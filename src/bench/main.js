@@ -1,5 +1,6 @@
 import './styles.css';
-import { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet } from '../shared/sprites.js';
+import { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet, paintFrame } from '../shared/sprites.js';
+import { HAIRSTYLES } from '../shared/presets/female-head.js';
 
 function main() {
 
@@ -19,14 +20,21 @@ function main() {
     { name: 'Checker', checker: true }
   ];
 
-  // paint each sheet once into an offscreen canvas, top row first
-  CAST.forEach((c) => {
-    const sh = paintSheet(c.spec), cv = document.createElement('canvas');
+  // paint a character's sheet into an offscreen canvas, top row first
+  function sheetCanvas(spec) {
+    const sh = paintSheet(spec), cv = document.createElement('canvas');
     cv.width = sh.W; cv.height = sh.H;
     const ctx = cv.getContext('2d'), img = ctx.createImageData(sh.W, sh.H);
     for (let y = 0; y < sh.H; y++) img.data.set(sh.data.subarray((sh.H - 1 - y) * sh.W * 4, (sh.H - y) * sh.W * 4), y * sh.W * 4);
     ctx.putImageData(img, 0, 0);
-    c.sheet = cv;
+    return cv;
+  }
+  // characters with a hairstyle keep one sheet per style, painted the first time that style is picked
+  CAST.forEach((c) => {
+    c.hair = c.spec.hairStyle;
+    c.sheets = {};
+    c.sheet = sheetCanvas(c.spec);
+    if (c.hair) c.sheets[c.hair] = c.sheet;
   });
 
   const state = { who: 0, facing: 0, anim: 'idle', frame: 0, playing: true, zoom: 3, ground: 0, turntable: false };
@@ -78,7 +86,8 @@ function main() {
     sctx.ellipse(w / 2, dy + 76 * unit, 13 * unit, 3.6 * unit, 0, 0, Math.PI * 2);
     sctx.fill();
     blit(sctx, state.who, state.facing, frameCol(), dx, dy, scale);
-    $('caption').textContent = `${CAST[state.who].name}, ${FACINGS[state.facing].toLowerCase()}, ${FRAMES[frameCol()].toLowerCase()}`;
+    const who = CAST[state.who], hairName = who.hair ? ', ' + HAIRSTYLES.find((h) => h.key === who.hair).name.toLowerCase() + ' hair' : '';
+    $('caption').textContent = `${who.name}${hairName}, ${FACINGS[state.facing].toLowerCase()}, ${FRAMES[frameCol()].toLowerCase()}`;
   }
 
   // cast list with small live previews
@@ -95,6 +104,41 @@ function main() {
     castEl.append(b);
     castCanvases.push(cv);
   });
+
+  // hairstyle picker: one button per style, each with a head-and-shoulders thumbnail of that style
+  const hairWrap = $('hairWrap'), hairsEl = $('hairs'), hairButtons = [];
+  const THUMB = { x: 36, y: 20, w: 56, h: 56 };   // crop of the front idle frame, in fine pixels
+  HAIRSTYLES.forEach((st) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.title = st.note;
+    const cv = document.createElement('canvas'); cv.width = THUMB.w; cv.height = THUMB.h;
+    b.append(cv, document.createTextNode(st.name));
+    b.addEventListener('click', () => pickHair(st.key));
+    hairsEl.append(b);
+    hairButtons.push({ b, cv, key: st.key });
+  });
+  const thumbsDone = new Set();
+  function paintHairThumbs() {
+    const c = CAST[state.who];
+    if (!c.hair || thumbsDone.has(c.key)) return;
+    thumbsDone.add(c.key);
+    hairButtons.forEach(({ cv, key }) => {
+      const buf = paintFrame({ ...c.spec, hairStyle: key }, 0, 0), ctx = cv.getContext('2d'), img = ctx.createImageData(THUMB.w, THUMB.h);
+      for (let y = 0; y < THUMB.h; y++) img.data.set(buf.subarray(((THUMB.y + y) * PW + THUMB.x) * 4, ((THUMB.y + y) * PW + THUMB.x + THUMB.w) * 4), y * THUMB.w * 4);
+      ctx.putImageData(img, 0, 0);
+    });
+  }
+  function pickHair(key) {
+    const c = CAST[state.who];
+    if (!c.hair || c.hair === key) return;
+    const done = () => { c.hair = key; c.sheet = c.sheets[key]; render(); paintCast(); };
+    if (c.sheets[key]) { done(); return; }
+    // a new style's sheet takes a moment to paint: show the button as busy, then paint
+    const hb = hairButtons.find((h) => h.key === key).b;
+    hb.setAttribute('aria-busy', 'true');
+    setTimeout(() => { c.sheets[key] = sheetCanvas({ ...c.spec, hairStyle: key }); hb.removeAttribute('aria-busy'); done(); }, 30);
+  }
 
   // facing dial: buttons placed around a circle, with the camera at the bottom
   const dial = $('dial'), dialButtons = [];
@@ -164,6 +208,9 @@ function main() {
 
   function render() {
     castEl.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String(i === state.who)));
+    const who = CAST[state.who];
+    hairWrap.hidden = !who.hair;
+    if (who.hair) { paintHairThumbs(); hairButtons.forEach(({ b, key }) => b.setAttribute('aria-pressed', String(key === who.hair))); }
     dialButtons.forEach((b, k) => b.setAttribute('aria-pressed', String(k === state.facing)));
     groundButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === state.ground)));
     $('animIdle').setAttribute('aria-pressed', String(state.anim === 'idle'));
