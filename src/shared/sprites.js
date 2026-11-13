@@ -1,5 +1,5 @@
 // Procedural pixel-art sprites for the Emberwood party, shared by the game and the sprite bench.
-import { lerp, FW, FH, COLS, ROWS, WALK, ramp, RES, PW, PH, SKIN, CX, GY, HEAD, grain } from './core.js';
+import { lerp, FW, FH, COLS, ROWS, WALK, ramp, RES, PW, PH, skinRamp, CX, GY, HEAD, grain } from './core.js';
 import { FEMALE_BODY } from './presets/female-body.js';
 import { FEMALE_HEAD, drawFemaleHead } from './presets/female-head.js';
 // ---------- Sprites ----------
@@ -154,6 +154,12 @@ function Painter() {
       if (X >= 0 && Y >= 0 && X < PW && Y < PH && buf[q + 3]) { buf[q] *= k; buf[q + 1] *= k * (1 + 0.01 * cool); buf[q + 2] *= k * (1 + 0.05 * cool); }
       return P;
     },
+    // erase an already painted fine pixel back to empty
+    clear(x, y) {
+      const X = Math.floor(x * RES), Y = Math.floor(y * RES);
+      if (X >= 0 && Y >= 0 && X < PW && Y < PH) buf[(Y * PW + X) * 4 + 3] = 0;
+      return P;
+    },
     // one fine pixel at a design position (fractions select the sub-pixel)
     dot(x, y, c) {
       const X = Math.floor(x * RES), Y = Math.floor(y * RES);
@@ -213,7 +219,7 @@ function View(theta, bob, sway, legLen) {
 // coordinates, so they turn with it and foreshorten in the three-quarter views.
 // the jawline in profile: the angle of the jaw below the ear and the point of the chin (forward offset, height)
 // (matches the back edge of the jaw in HEAD_SHAPE)
-const JAWLINE = { male: [[-0.8, -6.0], [3.3, -8.3]], fem: [[-0.6, -5.8], [3.1, -7.9]] };
+const JAWLINE = { male: [[-0.8, -6.0], [3.3, -8.3]], fem: [[0.0, -6.05], [2.4, -7.4]] };
 // ---- The sculpted head ----
 // The head is modelled as a stack of horizontal cross-sections in head space (a across toward the head's
 // right, f forward, h height from HEAD). Each section is a superellipse, flatter across the front so the face
@@ -232,12 +238,17 @@ const pw = (tab, h) => {
 const HEAD_SHAPE = {
   fem: {
     top: 8.1, bottom: -8.1,
-    W: [[8.1, 0], [7.3, 3.3], [6, 5.0], [4, 5.9], [2, 6.2], [0.5, 6.2], [-1, 6.05], [-2, 5.85], [-3, 5.5], [-4, 5.05], [-5, 4.55], [-6, 3.85], [-7, 3.05], [-7.6, 2.2], [-8.1, 0.8]],
+    W: [[8.1, 0], [7.3, 3.3], [6, 5.0], [4, 5.9], [2, 6.2], [0.5, 6.2], [-1, 6.05], [-2, 5.85], [-3, 5.32], [-4, 4.72], [-5, 4.02], [-6, 3.25], [-7, 2.55], [-7.6, 2.0], [-8.1, 1.0]],
     Ff: [[8.1, 0.4], [7.3, 3.2], [6, 4.8], [4, 5.6], [3, 5.85], [1, 6.05], [0, 6.1], [-1, 5.95], [-2, 5.9], [-3, 5.85], [-4, 5.8], [-5, 5.7], [-6, 5.45], [-7, 5.15], [-7.6, 4.8], [-7.9, 4.4], [-8.1, 3.9]],
-    Fb: [[8.1, 0.2], [7.3, -3.6], [6, -5.6], [4, -6.5], [2, -6.7], [0, -6.5], [-2, -5.8], [-3, -4.9], [-4, -3.6], [-5, -2.0], [-5.8, -0.6], [-6.4, 0.6], [-7.0, 1.8], [-7.6, 2.9], [-8.1, 3.4]],
+    // (the back of the head comes down to the angle of the jaw under the ear, about (-6.3, 0); from there the
+    // underside of the jaw runs forward to the chin nearly level, so the chin stands out from the neck in profile
+    // instead of the lower face sloping straight back into it)
+    Fb: [[8.1, 0.2], [7.3, -3.6], [6, -5.6], [4, -6.5], [2, -6.7], [0, -6.5], [-2, -5.8], [-3, -4.7], [-4, -2.8], [-4.8, -1.4], [-5.6, -0.4], [-6.3, 0.0], [-7.0, 0.8], [-7.5, 1.7], [-7.9, 2.7], [-8.1, 3.3]],
     m: [[8.1, 0.3], [-1, 0.3], [-3, 0.8], [-5, 1.8], [-7, 3.0], [-8.1, 3.6]],
     // the midline profile, the front edge seen from the side
-    P: [[3, 5.85], [1.2, 6.1], [0.2, 6.35], [-0.8, 6.15], [-1.9, 6.6], [-2.5, 6.98], [-2.85, 7.18], [-3.2, 7.15], [-3.45, 6.85], [-3.6, 6.3], [-4.3, 6.25], [-4.85, 6.1], [-5.05, 5.9], [-5.5, 6.05], [-6.1, 5.55], [-6.8, 5.75], [-7.4, 5.35], [-7.85, 4.6], [-8.1, 3.9]],
+    // (the nose: a soft, rounded tip rather than a point; the chin: a ball standing a little forward of the hollow
+    // under the lip, rounding under to the jaw)
+    P: [[3, 5.85], [1.2, 6.1], [0.2, 6.35], [-0.8, 6.15], [-1.9, 6.5], [-2.5, 6.78], [-2.85, 6.9], [-3.2, 6.88], [-3.45, 6.68], [-3.65, 6.3], [-4.3, 6.25], [-4.85, 6.1], [-5.05, 5.9], [-5.5, 6.05], [-6.05, 5.6], [-6.7, 5.95], [-7.3, 5.75], [-7.75, 5.1], [-8.1, 4.1]],
     nose: 0.8
   },
   male: {
@@ -250,6 +261,23 @@ const HEAD_SHAPE = {
     nose: 0.95
   }
 };
+// (how much of its length the female face keeps below the mouth; see below)
+const CHIN_UP = 0.8;
+// Her face is slimmer seen from the side: from the brow down, the face plane, the profile line (nose, lips, chin)
+// and the forward part of the jaw's underside are drawn back by up to faceIn, easing in over the forehead, so the
+// face is less deep front to back without changing it from the front. The features sit on the face plane, so
+// they follow.
+{
+  const T = HEAD_SHAPE.fem, faceIn = 0.7;
+  const back = (h) => { const t = Math.max(0, Math.min(1, (3 - h) / 3)); return faceIn * t * t * (3 - 2 * t); };
+  ['Ff', 'P', 'm'].forEach((key) => { T[key] = T[key].map(([h, v]) => [h, v - back(h)]); });
+  T.Fb = T.Fb.map(([h, v]) => [h, v - back(h) * Math.max(0, Math.min(1, (v + 1) / 2))]);
+  // and her chin sits higher: below the mouth the face is shortened (CHIN_UP), so the chin is less long and a
+  // little of the neck shows under it
+  const up = (h) => (h < -5 ? -5 + (h + 5) * CHIN_UP : h);
+  ['W', 'Ff', 'Fb', 'm', 'P'].forEach((key) => { T[key] = T[key].map(([h, v]) => [up(h), v]); });
+  T.bottom = up(T.bottom);
+}
 // the superellipse exponent across the front of the head: 2 (a plain ellipse) over the crown, where the hair
 // shells are built on a round skull, flattening to NF over the face so it reads as planes
 const NF = 2.7;
@@ -418,7 +446,8 @@ function faceShade(V, fem, map) {
   return shade;
 }
 // the flushed skin of the cheeks: the skin ramp nudged a little toward rose
-const FLUSH = SKIN.map((c) => c.map((v, i) => Math.round(v + ([214, 104, 96][i] - v) * 0.28)));
+// the flushed version of a skin ramp (the cheeks, the tip of the nose), each tone eased toward a warm rose
+const flushOf = (skin) => skin.map((c) => c.map((v, i) => Math.round(v + ([214, 104, 96][i] - v) * 0.28)));
 // mail: rows of interlocking rings, each with a dark centre and a lit upper edge
 const mail = (x, y) => { const r = y % 3, sx = (x + (Math.floor(y / 3) % 2) * 2) % 4; return r === 1 && sx === 1 ? -0.34 : r === 0 && (sx === 1 || sx === 2) ? 0.16 : r === 2 && sx === 0 ? -0.1 : 0; };
 // hair: strands running down, with a few lighter ones catching the light
@@ -428,18 +457,110 @@ const weave = (x, y) => ((x + y) % 4 === 0 ? -0.09 : (x - y) % 6 === 0 ? 0.05 : 
 
 // how far down the screen a point drops per unit it stands toward the viewer (legs and shoes)
 const LEG_TILT = 0.2;
+// ---- Hands built from parts ----
+// A hand is composed of separate parts (the palm, the thumb, each finger), so it can take shapes a single
+// blob cannot: fingers that part and curl, a thumb lying along the front. Each part is laid out in the hand's
+// own frame, [o, f, y]: o outward from the body (the back of the hand faces that way, the palm the thigh), f
+// forward (the thumb's side) and y down the hand toward the fingertips. A part is either an ellipsoid
+//   { e: [o, f, y], r: [ro, rf, ry], n }   (n > 2 squares it off toward a rounded box; 2 by default)
+// or a tapered capsule, a finger or thumb segment, from one point to another with a radius at each end
+//   { c: [[o, f, y], [o, f, y]], r: [r0, r1] }
+// with an optional lift (a brighter or darker tone), light (how strongly its form is lit, 1 by default; less
+// keeps it more even), below: [y, lift] (a further lift lower down the hand than y, blended in over a unit
+// around it) and shadow: false (it casts no contact shadow).
+// The parts are projected for the facing like the rest of the figure, so one layout turns through all eight
+// views. Every fine pixel belongs to the nearest part over it and is shaded from that part's rounded normal,
+// lit from the upper left and in front; where a part lies in front of another the one behind darkens a
+// tone along the join, so the fingers part with clean creases instead of painted lines.
+// hand: { x, y } the middle of the hand on screen, s the side (1 right, -1 left), k the scale; HS the skin ramp.
+function paintHand(P, V, hand, parts, HS, dim) {
+  const { s, k } = hand, L = [-0.5, -0.5, 0.71];
+  // a hand-frame point to the screen: [x, y, depth]
+  const proj = ([o, f, y]) => [hand.x + (s * o * V.rx + f * V.fx) * k, hand.y + y * k, (s * o * V.rz + f * V.fz) * k];
+  // across the screen, an extent ro outward and rf forward shows as this half-width
+  const across = (ro, rf) => Math.hypot(ro * V.rx, rf * V.fx) * k;
+  const shapes = parts.map((q) => {
+    if (q.e) {
+      const [x, y, d] = proj(q.e), rx = Math.max(0.5, across(q.r[0], q.r[1])), ry = q.r[2] * k;
+      return { q, x0: x - rx, x1: x + rx, y0: y - ry, y1: y + ry, d: Math.hypot(q.r[0] * V.rz, q.r[1] * V.fz) * k,
+        at(px, py) {
+          const n = q.n || 2, u = (px - x) / rx, v = (py - y) / ry, w = 1 - Math.pow(Math.abs(u), n) - Math.pow(Math.abs(v), n);
+          if (w < 0) return null;
+          // (shaded as a rounded form all over, even where the outline is squared off: the true normal of a
+          // superellipse stays flat across its middle, which left the hand one flat tone)
+          const nu = u * 0.9, nv = v * 0.9, nz = Math.sqrt(Math.max(0, 1 - nu * nu - nv * nv));
+          return [nu, nv, nz, d + this.d * Math.sqrt(w)];
+        } };
+    }
+    const [a, b] = q.c.map(proj), [r0, r1] = q.r.map((r) => r * k), vx = b[0] - a[0], vy = b[1] - a[1], len2 = vx * vx + vy * vy || 1e-6;
+    return { q, x0: Math.min(a[0] - r0, b[0] - r1), x1: Math.max(a[0] + r0, b[0] + r1), y0: Math.min(a[1] - r0, b[1] - r1), y1: Math.max(a[1] + r0, b[1] + r1),
+      at(px, py) {
+        const t = Math.max(0, Math.min(1, ((px - a[0]) * vx + (py - a[1]) * vy) / len2)), r = lerp(r0, r1, t);
+        const u = (px - a[0] - vx * t) / r, v = (py - a[1] - vy * t) / r, w = 1 - u * u - v * v;
+        return w < 0 ? null : [u, v, Math.sqrt(w), lerp(a[2], b[2], t) + r * Math.sqrt(w)];
+      } };
+  });
+  const X0 = Math.max(0, Math.floor(Math.min(...shapes.map((h) => h.x0)) * RES)), X1 = Math.min(PW - 1, Math.ceil(Math.max(...shapes.map((h) => h.x1)) * RES));
+  const Y0 = Math.max(0, Math.floor(Math.min(...shapes.map((h) => h.y0)) * RES)), Y1 = Math.min(PH - 1, Math.ceil(Math.max(...shapes.map((h) => h.y1)) * RES));
+  const W = X1 - X0 + 1, own = new Int8Array(W * (Y1 - Y0 + 1)).fill(-1), dep = new Float32Array(own.length), tone = new Float32Array(own.length);
+  for (let Y = Y0; Y <= Y1; Y++) for (let X = X0; X <= X1; X++) {
+    const px = (X + 0.5) / RES, py = (Y + 0.5) / RES, i = (Y - Y0) * W + X - X0;
+    shapes.forEach((h, j) => {
+      if (px < h.x0 || px > h.x1 || py < h.y0 || py > h.y1) return;
+      const n = h.at(px, py);
+      if (!n || own[i] >= 0 && n[3] <= dep[i]) return;
+      own[i] = j; dep[i] = n[3];
+      const lit = h.q.light == null ? 1 : h.q.light, by = h.q.below ? Math.max(0, Math.min(1, ((py - hand.y) / k - h.q.below[0]) + 0.5)) : 0;
+      tone[i] = 0.25 + 0.6 * lit * (n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) + (h.q.lift || 0) + (h.q.below ? h.q.below[1] * by * by * (3 - 2 * by) : 0);
+    });
+  }
+  for (let Y = Y0; Y <= Y1; Y++) for (let X = X0; X <= X1; X++) {
+    const i = (Y - Y0) * W + X - X0, j = own[i];
+    if (j < 0) continue;
+    let b = tone[i];
+    // a contact shadow where a neighbouring pixel belongs to a part lying in front of this one
+    const near = [X > X0 ? i - 1 : -1, X < X1 ? i + 1 : -1, Y > Y0 ? i - W : -1, Y < Y1 ? i + W : -1];
+    if (near.some((n) => n >= 0 && own[n] >= 0 && own[n] !== j && shapes[own[n]].q.shadow !== false && dep[n] > dep[i] + 0.15)) b -= 0.22;
+    if (dim) b -= 0.16;
+    const idx = Math.round(b * 4 + (BAYER[Y & 1][X & 1] - 0.375) * 0.25 - 0.05);
+    P.dot((X + 0.5) / RES, (Y + 0.5) / RES, HS[Math.max(0, Math.min(4, idx))]);
+  }
+}
+// A relaxed hanging hand, in the hand frame (see paintHand): the palm against the thigh, the fingers hanging
+// down from the knuckles and curling in toward the palm, the middle one longest, and the thumb lying along
+// the front of the hand. (The wrist, at the top, runs up under the cuff.)
+// how much larger than life the hanging hands are drawn (stylised, so the fingers and thumb have room)
+const HAND_SIZE = 1.3;
+const HANG_HAND = [
+  // the palm and back of the hand, darker below the knuckles, where the fingers begin
+  { e: [0.15, 0, -0.45], r: [1.85, 1.9, 1.85], n: 3, below: [0.45, -0.3] },
+  // the fingers, from the index (at the front, by the thumb) to the little finger: blunt, rounded tips, and
+  // set at slightly different depths so each one parts from the next with a crease. They are shaded darker than
+  // the back of the hand (they curl under, away from the light), so they read as fingers rather than more palm.
+  ...[[1.2, 1.6], [0.42, 1.75], [-0.36, 1.7], [-1.12, 1.5]].map(([f, tip], n) => ({ c: [[0.8, f, 0.45], [0.15 + (n % 2) * 0.2, f + 0.1, tip]], r: [0.75 - n * 0.03, 0.7 - n * 0.03], lift: -0.3, light: 0.5 })),
+  { c: [[-0.5, 1.55, -1.4], [-0.85, 2.0, 0.3]], r: [0.75, 0.58], lift: 0.06 }
+];
 function drawFigure(P, S, theta, f) {
+  // the figure's skin (spec.skinTone; see SKINS in core.js), and its flushed version
+  const SKIN = skinRamp(S.skinTone), FLUSH = flushOf(SKIN);
   // Walk: one smooth cycle over eight frames. swing is the right leg's stride (-1 back .. 1 forward);
   // the body rises as the legs pass and dips as each foot lands, and the weight shifts over the planted foot.
   const walking = f >= 2, step = f - 2, ph = walking ? step / WALK * Math.PI * 2 : 0;
   const swing = walking ? Math.sin(ph) : 0;
-  const bob = walking ? 0.4 - 1.5 * (1 - Math.abs(swing)) + 0.6 * Math.abs(swing) : (f === 1 ? 1 : 0);
+  // The bob follows the planted leg, a straight leg pivoting over its foot: the body rides highest as the legs pass
+  // and lowest at full stride, when the legs are spread (positive bob is lower on screen).
+  const bob = walking ? 1.15 * swing * swing - 0.15 : (f === 1 ? 1 : 0);
   const V = View(theta, bob, walking ? Math.cos(ph) * 0.7 : 0, S.body && S.body.legLen);
   const parts = [];
   const add = (depth, draw) => parts.push({ depth, draw });
   // body proportions: shoulder, chest, waist and hip half-widths, depth, limb widths, leg spacing
   const B = Object.assign({ sh: 9, chest: 8.6, waist: 7.2, hip: 7.8, depth: 5.4, arm: 4.8, fore: 4, leg: 6.2, shin: 4.8, gap: 3.8, slope: 3 }, S.body);
-  const A = { V, swing, ph, f, walking, B, S };
+  const A = { V, swing, ph, f, walking, B, S, skin: SKIN };
+  // Walking, the shoulders counter-rotate against the hips: the right shoulder comes forward (shFwd) and rises
+  // (shRise) as the right arm swings forward, and the left does the opposite. The arms swing from these moving
+  // shoulders, and anything worn over them (a mantle) turns and tilts with them. (walkShoulder scales it.)
+  const shk = walking ? (S.walkShoulder == null ? 1 : S.walkShoulder) : 0;
+  A.shFwd = -swing * 0.55 * shk; A.shRise = -swing * 0.2 * shk;
   // The resting pose (the idle frames) stands with the weight on the right leg: that foot sits a little back
   // and under the body, the left foot is eased forward and out with its knee soft, and the arms are held a
   // little off the body, bent at the elbow, the right hand further forward than the left. It gives the
@@ -506,7 +627,20 @@ function drawFigure(P, S, theta, f) {
       // The knee and ankle are tipped down by their depth (LEG_TILT, as the shoe below is), as if seen from a
       // little above: a foot ahead of the other then sits lower on screen, so it reads as ahead from the front too.
       const tip = (a, b, h, k) => { const q = V.pt(a, b, h); q[1] += V.d(a, b) * LEG_TILT * k; return q; };
-      const hip = V.pt(hipA, fb * 0.2, 22), knee = tip(hipA * (1.05 + ease * 0.06), fb * 0.5 + 0.8 + lift * 0.9 + ease * 0.9, 11.5 + lift * 0.8 - ease * 0.3, 0.5), ankle = tip(hipA * out, fb, 4 + lift, 1);
+      // Walking, the knee is found from the hip and the ankle (two-bone IK, thigh 10.5 and shin 7.5 long), always
+      // bending forward: the swinging leg folds at the knee as it passes and the planted leg straightens. The
+      // ankle counters the body's bob (gb), so the planted foot stays on the ground instead of riding with it.
+      const gb = walking ? V.bob : 0;
+      let kb = fb * 0.5 + 0.8 + lift * 0.9 + ease * 0.9, kh = 11.5 + lift * 0.8 - ease * 0.3;
+      if (walking) {
+        const L1 = 10.5, L2 = 7.5, hb0 = fb * 0.2, hh0 = 22 - gb, ab = fb, ah = 4 + lift;
+        const dx = ab - hb0, dy = ah - hh0, d = Math.min(L1 + L2 - 1e-3, Math.hypot(dx, dy)), ux = dx / (Math.hypot(dx, dy) || 1), uy = dy / (Math.hypot(dx, dy) || 1);
+        const al = (L1 * L1 - L2 * L2 + d * d) / (2 * d), hk = Math.sqrt(Math.max(0, L1 * L1 - al * al));
+        // (the perpendicular that points forward: the knee bends that way)
+        const nx = -uy, ny = ux, sg = nx >= 0 ? 1 : -1;
+        kb = hb0 + ux * al + nx * hk * sg; kh = hh0 + uy * al + ny * hk * sg + gb;
+      }
+      const hip = V.pt(hipA, fb * 0.2, 22), knee = tip(hipA * (1.05 + ease * 0.06), kb, kh, 0.5), ankle = tip(hipA * out, fb, 4 + lift + gb, 1);
       if (!S.robe) {
         P.t(hip[0], hip[1], knee[0], knee[1], B.leg, B.shin + 0.4).t(knee[0], knee[1], ankle[0], ankle[1], B.shin + 0.4, B.shin - 0.8).fill(S.legs, { dim, pattern: S.legPattern });
         if (S.knee && V.d(hipA, fb + 3) > 0) P.e(knee[0] + V.fx, knee[1], 2.4, 2.2).fill(S.knee, { dim });
@@ -540,7 +674,7 @@ function drawFigure(P, S, theta, f) {
       const across = Math.abs(yb * V.rx - ya * V.fx);
       const slices = [];
       for (let k = 0; k <= 20; k++) {
-        const u = k / 20, b = -SH.back + u * SH.len, base = lift + pitch(b), fa2 = fa + ya * b, fb2 = fb + yb * b, d = V.d(fa2, fb2), arch = archAt(u);
+        const u = k / 20, b = -SH.back + u * SH.len, base = lift + gb + pitch(b), fa2 = fa + ya * b, fb2 = fb + yb * b, d = V.d(fa2, fb2), arch = archAt(u);
         slices.push({ u, x: V.x(fa2, fb2), sw: Math.max(0.55, footW(u) * across), g: V.y(base) + d * TILT, y0: V.y(base + arch) + d * TILT, y1: V.y(base + footH(u)) + d * TILT, d });
       }
       // each slice is a flat-bottomed section with a rounded top; neighbouring slices are joined by their
@@ -557,7 +691,10 @@ function drawFigure(P, S, theta, f) {
       const sweep = (y0f, y1f, swf) => { for (let k = 0; k < slices.length - 1; k++) { const a = slices[k], b = slices[k + 1]; P.p(hull(section(a.x, y0f(a), y1f(a), swf(a)).concat(section(b.x, y0f(b), y1f(b), swf(b))))); } };
       // (the shaft stands straight above its own ankle, tipped by depth as the ankle is: from a fixed point by
       // the inner leg it would lean out to a foot set wide, and the boot would look drawn from another angle)
-      const top = tip(hipA * (out - 0.02), fb * 0.85, (S.robe ? 5 : 9.5) + lift, 1);
+      // (walking, the top of the shaft lies on the shin, the way from the ankle to the knee, so the boot leans with
+      // the lower leg as the knee bends instead of standing upright while the shin slants out of it)
+      const ah = 4 + lift + gb, bootUp = (S.robe ? 5 : 9.5) - 4, f = Math.min(0.95, bootUp / Math.max(1, Math.hypot(kb - fb, kh - ah)));
+      const top = walking && !S.robe ? tip(hipA * (out - 0.02), fb + (kb - fb) * f, ah + (kh - ah) * f, 1) : tip(hipA * (out - 0.02), fb * 0.85, (S.robe ? 5 : 9.5) + lift + gb, 1);
       // sole first: a welt standing a little proud of the upper, thicker under the heel, lifting at the
       // arch. The upper then sits on it, so from the front the near toe covers the sole of the far heel.
       const SOLE = S.sole || S.boots;
@@ -679,13 +816,40 @@ function drawFigure(P, S, theta, f) {
     // (the resting hands are placed from the hips they rest on or hang beside, not from the shoulders: on a
     // slim figure, placed from the shoulders they float off the body)
     const hangA = B.sh + 1.4 + (S.blendArms ? 0.6 : B.armOut == null ? 1.2 : B.armOut) + rest[0];
-    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + rest[1], 22 + Math.max(0, hb) * 0.35 + rest[2]]);
-    const sh = [s * (B.sh - 1), 0, 38.8 - B.slope * 0.3];
+    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + rest[1], 22 + Math.max(0, hb) * (walking ? 0.55 : 0.35) + rest[2]]);
+    // (the shoulder moves with the walk, see A.shFwd: forward and up with its arm's swing, drawing in a little as
+    // it turns, so the arm swings from a moving shoulder rather than a fixed pin)
+    const sh = [s * (B.sh - 1) - Math.abs(A.shFwd) * 0.25 * s, s * A.shFwd, 38.8 - B.slope * 0.3 + s * A.shRise];
+    // restFront adjusts a resting arm in the front view only ([right, left], each [hand out, elbow out, hand up]):
+    // it fades out so quickly with the turn that the three-quarter views keep the plain pose
+    const frontK = Math.pow(Math.max(0, V.fz), 8), rf = !walking && !grip && !akimbo && S.restFront ? S.restFront[s > 0 ? 0 : 1].map((v) => v * frontK) : [0, 0, 0];
+    if (!grip) { hand[0] += s * rf[0]; hand[2] += rf[2]; }
     // The hand on the hip rests on the side of it, a little forward, fingers curling over the hip toward the
     // front: seen from the front the whole hand shows on the hip (a hand tucked behind it left only a stub of
     // cuff at the waist, which read as a square from any distance), and the arm stands in front of the body.
     const depth = V.d(s * 11, hand[1] * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2;
     A['hand' + (s > 0 ? 'R' : 'L')] = { a: hand[0], b: hand[1], h: hand[2], depth };
+    // Long hair shows in the gap between the arm and the body (the locks hanging in front of the shoulders, and the
+    // hair behind the back), and as the arm swung it opened and closed there as a wedge of hair beside the waist.
+    // It is cleared, so the gap reads as open space, as it does with short hair: from the arm's inner edge in
+    // toward the body, every pixel of hair up to the first that is not (the jerkin's edge), from below the mantle
+    // or cape over the top of the arm. This runs as its own pass after all the hair is down (the locks in front
+    // are drawn last, at about 20.3).
+    const gapPts = [];
+    add(20.6, () => {
+      if (!A.isHair) return;
+      gapPts.forEach(([x, y, hw, inward, onSleeve]) => {
+        // (from just inside the arm's outer edge, stepping over the sleeve's own pixels)
+        for (let o = 0.5 - hw; o <= hw + 6; o += 0.5) {
+          const gx = x + inward * o, k = Math.floor(y * RES) * PW + Math.floor(gx * RES);
+          // (a tone of the hair, or one darkened by the arm's shadow beside it: see A.isHair; within the arm's own
+          // width anything else, sleeve or cuff, is stepped over)
+          const hair = P.buf[k * 4 + 3] && A.isHair(P.buf[k * 4], P.buf[k * 4 + 1], P.buf[k * 4 + 2]);
+          if (!hair) { if (o < hw || onSleeve(k)) continue; break; }
+          P.clear(gx, y);
+        }
+      });
+    });
     add(depth, () => {
       // (at rest the elbow sits just off the waist and back, so the arm bends softly instead of hanging straight)
       // At rest the upper arm hangs nearly straight down from the shoulder (the elbow only a little outside it)
@@ -695,7 +859,7 @@ function drawFigure(P, S, theta, f) {
       // (elbowTuck draws the resting elbows in toward a narrow waist, so the forearm angles softly out to the
       // hand beside the thigh and the arm bends a little at the elbow instead of hanging as one straight slant)
       const restElbow = Math.abs(sh[0]) + 2.6 + (S.blendArms ? 0.3 : 0) - (S.elbowTuck || 0);
-      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : Math.min(restElbow, Math.abs(hand[0]) - 0.3)), walking ? hand[1] * 0.45 - 1.4 : -0.9, (sh[2] + hand[2]) / 2 + 0.8];
+      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : Math.min(restElbow, Math.abs(hand[0]) - 0.3) + rf[1]), walking ? hand[1] * (hand[1] > 0 ? 0.3 : 0.5) - 1.4 + sh[1] * 0.5 : -0.9, (sh[2] + hand[2]) / 2 + 0.8];
       // a point up the forearm from the hand, dist along it toward the elbow, so the wrist, the cuffs and the
       // bracer follow the forearm when it angles forward instead of sitting straight above the hand
       // Points on the arm are tipped down by their depth like the knees and ankles (LEG_TILT): seen a little from
@@ -703,7 +867,9 @@ function drawFigure(P, S, theta, f) {
       // as the feet do instead of lying in one flat plane. The elbow takes half the tilt, the shoulder none.
       const tip = (q, a, b, k) => { q[1] += V.d(a, b) * LEG_TILT * k; return q; };
       const fore = (dist) => { const d = [elbow[0] - hand[0], elbow[1] - hand[1], elbow[2] - hand[2]], L = Math.hypot(...d) || 1, a = hand[0] + d[0] / L * dist, b = hand[1] + d[1] / L * dist; return tip(V.pt(a, b, hand[2] + d[2] / L * dist), a, b, 1); };
-      const pS = V.pt(...sh), pE = tip(V.pt(...elbow), elbow[0], elbow[1], 0.5), pH = fore(1.6);
+      // (sleeveDrop starts the arm a little below the shoulder point, for a character whose mantle or cape covers
+      // the shoulder: the round top of the sleeve then stays under it instead of standing out as a pad)
+      const pS = V.pt(sh[0], sh[1], sh[2] - (S.sleeveDrop || 0)), pE = tip(V.pt(...elbow), elbow[0], elbow[1], 0.5), pH = fore(1.6);
       const wU = S.sleeveW || B.arm, wF = S.sleeveW ? S.sleeveW + 1.5 : B.fore;
       const outward = Math.sign(pH[0] - V.x(0, 0)) || s;
       if (S.sleeveStyle === 'bell') {
@@ -736,7 +902,10 @@ function drawFigure(P, S, theta, f) {
         const ctl = [pE[0] * 1.1 - (pS[0] + pH[0]) * 0.05, pE[1] * 1.1 - (pS[1] + pH[1]) * 0.05];
         const Q = (t) => [(1 - t) * (1 - t) * pS[0] + 2 * t * (1 - t) * ctl[0] + t * t * pH[0], (1 - t) * (1 - t) * pS[1] + 2 * t * (1 - t) * ctl[1] + t * t * pH[1]];
         const Tq = (t) => { const x = 2 * (1 - t) * (ctl[0] - pS[0]) + 2 * t * (pH[0] - ctl[0]), y = 2 * (1 - t) * (ctl[1] - pS[1]) + 2 * t * (pH[1] - ctl[1]), L = Math.hypot(x, y) || 1; return [x / L, y / L]; };
-        const W = (t) => (t < 0.5 ? lerp(wU + 0.3, wU + 0.1, t * 2) : t < 0.75 ? lerp(wU + 0.1, wU - 0.1, (t - 0.5) * 4) : lerp(wU - 0.1, B.fore, (t - 0.75) * 4));
+        // (under a mantle (sleeveDrop) the sleeve starts slimmer, so its top does not swell out below the mantle's
+        // edge like a shoulder pad)
+        const wTop = S.sleeveDrop ? wU - 0.6 : wU + 0.3;
+        const W = (t) => (t < 0.5 ? lerp(wTop, wU + 0.1, t * 2) : t < 0.75 ? lerp(wU + 0.1, wU - 0.1, (t - 0.5) * 4) : lerp(wU - 0.1, B.fore, (t - 0.75) * 4));
         const NQ = 14, segs = [];
         for (let k = 0; k < NQ; k++) { const t0 = k / NQ, t1 = (k + 1) / NQ; segs.push([Q(t0), Q(t1), W(t0), W(t1), t0]); }
         segs.forEach(([a, b, w0, w1]) => P.t(a[0], a[1], b[0], b[1], w0, w1));
@@ -766,20 +935,12 @@ function drawFigure(P, S, theta, f) {
               if (onSleeve(kIn)) P.dot(x + inward * (hw - 0.3), y, S.sleeve[T(1)]);
               const kIn2 = Math.floor(y * RES) * PW + Math.floor((x + inward * (hw - 0.8)) * RES);
               if (i % 2 === 0 && onSleeve(kIn2)) P.dot(x + inward * (hw - 0.8), y, S.sleeve[T(2)]);
+              // (points along the arm's inner edge, for clearing the hair in the gap beside it: see gapPass)
+              if (t0 >= 0.15) gapPts.push([x, y, hw, inward, onSleeve]);
               [0.35, 0.85].forEach((o, j) => {
                 const sx = x + inward * (hw + o), k = Math.floor(y * RES) * PW + Math.floor(sx * RES);
                 if (!onSleeve(k) && P.buf[k * 4 + 3]) P.darken(sx, y, j ? 0.9 : 0.8, 0);
               });
-              // Below the elbow, whatever shows through the gap between the arm and the body (long hair falling
-              // behind the back, mostly) lies deep in their shadow: darkened, it reads as a gap, so the arm
-              // stands clear of the jerkin instead of running into hair of nearly the same brown.
-              if (t0 >= 0.5) {
-                const h = V.h(y), xt = V.x(0, 0) + outward * A.halfW(h, 0.45), xi = x + inward * (hw + 1.2);
-                for (let gx = Math.min(xt, xi); gx <= Math.max(xt, xi); gx += 0.5) {
-                  const k = Math.floor(y * RES) * PW + Math.floor(gx * RES);
-                  if ((gx - xt) * outward > 0 && (xi - gx) * outward > 0 && !onSleeve(k) && P.buf[k * 4 + 3]) P.darken(gx, y, 0.62, 0);
-                }
-              }
             }
           });
         }
@@ -876,48 +1037,16 @@ function drawFigure(P, S, theta, f) {
         [-0.86, 0, 0.86].forEach((x) => { for (let y = 0.25; y <= 1.9; y += 0.5) Dh(x, y, T(y > 1.1 ? 0 : 1)); });
       // (a hanging hand is a little narrower than it is long, so at a distance it reads as a hand, not a square)
       } else {
-        // its lower half is fuller than an ellipse (a superellipse), so the fingertips end in a soft round edge
-        // rather than narrowing to a point
-        const pts = [];
-        for (let k = 0; k < 32; k++) {
-          const t = k / 32 * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t), e = sn > 0 ? 0.8 : 1, ry = sn > 0 ? 2.2 : 2.4;
-          pts.push(H(Math.sign(c) * Math.pow(Math.abs(c), e) * 2.0, 0.1 + Math.sign(sn) * Math.pow(Math.abs(sn), e) * ry));
-        }
-        P.p(pts).fill(HS, { dim, round: 1.25 });
-      }
-      // front view: the cuff casts a soft shadow across the top of the hand, the side against the body
-      // falls into shadow, the fingers curl under into a darker underside, and the outer knuckle catches the light
-      if (V.fz > 0.3 && !akimbo) {
-        const inward = -outward, rx = 2.0, ry = 2.5, half = (dy) => rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / (ry * ry)));
-        for (let dy = -ry + 0.25; dy <= ry - 0.25; dy += 0.5) {
-          const w = half(dy);
-          if (w < 0.6) continue;
-          Dh(inward * (w - 0.25), dy, T(dy > 1 ? 0 : 1));
-          if (dy > -1 && dy < 1.5) Dh(inward * (w - 0.75), dy, T(2));
-        }
-        for (let dx = -1.75; dx <= 1.75; dx += 0.5) { Dh(dx, -ry + 0.75, T(dx * inward > 0 ? 1 : 2)); Dh(dx, ry * Math.sqrt(Math.max(0, 1 - (dx * dx) / (rx * rx))) - 0.25, T(1)); }
-        Dh(outward * 1.25, -0.75, T(4)); Dh(outward * 0.75, -1.25, T(3));
+        // A hanging hand is built from its parts (see paintHand), drawn a size larger than life (HAND_SIZE), so
+        // it has the pixels to show the fingers and thumb. It grows downward from the wrist, which stays where
+        // it was, just under the cuff.
+        const k = hk * HAND_SIZE;
+        paintHand(P, V, { x: hx, y: hy + 2.3 * (k - hk), s, k }, S.handParts || HANG_HAND, HS, dim);
       }
       // a bell sleeve overhangs the hand: its shadow falls across the back of the hand, deepest at the wrist
       if (S.sleeveStyle === 'bell') for (let dx = -2.25; dx <= 2.25; dx += 0.5) { P.darken(hx + dx * hk, hy - 2.15 * hk, 0.7, 0.3).darken(hx + dx * hk, hy - 1.65 * hk, 0.8, 0.3).darken(hx + dx * hk, hy - 1.15 * hk, 0.92, 0.3); }
-      // finger lines: short creases across the lower half of the hand, and the crease of the thumb, snapped to
-      // the fine grid (in the hand's own frame) so each is one clean pixel wide. The middle crease runs longest
-      // and the outer ones shorter, as the middle fingers are longer, so the lower edge reads as fingers rather
-      // than a mitten; each fingertip catches a little light.
-      const fp = (v) => (Math.floor(v * RES) + 0.5) / RES, ox = (fp(hx) - hx) / hk, oy = (fp(hy) - hy) / hk;
-      if (!akimbo) [-1, 0, 1].forEach((o) => { if (o === 0) Dh(ox + o, oy, T(1)); Dh(ox + o, oy + 0.5, T(1)); Dh(ox + o, oy + 1, T(0)); Dh(ox + o, oy + 1.5, T(0)); });
-      if (!akimbo) [-1.5, -0.5, 0.5, 1.5].forEach((o) => Dh(ox + o, oy + 1.5 - (Math.abs(o) > 1 ? 0.5 : 0), T(o * outward > 0 ? 3 : 2)));
-      if (Math.abs(V.fx) < 0.8 && !akimbo) { Dh(ox - outward * 1.5, oy - 0.5, T(1)); Dh(ox - outward * 1, oy, T(0)); }
-      // the cuff's shadow across the top of the hand, from every side (the front view's own loop draws it there)
-      if (V.fz <= 0.3 && !akimbo) for (let dx = -1.5; dx <= 1.5; dx += 0.5) Dh(dx, -1.65, T(1));
-      // in three-quarter and side views the thumb shows on the forward side of the hand: a small rounded pad
-      // standing off the hand's edge, parted from it by a crease and lit along its top
-      if (Math.abs(V.fx) > 0.3 && V.d(hand[0], hand[1] + 2) > V.d(hand[0], hand[1]) - 0.2) {
-        const fwd = Math.sign(V.fx);
-        ellipseAt(fwd * 1.85, -0.3, 0.95, 1.35).fill(HS, { dim, round: 1 });
-        for (let dy = -0.75; dy <= 0.75; dy += 0.5) Dh(fwd * 1.1, -0.3 + dy, T(1));
-        Dh(fwd * 1.85, -1.05, T(3)); Dh(fwd * 2.1, 0.7, T(1));
-      }
+      // the cuff casts a shadow across the top of the hanging hand
+      if (!akimbo) for (let dx = -2; dx <= 2; dx += 0.5) P.darken(hx + dx * hk, hy - 1.95 * hk, 0.86, 0);
     });
   });
 
@@ -929,7 +1058,7 @@ function drawFigure(P, S, theta, f) {
       // head), and it leans forward from the shoulders up to the head, so the throat runs up to meet the
       // underside of the jaw instead of leaving a thin stalk with a gap in front of it
       const n0 = V.pt(0, 0.5, 45 + 3 * V.fx * V.fx), n1 = V.pt(0, -0.4, 40.2);
-      P.t(n0[0], n0[1], n1[0], n1[1], V.w(S.female ? 3.4 : 4, S.female ? 5.4 : 6), V.w(S.female ? 3.8 : 4.4, S.female ? 5.8 : 6.4)).fill(SKIN, { round: 0.7, lift: -0.14 });
+      P.t(n0[0], n0[1], n1[0], n1[1], V.w(S.female ? 3.4 : 4, S.female ? 4.3 : 6), V.w(S.female ? 3.8 : 4.4, S.female ? 4.7 : 6.4)).fill(SKIN, { round: 0.7, lift: -0.14 });
       // the jaw casts a soft shadow onto the top of the neck, separating chin from throat
       if (V.fz > 0.3) P.e(V.x(0, 0.6), V.y(43.4), V.w(S.female ? 2 : 2.4, 2), 1.1).fill(SKIN, { tone: 1, flat: true });
       // seen from the side the shadow runs along the jawline (see HEAD_SHAPE), only on the neck itself,
@@ -978,7 +1107,12 @@ function drawFigure(P, S, theta, f) {
       if (d < 1) return;
       // o points from the eye toward the outer corner on screen
       const o = Math.sign(V.x(s * 6, 6) - V.x(a, b)) || -s;
-      const narrow = d < 2.6;
+      // (only an eye turned well away, the far eye in three-quarter view, is drawn narrow: in profile the eye
+      // stands about 2.4 deep since her face was drawn back, and the full eye reads better there)
+      const narrow = d < 2.1;
+      // in profile (the eye about 2.4 deep) the eye is seen edge on: narrower and a row shorter than the full
+      // eye, the iris at its front, with only a sliver of white behind it
+      const side = !narrow && d < 2.75;
       const cx = Math.round(V.x(a, b) * 2) / 2, cy = Math.round(V.y(HEAD - 1) * 2) / 2;
       // the eye on a fine grid, from the inner corner (i = 0) outward: lid, three rows of eye, soft lower lid
       const at = (i, j, c) => D(cx + o * (i * 0.5 - 0.75), cy + (j - 0.5) * 0.5, c);
@@ -986,6 +1120,13 @@ function drawFigure(P, S, theta, f) {
       if (narrow) {
         [1, 2].forEach((i) => at(i, -1, mix(lid, 0.85)));
         at(1, 0, iris); at(2, 0, pupil); at(1, 1, irisDk); at(2, 1, irisDk); at(1, 0.6, catchlight);
+      } else if (side) {
+        [1, 2].forEach((i) => at(i, -1, fem ? lash : mix(lid, 0.85)));
+        at(3, -1, lash); if (fem) at(3.5, -1.5, mix(lash, 0.6));
+        at(1, 0, irisLt); at(2, 0, iris); at(3, 0, mix(white, 0.7));
+        at(1, 1, pupil); at(2, 1, irisDk); at(3, 1, mix(white, 0.45));
+        at(1, 0, catchlight);
+        at(1, 2, mix(lid, 0.3)); at(2, 2, mix(lid, 0.3));
       } else {
         [0, 1, 2].forEach((i) => at(i, -1, mix(lid, 0.85)));
         at(3, -1, lash); at(4, -0.5, mix(lash, 0.6));
@@ -1309,13 +1450,18 @@ const RANGER = {
   },
   torso: SHIRT, sleeve: ramp(0x63704a, 0.1), legs: ramp(0x5b5547, 0.1), kneePatch: ramp(0x7a6c52, 0.1),
   boots: ramp(0x684a32, 0.1), cuff: ramp(0x7a5b40, 0.1), sole: ramp(0x2f2620, 0.08), belt: ramp(0x3d342b, 0.09), buckle: ramp(0x9a978f, 0.09), trim: GOLD,
-  hands: SKIN, sleeveStyle: 'puff', shirtCuff: SHIRT,
+  sleeveStyle: 'puff', shirtCuff: SHIRT,
   // both arms hang relaxed at rest, the elbows drawn in toward the waist
   akimbo: false, elbowTuck: 1.4,
+  // the mantle covers her shoulders, so the sleeves start under it
+  sleeveDrop: 1.4,
   // a little asymmetry so the relaxed pose is not flat: the arms set against the feet (the left foot is
   // forward), the right hand eased out from the body and forward, the left closer in and back. Both are at the
   // same height: they differ on screen only by their depth (see the arms' tilt), as the feet do.
   restArms: [[0.9, 3.0, 0.3], [0.0, -0.8, 0.3]],
+  // from the front the left arm, hanging straight below the shoulder, read as a stiff vertical bar: there the
+  // elbow eases out and the hand comes in toward the thigh, a little higher, so the arm bends softly
+  restFront: [[0, 0, 0], [-0.5, 0.9, 0.6]],
   chest(P, A) {
     const V = A.V, cx = V.x(0, 0), wc = V.w(A.B.chest + 0.4, A.B.depth + 0.5), wh = V.w(A.B.waist + 0.5, A.B.depth + 0.2);
     // jerkin over the shirt, open at the collar, laced up the front, falling just past the belt
@@ -1388,20 +1534,31 @@ const RANGER = {
     const V = A.V, B = A.B;
     // Short mantle: a ring of cloth around the shoulders, projected for each facing like the body,
     // so it keeps one smooth outline from every side. The hem dips at front and back and lifts over the arms.
-    add(9, () => {
+    // (drawn over both arms in every view: in three-quarter and side views the near arm stands as far forward as
+    // 9 to 11, and drawn over the mantle its round top stood out on the shoulder like a pad)
+    add(12, () => {
+      // (the mantle turns and tilts with the shoulders as she walks: Vm is the view with every point on it turned
+      // round the body by the shoulders' turn and lifted on the side whose shoulder rises; see A.shFwd)
+      const turn = -A.shFwd / (B.depth + 2);
+      const Vm = { ...V, seam: (a1, b1, phi, h) => V.seam(a1, b1, phi + turn, h + A.shRise * Math.sin(phi)) };
       const N = 28, ring = [];
+      // the widest point of the cloth (over the arms), and the hem, which tucks back in under it so the sides
+      // round off into the hem instead of dropping straight to a square corner
+      const MR = B.sh + 2.2, MD = B.depth + 2, HR = MR - 1.3, HD = MD - 0.7;
       const hemH = (phi) => 32.6 + 1.6 * Math.sin(phi) * Math.sin(phi) - 0.4 * Math.cos(phi);
       for (let k = 0; k <= N; k++) {
         const phi = k / N * Math.PI * 2;
-        const top = V.seam(4.4, 4, phi, 40.2), hem = V.seam(B.sh + 2.2, B.depth + 2, phi, hemH(phi));
+        const top = Vm.seam(4.4, 4, phi, 40.2), hem = Vm.seam(HR, HD, phi, hemH(phi));
         ring.push({ phi, top, hem });
       }
-      // From the neck to the hem the cloth follows a rounded shoulder rather than a straight cone: it slopes
-      // gently out from the neck and rounds down over the shoulder (outward fast at first, then mostly down),
-      // so the shoulders come out sloped and soft instead of a flat top with square corners.
-      const M = 6, at = (r, t) => {
-        const e = 1 - Math.pow(1 - t, 1.8), R = lerp(4.4, B.sh + 2.2, e), D = lerp(4, B.depth + 2, e);
-        return V.seam(R, D, r.phi, lerp(40.2, hemH(r.phi), Math.pow(t, 1.25)));
+      // From the neck to the hem the cloth follows one convex curve rather than a straight cone: it slopes
+      // gently out from the neck, rounds over the shoulder to its widest at TP of the way down, then curves back in
+      // to the hem. So the shoulders come out sloped and soft, and the sides are rounded rather than straight and
+      // boxy, with no square corner where they meet the hem.
+      const M = 8, TP = 0.72, at = (r, t) => {
+        const R = t < TP ? lerp(4.4, MR, 1 - Math.pow(1 - t / TP, 1.5)) : lerp(MR, HR, Math.pow((t - TP) / (1 - TP), 1.7));
+        const D = t < TP ? lerp(4, MD, 1 - Math.pow(1 - t / TP, 1.5)) : lerp(MD, HD, Math.pow((t - TP) / (1 - TP), 1.7));
+        return Vm.seam(R, D, r.phi, lerp(40.2, hemH(r.phi), Math.pow(t, 1.25)));
       };
       for (let k = 0; k < N; k++) {
         const a = ring[k], b = ring[k + 1];
@@ -1413,17 +1570,17 @@ const RANGER = {
       P.e(V.x(0, 0), V.y(39.9), V.w(6.0, 5.0), 1.6);
       // the cloth lying over each shoulder: a rounded cap, so the mantle covers the top of the sleeve beneath
       // (which otherwise pokes out past the sloped shoulder as a step in the outline) and keeps a soft outline
-      [-1, 1].forEach((sd) => { const c = V.seam(B.sh - 0.9, B.depth - 1.4, sd * Math.PI / 2, 37.5); P.e(c[0], c[1], 3.0, 2.7); });
+      [-1, 1].forEach((sd) => { const c = Vm.seam(B.sh - 0.9, B.depth - 1.4, sd * Math.PI / 2, 37.5); P.e(c[0], c[1], 3.0, 2.7); });
       P.fill(MANTLE, { pattern: weave, round: 0.6, lift: -0.06 });
       // folds: shadowed lines from the shoulders to the hem, each with a lit edge, on the side facing us
       const folds = [-1.35, -0.75, -0.3, 0.3, 0.75, 1.35, Math.PI - 0.5, Math.PI + 0.5];
       folds.forEach((phi) => {
-        const t = V.seam(5, 4.4, phi, 40.2), h = V.seam(B.sh + 2.1, B.depth + 1.9, phi, hemH(phi) + 0.3);
+        const t = Vm.seam(5, 4.4, phi, 40.2), h = Vm.seam(HR - 0.1, HD - 0.1, phi, hemH(phi) + 0.3);
         if (h[2] > 2.6 && t[2] > 2) P.l(t[0], t[1], h[0], h[1], 0.7);
       });
       P.fill(MANTLE, { flat: true, tone: 1 });
       folds.forEach((phi) => {
-        const t = V.seam(5, 4.4, phi + 0.12, 40), h = V.seam(B.sh + 2.1, B.depth + 1.9, phi + 0.14, hemH(phi + 0.14) + 0.5);
+        const t = Vm.seam(5, 4.4, phi + 0.12, 40), h = Vm.seam(HR - 0.1, HD - 0.1, phi + 0.14, hemH(phi + 0.14) + 0.5);
         if (h[2] > 2.6 && t[2] > 2) P.l(t[0], t[1], h[0], h[1], 0.45);
       });
       P.fill(MANTLE, { flat: true, tone: 3 });
@@ -1446,7 +1603,7 @@ const RANGER = {
       };
       const done = new Set();
       for (let k = 0; k <= 160; k++) {
-        const phi = k / 160 * Math.PI * 2, h = V.seam(B.sh + 2.2, B.depth + 2, phi, hemH(phi));
+        const phi = k / 160 * Math.PI * 2, h = Vm.seam(HR, HD, phi, hemH(phi));
         if (h[2] < 0.3) continue;
         P.dotOn(h[0], h[1] - 0.2, MANTLE[0]);
         if (h[2] > 3) P.dotOn(h[0], h[1] - 0.8, MANTLE[3]);
@@ -1459,7 +1616,7 @@ const RANGER = {
         });
       }
       // clasp at the throat
-      const cl = V.seam(4.6, 4.4, 0, 39);
+      const cl = Vm.seam(4.6, 4.4, 0, 39);
       if (cl[2] > 1) {
         P.e(cl[0], cl[1], 1.4, 1.3).fill(GOLD, { round: 0.5 });
         P.dot(cl[0] - 0.5, cl[1] - 0.5, GOLD[4]);
@@ -1758,7 +1915,7 @@ const CLERIC = {
   // the robe hides the legs; it is drawn by drawRobe below instead of the mage's straight robe
   robe: CL_WHITE, drawRobe(P, A) { clericRobe(P, A); clericScapular(P, A); clericCord(P, A); },
   torso: CL_WHITE, sleeve: CL_WHITE, sleeveStyle: 'bell', sleeveLining: CL_BLACK, cuffs: CL_BLACK, trim: CL_BLACK, sleevePattern: linen,
-  boots: CL_BLACK, sole: CL_SOLE, belt: CL_BLACK, buckle: CL_BLACK, hands: SKIN, bootRound: 0.8,
+  boots: CL_BLACK, sole: CL_SOLE, belt: CL_BLACK, buckle: CL_BLACK, bootRound: 0.8,
   gear(add, P, A) {
     add(9, () => clericCowl(P, A));
     drawFemaleHead(add, P, A, HAIR);

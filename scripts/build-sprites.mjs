@@ -91,7 +91,7 @@ async function main() {
   // remove sheets left over from styles or characters that no longer exist
   const keep = new Set(sheets.map((s) => s.file).concat('manifest.json'));
   fs.readdirSync(OUT).filter((f) => f.endsWith('.png') && !keep.has(f)).forEach((f) => fs.unlinkSync(path.join(OUT, f)));
-  fs.writeFileSync(manifestPath, JSON.stringify({ hash, sheets: sheets.map(({ key, hair, file }) => ({ key, hair, file })) }, null, 2) + '\n');
+  fs.writeFileSync(manifestPath, JSON.stringify({ hash, sheets: sheets.map(({ key, hair, skin, file }) => ({ key, hair, skin, file })) }, null, 2) + '\n');
   console.log(`sprites: painted ${done} sheets in ${((Date.now() - t0) / 1000).toFixed(1)}s -> public/sprites/`);
 }
 
