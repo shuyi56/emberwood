@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import './styles.css';
-import { COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet } from '../shared/sprites.js';
+import { COLS, ROWS, WALK } from '../shared/sprites.js';
+import { loadSheet } from '../shared/sheet-loader.js';
+import { loadParty, memberSpec } from '../shared/party.js';
 import { V_LIT, V_END, F_LIT, V_UNLIT, F_UNLIT, V_LOCAL } from './shaders.js';
 
 function main() {
@@ -29,7 +31,9 @@ function main() {
   const SHARED = {
     uTime: { value: 0 }, uWater: { value: 0 }, uViewH: { value: 800 }, uExposure: { value: 1 },
     uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunCol: { value: new THREE.Color(1, 1, 1) },
-    uSkyTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uNight: { value: 0 }
+    uSkyTop: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() }, uNight: { value: 0 },
+    // the light a sprite gets in the open in the current mood (see applyMood): sprites are lit relative to it
+    uSpriteRef: { value: new THREE.Vector3(1, 1, 1) }
   };
 
   function resize() {
@@ -494,19 +498,33 @@ void main() {
   vec4 worldPosition = vec4(centre + right * position.x * uSize.x + up * (position.y - 0.05) * uSize.y * stretch, 1.0);
   vec3 worldNormal = vec3(0.0, 1.0, 0.0);
   vCard = vec2(position.x + 0.5, position.y);
-` + V_END + `}`, `
+` + V_END + `
+  // The card leans toward the camera, so its bottom rows (the feet) sink into the ground and the terrain
+  // hides them, cutting both feet off along one line. For the depth test only, pull the card along the view
+  // ray toward the camera (the picture stays where it is), so the ground no longer covers the feet.
+  vec4 pulled = projectionMatrix * vec4(mvPosition.xyz * (1.0 - 0.8 / max(length(mvPosition.xyz), 1.0)), 1.0);
+  gl_Position.z = pulled.z / pulled.w * gl_Position.w;
+}`, `
 uniform sampler2D uSheet;
 uniform vec2 uGrid;
 uniform vec3 uFrame;   // column, row, mirror
+uniform vec3 uSpriteRef;
 varying vec2 vCard;
 void main() {
   vec2 uv = vCard;
   if (uFrame.z > 0.5) uv.x = 1.0 - uv.x;
   vec4 t = texture2D(uSheet, (vec2(uFrame.x, uGrid.y - 1.0 - uFrame.y) + uv) / uGrid);
   if (t.a < 0.5) discard;
+  // The sprites are painted with their own light and shade, so they skip the world's exposure and tone curve,
+  // which would crush their shadow tones and push the mid tones brighter and more saturated. The world's
+  // light only scales them, relative to the light in the open (uSpriteRef): out in daylight a sprite shows
+  // exactly its painted colours, and it darkens and cools in shadow, warms by a fire, and dims at night.
   float sh;
-  vec3 col = lin(t.rgb) * gather(vec3(0.0, 1.0, 0.0), 1.0, sh);
-  gl_FragColor = outCol(applyFog(col), 1.0);
+  vec3 k = min(gather(vec3(0.0, 1.0, 0.0), 1.0, sh) / uSpriteRef, vec3(1.35));
+  vec3 col = sRGBToLinear(vec4(t.rgb, 1.0)).rgb * k;
+  // far off it fades into the fog as the world draws it (through its tone curve), so it sits in the scene
+  col = mix(col, toneMap(lin(fogColor)), fogAmount());
+  gl_FragColor = linearToOutputTexel(vec4(col, 1.0));
 }`, { uSheet: { value: sheet }, uGrid: { value: new THREE.Vector2(COLS, ROWS) }, uFrame: { value: new THREE.Vector3(0, 0, 0) }, uSize: { value: new THREE.Vector2(1.76, 2.2) } });
 
   // soft contact shadow under each sprite
@@ -1402,12 +1420,13 @@ void main() {
 
   // ---------- Party ----------
   const cardGeo = new THREE.PlaneGeometry(1, 1); cardGeo.translate(0, 0.5, 0);
-  function makeHero(spec, ringColour) {
+  function makeHero(key, spec, ringColour) {
     const g = new THREE.Group();
-    const sheet = paintSheet(spec);
-    const tex = new THREE.DataTexture(sheet.data, sheet.W, sheet.H, THREE.RGBAFormat);
-    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter;
-    tex.needsUpdate = true;
+    // the sheet is a pre-painted image (scripts/build-sprites.mjs); until it arrives the texture is empty and
+    // the card draws nothing. (An image texture is flipped on upload, so its top row is the top of the card.)
+    const tex = new THREE.Texture();
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+    loadSheet(key, spec.hairStyle || null, spec).then((img) => { tex.image = img; tex.needsUpdate = true; });
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24), blobShadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.05;
@@ -1426,11 +1445,13 @@ void main() {
     return { g, x: 0, z: 0, moving: false, stride: rand() * 6, breath: Math.floor(rand() * 2), frame: material.uniforms.uFrame.value, facing: 0 };
   }
 
-  const leader = makeHero(FIGHTER, 0x7dff7a);
-  const followers = [makeHero(MAGE, 0xd8e6d2), makeHero(RANGER, 0xd8e6d2)];
+  // the party picked on the sprite bench (the first member leads), each in their chosen hairstyle
+  const party = loadParty();
+  const leader = makeHero(party.members[0], memberSpec(party.members[0], party), 0x7dff7a);
+  const followers = party.members.slice(1).map((k) => makeHero(k, memberSpec(k, party), 0xd8e6d2));
   leader.x = 2.6; leader.z = 2.4;
-  followers[0].x = 3.4; followers[0].z = 4.0;
-  followers[1].x = 1.2; followers[1].z = 4.2;
+  const START = [[3.4, 4.0], [1.2, 4.2], [2.4, 5.4]];
+  followers.forEach((f, k) => { [f.x, f.z] = START[k % START.length]; });
   [leader].concat(followers).forEach((h) => h.g.position.set(h.x, height(h.x, h.z), h.z));
   leader.g.rotation.y = Math.PI * 1.15;
 
@@ -1607,6 +1628,15 @@ void main() {
     sunDir.set(night ? 0.45 : -0.5, night ? 0.8 : 0.72, night ? -0.4 : 0.48).normalize();
     SHARED.uSunDir.value.copy(sunDir);
     SHARED.uSunCol.value.copy(sun.color).multiplyScalar(sun.intensity);
+    // The light a sprite gets in the open (its normal is straight up, its light wrapped all the way round, as
+    // in the sprite shader): the sky from above plus the sun. By day sprites are lit relative to exactly this,
+    // so in the open they show their painted colours; at night relative to a neutral grey brighter than the
+    // moonlight, so they dim to about NIGHT_SPRITE of their painted brightness and keep the moonlight's blue.
+    const open = new THREE.Vector3(hemi.color.r, hemi.color.g, hemi.color.b).multiplyScalar(hemi.intensity)
+      .add(new THREE.Vector3(sun.color.r, sun.color.g, sun.color.b).multiplyScalar(sun.intensity * (sunDir.y + 1) / 2));
+    const NIGHT_SPRITE = 0.5, lum = 0.2126 * open.x + 0.7152 * open.y + 0.0722 * open.z;
+    if (night) SHARED.uSpriteRef.value.setScalar(lum / NIGHT_SPRITE);
+    else SHARED.uSpriteRef.value.copy(open);
     fireBase = night ? 1.8 : 0.6;
   }
   applyMood();
