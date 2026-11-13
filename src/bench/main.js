@@ -1,5 +1,5 @@
 import './styles.css';
-import { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet, paintFrame } from '../shared/sprites.js';
+import { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, CLERIC, paintSheet, paintFrame } from '../shared/sprites.js';
 import { HAIRSTYLES } from '../shared/presets/female-head.js';
 
 function main() {
@@ -8,7 +8,8 @@ function main() {
   const CAST = [
     { key: 'knight', name: 'Knight', note: 'Mail and leather', spec: FIGHTER },
     { key: 'mage', name: 'Mage', note: 'Robe and pointed hat', spec: MAGE },
-    { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle', spec: RANGER }
+    { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle', spec: RANGER },
+    { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC }
   ];
   const FACINGS = ['Front', 'Front right', 'Right', 'Back right', 'Back', 'Back left', 'Left', 'Front left'];
   const FRAMES = ['Idle 1', 'Idle 2'].concat(Array.from({ length: WALK }, (_, i) => 'Walk ' + (i + 1)));

@@ -464,7 +464,8 @@ function drawFigure(P, S, theta, f) {
     const outline = neckline.concat(side.map(([w, h]) => [-w, h]), side.slice().reverse().map(([w, h]) => [w, h]), neckline.slice().reverse().map(([x, h]) => [-x, h]));
     P.p(outline.map(([x, h]) => [cx + x, V.y(h)])).e(cx - wD + 1.8, V.y(shH - 1.6), 2.4, 2.6).e(cx + wD - 1.8, V.y(shH - 1.6), 2.4, 2.6).fill(S.torso, { pattern: S.torsoPattern });
     const bl = B.belt || 22.5, wh0 = A.halfW(bl + 1);
-    if (S.robe) {
+    if (S.drawRobe) S.drawRobe(P, A);
+    else if (S.robe) {
       // the robe hangs from the shoulders and widens steadily to the hem, with no waist
       const flare = Math.abs(swing) * 1.4, hw = V.w(12.4, 9.2), top = A.halfW(25, 0.8), mid = V.w(11, 8.2);
       const hemY = (k) => 3.4 + Math.sin(k * 1.7 + swing * 0.8) * 0.6;
@@ -490,8 +491,8 @@ function drawFigure(P, S, theta, f) {
       P.fill(S.trim, { round: 0.4 });
     }
     if (S.chest) S.chest(P, A);
-    // belt, sitting at the waist
-    if (S.robe) {
+    // belt, sitting at the waist (a robe drawn by its own spec ties its own)
+    if (S.drawRobe) { /* tied by the robe */ } else if (S.robe) {
       const wl = A.halfW(bl + 2, 1), sag = Math.max(0, V.fz) * 1.6;
       P.p([[cx - wl, V.y(bl + 2.6)], [cx, V.y(bl + 2.6 - sag)], [cx + wl, V.y(bl + 2.6)], [cx + wl, V.y(bl + 0.4)], [cx, V.y(bl + 0.4 - sag)], [cx - wl, V.y(bl + 0.4)]]).fill(S.belt, { round: 0.6 });
     } else {
@@ -1052,6 +1053,220 @@ const RANGER = {
   }
 };
 
+// Cleric: the ranger's figure and face in a long white robe that hangs in deep pleats from a black
+// corded cincture, a black scapular falling front and back with a sun stitched on the breast, a soft white
+// cowl draped round the throat with the hood lying on her back, long bell sleeves edged in black, and her
+// hair gathered into a bun. Black and white only: the ramps are neutral greys, so the cloth's form comes
+// from its folds and not from colour.
+const CL_WHITE = [[124, 124, 128], [162, 162, 165], [196, 196, 197], [222, 222, 221], [241, 241, 238]];
+const CL_BLACK = [[18, 18, 21], [33, 33, 37], [50, 50, 54], [72, 72, 76], [100, 100, 104]];
+const CL_SOLE = [[12, 12, 14], [22, 22, 25], [34, 34, 37], [48, 48, 52], [66, 66, 70]];
+// a faint linen weave, quiet enough that the folds carry the cloth
+const linen = (x, y) => ((x * 3 + y) % 7 === 0 ? -0.035 : (x + y * 5) % 11 === 0 ? 0.025 : 0);
+const CL = { WAIST: 26, HEM: 2.2, PLEATS: 7, HEM_A: 12.2, HEM_B: 9 };
+// The robe as a surface around the body: at each height and angle round the body (phi 0 at the front,
+// positive to her right), a point in figure space. Above the cord it follows the body loosely; below it
+// the skirt flares toward the hem and falls into pleats that deepen as they fall, and the cloth over
+// each leg is carried forward or back with the stride.
+function clericSurface(A) {
+  const { V, walking, ph } = A;
+  const legs = [1, -1].map((s) => ({ s, fb: walking ? Math.sin(ph + (s > 0 ? 0 : Math.PI)) * 6.5 : 0 }));
+  const wW = A.lw(CL.WAIST, 0.7), wD = A.ld(wW) + 0.5;
+  const fall = (h) => Math.max(0, Math.min(1, (CL.WAIST - h) / (CL.WAIST - CL.HEM)));
+  const radii = (h) => {
+    if (h >= CL.WAIST) { const w = A.lw(h, 0.55); return [w, A.ld(w) + 0.45]; }
+    const t = Math.pow(fall(h), 0.78);
+    return [lerp(wW, CL.HEM_A, t), lerp(wD, CL.HEM_B, t)];
+  };
+  // pleats: the radius swells over each ridge and sinks into each trough, more toward the hem
+  const pleat = (phi, h) => 1 + 0.12 * Math.pow(fall(h), 0.8) * (0.7 + 0.3 * Math.sin(3 * phi + 1)) * Math.cos(CL.PLEATS * phi + 0.4);
+  const at = (phi, h) => {
+    const [ra, rb] = radii(h), m = pleat(phi, h), t = fall(h);
+    let a = ra * m * Math.sin(phi), b = rb * m * Math.cos(phi);
+    // each leg carries the cloth over it: most at the hem, fading round toward the far side
+    legs.forEach(({ s, fb }) => { const near = Math.max(0, Math.min(1, s * Math.sin(phi) * 1.3 + 0.55)); b += fb * 0.42 * Math.pow(t, 1.4) * near; });
+    return [V.x(a, b), V.y(h), V.d(a, b)];
+  };
+  // the hem: rises a little over each ridge (the cloth there hangs from further out) and lifts in front
+  // of the stepping leg
+  const hemH = (phi) => CL.HEM + 0.45 * Math.cos(CL.PLEATS * phi + 0.4) + legs.reduce((u, { s, fb }) => u + Math.max(0, fb) * 0.16 * Math.max(0, s * Math.sin(phi) + 0.6) * Math.max(0, Math.cos(phi)), 0);
+  // where a fold that reaches the hem at phi sits higher up: folds are gathered in toward the front and
+  // back under the cord and spread as they fall, so they run in long diagonals rather than straight down
+  const gather = (phi, h) => { const c = Math.round(phi / Math.PI) * Math.PI; return c + (phi - c) * lerp(0.62, 1, Math.pow(fall(h), 0.55)); };
+  return { at, hemH, fall, legs, gather };
+}
+function clericRobe(P, A) {
+  const W = CL_WHITE, K = CL_BLACK, { at, hemH, gather } = clericSurface(A);
+  const N = 66, HS = [37.2, 35, 33, 31, 29, 27.4, CL.WAIST, 24.5, 22.5, 20, 17.5, 15, 12.5, 10, 7.5, 5.2, 3.6];
+  const hOf = (h, phi) => Math.max(h, hemH(phi));
+  // the robe's body: quads between rings, round the whole body, then the hem row
+  for (let r = 0; r < HS.length; r++) for (let k = 0; k < N; k++) {
+    const p0 = k / N * Math.PI * 2, p1 = (k + 1) / N * Math.PI * 2, h0 = HS[r], h1 = r + 1 < HS.length ? HS[r + 1] : null;
+    const q = h1 == null ? [at(p0, h0), at(p1, h0), at(p1, hemH(p1)), at(p0, hemH(p0))] : [at(p0, h0), at(p1, h0), at(p1, hOf(h1, p1)), at(p0, hOf(h1, p0))];
+    P.p(q.map((c) => [c[0], c[1]]));
+  }
+  P.fill(W, { pattern: linen, round: 1.05, dither: 0.4 });
+  // Pleats: each trough a soft shadow that starts as a crease under the cord and widens as it falls,
+  // the side of each fold turned from the light a half tone darker, and a lit crest along each ridge.
+  // Drawn only where that part of the robe faces us.
+  const trough = (k) => (Math.PI * (2 * k + 1) - 0.4) / CL.PLEATS, crest = (k) => (Math.PI * 2 * k - 0.4) / CL.PLEATS;
+  const path = (phi, from, step) => { const pts = []; for (let h = from; h > hemH(phi) + 0.2; h -= step) pts.push(at(gather(phi, h), h)); pts.push(at(phi, hemH(phi) + 0.25)); return pts; };
+  const stroke = (pts, w0, w1, minD) => { for (let i = 0; i < pts.length - 1; i++) if (pts[i][2] > minD && pts[i + 1][2] > minD) { const t = i / Math.max(1, pts.length - 2); P.l(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], lerp(w0, w1, t)); } };
+  // the side of each fold turned from the light: a broad half-tone that widens as the fold opens out
+  for (let k = 0; k < CL.PLEATS; k++) stroke(path(trough(k) - 0.13, CL.WAIST - 1, 1.2), 0.5, 3.0, 1.0);
+  P.fill(W, { flat: true, tone: 2, on: true, pattern: linen });
+  // the deep of each trough, narrower and darker, fading out before it reaches the cord
+  for (let k = 0; k < CL.PLEATS; k++) stroke(path(trough(k), CL.WAIST - 3.5, 1.2), 0.5, 1.5, 1.3);
+  P.fill(W, { flat: true, tone: 1, on: true });
+  // the very bottom of each trough near the hem, where little light reaches
+  for (let k = 0; k < CL.PLEATS; k++) { const pts = path(trough(k), 11, 1.2); stroke(pts, 0.5, 0.7, 2); }
+  P.fill(W, { flat: true, tone: 0, on: true });
+  // the crest of each ridge, catching the light
+  for (let k = 0; k < CL.PLEATS; k++) stroke(path(crest(k) + 0.08, CL.WAIST - 2, 1.2), 0.5, 1.0, 1.8);
+  P.fill(W, { flat: true, tone: 4, on: true });
+  // above the cord the bodice is gathered: short soft folds fanning up from the cord toward the bust
+  [-0.9, -0.5, -0.15, 0.2, 0.55, 0.95].forEach((phi, i) => {
+    const a = at(phi, CL.WAIST + 0.5), b = at(phi * 0.8, CL.WAIST + 3.2 + (i % 2) * 1.2);
+    if (a[2] > 1.5 && b[2] > 1.5) P.l(a[0], a[1], b[0], b[1], 0.5);
+  });
+  P.fill(W, { flat: true, tone: 2, on: true });
+  // the skirt blouses out a little under the cord, which shades the cloth just beneath it
+  for (let k = 0; k <= 120; k++) { const phi = k / 120 * Math.PI * 2, q = at(phi, CL.WAIST - 0.9), q2 = at(phi, CL.WAIST - 1.6); if (q[2] > 0.5) { P.darken(q[0], q[1], 0.88); P.darken(q2[0], q2[1], 0.95); } }
+  // the hem: a black band following every rise and dip, the inside of the hem showing as a dark lip where
+  // the cloth turns back on itself at the troughs, and the robe's shadow on the ground-facing boots below
+  for (let k = 0; k <= 160; k++) {
+    const phi = k / 160 * Math.PI * 2, q = at(phi, hemH(phi) + 0.35), q2 = at(phi, hemH(phi) + 1.05);
+    if (q[2] < -0.4) continue;
+    P.dotOn(q[0], q[1], K[q[2] > 3 ? 2 : 1]).dotOn(q2[0], q2[1], K[q[2] > 3 ? 3 : 2]);
+  }
+}
+// the scapular: a black panel hanging from the shoulders to just above the hem, in front and behind,
+// lying on the robe; it swings with the cloth under it, with a soft crease down it and a sun stitched on
+// the breast in front
+function clericScapular(P, A) {
+  const V = A.V, K = CL_BLACK, W = CL_WHITE, { at } = clericSurface(A);
+  [0, Math.PI].forEach((c0) => {
+    const facing = V.d(0, Math.cos(c0)) > 0.18;
+    if (!facing) return;
+    const half = (h) => (h > CL.WAIST ? 0.52 : 0.46 - 0.12 * (CL.WAIST - h) / CL.WAIST);
+    const L = [], R = [];
+    for (let h = 38.6; h >= 7.4; h -= 0.8) { const w = half(h); L.push(at(c0 - w, h)); R.push(at(c0 + w, h)); }
+    // the bottom edge is cut square, with a small point at the middle
+    const tip = at(c0, 6.6);
+    P.p(L.map((q) => [q[0], q[1]]).concat([[tip[0], tip[1]]], R.reverse().map((q) => [q[0], q[1]]))).fill(K, { round: 0.8, pattern: linen, lift: 0.04 });
+    // a crease down the panel where it bends over the body, lit along its edge
+    const crease = []; for (let h = 30; h >= 9; h -= 1.2) crease.push(at(c0 + 0.08, h));
+    for (let i = 0; i < crease.length - 1; i++) if (crease[i][2] > 2) P.l(crease[i][0], crease[i][1], crease[i + 1][0], crease[i + 1][1], 0.5);
+    P.fill(K, { flat: true, tone: 0, on: true });
+    // a white running stitch inset along each long edge and across the foot
+    for (let h = 33; h >= 8.4; h -= 1.5) { const w = half(h) - 0.09; [at(c0 - w, h), at(c0 + w, h)].forEach((q) => { if (q[2] > 1.5) P.dotOn(q[0], q[1], W[2]); }); }
+    // the sun on the breast: a ring of short rays round a small disc, in white thread
+    if (c0 === 0) {
+      const s = at(0, 32.4);
+      if (s[2] > 3) {
+        P.dotOn(s[0], s[1], W[4]).dotOn(s[0] - 0.5, s[1], W[3]).dotOn(s[0] + 0.5, s[1], W[3]).dotOn(s[0], s[1] - 0.5, W[4]).dotOn(s[0], s[1] + 0.5, W[2]);
+        for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; P.dotOn(s[0] + Math.cos(a) * 1.5 * Math.abs(V.fz), s[1] + Math.sin(a) * 1.5, W[k < 4 ? 2 : 3]); }
+      }
+    }
+  });
+}
+// the cincture: a black cord round the waist over the scapular, knotted at her left hip, with two ends
+// hanging to the knee and finished in small tassels that swing with the stride
+function clericCord(P, A) {
+  const K = CL_BLACK, { at } = clericSurface(A);
+  const ring = []; for (let k = 0; k <= 64; k++) { const phi = k / 64 * Math.PI * 2, q = at(phi, CL.WAIST + 0.2); ring.push(q); }
+  for (let k = 0; k < 64; k++) { const a = ring[k], b = ring[k + 1]; if (a[2] > 0.4 && b[2] > 0.4) P.l(a[0], a[1], b[0], b[1], 1.1); }
+  P.fill(K, { round: 0.5 });
+  // the twist of the cord: a lit fleck every few pixels along it
+  for (let k = 0; k < 64; k += 2) { const q = ring[k]; if (q[2] > 1.5) P.dotOn(q[0], q[1] - 0.25, K[4]); }
+  const kphi = -0.75, knot = at(kphi, CL.WAIST + 0.1);
+  if (knot[2] < 0.4) return;
+  const sw = A.walking ? Math.sin(A.ph) * 0.9 : 0;
+  [[-0.45, 13.4, 0], [0.35, 15.6, 0.6]].forEach(([o, endH, lag]) => {
+    const end = at(kphi + o * 0.12, endH), x1 = end[0] + sw * (1 + lag), mid = [lerp(knot[0], x1, 0.5) + o * 0.6, lerp(knot[1], end[1], 0.5)];
+    P.l(knot[0] + o, knot[1] + 0.6, mid[0], mid[1], 0.8).l(mid[0], mid[1], x1, end[1], 0.8);
+    // the tassel: a binding, then a little brush of threads
+    P.e(x1, end[1] + 0.4, 0.75, 0.5).t(x1, end[1] + 0.8, x1 + sw * 0.3, end[1] + 2.8, 1.5, 1.1);
+  });
+  P.fill(K, { round: 0.6 });
+  [[-0.45, 13.4, 0], [0.35, 15.6, 0.6]].forEach(([o, endH, lag]) => { const end = at(kphi + o * 0.12, endH), x1 = end[0] + sw * (1 + lag); P.dotOn(x1 - 0.25, end[1] + 0.4, K[4]).dotOn(x1, end[1] + 1.6, K[3]).dotOn(x1 + 0.4, end[1] + 2.2, K[3]); });
+  P.e(knot[0], knot[1] + 0.2, 1.3, 1.1).fill(K, { round: 0.9 });
+  P.dotOn(knot[0] - 0.5, knot[1] - 0.25, K[4]);
+}
+// the cowl: soft white cloth draped round the throat, falling in loose U-shaped folds over the breast and
+// lying on the shoulders; and behind, the hood resting on her back, its black lining showing at the rim
+function clericCowl(P, A) {
+  const V = A.V, B = A.B, W = CL_WHITE, K = CL_BLACK;
+  // the hem dips lowest at the front where the cloth hangs in a deep U, rises over the shoulders
+  const hemH = (phi) => 37.2 - 3.4 * Math.pow(Math.max(0, Math.cos(phi)), 2) - 1.4 * Math.pow(Math.max(0, -Math.cos(phi)), 2);
+  const top = (phi) => V.seam(4.3, 4.0, phi, 40.6), bot = (phi) => V.seam(B.sh + 0.3, B.depth + 0.8, phi, hemH(phi));
+  const N = 40;
+  for (let k = 0; k < N; k++) {
+    const p0 = k / N * Math.PI * 2, p1 = (k + 1) / N * Math.PI * 2, a0 = top(p0), a1 = top(p1), b0 = bot(p0), b1 = bot(p1);
+    P.p([[a0[0], a0[1]], [a1[0], a1[1]], [b1[0], b1[1]], [b0[0], b0[1]]]);
+  }
+  P.e(V.x(0, 0), V.y(40.4), V.w(4.6, 4.2), 1.6);
+  P.fill(W, { pattern: linen, round: 0.75, dither: 0.4, lift: 0.04 });
+  // the drape: loose folds hanging in U-curves across the front, each a shadowed trough with lit cloth
+  // rolling over above it, deepest at the middle
+  const fold = (frac, sag, phiMax) => { const pts = []; for (let k = 0; k <= 22; k++) { const phi = -phiMax + k / 22 * phiMax * 2, c = Math.cos(phi); const h = lerp(40.4, hemH(phi), frac) - sag * c * c; const w = lerp(4.4, B.sh + 0.3, frac), d = lerp(4.1, B.depth + 0.8, frac) + 0.15; pts.push(V.seam(w, d, phi, h)); } return pts; };
+  const draw = (pts, minD, wd) => { for (let i = 0; i < pts.length - 1; i++) if (pts[i][2] > minD && pts[i + 1][2] > minD) P.l(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], wd); };
+  [[0.42, 0.9, 1.15], [0.72, 1.3, 1.3]].forEach(([fr, sag, pm]) => draw(fold(fr, sag, pm), 1.6, 0.6));
+  P.fill(W, { flat: true, tone: 1, on: true });
+  [[0.38, 0.9, 1.05], [0.67, 1.3, 1.2]].forEach(([fr, sag, pm]) => draw(fold(fr, sag, pm), 2, 0.45));
+  P.fill(W, { flat: true, tone: 4, on: true });
+  // folds over the shoulders from the side and back, running down from the neck
+  [-1.6, -2.3, 1.6, 2.3, Math.PI].forEach((phi) => { const a = top(phi), b = bot(phi + 0.1); if (a[2] > 1 && b[2] > 1) P.l(a[0], a[1] + 1, b[0], b[1] - 0.6, 0.55); });
+  P.fill(W, { flat: true, tone: 2, on: true });
+  // the cowl's edge: a black band following its hem, and its soft shadow on the robe below
+  for (let k = 0; k <= 120; k++) {
+    const phi = k / 120 * Math.PI * 2, q = bot(phi);
+    if (q[2] < 0.9) continue;
+    P.dotOn(q[0], q[1] - 0.3, K[q[2] > 3 ? 2 : 1]);
+    P.darken(q[0], q[1] + 0.6, 0.84).darken(q[0], q[1] + 1.1, 0.92);
+  }
+  // the hood resting on her back, seen from the side and behind: a soft bag of cloth hanging from the
+  // cowl to a rounded point between the shoulder blades, its mouth a black crescent of lining at the top
+  if (V.fz < 0.3) {
+    const D = -B.depth - 1.9, mouthW = B.sh - 1.1;
+    // outline: from one shoulder, swelling out and down to the point, back up to the other shoulder
+    const side = (s) => { const pts = []; for (let k = 0; k <= 10; k++) { const t = k / 10, a = s * mouthW * (1 + 0.18 * Math.sin(t * Math.PI * 0.9)) * (1 - Math.pow(t, 2.2)), h = lerp(38.8, 28.6, t); pts.push(V.pt(a, D - 0.35 * Math.sin(t * Math.PI), h)); } return pts; };
+    const L = side(-1), Rr = side(1).reverse();
+    P.p(L.concat(Rr)).fill(W, { pattern: linen, round: 1.1, lift: -0.03 });
+    // the mouth: the rim curves up at the shoulders and dips in the middle, the lining showing under it
+    const rim = (u, h0, sag) => V.pt(u * mouthW * 0.98, D, h0 - sag * (1 - u * u));
+    const top = [], low = [];
+    for (let k = 0; k <= 12; k++) { const u = -1 + k / 6; top.push(rim(u, 39.0, 0.9)); low.push(rim(u * 0.9, 38.6, 2.6)); }
+    P.p(top.concat(low.reverse())).fill(K, { round: 0.5, on: true });
+    // the lit roll of the rim over the lining
+    for (let i = 0; i < top.length - 1; i++) P.l(top[i][0], top[i][1] - 0.4, top[i + 1][0], top[i + 1][1] - 0.4, 0.5);
+    P.fill(W, { flat: true, tone: 4, on: true });
+    // folds sagging from the rim's ends toward the point, and a deep crease down the middle
+    [-1, 1].forEach((s) => {
+      const p0 = rim(s * 0.75, 38.6, 2.0), p1 = V.pt(s * 0.6, D, 30.2), p2 = rim(s * 0.4, 38.6, 2.6), p3 = V.pt(s * 0.25, D, 31.6);
+      P.l(p0[0], p0[1] + 0.5, p1[0], p1[1], 0.7).l(p2[0], p2[1] + 0.6, p3[0], p3[1], 0.45);
+    });
+    P.fill(W, { flat: true, tone: 1, on: true });
+    [-1, 1].forEach((s) => { const p0 = rim(s * 0.92, 38.6, 1.6), p1 = V.pt(s * 1.3, D, 31.4); P.l(p0[0], p0[1] + 0.6, p1[0], p1[1], 0.5); });
+    P.fill(W, { flat: true, tone: 4, on: true });
+    const pt = V.pt(0, D, 28.6);
+    P.dotOn(pt[0], pt[1] - 0.6, W[1]);
+  }
+}
+const CLERIC = {
+  ...FEMALE_BODY,
+  ...FEMALE_HEAD,
+  hairStyle: 'bun',
+  // the robe hides the legs; it is drawn by drawRobe below instead of the mage's straight robe
+  robe: CL_WHITE, drawRobe(P, A) { clericRobe(P, A); clericScapular(P, A); clericCord(P, A); },
+  torso: CL_WHITE, sleeve: CL_WHITE, sleeveStyle: 'bell', cuffs: CL_BLACK, trim: CL_BLACK, sleevePattern: linen,
+  boots: CL_BLACK, sole: CL_SOLE, belt: CL_BLACK, buckle: CL_BLACK, hands: SKIN, bootRound: 0.8,
+  gear(add, P, A) {
+    add(9, () => clericCowl(P, A));
+    drawFemaleHead(add, P, A, HAIR);
+  }
+};
+
 // paint one frame of a character (facing row, frame col) into a PW x PH RGBA buffer, top row first
 function paintFrame(S, row, col) {
   const P = Painter();
@@ -1076,4 +1291,4 @@ function paintSheet(S) {
 }
 // ---------- end sprites ----------
 
-export { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet, paintFrame };
+export { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, CLERIC, paintSheet, paintFrame };
