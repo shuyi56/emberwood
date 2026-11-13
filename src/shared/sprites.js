@@ -432,7 +432,7 @@ const weave = (x, y) => ((x + y) % 4 === 0 ? -0.09 : (x - y) % 6 === 0 ? 0.05 : 
 // (screen left), a core shadow turning away on the other side, the edge against the body darker still where it
 // is hidden from the light, and a crease on the inside of the elbow. Then the arm casts a soft neutral shadow
 // onto the body beside it, so a clear line of dark parts the two. under: the frame as it was before the arm.
-function armForm(P, under, { pS, pE, pH, outward, cx, bell, shaded }) {
+function armForm(P, under, { pS, pE, pH, outward, cx, bell }) {
   const buf = P.buf, inward = -outward;
   const changed = (k) => buf[k * 4 + 3] && (buf[k * 4] !== under[k * 4] || buf[k * 4 + 1] !== under[k * 4 + 1] || buf[k * 4 + 2] !== under[k * 4 + 2] || !under[k * 4 + 3]);
   const mix = (k, t, c) => { for (let j = 0; j < 3; j++) buf[k * 4 + j] = buf[k * 4 + j] + (c[j] - buf[k * 4 + j]) * t; };
@@ -464,7 +464,7 @@ function armForm(P, under, { pS, pE, pH, outward, cx, bell, shaded }) {
       const de = Math.abs(Y - elbowY);
       if (de < 2.5) { const k = innerK - inward * 1; dk(k, de < 1.5 ? 0.82 : 0.9); }
     }
-    // the cast shadow on the body beside the arm (the puff sleeve casts its own), fading in below the shoulder
+    // the cast shadow on the body beside the arm, fading in below the shoulder
     if (Y > (pS[1] + 3.2) * RES) {
       const fade = Math.min(1, (Y / RES - pS[1] - 3.2) / 2.5);
       [0.62, 0.76, 0.9].forEach((f, j) => {
@@ -905,7 +905,7 @@ function drawFigure(P, S, theta, f) {
       if (S.bracer && s < 0) { const pa = fore(5.5); P.t(pa[0], pa[1] - 1.8, pa[0], pa[1] + 1.8, 4.6, 4.6).fill(S.bracer, { dim }); }
       if (S.shoulder) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
       if (S.armArmor) S.armArmor(P, { pS, pE, pH }, dim, s, A);
-      if (formPass) armForm(P, under, { pS, pE, pH, outward, cx: V.x(0, 0), bell: S.sleeveStyle === 'bell', shaded: S.sleeveStyle === 'puff' });
+      if (formPass) armForm(P, under, { pS, pE, pH, outward, cx: V.x(0, 0), bell: S.sleeveStyle === 'bell' });
       // (a hand resting on the back of the hip is out of sight from the front: the sleeve ends at the cuff)
       const HS = S.hands || SKIN, T = (i) => HS[Math.max(0, i - (dim ? 1 : 0))];
       // The hand is drawn in its own frame: x across it, y down it toward the fingertips. A hanging hand points
