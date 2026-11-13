@@ -1225,7 +1225,7 @@ function clericCowl(P, A) {
   // Three deep swags, each a true U that hangs well below its ends, a little off-centre so they don't
   // stack like rings: [frac down the cowl, sag at the middle, half-reach round the body, centre offset].
   // A soft shadow band under a lit roll for each, thin at its ends.
-  const U = [[0.12, 1.6, 0.85, 0.06], [0.36, 2.3, 1.05, -0.08], [0.6, 2.8, 1.25, 0.04]];
+  const U = [[0.12, 1.6, 0.7, 0.04], [0.36, 2.3, 0.85, -0.05], [0.6, 2.8, 1.0, 0.03]];
   const foldAt = (fr, sag, pm, off, lift = 0) => fold(fr, sag, pm, lift, off);
   U.forEach(([fr, sag, pm, off]) => draw(foldAt(fr, sag, pm, off), 1.4, 0.45, fr > 0.5 ? 1.4 : 1.0));
   P.fill(W, { flat: true, tone: 2, on: true, pattern: linen });
@@ -1277,9 +1277,9 @@ function clericCowl(P, A) {
     // it is zero in profile, where the hem is seen edge-on and any line would sit on the silhouette
     const phi = k / 200 * Math.PI * 2, q = bot(phi), g = Math.max(0, Math.cos(phi) * (V.fz > 0 ? 1 : -1) * Math.abs(V.fz)), deep = Math.max(0, Math.cos(phi)) ** 2;
     if (q[2] < 0.9) continue;
-    if (g > 0.5) P.dotOn(q[0], q[1] - 0.25, K[g > 0.8 ? 2 : 3]);
+    if (g > 0.6) P.dotOn(q[0], q[1] - 0.25, K[g > 0.85 ? 3 : 4]);
     if (g > 0.5 && k % 4 === 0) P.dotOn(q[0], q[1] - 1.0, W[1]);
-    const f = Math.min(1, g * 1.3);
+    const f = Math.pow(Math.min(1, g * 1.2), 1.6) * 0.6;
     P.darken(q[0], q[1] + 0.3, 1 - (0.2 + 0.06 * deep) * f, 0).darken(q[0], q[1] + 0.8, 1 - 0.12 * f, 0).darken(q[0], q[1] + 1.3, 1 - 0.05 * f, 0);
   }
   // The hood, thrown back and resting on her shoulder blades: a full bag of cloth gathered up behind the
