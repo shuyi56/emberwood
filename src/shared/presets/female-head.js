@@ -334,8 +334,10 @@ function braid(add, P, A, HAIR) {
   const V = A.V, sway = A.walking ? -Math.sin(A.ph) * 0.5 : 0, N = 7, dim = V.fz > 0.2;
   // the plait lies on her back from the nape down, a little fuller at the top
   const pts = [];
-  for (let i = 0; i <= N; i++) { const t = i / N; pts.push([sway * t, -6.6 - Math.sin(t * Math.PI) * 0.4, HEAD - 5.4 - t * 13]); }
-  const widths = pts.map((_, i) => lerp(3.6, 2.3, i / N));
+  for (let i = 0; i <= N; i++) { const t = i / N; pts.push([sway * t, -5 - 1.4 * Math.min(1, t * 3) - Math.sin(t * Math.PI) * 0.4, HEAD - 5.4 - t * 13]); }
+  // (it starts tucked in against the nape, inside the hair's outline, and comes away from the neck as it falls)
+  // (seen from the side it is a little narrower, as a plait is flatter than it is wide)
+  const widths = pts.map((_, i) => lerp(3.6, 2.3, i / N) * (1 - 0.14 * V.fx * V.fx));
   // a point a fraction u of the way down the plait on screen, with its direction (ux, uy) and width
   const sc = pts.map((q) => V.pt(...q));
   const along = (u) => {
@@ -346,12 +348,17 @@ function braid(add, P, A, HAIR) {
   add(pieceDepth(V, -1), () => {
     chain(P, V, pts, widths);
     P.fill(HAIR, { pattern: cleanStrands, round: 1, dither: 0.3, dim, contour: true });
+    // where the plait leaves the head it is still part of the hair: its first stretch is painted again
+    // without the outline, so it runs out of the hair above with no seam
+    if (V.fz > -0.6) { const a = sc[0], b = along(0.11); P.t(a[0], a[1], b.x, b.y, widths[0] - 0.4, b.w - 0.6).fill(HAIR, { pattern: cleanStrands, round: 1, dither: 0.3, dim, flat: true }); }
     // The three strands cross over the middle in turn, so from behind the plait is a column of lobes
     // alternating left and right, each slanting down and in toward the middle. Each lobe is drawn as its
     // own lock with its own rounded shading (lit at its upper outer edge, turning dark where it tucks under
     // the next one), from the top down so every lobe lies over the end of the one above it.
     const M = 10, isHair = isHairOf(P, HAIR);
     for (let k = 0; k < M; k++) {
+      // (from the side the first lobe is hidden in the hair it grows out of)
+      if (k === 0 && V.fz > -0.6) continue;
       const c = along((k + 0.5) / M), side = k % 2 ? 1 : -1, nx = -c.uy, ny = c.ux, h = 13 / M;
       // across the lobe from its outer edge (o = 1) to just past the middle (o = -0.15), dropping as it goes
       const at = (o, d) => [c.x + nx * side * c.w * 0.5 * o + c.ux * (d - o * h * 0.35), c.y + ny * side * c.w * 0.5 * o + c.uy * (d - o * h * 0.35)];
@@ -384,7 +391,7 @@ function braid(add, P, A, HAIR) {
   });
   // from behind, the hair on the back of the head is drawn together toward the top of the plait: a few
   // strands sweep down and in to the nape, so the plait grows out of the hair instead of sitting on it
-  if (V.fz < 0) add(20.41, () => {
+  if (V.fz < 0.2) add(20.41, () => {
     const top = sc[0];
     [[-4.6, 1.5], [-2.6, 3], [-0.9, 3.8], [1.1, 3.6], [2.9, 2.6], [4.7, 1.2]].forEach(([a, h], i) => {
       const s0 = V.pt(a, -6.9, HEAD + h);

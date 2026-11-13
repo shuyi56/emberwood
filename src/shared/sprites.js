@@ -199,6 +199,8 @@ function View(theta, bob, sway) {
 // coordinates, so they turn with it and foreshorten in the three-quarter views.
 // the jaw in profile: [forward offset, half-width] for him and for her (height and depth as from the front)
 const JAW_PROFILE = { male: [0.9, 4.4], fem: [0.8, 4.1] };
+// the jawline in profile: the angle of the jaw below the ear and the point of the chin (forward offset, height)
+const JAWLINE = { male: [[-1.2, -4.9], [4.0, -8.45]], fem: [[-1.0, -4.6], [3.8, -8.2]] };
 // the front edge of the face in profile, in head space (forward offset, height from the head's centre):
 // the bridge and tip of the nose, the upper lip, the lips and the point of the chin
 function PROFILE_FRONT(P, V, fem) {
@@ -209,8 +211,9 @@ function PROFILE_FRONT(P, V, fem) {
   P.p(pts.map(at));
   // the jawline: from the point of the chin it runs back and up to the angle of the jaw below the ear.
   // The rounded bottoms of the skull and the jaw below that line would read as a swollen lower cheek.
-  const chin = fem ? [3.8, -8.2] : [4.0, -8.45], angle = fem ? [-1.0, -4.6] : [-1.2, -4.9];
-  P.cut([[-9, angle[1] + 0.6], angle, chin, [chin[0] + 4, chin[1]], [chin[0] + 4, -14], [-9, -14]].map(at));
+  const [angle, chin] = JAWLINE[fem ? 'fem' : 'male'];
+  // (only in front of the angle: behind it the head runs into the neck, and cutting there leaves a gap)
+  P.cut([angle, chin, [chin[0] + 4, chin[1]], [chin[0] + 4, -14], [angle[0], -14]].map(at));
 }
 const FACE_LIGHT = (() => { const l = [-0.5, 0.55, 0.67], n = Math.hypot(...l); return l.map((c) => c / n); })();
 function faceShade(V, fem, SKULL, JAW) {
@@ -569,11 +572,19 @@ function drawFigure(P, S, theta, f) {
   // neck: drawn just behind the body so collars and necklines cover its base, and the head covers its top
   add(-0.5, () => {
     if (Math.abs(V.fx) > 0.3 || V.fz < -0.3 || S.female) {
-      const n0 = V.pt(0, -0.6, 45), n1 = V.pt(0, -0.4, 40.2);
+      // (from the side it reaches up under the jawline, so no gap opens between the jaw and the neck)
+      const n0 = V.pt(0, -0.6, 45 + 1.8 * V.fx * V.fx), n1 = V.pt(0, -0.4, 40.2);
       P.t(n0[0], n0[1], n1[0], n1[1], V.w(S.female ? 3.4 : 4, S.female ? 3.2 : 3.8), V.w(S.female ? 3.8 : 4.4, S.female ? 3.6 : 4)).fill(SKIN, { round: 0.7, lift: -0.14 });
       // the jaw casts a soft shadow onto the top of the neck, separating chin from throat
       if (V.fz > 0.3) P.e(V.x(0, 0.6), V.y(43.4), V.w(S.female ? 2 : 2.4, 2), 1.1).fill(SKIN, { tone: 1, flat: true });
-      if (Math.abs(V.fx) > 0.5) P.l(V.x(0, 1), V.y(HEAD - 7.2), V.x(0, 4.4), V.y(HEAD - 8.4), 0.8).fill(SKIN, { tone: 1, flat: true });
+      // seen from the side the shadow runs along the jawline (see PROFILE_FRONT), only on the neck itself,
+      // so it does not hang below the chin; in three-quarter view it sits under the chin as before
+      if (V.fx * V.fx > 0.9) {
+        const [angle, chin] = JAWLINE[S.female ? 'fem' : 'male'], at = ([b, h]) => [V.x(0, b), V.y(HEAD + h - 0.45)];
+        // (it starts a little way along from the angle of the jaw, which the hair covers)
+        const p0 = at([lerp(angle[0], chin[0], 0.4), lerp(angle[1], chin[1], 0.4)]), p1 = at(chin);
+        P.l(p0[0], p0[1], p1[0], p1[1], 0.9).fill(SKIN, { tone: 1, flat: true, on: true });
+      } else if (Math.abs(V.fx) > 0.5) P.l(V.x(0, 1), V.y(HEAD - 7.2), V.x(0, 4.4), V.y(HEAD - 8.4), 0.8).fill(SKIN, { tone: 1, flat: true });
     }
   });
 
