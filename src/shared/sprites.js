@@ -528,9 +528,12 @@ function drawFigure(P, S, theta, f) {
         // is a soft curve: the cloth sags lowest a little to the outside of the wrist and rounds up at
         // both ends, the way a heavy bell sleeve hangs, rather than coming to a point.
         const wu = B.arm + 1.8, open = 5.2, wy = pH[1] + 1;
-        const pS2 = [pS[0] - outward * 0.5, pS[1] + 1.2];
+        const pS2 = [pS[0] - outward * 0.2, pS[1] + 0.6];
         const mouth = []; for (let k = 0; k <= 10; k++) { const t = k / 10, x = pH[0] + outward * lerp(-open + 0.5, open - 0.3, t); mouth.push([x, wy + lerp(1.0, 1.6, t) + 1.7 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.75)), 0.8)]); }
-        P.t(pS2[0], pS2[1], pE[0], pE[1], wu - 0.6, wu + 0.6)
+        P.t(pS2[0], pS2[1], pE[0], pE[1], wu + 0.2, wu + 0.6)
+          // the shoulder: a soft round where the cloth falls over the top of the arm, so the line from the
+          // neck runs on down the sleeve with no corner or step
+          .e(pS2[0] + outward * 0.2, pS2[1] + 1.2, wu / 2 + 0.5, 2.8)
           .p([[pE[0] - wu / 2 - 0.3, pE[1]], [pE[0] + wu / 2 + 0.3, pE[1]]].concat(outward > 0 ? mouth.slice().reverse() : mouth));
         P.fill(S.sleeve, { round: 0.75, dim: depth < -4, pattern: S.sleevePattern });
         // folds running down the sleeve, and the dark inside of the opening
@@ -1160,7 +1163,7 @@ function clericScapular(P, A) {
     if (!facing) return;
     const half = (h) => (h > CL.WAIST ? 0.52 : 0.46 - 0.12 * (CL.WAIST - h) / CL.WAIST);
     const L = [], R = [];
-    for (let h = 38.6; h >= 7.4; h -= 0.8) { const w = half(h); L.push(at(c0 - w, h)); R.push(at(c0 + w, h)); }
+    for (let h = 36.4; h >= 7.4; h -= 0.8) { const w = half(h); L.push(at(c0 - w, h)); R.push(at(c0 + w, h)); }
     // the bottom edge is cut square, with a small point at the middle
     const tip = at(c0, 6.6);
     P.p(L.map((q) => [q[0], q[1]]).concat([[tip[0], tip[1]]], R.reverse().map((q) => [q[0], q[1]]))).fill(K, { round: 0.8, pattern: linen, lift: 0.04 });
@@ -1208,7 +1211,7 @@ function clericCord(P, A) {
 function clericCowl(P, A) {
   const V = A.V, B = A.B, W = CL_WHITE, K = CL_BLACK;
   // the hem dips lowest at the front where the cloth hangs in a deep U, rises over the shoulders
-  const hemH = (phi) => 37.2 - 3.4 * Math.pow(Math.max(0, Math.cos(phi)), 2) - 1.4 * Math.pow(Math.max(0, -Math.cos(phi)), 2);
+  const hemH = (phi) => 37.2 - 3.4 * Math.pow(Math.max(0, Math.cos(phi)), 2) - 1.4 * Math.pow(Math.max(0, -Math.cos(phi)), 2) - 1.0 * Math.pow(Math.sin(phi), 4);
   const top = (phi) => V.seam(4.3, 4.0, phi, 40.6), bot = (phi) => V.seam(B.sh - 0.5, B.depth + 0.8, phi, hemH(phi));
   const N = 40;
   for (let k = 0; k < N; k++) {
@@ -1243,7 +1246,8 @@ function clericCowl(P, A) {
   for (let k = 0; k <= 160; k++) {
     const phi = k / 160 * Math.PI * 2, q = bot(phi), deep = Math.max(0, Math.cos(phi)) ** 2;
     if (q[2] < 0.9) continue;
-    P.dotOn(q[0], q[1] - 0.25, W[1]).dotOn(q[0], q[1] - 0.75, W[4]);
+    // (the lip fades out toward the sides, where the cowl lies smooth over the arm)
+    if (q[2] > 2.2) P.dotOn(q[0], q[1] - 0.25, W[q[2] > 3.4 ? 1 : 2]).dotOn(q[0], q[1] - 0.75, W[4]);
     P.darken(q[0], q[1] + 0.3, 0.8 - 0.06 * deep, 0).darken(q[0], q[1] + 0.8, 0.88, 0).darken(q[0], q[1] + 1.3, 0.95, 0);
   }
   // the hood resting on her back, seen from the side and behind: a soft bag of cloth hanging from the
