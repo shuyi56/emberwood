@@ -760,13 +760,21 @@ function drawFigure(P, S, theta, f) {
     // The forward arm bends at the elbow with its hand before the hip; the back arm hangs nearly straight, its
     // hand behind the hip. (Bell sleeves just swing a little each way, as they hang straight.)
     const fwd = s === -A.free ? 1 : -1, still = !walking && !grip && !akimbo;
+    // Seen from the front the back arm tucks behind the body: its hand goes behind the hip and the whole arm is
+    // drawn behind the torso, so only the sleeve beside the waist shows, while the forward arm comes across in
+    // front of the jerkin. That is what makes one read as behind the other from the front, where a swing toward
+    // or away from the viewer barely moves anything on screen.
+    const tuck = bend && fwd < 0 && V.fz > 0.6, across = bend && fwd > 0 && V.fz > 0.6;
     const restB = bend ? (fwd > 0 ? 5.6 : -2.6) : still ? rest[1] + fwd * 2.2 : rest[1], restH = bend && fwd > 0 ? 3.0 : bend ? -0.3 : 0;
-    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : bend ? (fwd > 0 ? Math.min(hangA, A.lw(24) + 0.5) : Math.max(hangA - 0.4, A.lw(21.5) + 2.2)) : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + restB, 22 + Math.max(0, hb) * 0.35 + rest[2] + restH]);
+    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : bend ? (across ? A.lw(24) - 0.6 : fwd > 0 ? Math.min(hangA, A.lw(24) + 0.5) : tuck ? A.lw(21.5) - 0.4 : Math.max(hangA - 0.4, A.lw(21.5) + 2.2)) : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + restB, 22 + Math.max(0, hb) * 0.35 + rest[2] + restH]);
     const sh = [s * (B.sh - 1), 0, 38.8 - B.slope * 0.3];
     // The hand on the hip rests on the side of it, a little forward, fingers curling over the hip toward the
     // front: seen from the front the whole hand shows on the hip (a hand tucked behind it left only a stub of
     // cuff at the waist, which read as a square from any distance), and the arm stands in front of the body.
-    const depth = V.d(s * 11, Math.max(hand[1], 0.6) * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2 || (bend && fwd < 0 && V.fz > 0.6);
+    const depth = tuck ? -1.5 : V.d(s * 11, Math.max(hand[1], 0.6) * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2 || tuck;
+    // (a pauldron on the tucked arm still sits on top of the shoulder, in front of the torso)
+    if (tuck && S.shoulder) add(2, () => { const q = V.pt(...sh); P.e(q[0], q[1] - 0.4, 3.8, 3).fill(S.shoulder, { round: 0.7, lift: -0.08 }); });
+    if (tuck && S.pauldron) add(2, () => S.pauldron(P, V.pt(...sh), false, s, A));
     A['hand' + (s > 0 ? 'R' : 'L')] = { a: hand[0], b: hand[1], h: hand[2], depth };
     add(depth, () => {
       // (what lay here before the arm, so the arm's own pixels can be told apart for its form pass below)
@@ -909,8 +917,8 @@ function drawFigure(P, S, theta, f) {
       // (on the hip arm a short cuff: a long pale one there reads as a block standing in for the hand)
       if (cuffC) cuffOnSleeve(cuffC, akimbo ? 1.5 : S.shirtCuff ? 2.7 : 2.4);
       if (S.bracer && s < 0) { const pa = fore(5.5); P.t(pa[0], pa[1] - 1.8, pa[0], pa[1] + 1.8, 4.6, 4.6).fill(S.bracer, { dim }); }
-      if (S.shoulder) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
-      if (S.armArmor) S.armArmor(P, { pS, pE, pH }, dim, s, A);
+      if (S.shoulder && !tuck) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
+      if (S.armArmor) S.armArmor(P, { pS, pE, pH, tuck }, dim, s, A);
       if (formPass) armForm(P, under, { pS, pE, pH, outward, cx: V.x(0, 0), bell: S.sleeveStyle === 'bell' });
       // (a hand resting on the back of the hip is out of sight from the front: the sleeve ends at the cuff)
       const HS = S.hands || SKIN, T = (i) => HS[Math.max(0, i - (dim ? 1 : 0))];
@@ -1235,10 +1243,14 @@ const FIGHTER = {
     P.t(bx0, by0, J.pH[0], J.pH[1] - 1.2, 4.4, 4).fill(HIDE, { dim, round: 0.7 });
     const mx = (bx0 + J.pH[0]) / 2, my = (by0 + J.pH[1]) / 2;
     P.l(mx - 2.4, my - 0.6, mx + 2.4, my - 0.6, 0.9).l(mx - 2.4, my + 1.4, mx + 2.4, my + 1.4, 0.9).fill(STRAP, { flat: true, tone: 2 });
+    if (!J.tuck) this.pauldron(P, J.pS, dim, s, A);
+  },
+  // (drawn on its own, above the torso, when the arm beneath is tucked behind the body)
+  pauldron(P, pS, dim, s, A) {
     const ox = s * 0.8 * Math.abs(A.V.rx);
-    P.e(J.pS[0] + ox * 0.6, J.pS[1] + 1.8, 3.6, 2).fill(HIDE, { dim, round: 0.7, contour: true });
-    P.e(J.pS[0] + ox * 0.3, J.pS[1] - 0.2, 3.8, 2.5).fill(HIDE, { dim, round: 0.9, contour: true });
-    for (let k = -4; k <= 4; k++) { const ang = k * 0.3; P.dot(J.pS[0] + ox * 0.3 + Math.sin(ang) * 3, J.pS[1] - 0.4 - Math.cos(ang) * 1.9, HIDE[4]); }
+    P.e(pS[0] + ox * 0.6, pS[1] + 1.8, 3.6, 2).fill(HIDE, { dim, round: 0.7, contour: true });
+    P.e(pS[0] + ox * 0.3, pS[1] - 0.2, 3.8, 2.5).fill(HIDE, { dim, round: 0.9, contour: true });
+    for (let k = -4; k <= 4; k++) { const ang = k * 0.3; P.dot(pS[0] + ox * 0.3 + Math.sin(ang) * 3, pS[1] - 0.4 - Math.cos(ang) * 1.9, HIDE[4]); }
   },
   gear(add, P, A) {
     const V = A.V;
