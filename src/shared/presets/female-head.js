@@ -556,22 +556,37 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
         if (b[2] > 3 && a[2] > 3) P.l(a[0], a[1], b[0], b[1], 0.5);
       });
       P.fill(HAIR, { flat: true, tone: 1, on: true });
-      for (let k = 0; k <= 26; k++) { const phi = -FACE + k / 26 * 2 * FACE, h = V.seam(7.1, 7.5, phi, hairline(phi) + 0.25); if (h[2] > 1) P.dotOn(h[0], h[1], HAIR[1]); }
+      // the edge of the fringe: darkest in the notches between locks and lighter at the tips, where the
+      // hair thins out, so the edge reads as soft ends rather than one drawn line
+      const between = (phi) => { const u = phi * F + 0.3; return Math.abs(u - Math.round(u)) * 2; };
+      for (let k = 0; k <= 48; k++) { const phi = -FACE + k / 48 * 2 * FACE, h = V.seam(7.1, 7.5, phi, hairline(phi) + 0.25); if (h[2] > 1) P.dotOn(h[0], h[1], HAIR[between(phi) > 0.55 ? 1 : 2]); }
       // Fringe detail, so it reads as locks of hair rather than a flat band. The light comes from the
       // upper left (positive phi on screen), so locks on that side get the brighter highlights.
       const onF = (phi, h, fn) => { const q = V.seam(7.1, 7.5, phi, h); if (q[2] > 1) fn(q[0], q[1]); };
       for (let n = -nLocks; n <= nLocks; n++) {
         const tipPhi = (n - 0.3) / F, notch = (n + 0.5 - 0.3) / F, lit = tipPhi > -0.25, dir = bg.dir(notch);
         if (Math.abs(tipPhi) > FACE - 0.1) continue;
-        // every other notch, a long clean groove parting two locks, curving toward the parting as it rises
-        if (n % 2 === 0) for (let j = 0; j <= 5; j++) onF(notch - j * 0.02 * dir, hairline(notch) + 0.3 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j < 3 ? 0 : 1]));
-        // alternate locks get a short lit streak along the top of their curve
-        if (n % 2 !== 0 && lit) for (let j = 0; j <= 2; j++) onF(tipPhi + 0.02 - j * 0.015, hairline(tipPhi) + 1.6 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j === 2 ? 4 : 3]));
+        // a groove parting two locks, curving toward the parting as it rises and fading out as the locks
+        // merge higher up: deep only right at the notch, longer at every other one
+        const gl = n % 2 === 0 ? 5 : 4;
+        for (let j = 0; j <= gl; j++) onF(notch - j * 0.02 * dir, hairline(notch) + 0.3 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j < 1 ? 0 : j < 3 ? 1 : 2]));
+        // a fine strand down each lock, following its sweep, one shade off the hair around it, so the lock
+        // has a grain without a hard line; it thins out (every third pixel left out) as it rises
+        { const sp = tipPhi + 0.3 / F, top = 3 + (n & 1) * 0.5;
+          for (let j = 1; j * 0.5 <= top; j++) {
+            if (j > 3 && j % 3 === 0) continue;
+            onF(sp - j * 0.012 * dir, hairline(sp) + 0.4 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[lit ? 3 : 2]));
+          } }
+        // locks on the lit side catch a soft sheen along the top of their curve, rising from the hair tone
+        // to the brightest and back, so the light lies on the hair rather than on top of it
+        if (lit) for (let j = 0; j <= 3; j++) onF(tipPhi + 0.02 - j * 0.015, hairline(tipPhi) + 1.4 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j === 1 || j === 2 ? (n % 2 ? 4 : 3) : 3]));
+        // a few fine ends slip past the cut edge onto the forehead, softening it
+        if ((n * 7 + 3) % 3 === 0) onF(tipPhi + 0.03 * dir, hairline(tipPhi) - 0.2, (x, y) => P.dotOn(x, y, HAIR[2]));
       }
       // a centre parting: a dark line up the middle where the two sides fall apart
       if (bg.partA === 0) for (let j = 0; j <= 6; j++) onF(0, hairline(0) + 0.2 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j < 4 ? 0 : 1]));
       // the fringe tucks under at its tips: a darker band just above the edge
-      for (let k = 0; k <= 40; k++) { const phi = -FACE + 0.05 + k / 40 * (2 * FACE - 0.1); onF(phi, hairline(phi) + 0.7, (x, y) => P.darken(x, y, 0.9)); }
+      for (let k = 0; k <= 40; k++) { const phi = -FACE + 0.05 + k / 40 * (2 * FACE - 0.1); onF(phi, hairline(phi) + 0.7, (x, y) => P.darken(x, y, 0.94)); }
     }
     // The hair casts a faint shadow onto the cheek where it overlaps it: lit skin right against the hair
     // steps one shade down the skin ramp. Only skin pixels change, so the eyes, brows and hair are untouched.
