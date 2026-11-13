@@ -524,17 +524,23 @@ function drawFigure(P, S, theta, f) {
       const outward = Math.sign(pH[0] - V.x(0, 0)) || s;
       if (S.sleeveStyle === 'bell') {
         // a loose upper sleeve that widens into a long bell; the lower edge hangs well past the wrist
+        // The sleeve starts narrow at a sloping shoulder (no square cap) and widens down the arm. Its mouth
+        // is a soft curve: the cloth sags lowest a little to the outside of the wrist and rounds up at
+        // both ends, the way a heavy bell sleeve hangs, rather than coming to a point.
         const wu = B.arm + 1.8, open = 5.2, wy = pH[1] + 1;
-        P.t(pS[0], pS[1], pE[0], pE[1], wu + 0.8, wu + 0.6)
-          .p([[pE[0] - wu / 2 - 0.3, pE[1]], [pE[0] + wu / 2 + 0.3, pE[1]], [pH[0] + open, wy], [pH[0] + outward * 3, wy + 5.8], [pH[0] - open, wy + 1.6]]);
+        const pS2 = [pS[0] - outward * 0.5, pS[1] + 1.2];
+        const mouth = []; for (let k = 0; k <= 10; k++) { const t = k / 10, x = pH[0] + outward * lerp(-open + 0.5, open - 0.3, t); mouth.push([x, wy + lerp(1.0, 1.6, t) + 1.7 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.75)), 0.8)]); }
+        P.t(pS2[0], pS2[1], pE[0], pE[1], wu - 0.6, wu + 0.6)
+          .p([[pE[0] - wu / 2 - 0.3, pE[1]], [pE[0] + wu / 2 + 0.3, pE[1]]].concat(outward > 0 ? mouth.slice().reverse() : mouth));
         P.fill(S.sleeve, { round: 0.75, dim: depth < -4, pattern: S.sleevePattern });
         // folds running down the sleeve, and the dark inside of the opening
-        P.l(pE[0] - outward * 0.6, pE[1] + 1, pH[0] - outward * 1.6, wy + 0.8, 0.7).l(pE[0] + outward * 0.8, pE[1] + 1.5, pH[0] + outward * 1.8, wy + 3, 0.7).fill(S.sleeve, { flat: true, tone: 1 });
+        P.l(pE[0] - outward * 0.6, pE[1] + 1, pH[0] - outward * 1.6, wy + 1.6, 0.7).l(pE[0] + outward * 0.8, pE[1] + 1.5, pH[0] + outward * 1.8, wy + 2.8, 0.7).fill(S.sleeve, { flat: true, tone: 1 });
         P.l(pE[0] + outward * 0.1, pE[1] + 1.2, pH[0] + outward * 0.2, wy + 1.8, 0.5).fill(S.sleeve, { flat: true, tone: 3 });
         // (just wider than the wrist, so it shows as the dark of the bell round the hand, not a wedge beside it)
         P.e(pH[0], wy - 0.2, Math.min(open - 1.2, 3.3), 1.5).fill(S.sleeveLining || S.sleeve, { flat: true, tone: S.sleeveLining ? 1 : 0 });
         // trim along the hanging edge
-        P.l(pH[0] - open, wy + 1.6, pH[0] + outward * 3, wy + 5.8, 0.9).l(pH[0] + outward * 3, wy + 5.8, pH[0] + open, wy, 0.9).fill(S.cuffs || S.trim, { round: 0.4 });
+        for (let k = 0; k < mouth.length - 1; k++) P.l(mouth[k][0], mouth[k][1] - 0.2, mouth[k + 1][0], mouth[k + 1][1] - 0.2, 0.9);
+        P.fill(S.cuffs || S.trim, { round: 0.4 });
       } else if (S.sleeveStyle === 'puff') {
         // a loose shirt sleeve: full through the forearm, gathered into the cuff or bracer
         const mid = [pE[0] + (pH[0] - pE[0]) * 0.55, pE[1] + (pH[1] - pE[1]) * 0.55];
@@ -1203,7 +1209,7 @@ function clericCowl(P, A) {
   const V = A.V, B = A.B, W = CL_WHITE, K = CL_BLACK;
   // the hem dips lowest at the front where the cloth hangs in a deep U, rises over the shoulders
   const hemH = (phi) => 37.2 - 3.4 * Math.pow(Math.max(0, Math.cos(phi)), 2) - 1.4 * Math.pow(Math.max(0, -Math.cos(phi)), 2);
-  const top = (phi) => V.seam(4.3, 4.0, phi, 40.6), bot = (phi) => V.seam(B.sh + 0.3, B.depth + 0.8, phi, hemH(phi));
+  const top = (phi) => V.seam(4.3, 4.0, phi, 40.6), bot = (phi) => V.seam(B.sh - 0.5, B.depth + 0.8, phi, hemH(phi));
   const N = 40;
   for (let k = 0; k < N; k++) {
     const p0 = k / N * Math.PI * 2, p1 = (k + 1) / N * Math.PI * 2, a0 = top(p0), a1 = top(p1), b0 = bot(p0), b1 = bot(p1);
@@ -1214,7 +1220,7 @@ function clericCowl(P, A) {
   // The drape: the cowl hangs in three loose U-curves across the breast, one inside the other, each a soft
   // band of shadow under a lit roll of cloth, deepest at the middle and easing out toward the shoulders
   // where the cloth lies flat. Then shorter folds run from the throat out over each shoulder.
-  const fold = (frac, sag, phiMax, lift = 0) => { const pts = []; for (let k = 0; k <= 26; k++) { const phi = -phiMax + k / 26 * phiMax * 2, c = Math.cos(phi); const h = lerp(40.4, hemH(phi), frac) - sag * c * c + lift; const w = lerp(4.4, B.sh + 0.3, frac), d = lerp(4.1, B.depth + 0.8, frac) + 0.2; pts.push(V.seam(w, d, phi, h)); } return pts; };
+  const fold = (frac, sag, phiMax, lift = 0) => { const pts = []; for (let k = 0; k <= 26; k++) { const phi = -phiMax + k / 26 * phiMax * 2, c = Math.cos(phi); const h = lerp(40.4, hemH(phi), frac) - sag * c * c + lift; const w = lerp(4.4, B.sh - 0.5, frac), d = lerp(4.1, B.depth + 0.8, frac) + 0.2; pts.push(V.seam(w, d, phi, h)); } return pts; };
   const draw = (pts, minD, w0, w1 = w0) => { for (let i = 0; i < pts.length - 1; i++) if (pts[i][2] > minD && pts[i + 1][2] > minD) { const t = Math.abs(i / (pts.length - 2) - 0.5) * 2; P.l(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], lerp(w1, w0, t)); } };
   const U = [[0.3, 0.7, 0.95], [0.56, 1.1, 1.2], [0.82, 1.5, 1.42]];
   // the soft shadow band under each roll, wide at the middle

@@ -124,7 +124,7 @@ const HAIRSTYLES = [
   { key: 'princess', name: 'Princess', note: 'Waves dressed with braids', length: 'wavy', ends: { base: 27.5, front: 5, shape: 'sections', sections: 7 }, volume: 0.9, bangs: 'soft', wavy: true, extra: princess },
   { key: 'pixie', name: 'Pixie', note: 'Short crop, choppy bangs', length: 'short', ends: { base: HEAD - 6.2, front: 1.5, side: 1.5 }, volume: 1.9, cap: HEAD - 5.5, bangs: 'choppy' },
   { key: 'ponytail', name: 'Ponytail', note: 'Loose and low, a soft fringe', length: 'short', ends: { base: HEAD - 5.2, front: 1.5, tuck: 4.5 }, volume: 0.5, cap: HEAD - 0.2, bangs: 'soft', extra: ponytail },
-  { key: 'bun', name: 'Bun', note: 'A knot, blunt bangs', length: 'short', ends: { base: HEAD - 5.2, front: 1.5, tuck: 4.5 }, volume: 0.35, cap: HEAD - 0.2, bangs: 'blunt', extra: bun },
+  { key: 'bun', name: 'Bun', note: 'A knot, curtain bangs', length: 'short', ends: { base: HEAD - 5.2, front: 1.5, tuck: 4.5 }, volume: 0.35, cap: HEAD - 0.2, bangs: 'curtain', extra: bun },
   { key: 'braid', name: 'Braid', note: 'A plait, wispy bangs', length: 'short', ends: { base: HEAD - 5.6, front: 1.5, tuck: 4.5 }, volume: 0.35, cap: HEAD - 0.2, bangs: 'wispy', extra: braid }
 ];
 const STYLE = Object.fromEntries(HAIRSTYLES.map((s) => [s.key, s]));
@@ -247,11 +247,15 @@ function bun(add, P, A, HAIR) {
   // its foot, the hair below swept up into it in a few lit strands.
   // The knot lies on a plane facing back and up, so it reads as a round knot from behind, a tall dome
   // from the side and a crest over the crown from the front.
-  const V = A.V, C = [0, -4.6, HEAD + 7.4];
+  const V = A.V, C = [0, -4.4, HEAD + 6.7];
   const U = [1, 0, 0], Vv = [0, 0.5, 0.87], N = [0, -0.87, 0.5];
   const on3 = (r, th, dome) => [0, 1, 2].map((k) => C[k] + U[k] * r * Math.cos(th) * 1.08 + Vv[k] * r * Math.sin(th) + N[k] * dome);
   add(pieceDepth(V, 19.9), () => {
     const dim = V.fz > 0.2;
+    // the hair gathered up off the crown into the knot: a soft swell joining the two, so the knot grows
+    // out of the head instead of sitting on it like a ball
+    const j = V.pt(0, -2.8, HEAD + 5.6), j2 = V.pt(0, -3.8, HEAD + 4.2);
+    P.e(j[0], j[1], V.w(4.6, 4.4), 2.6).e(j2[0], j2[1], V.w(5.2, 4.6), 2.6).fill(HAIR, { pattern: cleanStrands, round: 0.9, dither: 0.3, dim });
     // the hair swept up from the nape and sides into the knot, seen from behind and the side
     if (V.fz < 0.4) {
       [-2.6, -1.3, 0, 1.3, 2.6].forEach((a, i) => {
@@ -263,7 +267,7 @@ function bun(add, P, A, HAIR) {
     }
     // the base of the knot, a little wider than the coil, shading the hair it sits on
     const c = V.pt(...C);
-    for (let a = 0.2; a < Math.PI - 0.2; a += 0.2) P.darken(c[0] + Math.cos(a) * V.w(5.1, 4.4), c[1] + Math.sin(a) * 4.4 + 0.6, 0.82);
+    for (let a = 0.2; a < Math.PI - 0.2; a += 0.2) P.darken(c[0] + Math.cos(a) * V.w(5.1, 4.4), c[1] + Math.sin(a) * 4.4 + 0.6, 0.9);
     P.e(c[0], c[1], V.w(4.9, 4.2), 4.3).fill(HAIR, { pattern: cleanStrands, round: 0.8, dither: 0.3, dim, lift: -0.1 });
     // the knot: three fat loops of hair wound together, each standing off the others with its own dark
     // edge, lit along its upper curve and shadowed where it tucks under its neighbour
