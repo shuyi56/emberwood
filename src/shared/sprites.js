@@ -197,6 +197,21 @@ function View(theta, bob, sway) {
 // the brow ridge, a lit cheekbone with a hollow under it, the nose (a lit ridge, a shadow side and the
 // shadow it casts on the lip), the lips and the ball of the chin. All are placed in the head's own
 // coordinates, so they turn with it and foreshorten in the three-quarter views.
+// the jaw in profile: [forward offset, half-width] for him and for her (height and depth as from the front)
+const JAW_PROFILE = { male: [0.9, 4.4], fem: [0.8, 4.1] };
+// the front edge of the face in profile, in head space (forward offset, height from the head's centre):
+// the bridge and tip of the nose, the upper lip, the lips and the point of the chin
+function PROFILE_FRONT(P, V, fem) {
+  const pts = fem
+    ? [[4.2, 1.6], [6.3, 1.0], [6.6, 0], [6.2, -0.9], [6.8, -2.0], [7.4, -2.9], [6.8, -3.4], [6.2, -3.6], [6.5, -4.5], [6.1, -5.1], [6.4, -5.6], [5.8, -6.3], [6.0, -7.3], [5.3, -8.2], [4.0, -8.2], [3.4, -5]]
+    : [[4.2, 1.6], [6.6, 1.2], [6.9, 0], [6.5, -0.9], [7.2, -2.0], [7.9, -3.1], [7.2, -3.6], [6.5, -3.8], [6.7, -4.8], [6.3, -5.3], [6.5, -5.8], [6.0, -6.5], [6.3, -7.5], [5.6, -8.4], [4.2, -8.4], [3.5, -5]];
+  const at = ([b, h]) => [V.x(0, b), V.y(HEAD + h)];
+  P.p(pts.map(at));
+  // the jawline: from the point of the chin it runs back and up to the angle of the jaw below the ear.
+  // The rounded bottoms of the skull and the jaw below that line would read as a swollen lower cheek.
+  const chin = fem ? [4.0, -8.25] : [4.2, -8.45], angle = fem ? [-1.0, -4.6] : [-1.2, -4.9];
+  P.cut([[-9, angle[1] + 0.6], angle, chin, [chin[0] + 4, chin[1]], [chin[0] + 4, -14], [-9, -14]].map(at));
+}
 const FACE_LIGHT = (() => { const l = [-0.5, 0.55, 0.67], n = Math.hypot(...l); return l.map((c) => c / n); })();
 function faceShade(V, fem, SKULL, JAW) {
   const g = (x, y, sx, sy) => Math.exp(-(x * x) / (sx * sx) - (y * y) / (sy * sy));
@@ -576,8 +591,17 @@ function drawFigure(P, S, theta, f) {
     // her lower face is rounder: a broader, shorter jaw curve gives a round chin rather than a point
     // the skull and the jaw: [forward offset, height, half-width, half-height, depth radius]
     const SKULL = fem ? [0.3, 0.9, 6.2, 7.2, 6.6] : [0.3, 0.6, 6.6, 7.6, 7];
-    const JAW = fem ? [1.15, -4.2, 4.85, 4.1, 5.1] : [1.4, -3.3, 5.3, 5.1, 5.6];
+    const JAW0 = fem ? [1.15, -4.2, 4.85, 4.1, 5.1] : [1.4, -3.3, 5.3, 5.1, 5.6];
+    // Seen from the side the jaw is a slimmer shape than seen from the front: the cheek sits back from the
+    // plane of the face and the jawline runs back from the chin toward the ear. Using the front view's
+    // half-width there makes the lower face swell forward past the eye like a puffed cheek, so as the head
+    // turns to profile the jaw narrows and moves back (pf is 0 from the front, 1 in profile).
+    const pf = V.fx * V.fx;
+    const JAWP = fem ? [JAW_PROFILE.fem[0], JAW0[1], JAW_PROFILE.fem[1], JAW0[3], JAW0[4]] : [JAW_PROFILE.male[0], JAW0[1], JAW_PROFILE.male[1], JAW0[3], JAW0[4]];
+    const JAW = JAW0.map((v, i) => lerp(v, JAWP[i], pf));
     [SKULL, JAW].forEach(([cb, ch, w, hh]) => P.e(V.x(0, cb), V.y(HEAD + ch), w, hh));
+    // in profile the nose, the lips and the chin carry the face's front edge
+    if (pf > 0.9) PROFILE_FRONT(P, V, fem);
     const shade = faceShade(V, fem, SKULL, JAW);
     P.fill(SKIN, { shade: (X, Y) => { face.push(Y * PW + X); return shade(X, Y); }, dither: 0.35 });
     // the flush: pixels of the cheeks swap to the same tone of the rosier ramp, dithered at its edge
