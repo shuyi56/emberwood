@@ -755,12 +755,18 @@ function drawFigure(P, S, theta, f) {
     // front of the hip rather than beside it, so the arm reads as reaching toward us instead of lying flat
     // against the body. (Bell sleeves hang straight: a bent bell would hang wrong.)
     const bend = !walking && !grip && !akimbo && S.sleeveStyle !== 'bell' ? 1 : 0;
-    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : bend ? Math.min(hangA, A.lw(23) + 1.4) : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + rest[1] + bend * 2.6, 22 + Math.max(0, hb) * 0.35 + rest[2] + bend * 1.5]);
+    // At rest one arm hangs a little forward and the other a little back, opposite to the feet as in a step (the
+    // arm on the side of the weight leg comes forward): fwd is +1 for the forward arm, -1 for the one behind.
+    // The forward arm bends at the elbow with its hand before the hip; the back arm hangs nearly straight, its
+    // hand behind the hip. (Bell sleeves just swing a little each way, as they hang straight.)
+    const fwd = s === -A.free ? 1 : -1, still = !walking && !grip && !akimbo;
+    const restB = bend ? (fwd > 0 ? 5.6 : -2.6) : still ? rest[1] + fwd * 2.2 : rest[1], restH = bend && fwd > 0 ? 3.0 : bend ? -0.3 : 0;
+    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : bend ? (fwd > 0 ? Math.min(hangA, A.lw(24) + 0.5) : Math.max(hangA - 0.4, A.lw(21.5) + 2.2)) : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + restB, 22 + Math.max(0, hb) * 0.35 + rest[2] + restH]);
     const sh = [s * (B.sh - 1), 0, 38.8 - B.slope * 0.3];
     // The hand on the hip rests on the side of it, a little forward, fingers curling over the hip toward the
     // front: seen from the front the whole hand shows on the hip (a hand tucked behind it left only a stub of
     // cuff at the waist, which read as a square from any distance), and the arm stands in front of the body.
-    const depth = V.d(s * 11, hand[1] * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2;
+    const depth = V.d(s * 11, Math.max(hand[1], 0.6) * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2 || (bend && fwd < 0 && V.fz > 0.6);
     A['hand' + (s > 0 ? 'R' : 'L')] = { a: hand[0], b: hand[1], h: hand[2], depth };
     add(depth, () => {
       // (what lay here before the arm, so the arm's own pixels can be told apart for its form pass below)
@@ -773,7 +779,7 @@ function drawFigure(P, S, theta, f) {
       // (elbowTuck draws the resting elbows in toward a narrow waist, so the forearm angles softly out to the
       // hand beside the thigh and the arm bends a little at the elbow instead of hanging as one straight slant)
       const restElbow = Math.abs(sh[0]) + 2.6 + (S.blendArms ? 0.3 : 0) - (S.elbowTuck || 0);
-      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : (bend ? Math.max(restElbow, Math.abs(hand[0]) + 1.3) : Math.min(restElbow, Math.abs(hand[0]) - 0.3))), walking ? hand[1] * 0.45 - 1.4 : -0.9 - bend * 1.4, (sh[2] + hand[2]) / 2 + 0.8 - bend * 0.6];
+      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : (bend ? Math.max(restElbow, Math.abs(hand[0]) + (fwd > 0 ? 1.3 : 0.3)) : Math.min(restElbow, Math.abs(hand[0]) - 0.3))), walking ? hand[1] * 0.45 - 1.4 : bend ? (fwd > 0 ? -2.0 : -1.4) : -0.9, (sh[2] + hand[2]) / 2 + 0.8 - bend * (fwd > 0 ? 0.6 : 0)];
       // a point up the forearm from the hand, dist along it toward the elbow, so the wrist, the cuffs and the
       // bracer follow the forearm when it angles forward instead of sitting straight above the hand
       // Points on the arm are tipped down by their depth like the knees and ankles (LEG_TILT): seen a little from
