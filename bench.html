@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Emberwood sprite bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:wght@700;800&family=Alegreya+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Emberwood sprite bench</h1>
+    <p>The three party sprites at 128 by 160 pixels, painted live from the same code the game uses. Turn them, play their animations, and check them against the ground they walk on.</p>
+  </header>
+
+  <section class="stage-wrap" aria-label="Sprite preview">
+    <div class="stage" id="stage">
+      <canvas id="stageCanvas" aria-label="Enlarged sprite"></canvas>
+      <span class="stage-caption" id="caption"></span>
+    </div>
+    <div class="controls">
+      <div class="group" role="group" aria-label="Animation">
+        <button type="button" id="animIdle" aria-pressed="true">Idle</button>
+        <button type="button" id="animWalk" aria-pressed="false">Walk</button>
+        <button type="button" id="play" aria-pressed="true">Pause</button>
+        <button type="button" id="step">Next frame</button>
+      </div>
+      <div class="group">
+        <label class="group-label" for="zoom">Zoom</label>
+        <input type="range" id="zoom" min="1" max="5" step="1" value="3">
+        <span id="zoomOut" class="group-label">3×</span>
+      </div>
+      <div class="group">
+        <button type="button" id="turntable" aria-pressed="false">Turntable</button>
+      </div>
+    </div>
+  </section>
+
+  <aside>
+    <div>
+      <h2>Character</h2>
+      <div class="cast" id="cast"></div>
+    </div>
+    <div>
+      <h2>Facing</h2>
+      <div class="dial" id="dial"><span class="you">camera<br>is here ↓</span></div>
+    </div>
+    <div>
+      <h2>Ground</h2>
+      <div class="grounds" id="grounds"></div>
+    </div>
+  </aside>
+
+  <section class="sheet" aria-label="Full sprite sheet">
+    <h2 id="sheetTitle">Full sheet</h2>
+    <div class="sheet-scroll"><div class="grid" id="grid"></div></div>
+    <p class="hint">Click any frame to inspect it. On the stage, drag sideways or use the left and right arrow keys to turn the character; space plays and pauses.</p>
+  </section>
+</main>
+<script type="module" src="/src/bench/main.js"></script>
+</body>
+</html>

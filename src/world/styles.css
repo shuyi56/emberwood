@@ -1,0 +1,128 @@
+:root {
+  --bg: #B7D3DC;
+  --ink: #1D2A22;
+  --ink-soft: #3E4F44;
+  --panel: rgba(240, 244, 236, 0.84);
+  --edge: rgba(29, 42, 34, 0.22);
+  --key: rgba(29, 42, 34, 0.1);
+  --on: #2F5D3A;
+  --on-ink: #F3F7EF;
+  --focus: #8A5A00;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0E1A26;
+    --ink: #E9E4D4;
+    --ink-soft: #B9B6A6;
+    --panel: rgba(16, 24, 30, 0.82);
+    --edge: rgba(233, 228, 212, 0.2);
+    --key: rgba(233, 228, 212, 0.12);
+    --on: #E0A84A;
+    --on-ink: #1A1408;
+    --focus: #E0A84A;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0E1A26;
+  --ink: #E9E4D4;
+  --ink-soft: #B9B6A6;
+  --panel: rgba(16, 24, 30, 0.82);
+  --edge: rgba(233, 228, 212, 0.2);
+  --key: rgba(233, 228, 212, 0.12);
+  --on: #E0A84A;
+  --on-ink: #1A1408;
+  --focus: #E0A84A;
+}
+
+*, *::before, *::after { box-sizing: inherit; }
+html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Alegreya Sans", "Gill Sans", "Trebuchet MS", system-ui, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+main { position: relative; height: 100%; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+
+.card {
+  position: absolute;
+  top: clamp(0.7rem, 2.5vw, 1.5rem);
+  left: clamp(0.7rem, 2.5vw, 1.5rem);
+  width: min(19rem, calc(100% - 1.4rem));
+  padding: 0.8rem 1rem 0.7rem;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem 1.4rem 0.5rem 0.5rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.card h1 {
+  margin: 0;
+  font-family: "Alegreya", Georgia, "Times New Roman", serif;
+  font-weight: 800;
+  font-size: 1.9rem;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.card > p { margin: 0.35rem 0 0; font-size: 1rem; line-height: 1.35; color: var(--ink-soft); }
+.card > p.alt { color: var(--ink); font-weight: 500; }
+.alt strong { font-family: "Alegreya", Georgia, serif; font-weight: 800; font-size: 1.15rem; margin-left: 0.25rem; }
+details { margin-top: 0.55rem; border-top: 1px solid var(--edge); padding-top: 0.45rem; }
+summary { cursor: pointer; font-weight: 700; font-size: 0.95rem; border-radius: 0.3rem; }
+summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+dl { margin: 0.45rem 0 0.1rem; display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.7rem; font-size: 0.93rem; align-items: baseline; }
+dt { white-space: nowrap; }
+dd { margin: 0; color: var(--ink-soft); }
+kbd {
+  font: inherit; font-weight: 700; font-size: 0.85rem;
+  padding: 0.05rem 0.35rem; border-radius: 0.25rem;
+  background: var(--key); border: 1px solid var(--edge);
+}
+
+.dock {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(0.6rem, 2.2vw, 1.3rem);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 1.2rem);
+  display: flex; flex-direction: column; align-items: center; gap: 0.45rem;
+}
+.status {
+  margin: 0; padding: 0.2rem 0.8rem;
+  font-size: 0.95rem; text-align: center;
+  background: var(--panel); border-radius: 999px; color: var(--ink);
+}
+.bar {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 0.3rem;
+  padding: 0.35rem;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 0.8rem;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.bar button {
+  font: inherit; font-weight: 700; font-size: 0.95rem;
+  color: var(--ink); background: transparent;
+  border: 1px solid var(--edge); border-radius: 0.5rem;
+  padding: 0.45rem 0.75rem; cursor: pointer; white-space: nowrap;
+}
+.bar button:active { background: var(--key); }
+.bar button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.bar button[aria-pressed="true"] { background: var(--on); color: var(--on-ink); border-color: transparent; }
+
+@media (max-width: 560px) {
+  .card h1 { font-size: 1.5rem; }
+  .card > p { font-size: 0.92rem; }
+  .bar button { padding: 0.45rem 0.6rem; font-size: 0.9rem; }
+}

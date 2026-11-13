@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Emberwood: a 3D world with a party camera</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Alegreya:wght@500;800&family=Alegreya+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<main>
+  <canvas id="view" aria-label="A 3D forest valley with a party of three adventurers"></canvas>
+
+  <section class="card">
+    <h1>Emberwood</h1>
+    <p>Click the ground to send your party there. Take the ramp up to the stone circle, then the land bridge to the watchtower.</p>
+    <p class="alt">Height above the lake <strong id="alt">0 m</strong></p>
+    <details id="help">
+      <summary>Camera controls</summary>
+      <dl>
+        <dt>Drag, or <kbd>Q</kbd> <kbd>E</kbd></dt><dd>Turn the camera</dd>
+        <dt>Scroll or pinch</dt><dd>Zoom, from over the shoulder to bird’s eye</dd>
+        <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>Pan away from the party</dd>
+        <dt><kbd>Space</kbd></dt><dd>Snap back to the party</dd>
+      </dl>
+    </details>
+  </section>
+
+  <div class="dock">
+    <p class="status" id="status" aria-live="polite">The party waits by the campfire.</p>
+    <div class="bar">
+      <button type="button" id="rotL">Turn left</button>
+      <button type="button" id="rotR">Turn right</button>
+      <button type="button" id="zoomIn">Zoom in</button>
+      <button type="button" id="zoomOut">Zoom out</button>
+      <button type="button" id="follow" aria-pressed="true">Follow party</button>
+    </div>
+  </div>
+</main>
+
+<script type="module" src="/src/world/main.js"></script>
+</body>
+</html>

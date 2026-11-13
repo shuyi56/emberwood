@@ -1,0 +1,23 @@
+{
+  "name": "emberwood",
+  "version": "0.1.0",
+  "description": "Emberwood: a 3D forest valley with a party camera, plus the sprite bench that previews its pixel-art party.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.128.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "vite": "^8.3.8"
+  }
+}
