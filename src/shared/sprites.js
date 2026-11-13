@@ -426,6 +426,58 @@ const mail = (x, y) => { const r = y % 3, sx = (x + (Math.floor(y / 3) % 2) * 2)
 const strands = (x, y) => { const k = (x * 7 + Math.floor(y / 3) * 3) % 9; return k === 0 ? -0.24 : k === 4 ? 0.16 : 0; };
 const weave = (x, y) => ((x + y) % 4 === 0 ? -0.09 : (x - y) % 6 === 0 ? 0.05 : 0);
 
+// Seen from the front an arm hangs in the same plane as the torso and reads as a flat strip pasted to its side,
+// the more so when sleeve and body are one cloth (mail on mail, white on white). This pass gives it a round
+// form and sets it in front of the body: across each row of the arm a lit rim on the side toward the light
+// (screen left), a core shadow turning away on the other side, the edge against the body darker still where it
+// is hidden from the light, and a crease on the inside of the elbow. Then the arm casts a soft neutral shadow
+// onto the body beside it, so a clear line of dark parts the two. under: the frame as it was before the arm.
+function armForm(P, under, { pS, pE, pH, outward, cx, bell }) {
+  const buf = P.buf, inward = -outward;
+  const changed = (k) => buf[k * 4 + 3] && (buf[k * 4] !== under[k * 4] || buf[k * 4 + 1] !== under[k * 4 + 1] || buf[k * 4 + 2] !== under[k * 4 + 2] || !under[k * 4 + 3]);
+  const mix = (k, t, c) => { for (let j = 0; j < 3; j++) buf[k * 4 + j] = buf[k * 4 + j] + (c[j] - buf[k * 4 + j]) * t; };
+  const dk = (k, f) => { buf[k * 4] *= f; buf[k * 4 + 1] *= f; buf[k * 4 + 2] *= f; };
+  const LIGHT = [255, 246, 222];
+  const Y0 = Math.max(0, Math.floor((pS[1] + 2.4) * RES)), Y1 = Math.min(PH - 1, Math.ceil((pH[1] - 0.6) * RES));
+  const xMin = Math.max(0, Math.floor((Math.min(pS[0], pE[0], pH[0]) - 6) * RES)), xMax = Math.min(PW - 1, Math.ceil((Math.max(pS[0], pE[0], pH[0]) + 6) * RES));
+  const elbowY = pE[1] * RES;
+  for (let Y = Y0; Y <= Y1; Y++) {
+    // the arm's span in this row: the run of its own pixels nearest the arm's line
+    const t = Math.max(0, Math.min(1, (Y / RES - pS[1]) / Math.max(1, pH[1] - pS[1])));
+    const ax = (t < 0.5 ? lerp(pS[0], pE[0], t * 2) : lerp(pE[0], pH[0], (t - 0.5) * 2)) * RES;
+    let a = Math.round(ax), b;
+    if (!changed(Y * PW + a)) { let f = -1; for (let d = 1; d < 6 && f < 0; d++) { if (changed(Y * PW + a + d)) f = a + d; else if (changed(Y * PW + a - d)) f = a - d; } if (f < 0) continue; a = f; }
+    b = a;
+    while (a - 1 >= xMin && changed(Y * PW + a - 1)) a--;
+    while (b + 1 <= xMax && changed(Y * PW + b + 1)) b++;
+    const w = b - a + 1;
+    if (w < 3) continue;
+    const L = Y * PW + a, R = Y * PW + b, innerK = inward > 0 ? R : L;
+    if (!bell) {
+      // the lit rim, brighter on the arm whose outer side faces the light
+      mix(L, outward < 0 ? 0.3 : 0.16, LIGHT);
+      if (w > 5) mix(L + 1, outward < 0 ? 0.14 : 0.07, LIGHT);
+      // the core shadow on the side turned from the light, and the hidden edge against the body
+      { dk(R, 0.74); if (w > 5) dk(R - 1, 0.86); if (w > 8) dk(R - 2, 0.94); }
+      dk(innerK, inward > 0 ? 0.88 : 0.82);
+      // the crease on the inside of the elbow: a short soft dark notch
+      const de = Math.abs(Y - elbowY);
+      if (de < 2.5) { const k = innerK - inward * 1; dk(k, de < 1.5 ? 0.82 : 0.9); }
+    }
+    // the cast shadow on the body beside the arm, fading in below the shoulder
+    if (Y > (pS[1] + 3.2) * RES) {
+      const fade = Math.min(1, (Y / RES - pS[1] - 3.2) / 2.5);
+      [0.62, 0.76, 0.9].forEach((f, j) => {
+        const X = (inward > 0 ? b : a) + inward * (j + 1), k = Y * PW + X;
+        if (X < 0 || X >= PW || changed(k) || !buf[k * 4 + 3]) return;
+        // (only onto the body, not past the far side of it)
+        if ((X / RES - cx) * outward < 0) return;
+        dk(k, 1 - (1 - f) * fade);
+      });
+    }
+  }
+}
+
 // how far down the screen a point drops per unit it stands toward the viewer (legs and shoes)
 const LEG_TILT = 0.2;
 function drawFigure(P, S, theta, f) {
@@ -706,6 +758,8 @@ function drawFigure(P, S, theta, f) {
     const depth = V.d(s * 11, hand[1] * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2;
     A['hand' + (s > 0 ? 'R' : 'L')] = { a: hand[0], b: hand[1], h: hand[2], depth };
     add(depth, () => {
+      // (what lay here before the arm, so the arm's own pixels can be told apart for its form pass below)
+      const formPass = V.fz > 0.3, under = formPass ? P.buf.slice() : null;
       // (at rest the elbow sits just off the waist and back, so the arm bends softly instead of hanging straight)
       // At rest the upper arm hangs nearly straight down from the shoulder (the elbow only a little outside it)
       // and the forearm angles slightly out to the hand beside the hip, as a relaxed arm does. An elbow set
@@ -846,6 +900,7 @@ function drawFigure(P, S, theta, f) {
       if (S.bracer && s < 0) { const pa = fore(5.5); P.t(pa[0], pa[1] - 1.8, pa[0], pa[1] + 1.8, 4.6, 4.6).fill(S.bracer, { dim }); }
       if (S.shoulder) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
       if (S.armArmor) S.armArmor(P, { pS, pE, pH }, dim, s, A);
+      if (formPass) armForm(P, under, { pS, pE, pH, outward, cx: V.x(0, 0), bell: S.sleeveStyle === 'bell' });
       // (a hand resting on the back of the hip is out of sight from the front: the sleeve ends at the cuff)
       const HS = S.hands || SKIN, T = (i) => HS[Math.max(0, i - (dim ? 1 : 0))];
       // The hand is drawn in its own frame: x across it, y down it toward the fingertips. A hanging hand points
