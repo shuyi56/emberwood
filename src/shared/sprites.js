@@ -1211,8 +1211,8 @@ function clericCord(P, A) {
 function clericCowl(P, A) {
   const V = A.V, B = A.B, W = CL_WHITE, K = CL_BLACK;
   // the hem dips lowest at the front where the cloth hangs in a deep U, rises over the shoulders
-  const hemH = (phi) => 37.2 - 3.4 * Math.pow(Math.max(0, Math.cos(phi)), 2) - 1.4 * Math.pow(Math.max(0, -Math.cos(phi)), 2) - 1.0 * Math.pow(Math.sin(phi), 4);
-  const top = (phi) => V.seam(4.3, 4.0, phi, 40.6), bot = (phi) => V.seam(B.sh - 0.5, B.depth + 0.8, phi, hemH(phi));
+  const hemH = (phi) => 37.2 - 2.7 * Math.pow(Math.max(0, Math.cos(phi)), 2) - 1.4 * Math.pow(Math.max(0, -Math.cos(phi)), 2) - 1.0 * Math.pow(Math.sin(phi), 4) + 0.35 * Math.cos(5 * phi + 0.5) * Math.max(0, Math.cos(phi));
+  const top = (phi) => V.seam(4.3, 4.0, phi, 40.6), bot = (phi) => V.seam(B.sh - 0.5, B.depth + 0.35, phi, hemH(phi));
   const N = 40;
   for (let k = 0; k < N; k++) {
     const p0 = k / N * Math.PI * 2, p1 = (k + 1) / N * Math.PI * 2, a0 = top(p0), a1 = top(p1), b0 = bot(p0), b1 = bot(p1);
@@ -1223,31 +1223,39 @@ function clericCowl(P, A) {
   // The drape: the cowl hangs in three loose U-curves across the breast, one inside the other, each a soft
   // band of shadow under a lit roll of cloth, deepest at the middle and easing out toward the shoulders
   // where the cloth lies flat. Then shorter folds run from the throat out over each shoulder.
-  const fold = (frac, sag, phiMax, lift = 0) => { const pts = []; for (let k = 0; k <= 26; k++) { const phi = -phiMax + k / 26 * phiMax * 2, c = Math.cos(phi); const h = lerp(40.4, hemH(phi), frac) - sag * c * c + lift; const w = lerp(4.4, B.sh - 0.5, frac), d = lerp(4.1, B.depth + 0.8, frac) + 0.2; pts.push(V.seam(w, d, phi, h)); } return pts; };
+  const fold = (frac, sag, phiMax, lift = 0, off = 0) => { const pts = []; for (let k = 0; k <= 26; k++) { const phi = off - phiMax + k / 26 * phiMax * 2, c = Math.cos(phi - off); const h = lerp(40.4, hemH(phi), frac) - sag * c * c + lift; const w = lerp(4.4, B.sh - 0.5, frac), d = lerp(4.1, B.depth + 0.35, frac) + 0.2; pts.push(V.seam(w, d, phi, h)); } return pts; };
   const draw = (pts, minD, w0, w1 = w0) => { for (let i = 0; i < pts.length - 1; i++) if (pts[i][2] > minD && pts[i + 1][2] > minD) { const t = Math.abs(i / (pts.length - 2) - 0.5) * 2; P.l(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], lerp(w1, w0, t)); } };
-  const U = [[0.3, 0.7, 0.95], [0.56, 1.1, 1.2], [0.82, 1.5, 1.42]];
-  // the soft shadow band under each roll, wide at the middle
-  U.forEach(([fr, sag, pm]) => draw(fold(fr, sag, pm), 1.4, 0.5, 1.6));
+  // Three deep swags, each a true U that hangs well below its ends, a little off-centre so they don't
+  // stack like rings: [frac down the cowl, sag at the middle, half-reach round the body, centre offset].
+  // A soft shadow band under a lit roll for each, thin at its ends.
+  const U = [[0.12, 1.6, 0.85, 0.06], [0.36, 2.3, 1.05, -0.08], [0.6, 2.8, 1.25, 0.04]];
+  const foldAt = (fr, sag, pm, off, lift = 0) => fold(fr, sag, pm, lift, off);
+  U.forEach(([fr, sag, pm, off]) => draw(foldAt(fr, sag, pm, off), 1.4, 0.45, fr > 0.5 ? 1.4 : 1.0));
   P.fill(W, { flat: true, tone: 2, on: true, pattern: linen });
-  // the deepest line of each, at the middle only
-  U.forEach(([fr, sag, pm]) => draw(fold(fr, sag, pm * 0.7, -0.2), 2.2, 0.5, 0.7));
+  // the deepest line of the longer folds, at the middle only
+  U.forEach(([fr, sag, pm, off]) => { draw(foldAt(fr, sag, pm * 0.6, off, -0.15), 2.2, 0.45, 0.6); });
   P.fill(W, { flat: true, tone: 1, on: true });
   // the lit roll just above each shadow
-  U.forEach(([fr, sag, pm]) => draw(fold(fr - 0.12, sag, pm * 0.85), 2, 0.5, 0.8));
+  U.forEach(([fr, sag, pm, off]) => draw(foldAt(fr - 0.09, sag, pm * 0.8, off), 2, 0.45, 0.6));
   P.fill(W, { flat: true, tone: 4, on: true });
+  // pinches where the folds gather at the shoulders: short creases running down and out
+  [-1, 1].forEach((sd) => [0.95, 1.2].forEach((phi, i) => { const a = V.seam(lerp(4.4, B.sh - 0.5, 0.3), lerp(4.1, B.depth + 0.35, 0.3), sd * phi, lerp(40.4, hemH(sd * phi), 0.3)), b = bot(sd * (phi + 0.15)); if (a[2] > 1.5 && b[2] > 1.5) P.l(a[0], a[1], lerp(a[0], b[0], 0.7), lerp(a[1], b[1], 0.7), i ? 0.45 : 0.6); }));
+  P.fill(W, { flat: true, tone: 2, on: true });
   // folds from the throat out over each shoulder and down the back
-  [-1.25, -1.75, -2.4, 1.25, 1.75, 2.4, Math.PI].forEach((phi, i) => {
+  [-1.75, -2.4, -2.85, 1.75, 2.4, 2.85, Math.PI].forEach((phi, i) => {
     const a = top(phi), b = bot(phi + 0.12 * Math.sign(phi)), m = [lerp(a[0], b[0], 0.55), lerp(a[1], b[1], 0.55)];
     if (a[2] > 1 && b[2] > 1) { P.l(a[0], a[1] + 0.8, m[0], m[1], 0.5).l(m[0], m[1], b[0], b[1] - 0.5, i % 3 === 1 ? 0.6 : 0.9); }
   });
   P.fill(W, { flat: true, tone: 2, on: true });
-  // the cowl's edge: no hard line, but the cloth turning under itself (a darker lip) with a lit edge just
-  // above, and a soft shadow on the robe and sleeves below that is deepest where the cowl hangs lowest
-  for (let k = 0; k <= 160; k++) {
-    const phi = k / 160 * Math.PI * 2, q = bot(phi), deep = Math.max(0, Math.cos(phi)) ** 2;
+  // the neck: the cowl's top edge rolls over into a fine lit rim round the throat
+  for (let k = 0; k <= 80; k++) { const phi = k / 80 * Math.PI * 2, q = V.seam(4.4, 4.1, phi, 40.2); if (q[2] > 1.2) P.dotOn(q[0], q[1], W[4]); }
+  // the edge: a narrow black band following the rippled hem, a white running stitch just inside it,
+  // and a soft shadow on the robe and sleeves below that is deepest where the cowl hangs lowest
+  for (let k = 0; k <= 200; k++) {
+    const phi = k / 200 * Math.PI * 2, q = bot(phi), deep = Math.max(0, Math.cos(phi)) ** 2;
     if (q[2] < 0.9) continue;
-    // (the lip fades out toward the sides, where the cowl lies smooth over the arm)
-    if (q[2] > 2.2) P.dotOn(q[0], q[1] - 0.25, W[q[2] > 3.4 ? 1 : 2]).dotOn(q[0], q[1] - 0.75, W[4]);
+    if (q[2] > 1.6) P.dotOn(q[0], q[1] - 0.25, K[q[2] > 3.4 ? 2 : 3]);
+    if (q[2] > 2.6 && k % 4 === 0) P.dotOn(q[0], q[1] - 1.0, W[1]);
     P.darken(q[0], q[1] + 0.3, 0.8 - 0.06 * deep, 0).darken(q[0], q[1] + 0.8, 0.88, 0).darken(q[0], q[1] + 1.3, 0.95, 0);
   }
   // the hood resting on her back, seen from the side and behind: a soft bag of cloth hanging from the
