@@ -79,10 +79,13 @@ return smoothstep(fogNear, fogFar, vFogDepth);
 return 0.0;
 #endif
 }
-vec4 outCol(vec3 c, float a) {
+// the world's exposure and filmic tone curve (ACES), in linear light
+vec3 toneMap(vec3 c) {
 c *= uExposure;
-c = clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
-return linearToOutputTexel(vec4(c, a));
+return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+}
+vec4 outCol(vec3 c, float a) {
+return linearToOutputTexel(vec4(toneMap(c), a));
 }
 `;
 

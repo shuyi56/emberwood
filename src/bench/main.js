@@ -1,16 +1,15 @@
 import './styles.css';
-import { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, CLERIC, paintSheet, paintFrame } from '../shared/sprites.js';
+import { PW, PH, RES, WALK } from '../shared/sprites.js';
+import { loadSheet } from '../shared/sheet-loader.js';
 import { HAIRSTYLES } from '../shared/presets/female-head.js';
+import { ROSTER, loadParty, saveParty, memberSpec } from '../shared/party.js';
 
-function main() {
+async function main() {
 
   // ---------- Bench ----------
-  const CAST = [
-    { key: 'knight', name: 'Knight', note: 'Mail and leather', spec: FIGHTER },
-    { key: 'mage', name: 'Mage', note: 'Robe and pointed hat', spec: MAGE },
-    { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle', spec: RANGER },
-    { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC }
-  ];
+  // the cast, and the party the world uses: who is in it and each one's hairstyle (saved on every change)
+  const party = loadParty();
+  const CAST = ROSTER.map((c) => ({ ...c, spec: memberSpec(c.key, party) }));
   const FACINGS = ['Front', 'Front right', 'Right', 'Back right', 'Back', 'Back left', 'Left', 'Front left'];
   const FRAMES = ['Idle 1', 'Idle 2'].concat(Array.from({ length: WALK }, (_, i) => 'Walk ' + (i + 1)));
   const GROUNDS = [
@@ -21,22 +20,15 @@ function main() {
     { name: 'Checker', checker: true }
   ];
 
-  // paint a character's sheet into an offscreen canvas, top row first
-  function sheetCanvas(spec) {
-    const sh = paintSheet(spec), cv = document.createElement('canvas');
-    cv.width = sh.W; cv.height = sh.H;
-    const ctx = cv.getContext('2d'), img = ctx.createImageData(sh.W, sh.H);
-    for (let y = 0; y < sh.H; y++) img.data.set(sh.data.subarray((sh.H - 1 - y) * sh.W * 4, (sh.H - y) * sh.W * 4), y * sh.W * 4);
-    ctx.putImageData(img, 0, 0);
-    return cv;
-  }
-  // characters with a hairstyle keep one sheet per style, painted the first time that style is picked
-  CAST.forEach((c) => {
+  // Every sheet is pre-painted (scripts/build-sprites.mjs) and loaded here up front: one per character, and
+  // one per hairstyle for characters with hair, so switching style is just a swap of images.
+  await Promise.all(CAST.map(async (c) => {
     c.hair = c.spec.hairStyle;
     c.sheets = {};
-    c.sheet = sheetCanvas(c.spec);
-    if (c.hair) c.sheets[c.hair] = c.sheet;
-  });
+    const styles = c.hair ? HAIRSTYLES.map((h) => h.key) : [null];
+    await Promise.all(styles.map(async (hair) => { c.sheets[hair] = await loadSheet(c.key, hair, hair ? { ...c.spec, hairStyle: hair } : c.spec); }));
+    c.sheet = c.sheets[c.hair || null];
+  }));
 
   const state = { who: 0, facing: 0, anim: 'idle', frame: 0, playing: true, zoom: 3, ground: 0, turntable: false };
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -119,27 +111,41 @@ function main() {
     hairsEl.append(b);
     hairButtons.push({ b, cv, key: st.key });
   });
-  const thumbsDone = new Set();
+  // the thumbnails are crops of each style's loaded sheet (front, idle), redrawn when the character changes
+  let thumbsFor = null;
   function paintHairThumbs() {
     const c = CAST[state.who];
-    if (!c.hair || thumbsDone.has(c.key)) return;
-    thumbsDone.add(c.key);
+    if (!c.hair || thumbsFor === c.key) return;
+    thumbsFor = c.key;
     hairButtons.forEach(({ cv, key }) => {
-      const buf = paintFrame({ ...c.spec, hairStyle: key }, 0, 0), ctx = cv.getContext('2d'), img = ctx.createImageData(THUMB.w, THUMB.h);
-      for (let y = 0; y < THUMB.h; y++) img.data.set(buf.subarray(((THUMB.y + y) * PW + THUMB.x) * 4, ((THUMB.y + y) * PW + THUMB.x + THUMB.w) * 4), y * THUMB.w * 4);
-      ctx.putImageData(img, 0, 0);
+      const ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, THUMB.w, THUMB.h);
+      ctx.drawImage(c.sheets[key], THUMB.x, THUMB.y, THUMB.w, THUMB.h, 0, 0, THUMB.w, THUMB.h);
     });
   }
   function pickHair(key) {
     const c = CAST[state.who];
     if (!c.hair || c.hair === key) return;
-    const done = () => { c.hair = key; c.sheet = c.sheets[key]; render(); paintCast(); };
-    if (c.sheets[key]) { done(); return; }
-    // a new style's sheet takes a moment to paint: show the button as busy, then paint
-    const hb = hairButtons.find((h) => h.key === key).b;
-    hb.setAttribute('aria-busy', 'true');
-    setTimeout(() => { c.sheets[key] = sheetCanvas({ ...c.spec, hairStyle: key }); hb.removeAttribute('aria-busy'); done(); }, 30);
+    c.hair = key; c.sheet = c.sheets[key];
+    party.hair[c.key] = key; saveParty(party);
+    render(); paintCast();
   }
+
+  // party picker: which characters walk in the world. At least one must stay in; the first in the list leads.
+  const partyEl = $('party'), partyButtons = CAST.map((c) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = c.name;
+    b.addEventListener('click', () => {
+      const i = party.members.indexOf(c.key);
+      if (i >= 0) { if (party.members.length > 1) party.members.splice(i, 1); }
+      else party.members = CAST.map((m) => m.key).filter((k) => k === c.key || party.members.includes(k));
+      saveParty(party);
+      render();
+    });
+    partyEl.append(b);
+    return { b, key: c.key };
+  });
 
   // facing dial: buttons placed around a circle, with the camera at the bottom
   const dial = $('dial'), dialButtons = [];
@@ -211,6 +217,12 @@ function main() {
     castEl.querySelectorAll('button').forEach((b, i) => b.setAttribute('aria-pressed', String(i === state.who)));
     const who = CAST[state.who];
     hairWrap.hidden = !who.hair;
+    partyButtons.forEach(({ b, key }) => {
+      const on = party.members.includes(key);
+      b.setAttribute('aria-pressed', String(on));
+      b.disabled = on && party.members.length === 1;
+    });
+    $('partyNote').textContent = `${CAST.find((c) => c.key === party.members[0]).name} leads in the world.`;
     if (who.hair) { paintHairThumbs(); hairButtons.forEach(({ b, key }) => b.setAttribute('aria-pressed', String(key === who.hair))); }
     dialButtons.forEach((b, k) => b.setAttribute('aria-pressed', String(k === state.facing)));
     groundButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === state.ground)));

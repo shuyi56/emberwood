@@ -5,7 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "sprites": "node scripts/build-sprites.mjs",
+    "predev": "node scripts/build-sprites.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/build-sprites.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src"
