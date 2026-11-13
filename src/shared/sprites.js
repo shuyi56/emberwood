@@ -200,13 +200,13 @@ function View(theta, bob, sway) {
 // the jaw in profile: [forward offset, half-width] for him and for her (height and depth as from the front)
 const JAW_PROFILE = { male: [0.9, 4.4], fem: [0.8, 4.1] };
 // the jawline in profile: the angle of the jaw below the ear and the point of the chin (forward offset, height)
-const JAWLINE = { male: [[-1.2, -4.9], [4.0, -8.45]], fem: [[-1.0, -4.6], [3.8, -8.2]] };
+const JAWLINE = { male: [[-0.8, -4.9], [3.0, -7.7]], fem: [[-0.6, -4.6], [2.8, -7.3]] };
 // the front edge of the face in profile, in head space (forward offset, height from the head's centre):
 // the bridge and tip of the nose, the upper lip, the lips and the point of the chin
 function PROFILE_FRONT(P, V, fem) {
   const pts = fem
-    ? [[4.2, 1.6], [6.2, 1.0], [6.4, 0], [6.1, -0.9], [6.4, -2.0], [6.7, -2.9], [6.3, -3.3], [6.0, -3.6], [6.1, -4.5], [5.8, -5.1], [5.9, -5.6], [5.5, -6.3], [5.5, -7.2], [4.9, -8.0], [3.8, -8.1], [3.2, -5]]
-    : [[4.2, 1.6], [6.5, 1.2], [6.7, 0], [6.4, -0.9], [6.7, -2.0], [7.1, -3.0], [6.6, -3.5], [6.2, -3.8], [6.3, -4.8], [6.0, -5.3], [6.1, -5.8], [5.7, -6.5], [5.8, -7.4], [5.2, -8.3], [4.0, -8.4], [3.3, -5]];
+    ? [[4.2, 1.6], [6.2, 1.0], [6.4, 0], [6.1, -0.9], [6.4, -2.0], [6.7, -2.9], [6.3, -3.3], [6.0, -3.6], [6.0, -4.5], [5.7, -5.1], [5.6, -5.6], [5.1, -6.2], [4.8, -6.8], [4.0, -7.3], [2.8, -7.35], [2.6, -5]]
+    : [[4.2, 1.6], [6.5, 1.2], [6.7, 0], [6.4, -0.9], [6.7, -2.0], [7.1, -3.0], [6.6, -3.5], [6.2, -3.8], [6.2, -4.8], [5.9, -5.3], [5.8, -5.8], [5.3, -6.5], [5.0, -7.1], [4.2, -7.7], [3.0, -7.75], [2.8, -5]];
   const at = ([b, h]) => [V.x(0, b), V.y(HEAD + h)];
   P.p(pts.map(at));
   // the jawline: from the point of the chin it runs back and up to the angle of the jaw below the ear.

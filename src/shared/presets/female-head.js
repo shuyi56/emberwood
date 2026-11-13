@@ -334,7 +334,7 @@ function braid(add, P, A, HAIR) {
   const V = A.V, sway = A.walking ? -Math.sin(A.ph) * 0.5 : 0, N = 7, dim = V.fz > 0.2;
   // the plait lies on her back from the nape down, a little fuller at the top
   const pts = [];
-  for (let i = 0; i <= N; i++) { const t = i / N; pts.push([sway * t, -5 - 1.4 * Math.min(1, t * 3) - Math.sin(t * Math.PI) * 0.4, HEAD - 5.4 - t * 13]); }
+  for (let i = 0; i <= N; i++) { const t = i / N; pts.push([sway * t, -4.9 - 0.6 * Math.min(1, t * 3) - Math.sin(t * Math.PI) * 0.25, HEAD - 5.4 - t * 13]); }
   // (it starts tucked in against the nape, inside the hair's outline, and comes away from the neck as it falls)
   // (seen from the side it is a little narrower, as a plait is flatter than it is wide)
   const widths = pts.map((_, i) => lerp(3.6, 2.3, i / N) * (1 - 0.14 * V.fx * V.fx));
