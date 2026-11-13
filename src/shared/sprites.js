@@ -199,18 +199,6 @@ function View(theta, bob, sway) {
 // coordinates, so they turn with it and foreshorten in the three-quarter views.
 // the jaw in profile: [forward offset, half-width] for him and for her (height and depth as from the front)
 const JAW_PROFILE = { male: [0.9, 4.4], fem: [0.8, 4.1] };
-// the far cheek's outline in three-quarter view, the same way but on the side the head turns toward:
-// from beside the eye down past the corner of the mouth to the chin
-const FAR_CHEEK = {
-  male: [[6.0, 0.2], [5.6, -1.4], [5.4, -2.8], [5.3, -4.0], [5.3, -5.6], [4.7, -6.8], [3.8, -8.0], [2.8, -8.8]],
-  fem: [[5.6, 0.2], [5.2, -1.4], [5.0, -2.8], [4.9, -4.0], [4.9, -5.6], [4.3, -6.6], [3.5, -7.6], [2.5, -8.4]]
-};
-// the near jawline in three-quarter view: (distance out from the centre line, on the side away from the
-// way the head turns, and height), from the angle of the jaw below the ear to under the chin
-const NEAR_JAW = {
-  male: [[4.6, -2.8], [3.8, -4.2], [3.0, -5.4], [2.1, -6.5], [0.9, -7.5], [-0.6, -8.3]],
-  fem: [[3.8, -2.4], [3.0, -4.0], [2.3, -5.2], [1.4, -6.4], [0.3, -7.4], [-1.0, -8.0]]
-};
 // the jawline in profile: the angle of the jaw below the ear and the point of the chin (forward offset, height)
 const JAWLINE = { male: [[-0.8, -4.9], [3.0, -7.7]], fem: [[-0.6, -4.6], [2.8, -7.3]] };
 // the front edge of the face in profile, in head space (forward offset, height from the head's centre):
@@ -626,16 +614,6 @@ function drawFigure(P, S, theta, f) {
     [SKULL, JAW].forEach(([cb, ch, w, hh]) => P.e(V.x(0, cb), V.y(HEAD + ch), w, hh));
     // in profile the nose, the lips and the chin carry the face's front edge
     if (pf > 0.9) PROFILE_FRONT(P, V, fem);
-    // In three-quarter view both sides of the lower face kept the front view's full round curve, which reads
-    // as puffed cheeks. The far cheek is cut back to run close past the corner of the mouth, and on the near
-    // side the jaw runs from below the cheekbone down to the chin in a firmer line.
-    else if (pf > 0.3) {
-      const sg = Math.sign(V.fx), x0 = V.x(0, 0), at = ([o, h]) => [x0 + sg * o, V.y(HEAD + h)];
-      const far = (fem ? FAR_CHEEK.fem : FAR_CHEEK.male).map(at), fl = far[far.length - 1];
-      P.cut(far.concat([[fl[0] + sg * 8, fl[1]], [fl[0] + sg * 8, far[0][1]]]));
-      const jaw = (fem ? NEAR_JAW.fem : NEAR_JAW.male).map(([o, h]) => at([-o, h]));
-      P.cut(jaw.concat([[jaw[jaw.length - 1][0], V.y(HEAD - 14)], [jaw[0][0] - sg * 8, V.y(HEAD - 14)], [jaw[0][0] - sg * 8, jaw[0][1]]]));
-    }
     const shade = faceShade(V, fem, SKULL, JAW);
     P.fill(SKIN, { shade: (X, Y) => { face.push(Y * PW + X); return shade(X, Y); }, dither: 0.35 });
     // the flush: pixels of the cheeks swap to the same tone of the rosier ramp, dithered at its edge
@@ -705,10 +683,11 @@ function drawFigure(P, S, theta, f) {
       D(nx - 0.5, ny + 2, mix(lid, 0.5)); D(nx + 1, ny + 2, mix(lid, 0.65)); D(nx, ny + 2.5, SKIN[1]); D(nx + 0.5, ny + 2.5, SKIN[1]);
       }
     }
-    // mouth: a short upper lip line with soft corners, a lit lower lip and a shadow under it
+    // mouth: a short upper lip line with soft corners, a lit lower lip and a shadow under it. In three-quarter
+    // view it sits a little in from the face's edge, so the lips do not stand out on the outline as a pout
     if (V.fz > 0.3) {
       const front = V.fz > 0.9;
-      const mx = Math.round(V.x(0, front ? 7.4 : fem ? 5.5 : 5.8) * 2) / 2, my = Math.round(V.y(HEAD - 5.2) * 2) / 2, half = front ? 1 : 0.5;
+      const mx = Math.round(V.x(0, front ? 7.4 : fem ? 4.6 : 5.0) * 2) / 2, my = Math.round(V.y(HEAD - 5.2) * 2) / 2, half = front ? 1 : 0.5;
       const lipLine = fem ? [150, 76, 74] : [128, 80, 70], lipLo = fem ? [206, 124, 116] : [196, 132, 116];
       if (fem) {
         const up = [184, 104, 98];
