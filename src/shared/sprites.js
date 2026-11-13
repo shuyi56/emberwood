@@ -1,43 +1,17 @@
 // Procedural pixel-art sprites for the Emberwood party, shared by the game and the sprite bench.
-const lerp = (a, b, t) => a + (b - a) * t;
+import { lerp, FW, FH, COLS, ROWS, WALK, ramp, RES, PW, PH, SKIN, CX, GY, HEAD, grain } from './core.js';
+import { FEMALE_BODY } from './presets/female-body.js';
+import { FEMALE_HEAD, drawFemaleHead } from './presets/female-head.js';
 // ---------- Sprites ----------
 // The party are pixel-art sprites painted in code. Each figure is posed in 3D (hips, knees, shoulders,
 // hands, gear) and projected for eight facings, so every view is consistent and gear stays in the right
 // hand from every side. Columns: two idle (breathing) frames, then an eight-step walk. 64x80 pixels a frame.
-const FW = 64, FH = 80, COLS = 10, ROWS = 8, WALK = 8;
 
-// Palettes: five tones per material. Shadows drift toward cool violet, lights toward warm straw,
-// and both lose saturation, so each ramp covers a range of hues instead of one colour scaled.
-function rgb2hsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
-  if (mx === mn) return [0, 0, l];
-  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
-  let h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
-  return [h / 6, s, l];
-}
-function hsl2rgb(h, s, l) {
-  const f = (n) => { const k = (n + h * 12) % 12, a = s * Math.min(l, 1 - l); return 255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))); };
-  return [f(0), f(8), f(4)];
-}
-function hueToward(h, target, t) { let d = target - h; d -= Math.round(d); return (h + d * t + 1) % 1; }
-function ramp(hex, spread) {
-  const [h, s0, l] = rgb2hsl((hex >> 16) & 255, (hex >> 8) & 255, hex & 255);
-  const s = Math.min(s0, 0.46);
-  spread = (spread || 0.1) * 0.86;
-  return [-2, -1, 0, 1, 2].map((t) => {
-    const hh = t < 0 ? hueToward(h, 0.62, -t * 0.05) : hueToward(h, 0.13, t * 0.045);
-    const ss = Math.max(0, Math.min(1, s * (1 - Math.abs(t) * 0.08)));
-    const ll = Math.max(0.06, Math.min(0.9, l + t * spread * (t < 0 ? 1.0 : 0.8)));
-    return hsl2rgb(hh, ss, ll);
-  });
-}
 const BAYER = [[0, 0.5], [0.75, 0.25]];
 
 // The painter works at RES times the design grid: shapes are still described in 64x80 design units,
 // but they are rasterised, shaded, dithered and outlined on the finer grid, and dot() can place
 // single fine pixels for small details.
-const RES = 2, PW = FW * RES, PH = FH * RES;
 function Painter() {
   const buf = new Uint8Array(PW * PH * 4), mask = new Uint8Array(PW * PH);
   const runTop = new Int16Array(PW * PH), runBot = new Int16Array(PW * PH);
@@ -121,6 +95,10 @@ function Painter() {
       o = o || {};
       if (bx1 < bx0) return P;
       const round = o.round == null ? 1 : o.round;
+      // dither: how strongly neighbouring tones are mixed in a 2x2 pattern where they meet (1 = full)
+      const dith = o.dither == null ? 1 : o.dither;
+      // on: only repaint pixels that are already painted, so details cannot spill past a shape's edge
+      // (or a test of the pixel index k, to repaint only pixels of a chosen colour)
       // vertical extent of the shape through every pixel, found in two sweeps per column
       for (let X = bx0; X <= bx1; X++) {
         let start = -1;
@@ -139,15 +117,16 @@ function Painter() {
           for (let i = X; i <= X1; i++) {
             const k = Y * PW + i, top = runTop[k], bot = runBot[k];
             const u = (i - X + 0.5) / (X1 - X + 1), v = (Y - top + 0.5) / (bot - top + 1);
-            let b = 0.6 - (u - 0.35) * 0.56 * round - (v - 0.45) * 0.28 * round + (o.lift || 0);
+            // shade: a function of the fine pixel giving its own brightness (the face's modelled form)
+            let b = o.shade ? o.shade(i, Y) : 0.6 - (u - 0.35) * 0.56 * round - (v - 0.45) * 0.28 * round + (o.lift || 0);
             const edge = i === X || i === X1 || Y === top || Y === bot;
             if (o.contour && edge) b -= 0.38;
-            else if (!o.flat && (i === X1 || Y === bot)) b -= 0.17;
+            else if (!o.flat && !o.shade && (i === X1 || Y === bot)) b -= 0.17;
             if (o.dim) b -= 0.16;
             if (o.pattern) b += o.pattern(i, Y);
-            let idx = o.tone != null ? o.tone : Math.round(b * 4 + BAYER[Y & 1][i & 1] * 0.45 - 0.22);
+            let idx = o.tone != null ? o.tone : Math.round(b * 4 + (BAYER[Y & 1][i & 1] - 0.375) * 0.45 * dith + 0.16875 - 0.22);
             if (o.tone != null && !o.flat && (i === X1 || Y === bot)) idx--;
-            set(k, rmp[Math.max(0, Math.min(4, idx))]);
+            if (!o.on || (typeof o.on === 'function' ? o.on(k) : buf[k * 4 + 3])) set(k, rmp[Math.max(0, Math.min(4, idx))]);
           }
           X = X1 + 1;
         }
@@ -195,8 +174,7 @@ function Painter() {
   return P;
 }
 
-const SKIN = ramp(0xcf9f84, 0.1), EYE = [46, 40, 38], WHITE = [226, 222, 210];
-const CX = 32, GY = 77, HEAD = 52;
+const EYE = [46, 40, 38], WHITE = [226, 222, 210];
 // Local figure space: a = toward the figure's right, b = forward, h = up from the ground (sprite pixels).
 // theta 0 faces the viewer, PI/2 faces screen right, PI faces away.
 function View(theta, bob, sway) {
@@ -213,12 +191,80 @@ function View(theta, bob, sway) {
   };
   return V;
 }
+// The face's form, as a brightness for each fine pixel (for P.fill's shade). The head is the union of two
+// ellipsoids, the skull and the jaw ([forward offset, height, half-width, half-height, depth radius]),
+// lit from the upper left and in front. On top of that light sit the planes of the face: eye sockets under
+// the brow ridge, a lit cheekbone with a hollow under it, the nose (a lit ridge, a shadow side and the
+// shadow it casts on the lip), the lips and the ball of the chin. All are placed in the head's own
+// coordinates, so they turn with it and foreshorten in the three-quarter views.
+const FACE_LIGHT = (() => { const l = [-0.5, 0.55, 0.67], n = Math.hypot(...l); return l.map((c) => c / n); })();
+function faceShade(V, fem, SKULL, JAW) {
+  const g = (x, y, sx, sy) => Math.exp(-(x * x) / (sx * sx) - (y * y) / (sy * sy));
+  const [Lx, Ly, Lz] = FACE_LIGHT;
+  // the light's direction across the head (toward its right, a), so the nose's sides can face it or not
+  const La = V.rx * Lx + V.rz * Lz;
+  const shade = (X, Y) => {
+    const sx = (X + 0.5) / RES, sy = (Y + 0.5) / RES;
+    // the two surfaces under this pixel, blended smoothly toward the frontmost (a soft union, so there is
+    // no crease where the jaw meets the skull): the view normal and the point in head space
+    let wt = 0, nx = 0, ny = 0, nz = 0, xv = 0, zv = 0, cbs = 0;
+    [SKULL, JAW].forEach(([cb, ch, w, hh, rd]) => {
+      const dx = (sx - V.x(0, cb)) / w, dy = (V.y(HEAD + ch) - sy) / hh, q = 1 - dx * dx - dy * dy;
+      if (q < -0.05) return;
+      const n = Math.sqrt(Math.max(0, q)), z = cb * V.fz + rd * n, e = Math.exp(z / 0.9) * Math.min(1, (q + 0.05) * 8);
+      wt += e; nx += dx / w * 6 * e; ny += dy / hh * 6 * e; nz += n / rd * 6 * e; xv += dx * w * e; zv += rd * n * e; cbs += cb * e;
+    });
+    if (!wt) return 0.4;
+    nx /= wt; ny /= wt; nz /= wt; xv /= wt; zv /= wt;
+    const best = { xv, zv, cb: cbs / wt }, nl = Math.hypot(nx, ny, nz) || 1;
+    // light with a firm turn into shadow: the core shadow is darkest just past the turn, and the far rim
+    // picks up a little light reflected back from the shoulders
+    const l = (nx * Lx + ny * Ly + nz * Lz) / nl;
+    let b = 0.1 + 0.66 * Math.max(0, Math.min(1, (l + 0.08) / 1.0));
+    if (l < -0.08) b += 0.09 * Math.min(1, Math.max(0, (-0.3 - l) * 2.5)) - 0.04 * Math.min(1, (-0.08 - l) * 5);
+    // the underside of the jaw turns away from the light into the shadow over the neck
+    if (ny / nl < -0.5) b -= (-0.5 - ny / nl) * 0.4;
+    // head space: a across (toward the head's right), f forward, h height relative to the head's centre
+    const a = V.rx * best.xv + V.rz * best.zv, f = best.cb + V.fx * best.xv + V.fz * best.zv, h = GY + V.bob - sy - HEAD;
+    // only the front of the head carries the face
+    const front = Math.max(0, Math.min(1, (f - 1.5) / 3));
+    if (front <= 0) return b;
+    let k = 0;
+    const aa = Math.abs(a);
+    // eye sockets: shadow under the brow ridge, deepest at the inner corner beside the bridge of the nose
+    k -= 0.18 * g(aa - 2.3, h + 0.5, 1.35, 1.05) + 0.1 * g(aa - 1.2, h + 0.2, 0.6, 0.9);
+    // the brow ridge and the forehead above it catch the light
+    k += 0.09 * g(aa - 2.3, h - 1.8, 2, 0.6) + 0.07 * g(a + 0.6, h - 4.2, 3, 1.6);
+    // the cheekbone, lit, and (on him) the hollow of the cheek under it
+    k += (fem ? 0.1 : 0.12) * g(aa - 3.4, h + 2.6, 1.3, 0.9);
+    if (!fem) k -= 0.08 * g(aa - 4, h + 5, 1.2, 1.3);
+    else k += 0.05 * g(aa - 2.8, h + 3.6, 1.6, 1.1);
+    // the nose: a lit ridge down the middle, its sides turned toward or away from the light, a lit tip and
+    // the shadow it casts down onto the upper lip
+    const nose = g(0, (h + 2.2) / 2.1, 1, 1) * g(a, 0, fem ? 0.75 : 0.9, 1);
+    k += nose * (0.07 + 0.28 * Math.max(-1, Math.min(1, a / 0.7)) * La);
+    k += 0.08 * g(a, h + (fem ? 3.1 : 3.4), 0.5, 0.45);
+    k -= 0.17 * g(a - La * 0.5, h + (fem ? 3.95 : 4.25), 1.2, 0.4);
+    // the upper lip turns down out of the light, the lower lip and chin turn up into it, with a shadow between
+    k -= 0.05 * g(a, h + 4.8, 1.8, 0.5);
+    k -= 0.1 * g(a, h + (fem ? 6.3 : 6.4), 1.3, 0.35);
+    k += 0.08 * g(a, h + (fem ? 7.1 : 7.6), 1.8, 0.7);
+    // the corner where the front of the face turns into its side: a soft step, so the face reads as planes
+    k -= 0.08 * Math.max(0, Math.min(1, (aa - 4.4) / 1.2));
+    // how much of a flush this pixel carries: a soft patch on the apple of each cheek, below the cheekbone
+    const flush = front * g(aa - 3.2, h + 3.5, 1.5, 1.05);
+    if (flush > 0.02) shade.flush.set(Y * PW + X, flush);
+    return b + k * front;
+  };
+  shade.flush = new Map();
+  return shade;
+}
+// the flushed skin of the cheeks: the skin ramp nudged a little toward rose
+const FLUSH = SKIN.map((c) => c.map((v, i) => Math.round(v + ([214, 104, 96][i] - v) * 0.28)));
 // mail: rows of interlocking rings, each with a dark centre and a lit upper edge
 const mail = (x, y) => { const r = y % 3, sx = (x + (Math.floor(y / 3) % 2) * 2) % 4; return r === 1 && sx === 1 ? -0.34 : r === 0 && (sx === 1 || sx === 2) ? 0.16 : r === 2 && sx === 0 ? -0.1 : 0; };
-const grain = (x, y) => { const h = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453; return ((h - Math.floor(h)) - 0.5) * 0.14; };
 // hair: strands running down, with a few lighter ones catching the light
 // softer strands for long hair: gentle streaks, no bright glints
-const softStrands = (x, y) => { const k = (x * 5 + Math.floor(y / 4) * 2) % 11; return k === 0 ? -0.13 : k === 6 ? 0.06 : grain(x, y) * 0.4; };
 const strands = (x, y) => { const k = (x * 7 + Math.floor(y / 3) * 3) % 9; return k === 0 ? -0.24 : k === 4 ? 0.16 : 0; };
 const weave = (x, y) => ((x + y) % 4 === 0 ? -0.09 : (x - y) % 6 === 0 ? 0.05 : 0);
 
@@ -233,7 +279,7 @@ function drawFigure(P, S, theta, f) {
   const add = (depth, draw) => parts.push({ depth, draw });
   // body proportions: shoulder, chest, waist and hip half-widths, depth, limb widths, leg spacing
   const B = Object.assign({ sh: 9, chest: 8.6, waist: 7.2, hip: 7.8, depth: 5.4, arm: 4.8, fore: 4, leg: 6.2, shin: 4.8, gap: 3.8, slope: 3 }, S.body);
-  const A = { V, swing, f, walking, B };
+  const A = { V, swing, ph, f, walking, B, S };
   // Half-width of the body at height h, eased smoothly between control heights (hip, waist, chest,
   // bust, shoulder), so the silhouette curves instead of joining straight segments.
   const shH = 41.5 - B.slope;
@@ -295,11 +341,72 @@ function drawFigure(P, S, theta, f) {
         if (S.knee && V.d(hipA, fb + 3) > 0) P.e(knee[0] + V.fx, knee[1], 2.4, 2.2).fill(S.knee, { dim });
         if (S.legArmor) S.legArmor(P, { hip, knee, ankle }, dim, A);
       }
-      const heel = V.pt(hipA * 1.08, fb - 1.6, 2 + lift - Math.min(0, toeUp) * 1.5), toe = V.pt(hipA * 1.08, fb + 3.6, 1.8 + lift + Math.max(0, toeUp) * 1.4);
+      // Shoe: built from slices across the foot, heel to toe, each a section with a flat underside and a
+      // rounded top. It is cut roomier than the foot inside it: a full heel, a high instep running straight
+      // down from the shaft, and a broad, boxy toe. The foot pitches with the stride: toe up as the heel strikes,
+      // heel up as it pushes off. The near end of the foot sits a little lower, as if seen from slightly above.
+      const SH = Object.assign({ len: 7.6, back: 2.3, wide: 3.1, heelW: 0.92, toeH: 3, heelH: 4.2, instep: 5.4, sole: 0.9, heelBlock: 0.6, arch: 0.35, point: 0 }, S.shoe);
+      const fa = hipA * 1.08, TILT = 0.2, ua = SH.back / SH.len, BALL = 0.7, HEEL = ua * 0.85;
+      const pitch = (b) => (toeUp > 0 ? toeUp * 1.6 * (b + SH.back) / SH.len : -toeUp * 1.8 * (SH.len - SH.back - b) / SH.len);
+      const footW = (u) => {
+        if (u > BALL) { const t = (u - BALL) / (1 - BALL); return SH.wide * Math.max(0.3, Math.sqrt(1 - Math.pow(t, 2 + SH.point * 2))); }
+        return SH.wide * lerp(SH.heelW, 1, u / BALL) * Math.sqrt(Math.min(1, 0.6 + u / 0.06 * 0.4));
+      };
+      const footH = (u) => {
+        if (u < ua) return lerp(SH.heelH, SH.instep, u / ua);
+        // the instep falls in a nearly straight line to the toe box, not following the curve of the foot
+        if (u < 0.7) return lerp(SH.instep, SH.toeH, Math.pow((u - ua) / (0.7 - ua), 0.85));
+        // a blunt toe box: full height until near the tip, then turning down square to the sole
+        return SH.toeH * Math.sqrt(Math.max(0.2, 1 - Math.pow((u - 0.7) / 0.3, 6)));
+      };
+      // the arch: the sole lifts off the ground between the heel and the ball of the foot
+      const archAt = (u) => (u > HEEL && u < BALL - 0.08 ? Math.sin(Math.PI * (u - HEEL) / (BALL - 0.08 - HEEL)) * SH.arch : 0);
+      const slices = [];
+      for (let k = 0; k <= 20; k++) {
+        const u = k / 20, b = -SH.back + u * SH.len, base = lift + pitch(b), d = V.d(fa, fb + b), arch = archAt(u);
+        slices.push({ u, x: V.x(fa, fb + b), sw: Math.max(0.55, footW(u) * Math.abs(V.rx)), g: V.y(base) + d * TILT, y0: V.y(base + arch) + d * TILT, y1: V.y(base + footH(u)) + d * TILT, d });
+      }
+      // each slice is a flat-bottomed section with a rounded top; neighbouring slices are joined by their
+      // convex hull so the profile runs smoothly from heel to toe
+      const hull = (pts) => {
+        pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+        const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], hi = [];
+        pts.forEach((p) => { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); });
+        pts.slice().reverse().forEach((p) => { while (hi.length > 1 && cr(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); });
+        return lo.slice(0, -1).concat(hi.slice(0, -1));
+      };
+      const capR = (y0, y1, sw) => Math.min((y0 - y1) * 0.5, sw * 0.4);
+      const section = (q, y0, y1, sw) => { const r = capR(y0, y1, sw), pts = [[q - sw, y0], [q + sw, y0], [q + sw, y1 + r], [q - sw, y1 + r]]; for (let k = 1; k < 6; k++) { const a = Math.PI * k / 6; pts.push([q - Math.cos(a) * sw, y1 + r - Math.sin(a) * r]); } return pts; };
+      const sweep = (y0f, y1f, swf) => { for (let k = 0; k < slices.length - 1; k++) { const a = slices[k], b = slices[k + 1]; P.p(hull(section(a.x, y0f(a), y1f(a), swf(a)).concat(section(b.x, y0f(b), y1f(b), swf(b))))); } };
       const top = V.pt(hipA * 1.06, fb * 0.75, (S.robe ? 5 : 9.5) + lift);
-      P.t(top[0], top[1], ankle[0], ankle[1] + 1, 5.4, 5).t(heel[0], heel[1], toe[0], toe[1], 4.6, 3.6).fill(S.boots, { dim });
+      // sole first: a welt standing a little proud of the upper, thicker under the heel, lifting at the
+      // arch. The upper then sits on it, so from the front the near toe covers the sole of the far heel.
+      const SOLE = S.sole || S.boots;
+      const soleH = (q) => SH.sole + (q.u < HEEL ? SH.heelBlock : 0);
+      sweep((q) => q.y0, (q) => q.y0 - soleH(q) - 0.4, (q) => q.sw + 0.3);
+      P.fill(SOLE, { dim, tone: S.sole ? 2 : 1, flat: false });
+      // the shaft drops straight to the foot, standing off the ankle rather than hugging it
+      P.t(top[0], top[1], ankle[0], ankle[1] + 0.4, 5.4, 5.2);
+      sweep((q) => q.y0 - soleH(q), (q) => q.y1, (q) => q.sw);
+      P.fill(S.boots, { dim, round: S.bootRound || 1.1, pattern: S.bootPattern });
+      // the welt's top edge catches the light where it stands out from under the upper
+      slices.forEach((q) => { for (let t = -q.sw - 0.3; t <= q.sw + 0.3; t += 0.5) if (Math.abs(t) > q.sw - 0.2 || q.u > 0.92) P.dotOn(q.x + t, q.y0 - soleH(q) + 0.25, SOLE[dim ? 1 : S.sole ? 3 : 2]); });
+      // the toe box: seen from the front, a crease where it meets the instep with light along its rounded
+      // top (from the side, the fill's own shading models it)
+      const T = (i) => S.boots[Math.max(0, i - (dim ? 1 : 0))];
+      if (V.d(0, 1) > 0.3) {
+        const q = slices[16], r = capR(q.y0, q.y1, q.sw);
+        for (let t = -0.92; t <= 0.92; t += 0.08) { const x = q.x + t * q.sw, y = q.y1 + r - Math.sqrt(1 - t * t) * r; P.dotOn(x, y, T(1)); if (t < 0.4) P.dotOn(x, y + 0.5, T(S.bootRound ? 2 : 3)); }
+      }
+      const heel = [slices[0].x, slices[0].g], toe = [slices[20].x, slices[20].g];
+      if (S.bootDetail) S.bootDetail(P, { top, ankle, slices, heel, toe }, dim, A);
       if (S.footArmor) S.footArmor(P, { heel, toe }, dim, A);
-      if (S.cuff && !S.robe) P.t(top[0], top[1] + 0.5, top[0], top[1] + 1.5, 6.2, 6.2).fill(S.cuff, { dim, round: 0.5 });
+      if (S.cuff && !S.robe) {
+        // a folded band (cuffBand: [width, height]) or the default rolled cuff
+        if (S.cuffBand) P.e(top[0], top[1] - 1.5, S.cuffBand[0] / 2, S.cuffBand[1] / 2).fill(S.cuff, { dim, round: 0.7 });
+        else P.t(top[0], top[1] + 0.5, top[0], top[1] + 1.5, 6.2, 6.2).fill(S.cuff, { dim, round: 0.5 });
+        if (S.cuffDetail) S.cuffDetail(P, top, dim, A);
+      }
     });
   });
 
@@ -421,7 +528,26 @@ function drawFigure(P, S, theta, f) {
       if (S.bracer && s < 0) { const pa = V.pt(hand[0], hand[1], hand[2] + 5.5); P.t(pa[0], pa[1] - 1.8, pa[0], pa[1] + 1.8, 4.6, 4.6).fill(S.bracer, { dim }); }
       if (S.shoulder) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
       if (S.armArmor) S.armArmor(P, { pS, pE, pH }, dim, s, A);
-      P.e(pH[0], V.y(hand[2]), 2.3, 2.4).fill(S.hands || SKIN, { dim });
+      const HS = S.hands || SKIN, T = (i) => HS[Math.max(0, i - (dim ? 1 : 0))], hx = pH[0], hy = V.y(hand[2]);
+      P.e(hx, hy, 2.3, 2.4).fill(HS, { dim, round: 1.25 });
+      // front view: the cuff casts a soft shadow across the top of the hand, the side against the body
+      // falls into shadow, the fingers curl under into a darker underside, and the outer knuckle catches the light
+      if (V.fz > 0.3) {
+        const inward = -outward, rx = 2.3, ry = 2.4, half = (dy) => rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / (ry * ry)));
+        for (let dy = -ry + 0.25; dy <= ry - 0.25; dy += 0.5) {
+          const w = half(dy), y = hy + dy;
+          if (w < 0.6) continue;
+          P.dotOn(hx + inward * (w - 0.25), y, T(dy > 1 ? 0 : 1));
+          if (dy > -1 && dy < 1.5) P.dotOn(hx + inward * (w - 0.75), y, T(2));
+        }
+        for (let dx = -1.75; dx <= 1.75; dx += 0.5) { P.dotOn(hx + dx, hy - ry + 0.75, T(dx * inward > 0 ? 1 : 2)); P.dotOn(hx + dx, hy + half(dx) * 0 + ry * Math.sqrt(Math.max(0, 1 - (dx * dx) / (rx * rx))) - 0.25, T(1)); }
+        P.dotOn(hx + outward * 1.25, hy - 0.75, T(4)).dotOn(hx + outward * 0.75, hy - 1.25, T(3));
+      }
+      // finger lines: short creases across the lower half of the hand, and the crease of the thumb,
+      // snapped to the fine grid so each is one clean pixel wide
+      const fp = (v) => (Math.floor(v * RES) + 0.5) / RES, gx = fp(hx), gy = fp(hy);
+      [-1, 0, 1].forEach((o) => P.dotOn(gx + o, gy + 0.5, T(1)).dotOn(gx + o, gy + 1, T(0)).dotOn(gx + o, gy + 1.5, T(0)));
+      if (Math.abs(V.fx) < 0.8) P.dotOn(gx - outward * 1.5, gy - 0.5, T(1)).dotOn(gx - outward * 1, gy, T(0));
     });
   });
 
@@ -447,15 +573,29 @@ function drawFigure(P, S, theta, f) {
       P.dot(ex, ey - 1, SKIN[0]).dot(ex, ey - 0.5, SKIN[0]).dot(ex + 0.5 * s * V.rx, ey, SKIN[0]).dot(ex, ey + 0.5, SKIN[1]).dot(ex - 0.5, ey + 1.5, SKIN[3]);
     });
     const fem = !!S.female;
-    if (fem) P.e(V.x(0, 0.3), V.y(HEAD + 0.9), 6.2, 7.2).e(V.x(0, 1.1), V.y(HEAD - 3.1), 4.9, 5.2).fill(SKIN);
-    else P.e(V.x(0, 0.3), V.y(HEAD + 0.6), 6.6, 7.6).e(V.x(0, 1.4), V.y(HEAD - 3.3), 5.3, 5.1).fill(SKIN);
+    // her lower face is rounder: a broader, shorter jaw curve gives a round chin rather than a point
+    // the skull and the jaw: [forward offset, height, half-width, half-height, depth radius]
+    const SKULL = fem ? [0.3, 0.9, 6.2, 7.2, 6.6] : [0.3, 0.6, 6.6, 7.6, 7];
+    const JAW = fem ? [1.15, -4.2, 4.85, 4.1, 5.1] : [1.4, -3.3, 5.3, 5.1, 5.6];
+    [SKULL, JAW].forEach(([cb, ch, w, hh]) => P.e(V.x(0, cb), V.y(HEAD + ch), w, hh));
+    const shade = faceShade(V, fem, SKULL, JAW);
+    P.fill(SKIN, { shade: (X, Y) => { face.push(Y * PW + X); return shade(X, Y); }, dither: 0.35 });
+    // the flush: pixels of the cheeks swap to the same tone of the rosier ramp, dithered at its edge
+    shade.flush.forEach((w, k) => {
+      const X = k % PW, Y = (k - X) / PW;
+      if (w * 1.6 <= BAYER[Y & 1][X & 1] + 0.15) return;
+      const i = SKIN.findIndex((c) => Math.floor(c[0]) === P.buf[k * 4] && Math.floor(c[1]) === P.buf[k * 4 + 1] && Math.floor(c[2]) === P.buf[k * 4 + 2]);
+      if (i >= 0) P.dot((X + 0.5) / RES, (Y + 0.5) / RES, FLUSH[i]);
+    });
     const brow = S.brow || [86, 68, 56], iris = S.iris || [86, 72, 60];
     const irisDk = iris.map((c) => c * 0.62), irisLt = iris.map((c) => Math.min(255, c * 1.3 + 14));
     const lid = [86, 58, 50], lash = [52, 38, 34], white = [228, 222, 208], blush = [196, 128, 110];
     const mix = (c, k) => SKIN[2].map((v, i) => v + (c[i] - v) * k);
     const D = (x, y, c) => P.dotOn(x, y, c);
     [1, -1].forEach((s) => {
-      const a = s * 2.7, b = 6.4, d = V.d(a, b);
+      // the eyes sit on the curve of the face (b inside its radius), so in three-quarter view the far eye
+      // turns in from the silhouette and foreshortens instead of sitting on the edge of the face
+      const a = s * 2.7, b = 5.4, d = V.d(a, b);
       if (d < 1) return;
       // o points from the eye toward the outer corner on screen
       const o = Math.sign(V.x(s * 6, 6) - V.x(a, b)) || -s;
@@ -484,10 +624,11 @@ function drawFigure(P, S, theta, f) {
         D(cx + o * (i * 0.5 - 0.5), y, fem ? mix(brow, 0.85) : brow);
         if (i < 2 && !fem) D(cx + o * (i * 0.5 - 0.5), y + 0.5, mix(brow, 0.7));
       }
-      // lit cheekbone and a soft flush
+      // lit cheekbone
       if (!narrow) {
-        D(cx + o * 1, cy + 2, SKIN[3]); D(cx + o * 0.5, cy + 2, SKIN[3]);
-        D(cx + o * 1, cy + 3, mix(blush, 0.45)); D(cx + o * 0.5, cy + 3, mix(blush, 0.35)); D(cx + o * 1.5, cy + 3, mix(blush, 0.3)); D(cx + o * 1, cy + 3.5, mix(blush, 0.25));
+        if (!fem) { D(cx + o * 1, cy + 2, SKIN[3]); D(cx + o * 0.5, cy + 2, SKIN[3]); }
+        // a soft flush on the cheek (not on her)
+        if (!fem) { D(cx + o * 1, cy + 3, mix(blush, 0.45)); D(cx + o * 0.5, cy + 3, mix(blush, 0.35)); D(cx + o * 1.5, cy + 3, mix(blush, 0.3)); D(cx + o * 1, cy + 3.5, mix(blush, 0.25)); }
       }
     });
     // nose: shown from the front and three-quarter views; in profile it is left to the silhouette
@@ -509,7 +650,7 @@ function drawFigure(P, S, theta, f) {
     // mouth: a short upper lip line with soft corners, a lit lower lip and a shadow under it
     if (V.fz > 0.3) {
       const front = V.fz > 0.9;
-      const mx = Math.round(V.x(0, front ? 7.4 : 5.8) * 2) / 2, my = Math.round(V.y(HEAD - 5.2) * 2) / 2, half = front ? 1 : 0.5;
+      const mx = Math.round(V.x(0, front ? 7.4 : fem ? 5.5 : 5.8) * 2) / 2, my = Math.round(V.y(HEAD - 5.2) * 2) / 2, half = front ? 1 : 0.5;
       const lipLine = fem ? [150, 76, 74] : [128, 80, 70], lipLo = fem ? [206, 124, 116] : [196, 132, 116];
       if (fem) {
         const up = [184, 104, 98];
@@ -522,6 +663,31 @@ function drawFigure(P, S, theta, f) {
       for (let x = -half + 0.5; x <= half - 0.49 || x === -half + 0.5; x += 0.5) D(mx + x, my + 0.5, mix(lipLo, 0.6));
       D(mx, my + (fem ? 1.5 : 1), SKIN[1]);
     }
+    // remember the finished face, so whatever is later drawn over it can be found
+    faceWas = new Uint32Array(face.map((k) => (P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2]));
+  });
+  // Hair, fringe and hat brims lie on the face, so they cast a shadow onto it: skin just below and to
+  // the right of anything drawn over the face (away from the light) steps down a tone.
+  const face = [];
+  let faceWas = null;
+  add(99, () => {
+    if (!faceWas) return;
+    const rgb = (k) => (P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2];
+    const key = (c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2]);
+    // each skin tone (plain or flushed) and the tone one step darker in the same ramp
+    const tone = new Map(SKIN.map((c, i) => [key(c), SKIN[Math.max(0, i - 1)]]).concat(FLUSH.map((c, i) => [key(c), FLUSH[Math.max(0, i - 1)]])));
+    const was = new Map(face.map((k, i) => [k, faceWas[i]]));
+    const over = (k) => was.has(k) && rgb(k) !== was.get(k);
+    const hits = [];
+    face.forEach((k) => {
+      if (over(k) || !tone.has(rgb(k))) return;
+      // the shadow is two fine pixels deep, with a soft dithered third row
+      const X = k % PW, Y = (k - X) / PW;
+      const near = [[0, -1], [-1, -1], [0, -2], [-1, -2]].some(([dx, dy]) => over((Y + dy) * PW + X + dx));
+      const far = !near && ((X + Y) & 1) === 0 && [[0, -3], [-1, -3]].some(([dx, dy]) => over((Y + dy) * PW + X + dx));
+      if (near || far) hits.push(k);
+    });
+    hits.forEach((k) => { const c = tone.get(rgb(k)); P.buf[k * 4] = c[0]; P.buf[k * 4 + 1] = c[1]; P.buf[k * 4 + 2] = c[2]; });
   });
 
   if (S.gear) S.gear(add, P, A);
@@ -666,21 +832,70 @@ const MAGE = {
 const HAIR = ramp(0x7e4c34, 0.1), MANTLE = ramp(0x56663f, 0.1), JERKIN = ramp(0x765a40, 0.1), SHIRT = ramp(0xaca48d, 0.09),
       BOW = ramp(0x927452, 0.1), QUIVER = ramp(0x63513f, 0.1), STRING = ramp(0xcdc6b2, 0.08);
 const RANGER = {
-  // slender, long-limbed build: narrow waist, slimmer arms and legs, legs set closer
-  body: { curve: [[15, 8], [20.5, 9.1], [27.6, 3.9], [34, 8.4]], belt: 26, neckDrop: 0.8, sh: 7.8, chest: 7.2, bust: 8.6, waist: 4.1, hip: 9.2, depth: 5, arm: 4, fore: 3.4, leg: 5.8, shin: 4.2, gap: 3.6, slope: 3.4, armOut: 0.2 },
-  // cloth wraps wound around the shins, crossing in front
+  // the female figure and head presets: slender build, female face (see presets/)
+  ...FEMALE_BODY,
+  ...FEMALE_HEAD,
+  // trousers: a faint diagonal twill, kept quiet so the folds and shading read
+  legPattern: (x, y) => ((x + y * 2) % 6 === 0 ? -0.04 : 0),
+  // Trouser finish, painted over each leg in the trousers' own tones (no off-ramp darkening, so the
+  // cloth stays clean): shadow where the legs meet, a pressed crease catching the light down the front,
+  // folds bunching above the knee, a stitched side seam and a small patch sewn over the knee.
   legArmor(P, J, dim, A) {
-    for (let k = 0; k < 3; k++) {
-      const t0 = 0.25 + k * 0.22, t1 = t0 + 0.16;
-      const ax = J.knee[0] + (J.ankle[0] - J.knee[0]) * t0, ay = J.knee[1] + (J.ankle[1] - J.knee[1]) * t0;
-      const bx = J.knee[0] + (J.ankle[0] - J.knee[0]) * t1, by = J.knee[1] + (J.ankle[1] - J.knee[1]) * t1;
-      P.l(ax - 2, ay, bx + 2, by, 0.9).l(ax + 2, ay, bx - 2, by, 0.9);
+    const V = A.V, [hx, hy] = J.hip, [kx, ky] = J.knee, T = (i) => RANGER.legs[Math.max(0, i - (dim ? 1 : 0))];
+    const ux = (kx - hx) / (ky - hy || 1), wAt = (y) => lerp(A.B.leg, A.B.shin + 0.4, Math.max(0, Math.min(1, (y - hy) / (ky - hy || 1)))) / 2;
+    const xAt = (y) => hx + (y - hy) * ux, inner = Math.sign(V.x(0, 0) - hx) || 1, front = V.d(0, 1) > 0.15;
+    for (let i = 0, y = V.y(18); y <= ky; i++, y += 0.5) {
+      const x = xAt(y), w = wAt(y);
+      // the inner edge turns away into the shadow between the legs
+      if (Math.abs(V.fx) < 0.5) P.dotOn(x + inner * (w - 0.3), y, T(0)).dotOn(x + inner * (w - 0.8), y, T(1));
+      // front crease: a lit ridge left of centre
+      if (front && y < ky - 3.6) P.dotOn(x - w * 0.3, y, T(3));
+      // stitched side seam on the outer leg, seen most from the side
+      if (Math.abs(V.fx) > 0.35 && i % 3 === 0) P.dotOn(x - inner * w * 0.55 * Math.sign(V.fz || 1) + V.fx * 0.6, y, T(1));
     }
-    P.fill(ramp(0x8c8270, 0.09), { dim, round: 0.4 });
+    // folds bunching above the knee: a dark crease with a lit edge above it
+    [[4.3, 0.75], [5.4, 0.45]].forEach(([up, len]) => {
+      const y = ky - up, x = xAt(y), w = wAt(y);
+      for (let t = -len; t <= len; t += 0.25) { const fx = x + t * w, fy = y - t * 0.7 * inner; P.dotOn(fx, fy - 0.5, T(3)).dotOn(fx, fy, T(1)); }
+    });
+    // a small patch sewn over the knee, with stitches round its edge and a shadow under its lower rim
+    if (V.d(0, 1) > 0.2 && !dim) {
+      const K = RANGER.kneePatch, cx = kx + V.fx * 0.8, cy = ky - 2.2;
+      for (let t = -1.1; t <= 1.1; t += 0.5) P.dotOn(cx + t * 0.9, cy + 1.3, T(1));
+      P.e(cx, cy, 1.4, 1.1).fill(K, { round: 0.8 });
+      for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2; P.dotOn(cx + Math.cos(a) * 1.15, cy + Math.sin(a) * 0.85, k % 2 ? K[1] : K[3]); }
+    }
   },
-  torso: SHIRT, sleeve: ramp(0x63704a, 0.1), legs: ramp(0x5b5547, 0.1), knee: ramp(0x4e493d, 0.09),
-  boots: ramp(0x4a3f34, 0.1), cuff: ramp(0x655546, 0.1), belt: ramp(0x3d342b, 0.09), buckle: ramp(0x9a978f, 0.09), trim: GOLD,
-  female: true, hands: SKIN, brow: [96, 70, 56], iris: [88, 108, 70], softArms: true, sleeveStyle: 'puff', shirtCuff: SHIRT,
+  // folded-over boot tops: a narrow band with a row of stitches, a shadow under the fold and another
+  // cast up onto the trousers
+  cuffBand: [6, 2.2],
+  cuffDetail(P, top, dim) {
+    const [x, y] = top, C = RANGER.cuff, L = RANGER.legs, d = dim ? 1 : 0;
+    for (let t = -2.6; t <= 2.6; t += 0.5) P.dotOn(x + t, y - 3, L[1 - d]).dotOn(x + t, y - 0.3, C[0]).dotOn(x + t, y + 0.3, RANGER.boots[1 - d]);
+    // fine running stitches in a pale thread, not studs
+    for (let t = -2.25; t <= 2.25; t += 0.75) P.dotOn(x + t, y - 1.9, C[3 - d]);
+  },
+  // soft, worn leather boots: matte with a mottled grain, slouching into creases at the ankle,
+  // a seam stitched round where the foot joins the shaft, and the toes scuffed paler
+  bootRound: 0.7,
+  bootPattern: (x, y) => grain(x, y) * 0.8 + (((x * 3 + y * 7) % 13) === 0 ? -0.1 : 0),
+  bootDetail(P, J, dim, A) {
+    const V = A.V, B = RANGER.boots, T = (i) => B[Math.max(0, i - (dim ? 1 : 0))], [ax, ay] = J.ankle, [tx, ty] = J.top;
+    // slouch creases: short curved folds across the shaft, alternating sides, each dark with a lit lip above
+    [[0.45, -0.5, 1.4], [0.75, 0.6, 1.1]].forEach(([t, off, len]) => {
+      const cx = lerp(tx, ax, t) + off, cy = lerp(ty, ay, t) + 0.6;
+      for (let k = -len; k <= len; k += 0.5) { const yy = cy + (k * k) / (len * len) * 0.6; P.dotOn(cx + k, yy, T(Math.abs(k) < len * 0.6 ? 1 : 2)).dotOn(cx + k, yy - 0.5, T(3)); }
+    });
+    // stitched seam where the foot meets the shaft, curving round the instep
+    const s = J.slices, mid = s[8];
+    if (Math.abs(V.fx) > 0.3) for (let k = 3; k <= 11; k++) { const q = s[k]; if (k % 2) P.dotOn(q.x, Math.max(q.y1 + 0.9, mid.y1 + 0.4), T(1)); }
+    else for (let t = -0.8; t <= 0.8; t += 0.4) P.dotOn(mid.x + t * mid.sw, mid.y1 + 0.9 + t * t * 0.5, T(1));
+    // scuffed toes: a few paler flecks where the leather has worn
+    if (V.d(0, 1) > -0.2) [[17, -0.3, 1.1], [18, 0.2, 1.6], [16, 0.5, 1.9]].forEach(([k, o, dy]) => { const q = s[k]; P.dotOn(q.x + o * q.sw, q.y1 + dy, T(3)); });
+  },
+  torso: SHIRT, sleeve: ramp(0x63704a, 0.1), legs: ramp(0x5b5547, 0.1), kneePatch: ramp(0x7a6c52, 0.1),
+  boots: ramp(0x684a32, 0.1), cuff: ramp(0x7a5b40, 0.1), sole: ramp(0x2f2620, 0.08), belt: ramp(0x3d342b, 0.09), buckle: ramp(0x9a978f, 0.09), trim: GOLD,
+  hands: SKIN, sleeveStyle: 'puff', shirtCuff: SHIRT,
   chest(P, A) {
     const V = A.V, cx = V.x(0, 0), wc = V.w(A.B.chest + 0.4, A.B.depth + 0.5), wh = V.w(A.B.waist + 0.5, A.B.depth + 0.2);
     // jerkin over the shirt, open at the collar, laced up the front, falling just past the belt
@@ -737,7 +952,8 @@ const RANGER = {
   },
   waist(P, A) {
     const V = A.V;
-    if (V.d(-7.4, 2.5) > -3) P.e(V.x(-7.5, 2.8), V.y(20.6), 2.4, 2.6).fill(JERKIN, { dim: V.d(-7.4, 2.5) < 0 });
+    // belt pouch on the front of the left hip, drawn only when the front of that hip faces the viewer, never from behind
+    if (V.d(-7.4, 2.5) > 0.5 && V.fz > -0.1) P.e(V.x(-7.5, 2.8), V.y(20.6), 2.4, 2.6).fill(JERKIN);
   },
   gear(add, P, A) {
     const V = A.V, B = A.B;
@@ -786,127 +1002,18 @@ const RANGER = {
         P.dot(cl[0] + 1, cl[1] + 1, MANTLE[3]).dot(cl[0] + 1.5, cl[1] + 1.5, MANTLE[2]);
       }
     });
-    const L = A.handL;
-    // Hair: shoulder-length and loose, with a side-swept fringe and a side parting.
-    // The head is covered by one shell with the face cut out along a hairline that turns with the head
-    // (each half of the face cut separately, so it holds together in profile); the length falls as a
-    // curtain around the back of the head and over the shoulders.
-    // the face opening is narrow from the front (hair frames the cheeks) and opens up as she turns to profile
-    const FACE = 0.98 + 0.32 * V.fx * V.fx;
-    const hairline = (phi) => {
-      const t = Math.min(1, Math.abs(phi) / FACE), s = (phi + FACE) / (2 * FACE);
-      // the fringe sweeps from high on the parting side down across the forehead to the far temple
-      const tipN = phi * 7.5 + 0.3, tip = Math.abs(tipN - Math.round(tipN)) * 2;   // 0 at a strand tip, 1 between
-      const len = 0.5 + 0.5 * Math.sin(Math.round(tipN) * 2.3);                       // tips of different lengths
-      return HEAD + 3.3 - 1.5 * s - 0.6 * t * t + (tip * 0.9 - len * 0.7) * (1 - t * 0.7);
-    };
-    const ends = (phi) => 35.6 + Math.sin(phi * 5 + 0.4) * 0.9;
-    const curtainPhis = [];
-    for (let k = 0; k <= 22; k++) curtainPhis.push(1.45 + k / 22 * (Math.PI * 2 - 2.9));
-    // Bob: the hair falls from the crown to just below the jaw all the way round, swelling over the
-    // cheeks and curling under at the ends. It is built as rings around the head and drawn in two
-    // passes: the side facing us over the head, the far side behind everything, so it never covers the face.
-    // ends: clumps of different lengths, each coming to a soft point
-    const clumpN = 13;
-    const endH = (phi) => {
-      const u = phi / (Math.PI * 2) * clumpN, f = Math.abs(u - Math.round(u)) * 2;
-      const len = Math.sin(Math.round(u) * 3.1) * 0.9 + Math.sin(Math.round(u) * 1.3) * 0.5;
-      return 37.4 - len * 0.6 - (1 - f) * 0.45 - (1 - Math.cos(phi)) * 0.9 + 4.2 * Math.pow(Math.max(0, Math.cos(phi) + 0.25), 1.4);
-    };
-    // the outline swells and dips from clump to clump instead of being a smooth shell
-    const bulge = (phi) => Math.sin(phi * clumpN) * 0.28 + Math.sin(phi * 5 + 1) * 0.22;
-    const bob = (() => {
-      const N = 78, rings = [
-        // from the crown, out over the back of the skull, in at the nape, then down over the shoulders
-        { r: () => 6.95, d: () => 7.3, h: () => HEAD + 1.2 },
-        { r: (p) => 7.3 + bulge(p) * 0.6 + 0.6 * Math.max(0, Math.cos(p) + 0.3), d: (p) => 8 + bulge(p) * 0.6, h: (p) => HEAD - 2.2 + Math.sin(p * 3) * 0.3 },
-        { r: (p) => 7.1 + bulge(p) * 0.5 + 0.5 * Math.max(0, Math.cos(p) + 0.3), d: (p) => 6 + bulge(p) * 0.4, h: (p) => HEAD - 7.6, k: 0.86 },
-        { r: (p) => 7 + bulge(p) * 0.5, d: (p) => 5.8 + bulge(p) * 0.4, h: (p) => endH(p) + 0.9, k: 0.72 },
-        { r: (p) => 6.1 + bulge(p) * 0.4, d: (p) => 4.8, h: (p) => endH(p), k: 0.66 }
-      ];
-      const quads = [];
-      for (let k = 0; k < N; k++) {
-        const p0 = FACE + k / N * (Math.PI * 2 - 2 * FACE), p1 = FACE + (k + 1) / N * (Math.PI * 2 - 2 * FACE);
-        const clump = Math.round((p0 + p1) / 2 / (Math.PI * 2) * clumpN);
-        for (let r = 0; r < rings.length - 1; r++) {
-          const A0 = rings[r], A1 = rings[r + 1];
-          // a ring with k < 1 pulls its angles toward the back of the head
-          const g = (A, p) => (A.k ? Math.PI + (p - Math.PI) * A.k : p);
-          const at = (A, p) => V.seam(A.r(p), A.d(p), g(A, p), A.h(p));
-          const q = [at(A0, p0), at(A0, p1), at(A1, p1), at(A1, p0)];
-          const mid = V.seam(7.6, 7.8, (p0 + p1) / 2, HEAD);
-          quads.push({ q, facing: mid[2] > -0.4, band: r, clump });
-        }
-      }
-      return quads;
-    })();
-    const drawBob = (front) => {
-      const mine = bob.filter((b) => b.facing === front);
-      if (!mine.length) return;
-      if (!front) { mine.forEach((b) => P.p(b.q.map((p) => [p[0], p[1]]))); P.fill(HAIR, { pattern: softStrands, round: 1, dim: true }); return; }
-      // (the shape itself was added to the head's hair mask and filled with it; here come the details on top)
-      // the curled-under ends sit in shadow
-      mine.filter((b) => b.band === 3).forEach((b) => P.p(b.q.map((p) => [p[0], p[1]])));
-      P.fill(HAIR, { pattern: softStrands, round: 0.6, lift: -0.2 });
-      // strands: curved lines down each lock, longer and shorter, not evenly spaced
-      for (let k = 0; k <= 26; k++) {
-        const phi = FACE + 0.05 + k / 26 * (Math.PI * 2 - 2 * FACE - 0.1) + Math.sin(k * 2.7) * 0.04;
-        const top = HEAD + 0.6 - (k % 3) * 0.9, bend = Math.sin(k * 1.7) * 0.08;
-        const a = V.seam(7, 7.4, phi, top), m = V.seam(7.35 + bulge(phi) * 0.6, 7.55 + bulge(phi) * 0.6, phi + bend, HEAD - 3.4), b2 = V.seam(7.4, 7.45, phi + bend * 1.6, endH(phi) + 1.2 + (k % 2) * 0.8);
-        if (m[2] < 1.2) continue;
-        P.l(a[0], a[1], m[0], m[1], 0.5).l(m[0], m[1], b2[0], b2[1], 0.5);
-      }
-      P.fill(HAIR, { flat: true, tone: 1 });
-      // a few lit strands catching the light on the upper part of each lock
-      for (let k = 0; k <= 12; k++) {
-        const phi = FACE + 0.2 + k / 12 * (Math.PI * 2 - 2 * FACE - 0.4), m = V.seam(7.3 + bulge(phi) * 0.6, 7.5 + bulge(phi) * 0.6, phi + 0.06, HEAD - 2.2);
-        const a = V.seam(7.05, 7.45, phi + 0.04, HEAD + 0.2);
-        if (m[2] > 2 && (k % 2 === 0)) P.l(a[0] + 0.3, a[1], m[0] + 0.3, m[1], 0.4);
-      }
-      P.fill(HAIR, { flat: true, tone: 3 });
-    };
-    add(-1, () => drawBob(false));
-    // Crown, fringe and the near side of the bob are one shape, filled in one pass so the shading runs
-    // continuously from the bangs down the sides with no seam; the face is cut out of the whole.
-    add(20.3, () => {
-      P.e(V.x(0, -0.4), V.y(HEAD + 0.6), V.w(6.75, 7.1), 8);
-      bob.filter((b) => b.facing).forEach((b) => P.p(b.q.map((p) => [p[0], p[1]])));
-      if (V.fz > -0.25) {
-        [1, -1].forEach((sd) => {
-          const pts = [];
-          for (let k = 0; k <= 10; k++) { const phi = sd * k / 10 * FACE; pts.push(V.seam(7.1, 7.5, phi, hairline(phi)).slice(0, 2)); }
-          pts.push(V.seam(7.1, 7.5, sd * FACE, HEAD - 3.4).slice(0, 2), V.seam(5.4, 7, sd * FACE * 0.9, HEAD - 12).slice(0, 2), V.seam(5.6, 7.2, 0, HEAD - 12).slice(0, 2));
-          P.cut(pts);
-        });
-      }
-      P.fill(HAIR, { pattern: softStrands, round: 1.1 });
-      drawBob(true);
-      // a soft band of light across the upper left of the crown, following the curve of the head
-      for (let k = 0; k <= 18; k++) {
-        const phi = -1.5 + k / 18 * 2.2, q = V.seam(6.3, 6.7, phi, HEAD + 5.6 + Math.cos(phi + 0.4) * 0.8);
-        if (q[2] > 1.2) { P.dotOn(q[0], q[1], HAIR[3]); P.dotOn(q[0] + 0.5, q[1] - 0.5, HAIR[3]); if (k % 3 === 1) P.dotOn(q[0], q[1] + 0.5, HAIR[4]); }
-      }
-      // the fringe casts a soft shadow onto the forehead
-      if (V.fz > -0.25) for (let k = 0; k <= 30; k++) {
-        const phi = -FACE + k / 30 * 2 * FACE, h = hairline(phi), q = V.seam(7.1, 7.5, phi, h - 0.7), q2 = V.seam(7.1, 7.5, phi, h - 1.2);
-        if (q[2] > 1) { P.darken(q[0], q[1], 0.86); P.darken(q2[0], q2[1], 0.93); }
-      }
-      // sheen across the crown
-      for (let k = 0; k <= 14; k++) { const phi = -1 + k / 14 * 2, q = V.seam(6.2, 6.6, phi, HEAD + 5.4 + Math.cos(phi) * 0.6); if (q[2] > 2 && k % 3 === 0) P.dotOn(q[0], q[1], HAIR[3]); }
-      // side parting
-      for (let k = 0; k <= 7; k++) { const q = V.seam(2.6, 6.6 - k * 1.5, 0, HEAD + 7.4 - Math.abs(k - 3) * 0.25); if (q[2] > -3) P.dotOn(V.x(-2.4, 6.6 - k * 1.5), q[1], HAIR[1]); }
-      // fringe: strand shadows sweeping across the forehead, and darker tips along the edge
-      if (V.fz > -0.25) {
-        [-0.9, -0.45, 0, 0.45].forEach((phi) => {
-          const a = V.seam(6.6, 7, phi - 0.25, hairline(phi - 0.25) + 2.4), b = V.seam(7.05, 7.45, phi + 0.3, hairline(phi + 0.3) + 0.6);
-          if (b[2] > 3 && a[2] > 3) P.l(a[0], a[1], b[0], b[1], 0.5);
-        });
-        P.fill(HAIR, { flat: true, tone: 1 });
-        for (let k = 0; k <= 26; k++) { const phi = -FACE + k / 26 * 2 * FACE, h = V.seam(7.1, 7.5, phi, hairline(phi) + 0.25); if (h[2] > 1) P.dotOn(h[0], h[1], HAIR[1]); }
-      }
-    });
+    // hair: the female head preset's bob with fringe and side parting, in her auburn
+    drawFemaleHead(add, P, A, HAIR);
   }
 };
+
+// paint one frame of a character (facing row, frame col) into a PW x PH RGBA buffer, top row first
+function paintFrame(S, row, col) {
+  const P = Painter();
+  drawFigure(P, S, row * Math.PI / 4, col);
+  P.outline();
+  return P.buf;
+}
 
 // paint every facing and frame of one character into a single RGBA sheet (row 0 at the top)
 function paintSheet(S) {
@@ -924,4 +1031,4 @@ function paintSheet(S) {
 }
 // ---------- end sprites ----------
 
-export { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet };
+export { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, paintSheet, paintFrame };

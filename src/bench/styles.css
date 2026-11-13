@@ -107,6 +107,10 @@ aside { grid-area: side; display: flex; flex-direction: column; gap: 1.4rem; }
 }
 .cast canvas { width: 64px; height: 80px; image-rendering: pixelated; border-radius: 3px; }
 .cast small { display: block; font-weight: 400; color: inherit; opacity: 0.8; font-size: 0.85rem; }
+.hairs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+.hairs button { display: grid; justify-items: center; gap: 0.2rem; padding: 0.35rem 0.3rem; font-size: 0.85rem; }
+.hairs canvas { width: 56px; height: 56px; image-rendering: pixelated; border-radius: 3px; background: var(--panel); }
+.hairs button[aria-busy="true"] { opacity: 0.6; cursor: progress; }
 .dial { position: relative; width: 13rem; height: 13rem; margin: 0 auto; }
 .dial::before { content: ""; position: absolute; inset: 1.4rem; border: 1px dashed var(--line); border-radius: 50%; }
 .dial button { position: absolute; width: 3rem; height: 2.2rem; padding: 0; transform: translate(-50%, -50%); font-size: 0.85rem; }
