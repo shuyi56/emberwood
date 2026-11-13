@@ -527,7 +527,10 @@ void main() {
   gl_FragColor = linearToOutputTexel(vec4(col, 1.0));
 }`, { uSheet: { value: sheet }, uGrid: { value: new THREE.Vector2(COLS, ROWS) }, uFrame: { value: new THREE.Vector3(0, 0, 0) }, uSize: { value: new THREE.Vector2(1.76, 2.2) } });
 
-  // soft contact shadow under each sprite
+  // Contact shadow under each sprite: a crisp, stylised disc rather than a soft blur, so it still reads on dark
+  // grass and at night: a dark core inside a slightly lighter band, each with a hard edge (smoothed over a hair,
+  // so it doesn't shimmer). The colour leans cool violet, as the
+  // sprites' own shadows do, instead of a grey that sinks into the ground.
   const blobShadowMat = makeMat(false, `
 varying vec2 vDisc;
 void main() {
@@ -538,8 +541,11 @@ void main() {
 }`, `
 varying vec2 vDisc;
 void main() {
-  float a = (1.0 - smoothstep(0.15, 0.5, length(vDisc))) * 0.5 * (1.0 - fogAmount());
-  gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+  float r = length(vDisc) / 0.5;
+  float inside = 1.0 - smoothstep(0.96, 1.0, r);
+  float core = 1.0 - smoothstep(0.6, 0.64, r);
+  float a = mix(0.58, 0.78, core) * inside * (1.0 - fogAmount());
+  gl_FragColor = linearToOutputTexel(vec4(mix(lin(vec3(0.08, 0.06, 0.13)), lin(vec3(0.03, 0.02, 0.06)), core), a));
 }`, {}, { transparent: true, depthWrite: false });
 
   // Ground rings for the party and the move target; the target ring has marching dashes.
@@ -1427,10 +1433,11 @@ void main() {
     const tex = new THREE.Texture();
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
     loadSheet(key, spec.hairStyle || null, spec).then((img) => { tex.image = img; tex.needsUpdate = true; });
-    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24), blobShadowMat);
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 64), blobShadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.05;
-    shadow.scale.set(1.15, 0.9, 1);
+    // (round, so it stays the same shape as the hero turns; just inside the selection ring)
+    shadow.scale.setScalar(0.76);
     g.add(shadow);
     const material = spriteMat(tex);
     const card = new THREE.Mesh(cardGeo, material);
