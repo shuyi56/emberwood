@@ -426,58 +426,6 @@ const mail = (x, y) => { const r = y % 3, sx = (x + (Math.floor(y / 3) % 2) * 2)
 const strands = (x, y) => { const k = (x * 7 + Math.floor(y / 3) * 3) % 9; return k === 0 ? -0.24 : k === 4 ? 0.16 : 0; };
 const weave = (x, y) => ((x + y) % 4 === 0 ? -0.09 : (x - y) % 6 === 0 ? 0.05 : 0);
 
-// Seen from the front an arm hangs in the same plane as the torso and reads as a flat strip pasted to its side,
-// the more so when sleeve and body are one cloth (mail on mail, white on white). This pass gives it a round
-// form and sets it in front of the body: across each row of the arm a lit rim on the side toward the light
-// (screen left), a core shadow turning away on the other side, the edge against the body darker still where it
-// is hidden from the light, and a crease on the inside of the elbow. Then the arm casts a soft neutral shadow
-// onto the body beside it, so a clear line of dark parts the two. under: the frame as it was before the arm.
-function armForm(P, under, { pS, pE, pH, outward, cx, bell }) {
-  const buf = P.buf, inward = -outward;
-  const changed = (k) => buf[k * 4 + 3] && (buf[k * 4] !== under[k * 4] || buf[k * 4 + 1] !== under[k * 4 + 1] || buf[k * 4 + 2] !== under[k * 4 + 2] || !under[k * 4 + 3]);
-  const mix = (k, t, c) => { for (let j = 0; j < 3; j++) buf[k * 4 + j] = buf[k * 4 + j] + (c[j] - buf[k * 4 + j]) * t; };
-  const dk = (k, f) => { buf[k * 4] *= f; buf[k * 4 + 1] *= f; buf[k * 4 + 2] *= f; };
-  const LIGHT = [255, 246, 222];
-  const Y0 = Math.max(0, Math.floor((pS[1] + 2.4) * RES)), Y1 = Math.min(PH - 1, Math.ceil((pH[1] - 0.6) * RES));
-  const xMin = Math.max(0, Math.floor((Math.min(pS[0], pE[0], pH[0]) - 6) * RES)), xMax = Math.min(PW - 1, Math.ceil((Math.max(pS[0], pE[0], pH[0]) + 6) * RES));
-  const elbowY = pE[1] * RES;
-  for (let Y = Y0; Y <= Y1; Y++) {
-    // the arm's span in this row: the run of its own pixels nearest the arm's line
-    const t = Math.max(0, Math.min(1, (Y / RES - pS[1]) / Math.max(1, pH[1] - pS[1])));
-    const ax = (t < 0.5 ? lerp(pS[0], pE[0], t * 2) : lerp(pE[0], pH[0], (t - 0.5) * 2)) * RES;
-    let a = Math.round(ax), b;
-    if (!changed(Y * PW + a)) { let f = -1; for (let d = 1; d < 6 && f < 0; d++) { if (changed(Y * PW + a + d)) f = a + d; else if (changed(Y * PW + a - d)) f = a - d; } if (f < 0) continue; a = f; }
-    b = a;
-    while (a - 1 >= xMin && changed(Y * PW + a - 1)) a--;
-    while (b + 1 <= xMax && changed(Y * PW + b + 1)) b++;
-    const w = b - a + 1;
-    if (w < 3) continue;
-    const L = Y * PW + a, R = Y * PW + b, innerK = inward > 0 ? R : L;
-    if (!bell) {
-      // the lit rim, brighter on the arm whose outer side faces the light
-      mix(L, outward < 0 ? 0.3 : 0.16, LIGHT);
-      if (w > 5) mix(L + 1, outward < 0 ? 0.14 : 0.07, LIGHT);
-      // the core shadow on the side turned from the light, and the hidden edge against the body
-      { dk(R, 0.74); if (w > 5) dk(R - 1, 0.86); if (w > 8) dk(R - 2, 0.94); }
-      dk(innerK, inward > 0 ? 0.88 : 0.82);
-      // the crease on the inside of the elbow: a short soft dark notch
-      const de = Math.abs(Y - elbowY);
-      if (de < 2.5) { const k = innerK - inward * 1; dk(k, de < 1.5 ? 0.82 : 0.9); }
-    }
-    // the cast shadow on the body beside the arm, fading in below the shoulder
-    if (Y > (pS[1] + 3.2) * RES) {
-      const fade = Math.min(1, (Y / RES - pS[1] - 3.2) / 2.5);
-      [0.62, 0.76, 0.9].forEach((f, j) => {
-        const X = (inward > 0 ? b : a) + inward * (j + 1), k = Y * PW + X;
-        if (X < 0 || X >= PW || changed(k) || !buf[k * 4 + 3]) return;
-        // (only onto the body, not past the far side of it)
-        if ((X / RES - cx) * outward < 0) return;
-        dk(k, 1 - (1 - f) * fade);
-      });
-    }
-  }
-}
-
 // how far down the screen a point drops per unit it stands toward the viewer (legs and shoes)
 const LEG_TILT = 0.2;
 function drawFigure(P, S, theta, f) {
@@ -499,12 +447,12 @@ function drawFigure(P, S, theta, f) {
   // little off the body, bent at the elbow, the right hand further forward than the left. It gives the
   // figure depth from every side, where a pose with both sides alike reads flat.
   // stride(s): how far forward (b) the foot of leg s stands, for the legs and for any cloth that follows them
-  // At rest the feet stand well apart, wide to the sides and one ahead of the other: the free leg forward with
-  // its knee eased, the weight leg back under the hips. Which foot is forward is chosen per facing (A.free, the
-  // side of the free leg): from some three-quarter views the step forward would carry the left foot straight
-  // behind the right on screen and the legs would stack into one, so there the other foot steps forward.
-  // (the step is longest seen from the side, where it is the only thing parting the legs: there the boots,
-  // long from heel to toe, would otherwise overlap and the trousers run together)
+  // At rest the feet stand apart, about hip-wide and one ahead of the other: the free leg forward with its knee
+  // eased, the weight leg back under the hips. Which foot is forward is chosen per facing (A.free, the side of
+  // the free leg): from some three-quarter views the step forward would carry the left foot straight behind the
+  // right on screen and the legs would stack into one, so there the other foot steps forward.
+  // (the step is a little longer seen from the side, where it is the only thing parting the legs: there the
+  // boots, long from heel to toe, would otherwise overlap and the trousers run together)
   const reach = 1 + 0.32 * V.fx * V.fx, REST_FWD = 4.8 * reach, REST_BACK = -2.4 * reach;
   A.free = -1;
   if (!walking) {
@@ -750,35 +698,14 @@ function drawFigure(P, S, theta, f) {
     // (the resting hands are placed from the hips they rest on or hang beside, not from the shoulders: on a
     // slim figure, placed from the shoulders they float off the body)
     const hangA = B.sh + 1.4 + (S.blendArms ? 0.6 : B.armOut == null ? 1.2 : B.armOut) + rest[0];
-    // A relaxed arm at rest is bent a little at the elbow: the elbow sits back by the waist and the forearm comes
-    // forward, the hand a little raised. From the front the forearm is then foreshortened and the hand stands in
-    // front of the hip rather than beside it, so the arm reads as reaching toward us instead of lying flat
-    // against the body. (Bell sleeves hang straight: a bent bell would hang wrong.)
-    const bend = !walking && !grip && !akimbo && S.sleeveStyle !== 'bell' ? 1 : 0;
-    // At rest one arm hangs a little forward and the other a little back, opposite to the feet as in a step (the
-    // arm on the side of the weight leg comes forward): fwd is +1 for the forward arm, -1 for the one behind.
-    // The forward arm bends at the elbow with its hand before the hip; the back arm hangs nearly straight, its
-    // hand behind the hip. (Bell sleeves just swing a little each way, as they hang straight.)
-    const fwd = s === -A.free ? 1 : -1, still = !walking && !grip && !akimbo;
-    // Seen from the front the back arm tucks behind the body: its hand goes behind the hip and the whole arm is
-    // drawn behind the torso, so only the sleeve beside the waist shows, while the forward arm comes across in
-    // front of the jerkin. That is what makes one read as behind the other from the front, where a swing toward
-    // or away from the viewer barely moves anything on screen.
-    const tuck = bend && fwd < 0 && V.fz > 0.6, across = bend && fwd > 0 && V.fz > 0.6;
-    const restB = bend ? (fwd > 0 ? 5.6 : -2.6) : still ? rest[1] + fwd * 2.2 : rest[1], restH = bend && fwd > 0 ? 3.0 : bend ? -0.3 : 0;
-    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : bend ? (across ? A.lw(24) - 0.6 : fwd > 0 ? Math.min(hangA, A.lw(24) + 0.5) : tuck ? A.lw(21.5) - 0.4 : Math.max(hangA - 0.4, A.lw(21.5) + 2.2)) : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + restB, 22 + Math.max(0, hb) * 0.35 + rest[2] + restH]);
+    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + rest[1], 22 + Math.max(0, hb) * 0.35 + rest[2]]);
     const sh = [s * (B.sh - 1), 0, 38.8 - B.slope * 0.3];
     // The hand on the hip rests on the side of it, a little forward, fingers curling over the hip toward the
     // front: seen from the front the whole hand shows on the hip (a hand tucked behind it left only a stub of
     // cuff at the waist, which read as a square from any distance), and the arm stands in front of the body.
-    const depth = tuck ? -1.5 : V.d(s * 11, Math.max(hand[1], 0.6) * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2 || tuck;
-    // (a pauldron on the tucked arm still sits on top of the shoulder, in front of the torso)
-    if (tuck && S.shoulder) add(2, () => { const q = V.pt(...sh); P.e(q[0], q[1] - 0.4, 3.8, 3).fill(S.shoulder, { round: 0.7, lift: -0.08 }); });
-    if (tuck && S.pauldron) add(2, () => S.pauldron(P, V.pt(...sh), false, s, A));
+    const depth = V.d(s * 11, hand[1] * 0.5) - (S.blendArms && Math.abs(V.fz) > 0.6 ? 0.5 : 0), dim = depth < -2;
     A['hand' + (s > 0 ? 'R' : 'L')] = { a: hand[0], b: hand[1], h: hand[2], depth };
     add(depth, () => {
-      // (what lay here before the arm, so the arm's own pixels can be told apart for its form pass below)
-      const formPass = V.fz > 0.3, under = formPass ? P.buf.slice() : null;
       // (at rest the elbow sits just off the waist and back, so the arm bends softly instead of hanging straight)
       // At rest the upper arm hangs nearly straight down from the shoulder (the elbow only a little outside it)
       // and the forearm angles slightly out to the hand beside the hip, as a relaxed arm does. An elbow set
@@ -787,7 +714,7 @@ function drawFigure(P, S, theta, f) {
       // (elbowTuck draws the resting elbows in toward a narrow waist, so the forearm angles softly out to the
       // hand beside the thigh and the arm bends a little at the elbow instead of hanging as one straight slant)
       const restElbow = Math.abs(sh[0]) + 2.6 + (S.blendArms ? 0.3 : 0) - (S.elbowTuck || 0);
-      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : (bend ? Math.max(restElbow, Math.abs(hand[0]) + (fwd > 0 ? 1.3 : 0.3)) : Math.min(restElbow, Math.abs(hand[0]) - 0.3))), walking ? hand[1] * 0.45 - 1.4 : bend ? (fwd > 0 ? -2.0 : -1.4) : -0.9, (sh[2] + hand[2]) / 2 + 0.8 - bend * (fwd > 0 ? 0.6 : 0)];
+      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : Math.min(restElbow, Math.abs(hand[0]) - 0.3)), walking ? hand[1] * 0.45 - 1.4 : -0.9, (sh[2] + hand[2]) / 2 + 0.8];
       // a point up the forearm from the hand, dist along it toward the elbow, so the wrist, the cuffs and the
       // bracer follow the forearm when it angles forward instead of sitting straight above the hand
       // Points on the arm are tipped down by their depth like the knees and ankles (LEG_TILT): seen a little from
@@ -917,9 +844,8 @@ function drawFigure(P, S, theta, f) {
       // (on the hip arm a short cuff: a long pale one there reads as a block standing in for the hand)
       if (cuffC) cuffOnSleeve(cuffC, akimbo ? 1.5 : S.shirtCuff ? 2.7 : 2.4);
       if (S.bracer && s < 0) { const pa = fore(5.5); P.t(pa[0], pa[1] - 1.8, pa[0], pa[1] + 1.8, 4.6, 4.6).fill(S.bracer, { dim }); }
-      if (S.shoulder && !tuck) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
-      if (S.armArmor) S.armArmor(P, { pS, pE, pH, tuck }, dim, s, A);
-      if (formPass) armForm(P, under, { pS, pE, pH, outward, cx: V.x(0, 0), bell: S.sleeveStyle === 'bell' });
+      if (S.shoulder) P.e(pS[0], pS[1] - 0.4, 3.8, 3).fill(S.shoulder, { dim, round: 0.7, lift: -0.08 });
+      if (S.armArmor) S.armArmor(P, { pS, pE, pH }, dim, s, A);
       // (a hand resting on the back of the hip is out of sight from the front: the sleeve ends at the cuff)
       const HS = S.hands || SKIN, T = (i) => HS[Math.max(0, i - (dim ? 1 : 0))];
       // The hand is drawn in its own frame: x across it, y down it toward the fingertips. A hanging hand points
@@ -1243,14 +1169,10 @@ const FIGHTER = {
     P.t(bx0, by0, J.pH[0], J.pH[1] - 1.2, 4.4, 4).fill(HIDE, { dim, round: 0.7 });
     const mx = (bx0 + J.pH[0]) / 2, my = (by0 + J.pH[1]) / 2;
     P.l(mx - 2.4, my - 0.6, mx + 2.4, my - 0.6, 0.9).l(mx - 2.4, my + 1.4, mx + 2.4, my + 1.4, 0.9).fill(STRAP, { flat: true, tone: 2 });
-    if (!J.tuck) this.pauldron(P, J.pS, dim, s, A);
-  },
-  // (drawn on its own, above the torso, when the arm beneath is tucked behind the body)
-  pauldron(P, pS, dim, s, A) {
     const ox = s * 0.8 * Math.abs(A.V.rx);
-    P.e(pS[0] + ox * 0.6, pS[1] + 1.8, 3.6, 2).fill(HIDE, { dim, round: 0.7, contour: true });
-    P.e(pS[0] + ox * 0.3, pS[1] - 0.2, 3.8, 2.5).fill(HIDE, { dim, round: 0.9, contour: true });
-    for (let k = -4; k <= 4; k++) { const ang = k * 0.3; P.dot(pS[0] + ox * 0.3 + Math.sin(ang) * 3, pS[1] - 0.4 - Math.cos(ang) * 1.9, HIDE[4]); }
+    P.e(J.pS[0] + ox * 0.6, J.pS[1] + 1.8, 3.6, 2).fill(HIDE, { dim, round: 0.7, contour: true });
+    P.e(J.pS[0] + ox * 0.3, J.pS[1] - 0.2, 3.8, 2.5).fill(HIDE, { dim, round: 0.9, contour: true });
+    for (let k = -4; k <= 4; k++) { const ang = k * 0.3; P.dot(J.pS[0] + ox * 0.3 + Math.sin(ang) * 3, J.pS[1] - 0.4 - Math.cos(ang) * 1.9, HIDE[4]); }
   },
   gear(add, P, A) {
     const V = A.V;
