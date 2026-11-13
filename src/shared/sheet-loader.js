@@ -21,9 +21,9 @@ function paintedCanvas(spec) {
 }
 
 const cache = new Map();
-// key and hair name the sheet's file; spec is only used to paint it if the file cannot be loaded
+// key, hair and the spec's skin tone name the sheet's file; spec is also used to paint it if the file cannot be loaded
 function loadSheet(key, hair, spec) {
-  const file = sheetFile(key, hair);
+  const file = sheetFile(key, hair, spec && spec.skinTone);
   if (!cache.has(file)) {
     cache.set(file, getVersion().then((v) => new Promise((resolve) => {
       const img = new Image();

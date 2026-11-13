@@ -2,6 +2,7 @@ import './styles.css';
 import { PW, PH, RES, WALK } from '../shared/sprites.js';
 import { loadSheet } from '../shared/sheet-loader.js';
 import { HAIRSTYLES } from '../shared/presets/female-head.js';
+import { SKINS } from '../shared/core.js';
 import { ROSTER, loadParty, saveParty, memberSpec } from '../shared/party.js';
 
 async function main() {
@@ -20,14 +21,19 @@ async function main() {
     { name: 'Checker', checker: true }
   ];
 
-  // Every sheet is pre-painted (scripts/build-sprites.mjs) and loaded here up front: one per character, and
-  // one per hairstyle for characters with hair, so switching style is just a swap of images.
+  // Every sheet is pre-painted (scripts/build-sprites.mjs) and loaded here up front: one per character and skin
+  // tone, and per hairstyle for characters with hair, so switching style or skin is just a swap of images.
+  // (c.sheets is keyed by hairstyle and skin tone: see sheetKey)
+  const sheetKey = (hair, skin) => `${hair}|${skin}`;
   await Promise.all(CAST.map(async (c) => {
     c.hair = c.spec.hairStyle;
+    c.skin = c.spec.skinTone || SKINS[0].key;
     c.sheets = {};
     const styles = c.hair ? HAIRSTYLES.map((h) => h.key) : [null];
-    await Promise.all(styles.map(async (hair) => { c.sheets[hair] = await loadSheet(c.key, hair, hair ? { ...c.spec, hairStyle: hair } : c.spec); }));
-    c.sheet = c.sheets[c.hair || null];
+    await Promise.all(styles.flatMap((hair) => SKINS.map(async ({ key: skin }) => {
+      c.sheets[sheetKey(hair, skin)] = await loadSheet(c.key, hair, { ...c.spec, ...(hair ? { hairStyle: hair } : {}), skinTone: skin });
+    })));
+    c.sheet = c.sheets[sheetKey(c.hair || null, c.skin)];
   }));
 
   const state = { who: 0, facing: 0, anim: 'idle', frame: 0, playing: true, zoom: 3, ground: 0, turntable: false };
@@ -111,23 +117,44 @@ async function main() {
     hairsEl.append(b);
     hairButtons.push({ b, cv, key: st.key });
   });
-  // the thumbnails are crops of each style's loaded sheet (front, idle), redrawn when the character changes
+  // skin tone picker: one button per tone, each with a head-and-shoulders thumbnail in the current hairstyle
+  const skinsEl = $('skins'), skinButtons = [];
+  SKINS.forEach((t) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const cv = document.createElement('canvas'); cv.width = THUMB.w; cv.height = THUMB.h;
+    b.append(cv, document.createTextNode(t.name));
+    b.addEventListener('click', () => pickSkin(t.key));
+    skinsEl.append(b);
+    skinButtons.push({ b, cv, key: t.key });
+  });
+  // the thumbnails are crops of the loaded sheets (front, idle), redrawn when the character, hairstyle or skin
+  // tone changes: the hairstyles in the current skin tone, the skin tones in the current hairstyle
   let thumbsFor = null;
-  function paintHairThumbs() {
-    const c = CAST[state.who];
-    if (!c.hair || thumbsFor === c.key) return;
-    thumbsFor = c.key;
-    hairButtons.forEach(({ cv, key }) => {
-      const ctx = cv.getContext('2d');
-      ctx.clearRect(0, 0, THUMB.w, THUMB.h);
-      ctx.drawImage(c.sheets[key], THUMB.x, THUMB.y, THUMB.w, THUMB.h, 0, 0, THUMB.w, THUMB.h);
-    });
+  const thumb = (cv, img) => {
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, THUMB.w, THUMB.h);
+    ctx.drawImage(img, THUMB.x, THUMB.y, THUMB.w, THUMB.h, 0, 0, THUMB.w, THUMB.h);
+  };
+  function paintThumbs() {
+    const c = CAST[state.who], key = c.key + sheetKey(c.hair, c.skin);
+    if (thumbsFor === key) return;
+    thumbsFor = key;
+    if (c.hair) hairButtons.forEach(({ cv, key: hair }) => thumb(cv, c.sheets[sheetKey(hair, c.skin)]));
+    skinButtons.forEach(({ cv, key: skin }) => thumb(cv, c.sheets[sheetKey(c.hair || null, skin)]));
   }
   function pickHair(key) {
     const c = CAST[state.who];
     if (!c.hair || c.hair === key) return;
-    c.hair = key; c.sheet = c.sheets[key];
+    c.hair = key; c.sheet = c.sheets[sheetKey(key, c.skin)];
     party.hair[c.key] = key; saveParty(party);
+    render(); paintCast();
+  }
+  function pickSkin(key) {
+    const c = CAST[state.who];
+    if (c.skin === key) return;
+    c.skin = key; c.sheet = c.sheets[sheetKey(c.hair || null, key)];
+    party.skin[c.key] = key; saveParty(party);
     render(); paintCast();
   }
 
@@ -223,7 +250,9 @@ async function main() {
       b.disabled = on && party.members.length === 1;
     });
     $('partyNote').textContent = `${CAST.find((c) => c.key === party.members[0]).name} leads in the world.`;
-    if (who.hair) { paintHairThumbs(); hairButtons.forEach(({ b, key }) => b.setAttribute('aria-pressed', String(key === who.hair))); }
+    paintThumbs();
+    if (who.hair) hairButtons.forEach(({ b, key }) => b.setAttribute('aria-pressed', String(key === who.hair)));
+    skinButtons.forEach(({ b, key }) => b.setAttribute('aria-pressed', String(key === who.skin)));
     dialButtons.forEach((b, k) => b.setAttribute('aria-pressed', String(k === state.facing)));
     groundButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === state.ground)));
     $('animIdle').setAttribute('aria-pressed', String(state.anim === 'idle'));

@@ -13,7 +13,7 @@
 // down to the ends, projected for each facing so it holds together from all eight sides; the face is
 // cut out along the fringe, whose shape (one of BANGS) each style picks. A style sets how far the rings fall and how full they are, and can add
 // a piece of its own (a ponytail, bun or braid) built the same way.
-import { HEAD, CX, PW, PH, RES, SKIN, lerp, softStrands, cleanStrands } from '../core.js';
+import { HEAD, CX, PW, PH, RES, lerp, softStrands, cleanStrands } from '../core.js';
 
 const FEMALE_HEAD = { female: true, brow: [96, 70, 56], iris: [88, 108, 70], hairStyle: 'bob' };
 
@@ -108,8 +108,10 @@ const BANGS = {
   soft: { edge: (t) => HEAD + 3.7 - 1.7 * Math.pow(t, 1.3) + 0.6 * Math.max(0, 1 - t / 0.12), freq: 6, tip: 0.55, jag: 0.3, dir: (phi) => Math.sign(phi) * 0.9, partA: 0 },
   // one long lock swept low across from a deep side parting
   deep: { edge: (t, s) => HEAD + 4.7 - 2.8 * s - 0.3 * t * t, freq: 5.5, tip: 0.6, jag: 0.45, dir: () => 1.3, partA: -3.4 },
-  // a few fine wisps with the forehead showing between them
-  wispy: { edge: (t, s) => HEAD + 3.6 - 0.4 * s - 0.6 * t * t, freq: 4.5, tip: 2.6, jag: 0.6, dir: () => 0.6, partA: -2.4 }
+  // a few fine wisps with the forehead showing between them: the fringe rises off the middle of the forehead
+  // and falls away to the temples, the wisps of very different lengths, with no dark rim along the cut (soft),
+  // so the edge reads as loose hair rather than the brim of a cap
+  wispy: { edge: (t, s) => HEAD + 4.4 - 0.5 * s - 1.7 * Math.pow(t, 1.3), freq: 4.5, tip: 2.4, jag: 1.1, dir: () => 0.6, partA: -2.4, soft: true }
 };
 
 // The styles. length picks a ring list; ends sets where the ends fall (base: their height at the back,
@@ -445,11 +447,18 @@ function braid(add, P, A, HAIR) {
 }
 
 function drawFemaleHead(add, P, A, HAIR, styleKey) {
+  // (the figure's own skin tone, for the hair's shadow on the cheek)
+  const SKIN = A.skin;
+  // Is a colour one of the hair's tones, or one darkened by a soft cast shadow (P.darken by 0.8 or 0.9)? So other
+  // parts can tell the hair's pixels apart: see the gap between the arms and the body.
+  const hairTones = [1, 0.9, 0.8].flatMap((m) => HAIR.map((c) => c.map((v) => Math.floor(v) * m)));
+  A.isHair = (r, g, b) => hairTones.some((c) => Math.abs(c[0] - r) < 1.5 && Math.abs(c[1] - g) < 1.5 && Math.abs(c[2] - b) < 1.5);
   const V = A.V, st = STYLE[styleKey || (A.S && A.S.hairStyle)] || STYLE.bob;
   // The head is covered by one shell with the face cut out along a hairline that turns with the head
   // (each half of the face cut separately, so it holds together in profile).
   // the face opening is narrow from the front (hair frames the cheeks) and opens up as she turns to profile
-  const FACE = 0.98 + 0.32 * V.fx * V.fx;
+  // (only a little: opened wide, the cheek and jaw showed far back toward the ear and the face read broad in profile)
+  const FACE = 0.98 + 0.16 * V.fx * V.fx;
   // the fringe: the style's bang shape, with locks of different lengths cut into its edge
   const bg = BANGS[st.bangs] || BANGS.swept, F = bg.freq, nLocks = Math.round(8 * F / 7.5);
   const hairline = (phi) => {
@@ -476,7 +485,10 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
   const endH = (phi) => {
     // tuck: tied-back hair is pulled up off the face and over the ear, then drops sharply just behind the
     // ear to cover the back of the head down to the nape
-    const tuck = (st.ends.tuck || 0) * Math.min(1, Math.max(0, (Math.cos(phi) + 0.3) / 0.35));
+    // (the drop is sharp, over about 15 degrees right behind the ear: eased over a wide arc it left a long
+    // diagonal edge from the temple to the nape, baring the side of the head behind the ear, which then ran
+    // into the neck and jaw as one long, wide stretch of skin in the side views)
+    const tuck = (st.ends.tuck || 0) * Math.min(1, Math.max(0, (Math.cos(phi) + 0.12) / 0.22));
     const lift = st.ends.front * Math.pow(Math.max(0, Math.cos(phi) + 0.25), 1.4) + (st.ends.side || 0) * Math.max(0, Math.cos(phi) + 0.6) / 1.6 + tuck;
     if (shape === 'blunt') return st.ends.base - Math.sin(phi * 3 + 0.5) * 0.15 - (1 - Math.cos(phi)) * 0.9 + lift;
     if (shape === 'sections') {
@@ -514,21 +526,86 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
           const fwd = (R, p) => R.d(p) * Math.cos(g(R, p));
           facing = (fwd(A0, p0) + fwd(A0, p1) + fwd(A1, p1) + fwd(A1, p0)) / 4 > BEHIND;
         }
-        quads.push({ q, facing, band: r, clump });
+        // Below the shoulders (under the line of a mantle's hem) the hair is drawn behind the body and arms from
+        // the front half: in front, a lock lay over the inner side of the arm, and as the arm swung it showed as
+        // a wedge of hair opening and closing beside the waist.
+        if (facing && V.fz > 0.2 && A0.h(p0) < 34) facing = false;
+        // the patch's surface normal, in screen terms [right, up, toward us]: round the head it faces out along
+        // the ring (sin and cos of its angle), and up or down by the shell's slope from ring to ring (wider
+        // below: it faces up, as over the crown; narrower below: it faces down, as where the hair falls in)
+        // (each lock is a rounded form: the outline swells and dips from lock to lock (bulge), and the facing turns
+        // with that swell, so every lock is lit on one side and shaded on the other; taken a little past the true
+        // slope, as at this size the locks would otherwise barely register)
+        const pm = (p0 + p1) / 2, bd = (Math.cos(pm * clumpN) * 0.28 * clumpN + Math.cos(pm * 5 + 1) * 0.22 * 5) * st.volume;
+        const gm = (g(A0, pm) + g(A1, pm)) / 2 + Math.atan(-1.6 * bd / 7), ha = Math.sin(gm), hb = Math.cos(gm);
+        const rad = (R) => (R.r(pm) + R.d(pm)) / 2, dh = Math.max(0.3, A0.h(pm) - A1.h(pm));
+        const up = Math.max(-1.6, Math.min(1.6, (rad(A1) - rad(A0)) / dh));
+        const nx = ha * V.rx + hb * V.fx, nz = ha * V.rz + hb * V.fz, nl = Math.hypot(nx, up, nz) || 1;
+        quads.push({ q, facing, band: r, clump, n: [nx / nl, up / nl, nz / nl], t: r / Math.max(1, rings.length - 2), h: (A0.h(pm) + A1.h(pm)) / 2 });
       }
     }
     return quads;
   })();
   // is the fine pixel at index k painted in one of the hair's tones?
   const isHair = isHairOf(P, HAIR);
+  // The hair's light, from its shell. Each patch is lit by the way it faces: the crown turned up into the light,
+  // the curve over the back of the head turning away, the hair darkening where it falls in below its widest
+  // point and toward its ends. Hair also has a sheen: a band of light across it where the strands face halfway
+  // between the light and us. (A flat fill shaded row by row, as before, left the long side of the hair one flat
+  // sheet in profile.) shellLight(front) rasterises the patches facing us (or the far ones) into a map of
+  // brightness, nearest patch on top; pixels no patch covers (the crown) are lit as the round of the skull.
+  const LT = [-0.5, 0.55, 0.67], HV = (() => { const h = [LT[0], LT[1], LT[2] + 1], l = Math.hypot(...h); return h.map((v) => v / l); })();
+  // (t: how far down the hair, 0 at the crown and 1 at the ends; h: the height, for the sheen's band)
+  const lightOf = (n, t, h) => {
+    const dif = n[0] * LT[0] + n[1] * LT[1] + n[2] * LT[2], spec = Math.pow(Math.max(0, n[0] * HV[0] + n[1] * HV[1] + n[2] * HV[2]), 10);
+    // the sheen: a band across the hair where it rounds over the back of the head, on the side toward the light
+    const band = h == null ? 0 : Math.exp(-Math.pow((h - (HEAD + 1.5)) / 2.2, 2)) * Math.max(0, n[0] * LT[0] + n[2] * LT[2] + 0.2);
+    return 0.4 + 0.5 * Math.max(-0.3, dif) + 0.16 * spec + 0.16 * band - 0.1 * Math.pow(Math.max(0, t - 0.5) / 0.5, 1.5);
+  };
+  const shellMaps = {};
+  // (wavy hair is shaded from its shell in every view, straight hair everywhere but in profile: seen from the
+  // side, the straight locks it rounds line up into stripes down the long side, and the plain fill reads better)
+  const SHELL = !!st.wavy || Math.abs(V.fx) < 0.9;
+  const shellLight = (front) => {
+    if (shellMaps[front]) return shellMaps[front];
+    const br = new Float32Array(PW * PH).fill(NaN), dp = new Float32Array(PW * PH).fill(-1e9);
+    bob.filter((b) => b.facing === front).forEach((b) => {
+      const pts = b.q, d = (pts[0][2] + pts[1][2] + pts[2][2] + pts[3][2]) / 4, v = lightOf(b.n, b.t, b.h);
+      let y0 = 1e9, y1 = -1e9;
+      pts.forEach((p) => { y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+      for (let Y = Math.max(0, Math.floor(y0 * RES)); Y <= Math.min(PH - 1, Math.ceil(y1 * RES)); Y++) {
+        const py = (Y + 0.5) / RES, xs = [];
+        for (let i = 0, j = 3; i < 4; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > py) !== (yj > py)) xs.push(xi + (py - yi) / (yj - yi) * (xj - xi)); }
+        if (xs.length < 2) continue;
+        // (a patch is filled a little wider than itself, so neighbouring patches meet without gaps)
+        const xa = Math.min(...xs) - 0.3, xb = Math.max(...xs) + 0.3;
+        for (let X = Math.max(0, Math.floor(xa * RES)); X <= Math.min(PW - 1, Math.ceil(xb * RES)); X++) {
+          const k = Y * PW + X;
+          if (d > dp[k]) { dp[k] = d; br[k] = v; }
+        }
+      }
+    });
+    // the skull under the crown: a sphere round the head's centre
+    const cx = V.x(0, -0.4), cy = V.y(HEAD + 0.6), rx = V.w(6.75, 7.1), ry = 8;
+    const skull = (X, Y) => { const u = ((X + 0.5) / RES - cx) / rx, w = -((Y + 0.5) / RES - cy) / ry, z = Math.sqrt(Math.max(0, 1 - u * u - w * w)); return lightOf([u, w, z], 0); };
+    return (shellMaps[front] = (X, Y) => { const v = br[Y * PW + X]; return Number.isNaN(v) ? skull(X, Y) : v; });
+  };
   const drawBob = (front) => {
     const mine = bob.filter((b) => b.facing === front);
     if (!mine.length) return;
-    if (!front) { mine.forEach((b) => P.p(b.q.map((p) => [p[0], p[1]]))); P.fill(HAIR, { pattern: cleanStrands, round: 1, dim: true, dither: 0.3 }); return; }
+    if (!front) {
+      mine.forEach((b) => P.p(b.q.map((p) => [p[0], p[1]])));
+      if (!SHELL) P.fill(HAIR, { pattern: cleanStrands, round: 1, dim: true, dither: 0.3 });
+      else { const L = shellLight(false); P.fill(HAIR, { shade: (X, Y) => L(X, Y) + cleanStrands(X, Y) - 0.12, dither: 0.3 }); }
+      return;
+    }
     // (the shape itself was added to the head's hair mask and filled with it; here come the details on top)
     // the curled-under ends sit in shadow
-    mine.filter((b) => b.band >= lastBands).forEach((b) => P.p(b.q.map((p) => [p[0], p[1]])));
-    P.fill(HAIR, { pattern: softStrands, round: 0.6, lift: -0.2 });
+    // (with shell shading the ends already fall into shadow by themselves, and darkening them again made a blob)
+    if (!SHELL) {
+      mine.filter((b) => b.band >= lastBands).forEach((b) => P.p(b.q.map((p) => [p[0], p[1]])));
+      P.fill(HAIR, { pattern: softStrands, round: 0.6, lift: -0.2 });
+    }
     // wavy hair: strands that follow the shell ring by ring, so they ripple with the waves, and a lit
     // fleck on each crest where the wave swells out toward the light
     if (st.wavy) {
@@ -606,24 +683,41 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
         const r = t < 0.4 ? lerp(7.05, 7.35 + b, t / 0.4) : lerp(7.35 + b, 7.4, (t - 0.4) / 0.6);
         return V.seam(r - inset, r + 0.2 - inset, phi, h);
       };
-      const run = (phi, t0, t1, inset, tone) => {
+      // (sway: the lock's line drifts round the head as it falls, so it curves instead of running ruler-straight)
+      const run = (phi, t0, t1, inset, tone, sway, gap) => {
         // (a step of a quarter of a fine pixel or less along the lock, so the line has no gaps on long hair)
         const len = Math.abs(path(phi, 0, inset)[1] - path(phi, 1, inset)[1]) + 1, dt = 1 / (len * RES * 4);
-        for (let t = t0; t <= t1; t += dt) { const q = path(phi, t, inset); if (q[2] > 2.6) onHair(q[0], q[1], HAIR[typeof tone === 'function' ? tone(t) : tone]); }
+        for (let t = t0; t <= t1; t += dt) {
+          // (gap: a stretch where the line breaks off, as a groove does where two locks lie together for a while)
+          if (gap && t > gap[0] && t < gap[1]) continue;
+          const q = path(phi + (sway ? sway(t) : 0), t, inset);
+          if (q[2] > 2.6) onHair(q[0], q[1], HAIR[typeof tone === 'function' ? tone(t) : tone]);
+        }
       };
+      // Each lock is a little different, so the hair does not read as ruled lines: its place round the head is
+      // nudged off the even spacing, its line sways in a gentle S as it falls (each its own way), the groove
+      // starts and ends at its own height and on some locks breaks off for a stretch, and the lit ridge runs
+      // its own length. (rnd(n, k): a fixed pseudo-random number in -1..1 for lock n.)
+      const rnd = (n, k) => Math.sin(n * 12.9898 + k * 78.233) * 0.5 + Math.sin(n * 4.1 + k * 2.7) * 0.5;
       for (let n = 0; n < clumpN; n++) {
         // the swell of the lock (bulge peaks) and the parting before it (bulge dips)
-        const ridge = (Math.PI / 2 + Math.PI * 2 * n) / clumpN, groove = ridge - Math.PI / clumpN;
+        const step = Math.PI * 2 / clumpN, ridge = (Math.PI / 2 + Math.PI * 2 * n) / clumpN + rnd(n, 1) * step * 0.14;
+        const groove = ridge - step / 2 + rnd(n, 2) * step * 0.18;
+        const amp = (0.13 + 0.06 * rnd(n, 3)) * (n % 2 ? 1 : -1), fq = 2.4 + rnd(n, 4) * 0.9, ph0 = rnd(n, 5) * 3;
+        const sway = (t) => amp * Math.sin(t * fq + ph0) * Math.min(1, t * 3);
         if (Math.abs(Math.atan2(Math.sin(groove), Math.cos(groove))) < FACE + 0.05) continue;
         // the groove: shallow under the crown, deepening down the length where the locks fall apart
-        run(groove, 0.08 + (n % 3) * 0.04, 0.96, 0.05, (t) => (t < 0.45 ? 1 : 0));
+        const g0 = 0.1 + Math.abs(rnd(n, 6)) * 0.2, g1 = 0.8 + Math.abs(rnd(n, 7)) * 0.17;
+        const gap = rnd(n, 8) > 0.3 ? [0.4 + rnd(n, 9) * 0.1, 0.52 + rnd(n, 9) * 0.1] : null;
+        run(groove, g0, g1, 0.05, (t) => (t < 0.45 + rnd(n, 10) * 0.1 ? 1 : 0), sway, gap);
         if (Math.abs(Math.atan2(Math.sin(ridge), Math.cos(ridge))) < FACE + 0.05) continue;
         const lit = lightOn(ridge), up = lit > 0.45 ? 4 : lit > 0.1 ? 3 : 2;
         // the ridge: brightest just under the crown, fading down the lock, a little to the lit side of centre
         // (two fine pixels wide, so the lock reads as a rounded form rather than another line)
+        const r0 = 0.04 + Math.abs(rnd(n, 11)) * 0.1, rm = 0.26 + Math.abs(rnd(n, 12)) * 0.18, r1 = 0.5 + Math.abs(rnd(n, 13)) * 0.3;
         [0.03, 0.1].forEach((dp, j) => {
-          run(ridge + dp, 0.05 + j * 0.04, 0.3 + (n % 2) * 0.12, 0.15, j ? Math.max(2, up - 1) : up);
-          run(ridge + dp, 0.3 + (n % 2) * 0.12, 0.62 + (n % 3) * 0.08 - j * 0.1, 0.15, Math.max(2, up - 1 - j));
+          run(ridge + dp, r0 + j * 0.04, rm, 0.15, j ? Math.max(2, up - 1) : up, sway);
+          run(ridge + dp, rm, r1 - j * 0.1, 0.15, Math.max(2, up - 1 - j), sway);
         });
       }
     }
@@ -648,7 +742,8 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
         P.cut(pts);
       });
     }
-    P.fill(HAIR, { pattern: cleanStrands, round: 1.1, dither: 0.3 });
+    if (!SHELL) P.fill(HAIR, { pattern: cleanStrands, round: 1.1, dither: 0.3 });
+    else { const L = shellLight(true); P.fill(HAIR, { shade: (X, Y) => L(X, Y) + cleanStrands(X, Y), dither: 0.6 }); }
     drawBob(true);
     // Crown detail, crisp like the fringe instead of a soft speckle: strands running from the top of the
     // head down over the crown into the fringe, and one clean band of sheen across the curve of the head,
@@ -674,46 +769,57 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
     // darken here turned the warm skin grey, a pale band under the fringe like the rim of a cap)
     // side parting
     for (let k = 0; k <= 7; k++) { const q = V.seam(2.6, 6.6 - k * 1.5, 0, HEAD + 7.4 - Math.abs(k - 3) * 0.25); if (q[2] > -3) P.dotOn(V.x(bg.partA, 6.6 - k * 1.5), q[1], HAIR[1]); }
-    // fringe: strand shadows sweeping across the forehead, and darker tips along the edge
+    // Fringe: each lock is painted as one clear shape rather than built up from single pixels (which turned
+    // into speckle at this size): a band from the lock's tip up into the fringe, leaning with the bangs' sweep
+    // and narrowing to its tip, shaded as a rounded lock with a lit band down the side toward the light (upper
+    // left, positive phi) and the other side in shadow; between the locks, a dark crease up from each notch,
+    // deepest at the edge and fading as the locks merge higher up. Everything lands on the hair's own pixels.
     if (V.fz > -0.25) {
-      [-0.9, -0.45, 0, 0.45].forEach((p0) => {
-        // with a centre parting the locks sweep outward, so no strand runs across the middle
-        const phi = bg.partA === 0 && p0 === 0 ? 0.9 : p0, dir = bg.dir(phi);
-        const a = V.seam(6.6, 7, phi - 0.25 * dir, hairline(phi - 0.25 * dir) + 2.4), b = V.seam(7.05, 7.45, phi + 0.3 * dir, hairline(phi + 0.3 * dir) + 0.6);
-        if (b[2] > 3 && a[2] > 3) P.l(a[0], a[1], b[0], b[1], 0.5);
-      });
-      P.fill(HAIR, { flat: true, tone: 1, on: true });
-      // the edge of the fringe: darkest in the notches between locks and lighter at the tips, where the
-      // hair thins out, so the edge reads as soft ends rather than one drawn line
-      const between = (phi) => { const u = phi * F + 0.3; return Math.abs(u - Math.round(u)) * 2; };
-      for (let k = 0; k <= 48; k++) { const phi = -FACE + k / 48 * 2 * FACE, h = V.seam(7.1, 7.5, phi, hairline(phi) + 0.25); if (h[2] > 1) P.dotOn(h[0], h[1], HAIR[between(phi) > 0.55 ? 1 : 2]); }
-      // Fringe detail, so it reads as locks of hair rather than a flat band. The light comes from the
-      // upper left (positive phi on screen), so locks on that side get the brighter highlights.
       const onF = (phi, h, fn) => { const q = V.seam(7.1, 7.5, phi, h); if (q[2] > 1) fn(q[0], q[1]); };
-      for (let n = -nLocks; n <= nLocks; n++) {
-        const tipPhi = (n - 0.3) / F, notch = (n + 0.5 - 0.3) / F, lit = tipPhi > -0.25, dir = bg.dir(notch);
+      const at = (phi, h) => { const q = V.seam(7.1, 7.5, phi, h); return [q[0], q[1], q[2]]; };
+      // (the locks are shaded in pairs, as broader locks about four fine pixels wide: a single lock is two
+      // pixels across, with no room for a lit band and a shadowed side, and came out as dark spikes)
+      const W = 1 / F, LEN = 3.6;
+      // a band across a lock, from fraction a to b of its width (0 its shadowed side, 1 its lit side), from u0
+      // to u1 of its length (0 at the tip, 1 up in the fringe); it leans toward the parting as it rises
+      const band = (tipPhi, dir, a, b, u0, u1) => {
+        const L = [], R = [], N = 6;
+        for (let k = 0; k <= N; k++) {
+          const u = lerp(u0, u1, k / N), w = W * (0.45 + 0.55 * Math.min(1, u * 1.6)), c = tipPhi - 0.2 * dir * u, h = hairline(c) + 0.15 + u * LEN;
+          L.push(at(c - w + a * 2 * w, h)); R.push(at(c - w + b * 2 * w, h));
+        }
+        const pts = L.concat(R.reverse());
+        if (pts.some((q) => q[2] <= 1)) return false;
+        P.p(pts.map((q) => [q[0], q[1]]));
+        return true;
+      };
+      const locks = [];
+      for (let n = -nLocks; n <= nLocks; n += 2) {
+        const tipPhi = (n + 0.5 - 0.3) / F, notch = (n + 1.5 - 0.3) / F;
         if (Math.abs(tipPhi) > FACE - 0.1) continue;
-        // a groove parting two locks, curving toward the parting as it rises and fading out as the locks
-        // merge higher up: deep only right at the notch, longer at every other one
-        const gl = n % 2 === 0 ? 5 : 4;
-        for (let j = 0; j <= gl; j++) onF(notch - j * 0.02 * dir, hairline(notch) + 0.3 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j < 1 ? 0 : j < 3 ? 1 : 2]));
-        // a fine strand down each lock, following its sweep, one shade off the hair around it, so the lock
-        // has a grain without a hard line; it thins out (every third pixel left out) as it rises
-        { const sp = tipPhi + 0.3 / F, top = 3 + (n & 1) * 0.5;
-          for (let j = 1; j * 0.5 <= top; j++) {
-            if (j > 3 && j % 3 === 0) continue;
-            onF(sp - j * 0.012 * dir, hairline(sp) + 0.4 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[lit ? 3 : 2]));
-          } }
-        // locks on the lit side catch a soft sheen along the top of their curve, rising from the hair tone
-        // to the brightest and back, so the light lies on the hair rather than on top of it
-        if (lit) for (let j = 0; j <= 3; j++) onF(tipPhi + 0.02 - j * 0.015, hairline(tipPhi) + 1.4 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j === 1 || j === 2 ? (n % 2 ? 4 : 3) : 3]));
-        // a few fine ends slip past the cut edge onto the forehead, softening it
-        if ((n * 7 + 3) % 3 === 0) onF(tipPhi + 0.03 * dir, hairline(tipPhi) - 0.2, (x, y) => P.dotOn(x, y, HAIR[2]));
+        // (the side of the face toward the light, positive phi, is brighter all over)
+        locks.push({ n, tipPhi, notch, dir: bg.dir(tipPhi), lit: tipPhi > -0.25 });
       }
+      // the shadowed side of each lock, down most of its length
+      locks.forEach((l) => band(l.tipPhi, l.dir, 0, 0.2, 0.12, 0.6));
+      P.fill(HAIR, { flat: true, tone: 1, on: isHair });
+      // the lit band down the side toward the light, brightest a little above the tip, where the lock curves
+      locks.forEach((l) => band(l.tipPhi, l.dir, 0.55, 0.85, 0.15, (l.n / 2) % 2 ? 0.85 : 0.7));
+      P.fill(HAIR, { flat: true, tone: 3, on: isHair });
+      locks.filter((l) => l.lit).forEach((l) => band(l.tipPhi, l.dir, 0.62, 0.8, 0.28, 0.55));
+      P.fill(HAIR, { flat: true, tone: 4, on: isHair });
+      // the creases between locks: one dark pixel wide, from the notch up, darkest at the edge
+      locks.forEach((l) => {
+        const d = bg.dir(l.notch), gl = (l.n / 2) % 2 === 0 ? 2.8 : 2.2;
+        for (let h = 0; h <= gl; h += 0.5) onF(l.notch - 0.2 * d * (h / LEN), hairline(l.notch) + 0.2 + h, (x, y) => P.dotOn(x, y, HAIR[h < 1 ? 0 : 1]));
+      });
+      // the cut edge: the tips themselves one shade down, where the hair thins out and tucks under (not on soft,
+      // wispy bangs, where a dark line along the edge reads as the rim of a cap)
+      if (!bg.soft) for (let k = 0; k <= 48; k++) { const phi = -FACE + k / 48 * 2 * FACE; onF(phi, hairline(phi) + 0.25, (x, y) => P.dotOn(x, y, HAIR[1])); }
       // a centre parting: a dark line up the middle where the two sides fall apart
       if (bg.partA === 0) for (let j = 0; j <= 6; j++) onF(0, hairline(0) + 0.2 + j * 0.5, (x, y) => P.dotOn(x, y, HAIR[j < 4 ? 0 : 1]));
       // the fringe tucks under at its tips: a darker band just above the edge
-      for (let k = 0; k <= 40; k++) { const phi = -FACE + 0.05 + k / 40 * (2 * FACE - 0.1); onF(phi, hairline(phi) + 0.7, (x, y) => P.darken(x, y, 0.94)); }
+      if (!bg.soft) for (let k = 0; k <= 40; k++) { const phi = -FACE + 0.05 + k / 40 * (2 * FACE - 0.1); onF(phi, hairline(phi) + 0.7, (x, y) => P.darken(x, y, 0.94)); }
     }
     // The hair casts a faint shadow onto the cheek where it overlaps it: lit skin right against the hair
     // steps one shade down the skin ramp. Only skin pixels change, so the eyes, brows and hair are untouched.

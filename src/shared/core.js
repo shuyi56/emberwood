@@ -41,6 +41,16 @@ const RES = 2, PW = FW * RES, PH = FH * RES;
 // but lean toward orange-brown (hue about 15-19 degrees) rather than red, so the face can carry strong
 // form without looking either flushed or grey.
 const SKIN = [[160, 100, 80], [191, 134, 108], [207, 159, 132], [218, 180, 156], [229, 203, 184]];
+// The skin tones a character can be given (spec.skinTone), each a hand-set ramp from shadow to highlight; the
+// first is the default. Fair: paler and pinker, with less colour in the light. Its shadows still keep warmth,
+// leaning rose-brown (hue about 12-16 degrees) so they model the form instead of greying it, and it steps less
+// between the lit tones, as pale skin does, while the shadow end stays deep enough to carry the face's planes.
+const SKINS = [
+  { key: 'medium', name: 'Medium', ramp: SKIN },
+  { key: 'fair', name: 'Fair', ramp: [[178, 118, 102], [212, 157, 137], [231, 186, 164], [240, 206, 187], [247, 226, 211]] }
+];
+// a skin tone's ramp by key (unknown or missing: the default)
+const skinRamp = (key) => (SKINS.find((t) => t.key === key) || SKINS[0]).ramp;
 const CX = 32, GY = 77, HEAD = 52;
 
 // surface patterns: a fine random grain, and hair strands (soft with grain, or clean for crisp detail on top)
@@ -49,4 +59,4 @@ const softStrands = (x, y) => { const k = (x * 5 + Math.floor(y / 4) * 2) % 11; 
 // the same streaks without the grain noise, for surfaces that carry crisp drawn detail on top
 const cleanStrands = (x, y) => { const k = (x * 5 + Math.floor(y / 4) * 2) % 11; return k === 0 ? -0.1 : k === 6 ? 0.05 : 0; };
 
-export { lerp, FW, FH, COLS, ROWS, WALK, ramp, RES, PW, PH, SKIN, CX, GY, HEAD, grain, softStrands, cleanStrands };
+export { lerp, FW, FH, COLS, ROWS, WALK, ramp, RES, PW, PH, SKIN, SKINS, skinRamp, CX, GY, HEAD, grain, softStrands, cleanStrands };

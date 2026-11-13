@@ -3,15 +3,17 @@
 // world load those files instead of painting sheets at runtime.
 import { ROSTER } from './party.js';
 import { HAIRSTYLES } from './presets/female-head.js';
+import { SKINS } from './core.js';
 
 const SHEET_DIR = 'sprites';
-const sheetFile = (key, hair) => (hair ? `${key}-${hair}.png` : `${key}.png`);
+// (the default skin tone, the first of SKINS, keeps the plain name; any other adds its key)
+const sheetFile = (key, hair, skin) => (hair ? `${key}-${hair}` : key) + (skin && skin !== SKINS[0].key ? `-${skin}` : '') + '.png';
 
-// every sheet to paint: { key, hair (or null), file, spec }
+// every sheet to paint: { key, hair (or null), skin, file, spec }, one for each hairstyle and skin tone
 function allSheets() {
-  return ROSTER.flatMap((c) => (c.spec.hairStyle
-    ? HAIRSTYLES.map((h) => ({ key: c.key, hair: h.key, file: sheetFile(c.key, h.key), spec: { ...c.spec, hairStyle: h.key } }))
-    : [{ key: c.key, hair: null, file: sheetFile(c.key, null), spec: c.spec }]));
+  return ROSTER.flatMap((c) => (c.spec.hairStyle ? HAIRSTYLES.map((h) => h.key) : [null]).flatMap((hair) => SKINS.map(({ key: skin }) => ({
+    key: c.key, hair, skin, file: sheetFile(c.key, hair, skin), spec: { ...c.spec, ...(hair ? { hairStyle: hair } : {}), skinTone: skin }
+  }))));
 }
 
 export { SHEET_DIR, sheetFile, allSheets };
