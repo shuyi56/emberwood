@@ -1317,7 +1317,7 @@ function clericCowl(P, A) {
     P.fill(W, { flat: true, tone: 2, on: true, pattern: linen });
     FOLDS.forEach(([u0, u1, h0, h1, bow, w]) => crease(u0 - 0.01, u1 - 0.01, h0 - 0.8, h1 + 1.6, bow, 0.4, w * 0.45));
     P.fill(W, { flat: true, tone: 1, on: true });
-    FOLDS.forEach(([u0, u1, h0, h1, bow, w]) => crease(u0 + 0.14, u1 + 0.12, h0 - 0.6, h1 + 2.2, bow, 0.4, 0.8));
+    FOLDS.forEach(([u0, u1, h0, h1, bow]) => crease(u0 + 0.14, u1 + 0.12, h0 - 0.6, h1 + 2.2, bow, 0.4, 0.8));
     P.fill(W, { flat: true, tone: 4, on: true });
     // the opening: seen from behind, the black lining is a crescent, hugging the collar along its top and
     // sagging in the middle to a thick rolled edge below it. It tapers to nothing over each shoulder.
