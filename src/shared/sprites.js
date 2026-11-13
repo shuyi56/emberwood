@@ -180,9 +180,14 @@ const EYE = [46, 40, 38], WHITE = [226, 222, 210];
 function View(theta, bob, sway) {
   sway = sway || 0;
   const fx = Math.sin(theta), fz = Math.cos(theta), rx = -Math.cos(theta), rz = Math.sin(theta);
+  // The walk's bob and sway move the whole figure. They are snapped to whole fine pixels, so the figure moves
+  // rigidly: a shift of a fraction of a pixel lands the shapes and the details snapped to the pixel grid (eyes,
+  // mouth) on different sides of a pixel, and the face comes out subtly rearranged in those frames.
+  bob = Math.round(bob * RES) / RES;
+  const shift = Math.round(sway * rx * RES) / RES;
   const V = {
     fx, fz, rx, rz, bob,
-    x: (a, b) => CX + (a + sway) * rx + b * fx,
+    x: (a, b) => CX + shift + a * rx + b * fx,
     y: (h) => GY - h + bob,
     d: (a, b) => a * rz + b * fz,
     pt: (a, b, h) => [V.x(a, b), V.y(h)],
@@ -205,15 +210,18 @@ const JAWLINE = { male: [[-0.8, -4.9], [3.0, -7.7]], fem: [[-0.6, -4.6], [2.8, -
 // the bridge and tip of the nose, the upper lip, the lips and the point of the chin
 function PROFILE_FRONT(P, V, fem) {
   const pts = fem
-    ? [[4.2, 1.6], [6.2, 1.0], [6.4, 0], [6.1, -0.9], [6.4, -2.0], [6.7, -2.9], [6.3, -3.3], [6.0, -3.6], [6.1, -4.4], [5.8, -5.0], [5.9, -5.5], [5.4, -6.0], [5.5, -6.6], [5.0, -7.2], [3.9, -7.45], [2.8, -7.35], [2.6, -5]]
-    : [[4.2, 1.6], [6.5, 1.2], [6.7, 0], [6.4, -0.9], [6.7, -2.0], [7.1, -3.0], [6.6, -3.5], [6.2, -3.8], [6.2, -4.8], [5.9, -5.3], [5.8, -5.8], [5.3, -6.5], [5.0, -7.1], [4.2, -7.7], [3.0, -7.75], [2.8, -5]];
+    ? [[4.2, 1.6], [6.2, 1.0], [6.4, 0], [6.1, -0.9], [6.4, -2.0], [6.7, -2.9], [6.3, -3.3], [6.0, -3.6], [6.1, -4.4], [5.8, -5.0], [5.9, -5.5], [5.4, -6.0], [5.5, -6.6], [5.2, -7.1], [4.6, -7.45], [3.7, -7.6], [2.8, -7.4], [2.6, -5]]
+    : [[4.2, 1.6], [6.5, 1.2], [6.7, 0], [6.4, -0.9], [6.7, -2.0], [7.1, -3.0], [6.6, -3.5], [6.2, -3.8], [6.2, -4.8], [5.9, -5.3], [5.8, -5.8], [5.3, -6.5], [5.0, -7.1], [4.5, -7.65], [3.8, -7.95], [3.0, -7.85], [2.8, -5]];
   const at = ([b, h]) => [V.x(0, b), V.y(HEAD + h)];
   P.p(pts.map(at));
   // the jawline: from the point of the chin it runs back and up to the angle of the jaw below the ear.
   // The rounded bottoms of the skull and the jaw below that line would read as a swollen lower cheek.
   const [angle, chin] = JAWLINE[fem ? 'fem' : 'male'];
   // (only in front of the angle: behind it the head runs into the neck, and cutting there leaves a gap)
-  P.cut([angle, chin, [chin[0] + 4, chin[1]], [chin[0] + 4, -14], [angle[0], -14]].map(at));
+  // (the line bows gently down between the two, so the jaw reads as a soft curve rather than a hard edge)
+  const line = [];
+  for (let k = 0; k <= 6; k++) { const t = k / 6; line.push([lerp(angle[0], chin[0], t), lerp(angle[1], chin[1], t) - 0.5 * Math.sin(Math.PI * t)]); }
+  P.cut(line.concat([[chin[0] + 4, chin[1]], [chin[0] + 4, -14], [angle[0], -14]]).map(at));
 }
 const FACE_LIGHT = (() => { const l = [-0.5, 0.55, 0.67], n = Math.hypot(...l); return l.map((c) => c / n); })();
 function faceShade(V, fem, SKULL, JAW) {
