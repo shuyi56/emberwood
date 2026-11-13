@@ -531,9 +531,6 @@ function drawFigure(P, S, theta, f) {
         const pS2 = [pS[0] - outward * 0.2, pS[1] + 0.6];
         const mouth = []; for (let k = 0; k <= 10; k++) { const t = k / 10, x = pH[0] + outward * lerp(-open + 0.5, open - 0.3, t); mouth.push([x, wy + lerp(1.0, 1.6, t) + 1.7 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.75)), 0.8)]); }
         P.t(pS2[0], pS2[1], pE[0], pE[1], wu + 0.2, wu + 0.6)
-          // the shoulder: a soft round where the cloth falls over the top of the arm, so the line from the
-          // neck runs on down the sleeve with no corner or step
-          .e(pS2[0] + outward * 0.2, pS2[1] + 1.2, wu / 2 + 0.5, 2.8)
           .p([[pE[0] - wu / 2 - 0.3, pE[1]], [pE[0] + wu / 2 + 0.3, pE[1]]].concat(outward > 0 ? mouth.slice().reverse() : mouth));
         P.fill(S.sleeve, { round: 0.75, dim: depth < -4, pattern: S.sleevePattern });
         // folds running down the sleeve, and the dark inside of the opening
@@ -1238,15 +1235,6 @@ function clericCowl(P, A) {
   // the lit roll just above each shadow
   U.forEach(([fr, sag, pm, off]) => draw(foldAt(fr - 0.09, sag, pm * 0.8, off), 2, 0.45, 0.6));
   P.fill(W, { flat: true, tone: 4, on: true });
-  // pinches where the folds gather at the shoulders: short creases running down and out
-  [-1, 1].forEach((sd) => [0.95, 1.2].forEach((phi, i) => { const a = V.seam(lerp(4.4, B.sh - 0.5, 0.3), lerp(4.1, B.depth + 0.35, 0.3), sd * phi, lerp(40.4, hemH(sd * phi), 0.3)), b = bot(sd * (phi + 0.15)); if (a[2] > 1.5 && b[2] > 1.5) P.l(a[0], a[1], lerp(a[0], b[0], 0.7), lerp(a[1], b[1], 0.7), i ? 0.45 : 0.6); }));
-  P.fill(W, { flat: true, tone: 2, on: true });
-  // folds from the throat out over each shoulder and down the back
-  [-1.75, -2.4, -2.85, 1.75, 2.4, 2.85, Math.PI].forEach((phi, i) => {
-    const a = top(phi), b = bot(phi + 0.12 * Math.sign(phi)), m = [lerp(a[0], b[0], 0.55), lerp(a[1], b[1], 0.55)];
-    if (a[2] > 1 && b[2] > 1) { P.l(a[0], a[1] + 0.8, m[0], m[1], 0.5).l(m[0], m[1], b[0], b[1] - 0.5, i % 3 === 1 ? 0.6 : 0.9); }
-  });
-  P.fill(W, { flat: true, tone: 2, on: true });
   // The collar: a standing roll of cloth round the neck, low at the throat and rising at the sides and
   // back, flaring a little at its top and finished with a thick lit roll. It gives the neckpiece height
   // and body instead of a flat edge, and its inside shows as a shadowed band where it stands away.
@@ -1281,14 +1269,18 @@ function clericCowl(P, A) {
   }
   // the seam where the collar meets the cowl: a soft shadow line, and the cowl's shadow cast on it
   for (let k = 0; k <= 80; k++) { const phi = k / 80 * Math.PI * 2, q = ringAt(phi, 40.0); if (q[2] > 1) P.darken(q[0], q[1] + 0.2, 0.82, 0).darken(q[0], q[1] + 0.7, 0.92, 0); }
-  // the edge: a narrow black band following the rippled hem, a white running stitch just inside it,
-  // and a soft shadow on the robe and sleeves below that is deepest where the cowl hangs lowest
+  // the edge: a narrow black band and white running stitch along the hem where it hangs across the
+  // breast and back only. Over the shoulders there is no line at all, just a shadow that fades out, so
+  // nothing reads as a pad or a plate on top of the arm.
   for (let k = 0; k <= 200; k++) {
-    const phi = k / 200 * Math.PI * 2, q = bot(phi), deep = Math.max(0, Math.cos(phi)) ** 2;
+    // g: how squarely this part of the hem faces us, front on the breast or back on the shoulder blades;
+    // it is zero in profile, where the hem is seen edge-on and any line would sit on the silhouette
+    const phi = k / 200 * Math.PI * 2, q = bot(phi), g = Math.max(0, Math.cos(phi) * (V.fz > 0 ? 1 : -1) * Math.abs(V.fz)), deep = Math.max(0, Math.cos(phi)) ** 2;
     if (q[2] < 0.9) continue;
-    if (q[2] > 3.0) P.dotOn(q[0], q[1] - 0.25, K[q[2] > 4.4 ? 2 : 3]);
-    if (q[2] > 2.6 && k % 4 === 0) P.dotOn(q[0], q[1] - 1.0, W[1]);
-    P.darken(q[0], q[1] + 0.3, 0.8 - 0.06 * deep, 0).darken(q[0], q[1] + 0.8, 0.88, 0).darken(q[0], q[1] + 1.3, 0.95, 0);
+    if (g > 0.5) P.dotOn(q[0], q[1] - 0.25, K[g > 0.8 ? 2 : 3]);
+    if (g > 0.5 && k % 4 === 0) P.dotOn(q[0], q[1] - 1.0, W[1]);
+    const f = Math.min(1, g * 1.3);
+    P.darken(q[0], q[1] + 0.3, 1 - (0.2 + 0.06 * deep) * f, 0).darken(q[0], q[1] + 0.8, 1 - 0.12 * f, 0).darken(q[0], q[1] + 1.3, 1 - 0.05 * f, 0);
   }
   // The hood, thrown back and resting on her shoulder blades: a full bag of cloth gathered up behind the
   // collar. It is built on the same ellipse as the body and wraps round the back of it, so it turns with
@@ -1335,7 +1327,7 @@ function clericCowl(P, A) {
     const at = (u, h) => V.seam(ra0, rb0, PI + u * span, h);
     const upper = [], lower = [];
     for (let k = 0; k <= 16; k++) { const u = -1 + k / 8; upper.push(at(u, up(u))); lower.push(at(u, lo(u))); }
-    const vis = (q) => q[2] > 0.3;
+    const vis = (q) => Math.abs(V.fz) > 0.3 && q[2] > 1.6 * Math.abs(V.fz) + 0.3;
     P.p(upper.filter(vis).concat(lower.filter(vis).reverse()).map((q) => [q[0], q[1]])).fill(K, { round: 0.5, on: true });
     for (let k = 2; k <= 14; k++) { const u = -1 + k / 8, q = at(u, up(u) - 0.6); if (vis(q)) P.dotOn(q[0], q[1], K[2]); }
     // the rolled edge: a thick pale band along the lower curve, lit on top, shaded at its underside
