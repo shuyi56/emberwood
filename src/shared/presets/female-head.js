@@ -554,7 +554,8 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
       crest.forEach(([q, tone]) => { const X = Math.floor(q[0] * RES), Y = Math.floor(q[1] * RES); if (X >= 0 && Y >= 0 && X < PW && Y < PH && isHair(Y * PW + X)) P.dot(q[0], q[1], HAIR[tone]); });
     }
     // strands: curved lines down each lock, longer and shorter, not evenly spaced
-    if (!st.wavy) for (let k = 0; k <= 26; k++) {
+    // (long straight hair gets the locks below instead, which these would stripe over)
+    if (!st.wavy && !shape) for (let k = 0; k <= 26; k++) {
       const phi = FACE + 0.05 + k / 26 * (Math.PI * 2 - 2 * FACE - 0.1) + Math.sin(k * 2.7) * 0.04;
       const top = HEAD + 0.6 - (k % 3) * 0.9, bend = Math.sin(k * 1.7) * 0.08;
       const stop = shape ? 2.6 + (k % 2) * 1.4 : 1.2 + (k % 2) * 0.8;
@@ -591,6 +592,41 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
       if (m[2] > 2 && (k % 2 === 0)) P.l(a[0] + 0.3, a[1], m[0] + 0.3, m[1], 0.4);
     }
     P.fill(HAIR, { flat: true, tone: 3 });
+    // Locks. Each of the clumps the outline swells into (bulge) is drawn as a rounded lock, so the hair has
+    // form from every side, not only where the fringe and crown face us: a dark groove where two locks part,
+    // and a lit ridge down the upper part of each lock, as bright as that lock is turned toward the light.
+    // (wavy hair has its own strands that follow the waves)
+    if (!st.wavy) {
+      const [Lx, , Lz] = [-0.5, 0.55, 0.67];
+      const lightOn = (phi) => { const s = Math.sin(phi), c = Math.cos(phi); return ((s * V.rx + c * V.fx) * Lx + (s * V.rz + c * V.fz) * Lz) / 0.84; };
+      // a point a fraction t down a lock line at phi, from below the crown to just above its end
+      const path = (phi, t, inset) => {
+        const b = bulge(phi) * 0.6, top = HEAD + 0.8, end = endH(phi) + (shape ? 1.4 : 0.8);
+        const h = t < 0.4 ? lerp(top, HEAD - 3.4, t / 0.4) : lerp(HEAD - 3.4, end, (t - 0.4) / 0.6);
+        const r = t < 0.4 ? lerp(7.05, 7.35 + b, t / 0.4) : lerp(7.35 + b, 7.4, (t - 0.4) / 0.6);
+        return V.seam(r - inset, r + 0.2 - inset, phi, h);
+      };
+      const run = (phi, t0, t1, inset, tone) => {
+        // (a step of a quarter of a fine pixel or less along the lock, so the line has no gaps on long hair)
+        const len = Math.abs(path(phi, 0, inset)[1] - path(phi, 1, inset)[1]) + 1, dt = 1 / (len * RES * 4);
+        for (let t = t0; t <= t1; t += dt) { const q = path(phi, t, inset); if (q[2] > 2.6) onHair(q[0], q[1], HAIR[typeof tone === 'function' ? tone(t) : tone]); }
+      };
+      for (let n = 0; n < clumpN; n++) {
+        // the swell of the lock (bulge peaks) and the parting before it (bulge dips)
+        const ridge = (Math.PI / 2 + Math.PI * 2 * n) / clumpN, groove = ridge - Math.PI / clumpN;
+        if (Math.abs(Math.atan2(Math.sin(groove), Math.cos(groove))) < FACE + 0.05) continue;
+        // the groove: shallow under the crown, deepening down the length where the locks fall apart
+        run(groove, 0.08 + (n % 3) * 0.04, 0.96, 0.05, (t) => (t < 0.45 ? 1 : 0));
+        if (Math.abs(Math.atan2(Math.sin(ridge), Math.cos(ridge))) < FACE + 0.05) continue;
+        const lit = lightOn(ridge), up = lit > 0.45 ? 4 : lit > 0.1 ? 3 : 2;
+        // the ridge: brightest just under the crown, fading down the lock, a little to the lit side of centre
+        // (two fine pixels wide, so the lock reads as a rounded form rather than another line)
+        [0.03, 0.1].forEach((dp, j) => {
+          run(ridge + dp, 0.05 + j * 0.04, 0.3 + (n % 2) * 0.12, 0.15, j ? Math.max(2, up - 1) : up);
+          run(ridge + dp, 0.3 + (n % 2) * 0.12, 0.62 + (n % 3) * 0.08 - j * 0.1, 0.15, Math.max(2, up - 1 - j));
+        });
+      }
+    }
   };
   add(-1, () => drawBob(false));
   if (st.extra) st.extra(add, P, A, HAIR);
@@ -625,17 +661,17 @@ function drawFemaleHead(add, P, A, HAIR, styleKey) {
       const end = sheenH(phi) + 0.4, top = HEAD + 7.6 - (i % 2) * 0.5;
       for (let h = top; h >= end; h -= 0.5) { const t = (top - h) / Math.max(0.5, top - end); onCrown(lerp(phi * 0.75 - 0.08, phi, t), h, (x, y) => P.dotOn(x, y, HAIR[t < 0.35 ? 2 : phi > 0 ? 2 : 1])); }
     });
-    for (let k = 0; k <= 44; k++) {
-      const phi = -1.25 + k / 44 * 2.2;
-      if (strandPhis.some((sp) => Math.abs(sp - phi) < 0.05)) continue;
-      onCrown(phi, sheenH(phi), (x, y) => P.dotOn(x, y, HAIR[3]));
-      if (phi > -0.3) onCrown(phi, sheenH(phi) + 0.5, (x, y) => P.dotOn(x, y, HAIR[phi > 0.05 && phi < 0.7 ? 4 : 3]));
+    // the band of sheen runs right round the crown (seen from the side or behind it still catches the
+    // light), brightest where the crown turns toward the light and dull on the far side of it
+    const crownLight = (phi) => { const s = Math.sin(phi), c = Math.cos(phi); return ((s * V.rx + c * V.fx) * -0.5 + (s * V.rz + c * V.fz) * 0.67) / 0.84; };
+    for (let k = 0; k <= 120; k++) {
+      const phi = -Math.PI + k / 120 * Math.PI * 2, lit = crownLight(phi);
+      if (strandPhis.some((sp) => Math.abs(sp - phi) < 0.05) || lit < -0.35) continue;
+      onCrown(phi, sheenH(phi), (x, y) => P.dotOn(x, y, HAIR[lit > -0.05 ? 3 : 2]));
+      if (lit > 0.25) onCrown(phi, sheenH(phi) + 0.5, (x, y) => P.dotOn(x, y, HAIR[lit > 0.6 ? 4 : 3]));
     }
-    // the fringe casts a soft shadow onto the forehead
-    if (V.fz > -0.25) for (let k = 0; k <= 30; k++) {
-      const phi = -FACE + k / 30 * 2 * FACE, h = hairline(phi), q = V.seam(7.1, 7.5, phi, h - 0.7), q2 = V.seam(7.1, 7.5, phi, h - 1.2);
-      if (q[2] > 1) { P.darken(q[0], q[1], 0.86); P.darken(q2[0], q2[1], 0.93); }
-    }
+    // (the fringe's shadow on the forehead is cast below, by stepping skin down its own ramp: a plain
+    // darken here turned the warm skin grey, a pale band under the fringe like the rim of a cap)
     // side parting
     for (let k = 0; k <= 7; k++) { const q = V.seam(2.6, 6.6 - k * 1.5, 0, HEAD + 7.4 - Math.abs(k - 3) * 0.25); if (q[2] > -3) P.dotOn(V.x(bg.partA, 6.6 - k * 1.5), q[1], HAIR[1]); }
     // fringe: strand shadows sweeping across the forehead, and darker tips along the edge
