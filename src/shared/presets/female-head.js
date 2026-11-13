@@ -243,18 +243,46 @@ function ponytail(add, P, A, HAIR) {
 }
 
 function bun(add, P, A, HAIR) {
-  const V = A.V, c = V.pt(0, -4.6, HEAD + 6.2);
+  // An elaborate bun: three fat loops of hair wound into a knot on the crown, a fine plait wrapped round
+  // its foot, the hair below swept up into it in a few lit strands.
+  // The knot lies on a plane facing back and up, so it reads as a round knot from behind, a tall dome
+  // from the side and a crest over the crown from the front.
+  const V = A.V, C = [0, -4.6, HEAD + 7.4];
+  const U = [1, 0, 0], Vv = [0, 0.5, 0.87], N = [0, -0.87, 0.5];
+  const on3 = (r, th, dome) => [0, 1, 2].map((k) => C[k] + U[k] * r * Math.cos(th) * 1.08 + Vv[k] * r * Math.sin(th) + N[k] * dome);
   add(pieceDepth(V, 19.9), () => {
-    P.e(c[0], c[1], V.w(3.3, 3), 3).fill(HAIR, { pattern: cleanStrands, round: 1, dither: 0.3 });
-    // the twist of the knot: two curved grooves and a lit coil
-    for (let k = 0; k < 2; k++) {
-      for (let t = 0; t <= 1.001; t += 0.1) {
-        const a = Math.PI * (0.15 + t * 0.8) + k * Math.PI;
-        P.dotOn(c[0] + Math.cos(a) * 1.9 * (1 - t * 0.3), c[1] + Math.sin(a) * 1.7 * (1 - t * 0.3), HAIR[1]);
-      }
+    const dim = V.fz > 0.2;
+    // the hair swept up from the nape and sides into the knot, seen from behind and the side
+    if (V.fz < 0.4) {
+      [-2.6, -1.3, 0, 1.3, 2.6].forEach((a, i) => {
+        const p = V.pt(a * 1.25, -6.4 + Math.abs(a) * 0.35, HEAD - 2.2), q = V.pt(a * 0.45, -5.6, HEAD + 3.6);
+        P.l(p[0], p[1], q[0], q[1], 0.5);
+        if (i % 2 === 0) { const r = V.pt(a * 1.1, -6.3, HEAD - 0.6), m = V.pt(a * 0.6, -5.9, HEAD + 2.4); P.dotOn(r[0], r[1], HAIR[3]).dotOn(m[0], m[1], HAIR[3]); }
+      });
+      P.fill(HAIR, { flat: true, tone: 1, on: isHairOf(P, HAIR) });
     }
-    for (let t = 0; t <= 1.001; t += 0.12) { const a = Math.PI * (1.1 + t * 0.6); P.dotOn(c[0] + Math.cos(a) * 2.4, c[1] + Math.sin(a) * 2.2, HAIR[3]); }
-    P.dotOn(c[0] - 1.2, c[1] - 1.6, HAIR[4]);
+    // the base of the knot, a little wider than the coil, shading the hair it sits on
+    const c = V.pt(...C);
+    for (let a = 0.2; a < Math.PI - 0.2; a += 0.2) P.darken(c[0] + Math.cos(a) * V.w(5.1, 4.4), c[1] + Math.sin(a) * 4.4 + 0.6, 0.82);
+    P.e(c[0], c[1], V.w(4.9, 4.2), 4.3).fill(HAIR, { pattern: cleanStrands, round: 0.8, dither: 0.3, dim, lift: -0.1 });
+    // the knot: three fat loops of hair wound together, each standing off the others with its own dark
+    // edge, lit along its upper curve and shadowed where it tucks under its neighbour
+    const loops = [[Math.PI * 0.55, 1.9, 2.9, 2.2], [Math.PI * 1.2, 2.0, 2.6, 2.1], [Math.PI * 1.85, 2.0, 2.6, 2.1]];
+    (V.fz < 0.2 ? [1, 2, 0] : [0, 1, 2]).forEach((n) => {
+      const [th, r, rx0, ry] = loops[n], q = V.pt(...on3(r, th, 0.7)), rx = V.w(rx0, rx0 * 0.8);
+      P.e(q[0], q[1], rx, ry).fill(HAIR, { pattern: cleanStrands, round: 1, dither: 0.3, dim, contour: true, lift: dim ? 0.04 : 0.2 });
+      // the strands running round the loop: lit over its top, darker where it curls under
+      // (one clean lit band over the top and a dark crease along the bottom, so each loop reads at this size)
+      for (let a = Math.PI * 1.15; a <= Math.PI * 1.75; a += 0.12) P.dotOn(q[0] + Math.cos(a) * rx * 0.55, q[1] + Math.sin(a) * ry * 0.55, HAIR[dim ? 2 : 3]);
+      if (!dim) for (let a = Math.PI * 1.3; a <= Math.PI * 1.6; a += 0.1) P.dotOn(q[0] + Math.cos(a) * rx * 0.62, q[1] + Math.sin(a) * ry * 0.62, HAIR[4]);
+      for (let a = Math.PI * 0.25; a <= Math.PI * 0.75; a += 0.12) P.dotOn(q[0] + Math.cos(a) * rx * 0.75, q[1] + Math.sin(a) * ry * 0.75, HAIR[0]);
+    });
+    // a fine plait wrapped round the foot of the knot, binding it to the head
+    const ring = [], rw = [];
+    for (let k = 0; k <= 12; k++) { ring.push(on3(4.1, Math.PI * (0.95 + k / 12 * 1.1), 0.1)); rw.push(1.6); }
+    plait(P, V, ring, rw, HAIR, dim);
+    // a few loose hairs escaping the knot
+    if (!dim) { const a = V.pt(...on3(3.1, 0.6, 0)), b = V.pt(...on3(3.7, 0.9, -0.3)); P.dotOn(a[0], a[1], HAIR[3]); P.dot(b[0], b[1], HAIR[2]); }
   });
 }
 
