@@ -104,10 +104,15 @@ M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.18)
 M_STEEL = mat_def(13, 'buckle', ramp(0x9a978f, 0.09), 0.0)
 M_GOLD = mat_def(14, 'clasp', ramp(0xa8905c, 0.09), 0.0)
 M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
-M_EYE = mat_def(16, 'iris', [[46, 40, 38], [58, 66, 46], [88, 108, 70], [120, 140, 100], [226, 222, 210]], 0.0, flat=1)
-M_LASH = mat_def(20, 'lashes', [[46, 40, 38]] * 5, 0.0, flat=0)
-M_SCLERA = mat_def(21, 'eye white', [[226, 222, 210]] * 5, 0.0, flat=0)
+# the eyes: a moss-green iris dark enough to hold against the white and the skin at sprite size, a near-black
+# pupil and lash line, a warm catchlight, and a lid tone a step down the skin for the creases
+M_EYE = mat_def(16, 'iris', [[40, 52, 36], [56, 86, 48], [72, 106, 60], [104, 134, 82], [226, 222, 210]], 0.0, flat=1)
+M_LASH = mat_def(20, 'lashes', [[40, 30, 28]] * 5, 0.0, flat=0)
+M_SCLERA = mat_def(21, 'eye white', [[206, 198, 186], [226, 220, 208], [224, 217, 205], [234, 229, 218], [242, 238, 230]], 0.0, flat=1)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
+M_PUPIL = mat_def(23, 'pupil', [[26, 22, 22]] * 5, 0.0, flat=0)
+M_GLINT = mat_def(24, 'catchlight', [[246, 242, 232]] * 5, 0.0, flat=0)
+M_LID = mat_def(25, 'eyelid', [[150, 94, 78], [164, 108, 90], [176, 120, 100], [190, 136, 116], [204, 152, 130]], 0.0, flat=2)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
 M_STITCH = mat_def(22, 'stitching', ramp(0xb39a74, 0.08), 0.0, flat=2)
@@ -1010,6 +1015,131 @@ def outward(p, d):
     return x + x / n * d, y + y / n * d
 
 
+def tube(pts, radii, flat=0.5, n=10):
+    """A tapered tube along a polyline (lash lines, lids, brows): radii[i] across the face at pts[i], flat times
+    that through it (along Y, toward the camera), with rounded ends so it never stops in a cut-off disc."""
+    bm = bmesh.new()
+    pts = [Vector(p) for p in pts]
+    rings = []
+    for i, p in enumerate(pts):
+        t = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+        a = t.cross(Vector((0, 1, 0)))
+        a = a.normalized() if a.length > 1e-6 else Vector((0, 0, 1))
+        b = a.cross(t).normalized()
+        r = radii[i]
+        rings.append([bm.verts.new(p + a * (r * math.cos(2 * math.pi * k / n)) + b * (r * flat * math.sin(2 * math.pi * k / n)))
+                      for k in range(n)])
+    for ra, rb in zip(rings, rings[1:]):
+        for k in range(n):
+            bm.faces.new((ra[k], ra[(k + 1) % n], rb[(k + 1) % n], rb[k]))
+    for ring, p in ((rings[0], pts[0]), (rings[-1], pts[-1])):
+        c = bm.verts.new(p)
+        for k in range(n):
+            bm.faces.new((ring[k], ring[(k + 1) % n], c))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
+def almond(rx, ry, rz, seg=28, rings=16):
+    """The eyeball as it shows between the lids: an ellipsoid pinched toward the corners (the inner one rounder,
+    the outer one a little sharper), so the white reads as an almond rather than a pill."""
+    bm = ellipsoid(rx, ry, rz, seg, rings)
+    for v in bm.verts:
+        u = min(1.0, abs(v.co.x) / rx)
+        v.co.z *= (1 - u ** 2.2) ** 0.22
+    return bm
+
+
+def build_eye(head, head_tree, s, x, ey, ez):
+    """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
+    across, ey the face's surface there, ez its height). The parts, front to back: the curve of the white; an
+    iris looking straight ahead whose top is tucked under the upper lid; a pupil and a catchlight; the upper lid
+    as a dark lash line that thickens toward the outer corner and flicks up past it; a soft crease above that; a
+    fine lower lid; and an arched brow, full at the nose and tapering to a fine tail. At sprite size this paints
+    the same eye a painter would (a lash row over a white-iris-white row, the iris a dark, solid shape); in the
+    close-up and the world model it holds as a set-in, curved eye."""
+    RX, RY, RZ = 1.1, 0.5, 0.52
+    TILT = 0.06                                     # the outer corner sits a touch higher than the inner one
+    cy = ey + 0.32                                  # the white's front stands 0.18 proud of the skin
+    white = almond(RX, RY, RZ)
+    bmesh.ops.rotate(white, cent=(0, 0, 0), matrix=Euler((0, -s * TILT, 0)).to_matrix(), verts=white.verts)
+    bmesh.ops.translate(white, vec=(x, cy, ez), verts=white.verts)
+    # bend the white round the face, so it stands the same height proud of the skin all round its edge: a straight
+    # one sank under the socket wall at the inner corner (pushing the iris over to the nose side at sprite size) and
+    # under the rim below, and stood out past the lids at the outer corner, where the face turns back
+    def skin_y(px, pz):
+        h = head_tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        return h[0].y if h[0] is not None else ey
+    for v in white.verts:
+        v.co.y += skin_y(v.co.x, v.co.z) - ey
+    wtree = bvh_of(white)
+    mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
+
+    def front(px, pz):
+        """The nearest surface (the face or the white) in front of (px, pz), seen from the camera."""
+        best = 1e9
+        h = head_tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        if h[0] is not None:
+            best = h[0].y
+        h = wtree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        if h[0] is not None:
+            best = min(best, h[0].y)
+        return best
+
+    def lid_z(u, top):
+        """The edge of the white at u (-1 inner corner .. 1 outer corner across), upper or lower."""
+        e = RZ * (1 - min(1.0, abs(u)) ** 2.2) ** 0.22
+        return ez + (e if top else -e) + u * RX * TILT
+
+    # the iris, pupil and catchlight lie on the curve of the white, turned to face the way it faces there (the
+    # white bends with the face, so a disc square to the camera sank into it on the nose side and read as a lens
+    # with the pupil off centre)
+    iz = ez + 0.0
+    hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
+            for dx, dz in ((0, 0), (0.3, 0), (-0.3, 0), (0, 0.25), (0, -0.25))]
+    n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
+    c = hits[0][0]
+    turn = Vector((0, -1, 0)).rotation_difference(n)
+    side = turn @ Vector((1, 0, 0))
+    up = turn @ Vector((0, 0, 1))
+
+    def disc(name, rx, ry, rz, mid, lift, off=Vector()):
+        bm = ellipsoid(rx, ry, rz, 16, 10)
+        bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=bm.verts)
+        mesh_obj(name, bm, mid, head, loc=c + n * lift + off, subdiv=0)
+    disc(f'Iris {s}', 0.52, 0.1, 0.52, M_EYE, 0.03)
+    disc(f'Pupil {s}', 0.21, 0.08, 0.23, M_PUPIL, 0.09, up * -0.02)
+    disc(f'Catchlight {s}', 0.13, 0.06, 0.13, M_GLINT, 0.15, side * (s * 0.18) + up * 0.18)
+
+    def on_face(us, zf, lift, inset=0.0):
+        pts = []
+        for u in us:
+            px = x + s * u * RX * (1.0 + inset)
+            pz = zf(u)
+            pts.append((px, front(px, pz) - lift, pz))
+        return pts
+
+    # upper lid: the lash line, riding just above the top of the white and over the top of the iris,
+    # thickening to the outer corner and flicking up and out past it
+    us = [-0.92, -0.75, -0.5, -0.2, 0.1, 0.4, 0.7, 0.9, 1.02, 1.12]
+    lash = on_face(us, lambda u: lid_z(u, True) + 0.0 + (0.1 * (u - 0.9) / 0.22 if u > 0.9 else 0.0), 0.03)
+    mesh_obj(f'Lash {s}', tube(lash, [0.03, 0.06, 0.08, 0.09, 0.1, 0.11, 0.12, 0.11, 0.07, 0.02], flat=0.5), M_LASH, head, subdiv=0)
+    # the crease of the upper lid, a little above the lash line, fading out before either corner
+    cus = [-0.6, -0.3, 0.0, 0.3, 0.6, 0.85]
+    crease = on_face(cus, lambda u: lid_z(u, True) + 0.34 - 0.06 * u * u, -0.01)
+    mesh_obj(f'Lid crease {s}', tube(crease, [0.01, 0.035, 0.045, 0.045, 0.035, 0.01], flat=0.5), M_LID, head, subdiv=0)
+    # lower lid: a fine line under the white, from below the iris to the outer corner (none at the inner corner,
+    # where it would make the eye look boxed in)
+    lus = [-0.4, -0.15, 0.1, 0.35, 0.55, 0.72]
+    low = on_face(lus, lambda u: lid_z(u, False) + 0.1, 0.0)
+    mesh_obj(f'Lower lid {s}', tube(low, [0.01, 0.04, 0.05, 0.05, 0.035, 0.01], flat=0.5), M_LID, head, subdiv=0)
+    # the brow: on the brow ridge, starting just outside the bridge of the nose, rising in a soft arch to its peak
+    # two thirds of the way out and falling away to a fine tail past the outer corner
+    bus = [-0.78, -0.55, -0.25, 0.05, 0.35, 0.6, 0.85, 1.1, 1.3]
+    brow = on_face(bus, lambda u: ez + 1.08 + 0.3 * math.sin(math.pi * (u + 0.8) / 2.5) ** 1.2 - (0.12 if u > 1.1 else 0.0), 0.03)
+    mesh_obj(f'Brow {s}', tube(brow, [0.12, 0.17, 0.18, 0.17, 0.15, 0.12, 0.09, 0.06, 0.02], flat=0.4), M_BROW, head, subdiv=0)
+
+
 def build():
     reset()
     sc = bpy.context.scene
@@ -1081,13 +1211,7 @@ def build():
     for s in (-1, 1):
         x, ey, by = feat[s]
         ez = 0.525 * HEAD_H
-        # an almond of white set into the socket, the iris in the middle, a dark lash line across the top
-        mesh_obj(f'Eye white {s}', ellipsoid(0.85, 0.2, 0.4, 12, 8), M_SCLERA, head, loc=(x, ey + 0.16, ez), subdiv=0)
-        mesh_obj(f'Iris {s}', ellipsoid(0.4, 0.2, 0.42, 10, 8), M_EYE, head, loc=(x - s * 0.05, ey + 0.02, ez - 0.03), subdiv=0)
-        mesh_obj(f'Lash {s}', ellipsoid(0.95, 0.25, 0.16, 12, 6), M_LASH, head, loc=(x + s * 0.06, ey + 0.02, ez + 0.38), subdiv=0)
-        brow = ellipsoid(0.9, 0.2, 0.15, 12, 6)
-        bmesh.ops.rotate(brow, cent=(0, 0, 0), matrix=Euler((0, -s * 0.1, 0)).to_matrix(), verts=brow.verts)
-        mesh_obj(f'Brow {s}', brow, M_BROW, head, loc=(x + s * 0.05, by + 0.2, 0.645 * HEAD_H), subdiv=0)
+        build_eye(head, head_tree, s, x, ey, ez)
     mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
@@ -1472,11 +1596,18 @@ def to_pixels(ch):
 
 def sprite_mode(on):
     """At sprite size the hair's strand relief is finer than a pixel and only adds speckle; the painted strands
-    (the detail pass) carry it there instead, so the relief is turned down for the sheet."""
+    (the detail pass) carry it there instead, so the relief is turned down for the sheet. The eyes are simplified
+    the same way (see below)."""
     m = bpy.data.materials.get('hair')
     for n in m.node_tree.nodes:
         if n.type == 'BUMP':
             n.inputs['Strength'].default_value = 0.1 if on else 0.6
+    # the pupil and catchlight are each smaller than a sprite pixel: where one happened to cover a pixel's centre
+    # it took the whole iris (a black dot for an eye), and it came and went from frame to frame. At sprite size the
+    # iris alone is the eye, a solid dark green between the whites; they show in the close-up and the world model
+    for o in bpy.data.objects:
+        if o.name.startswith(('Pupil', 'Catchlight')):
+            o.hide_render = on
 
 
 def render_sheet(out_png, tmp):
