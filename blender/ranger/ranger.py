@@ -541,7 +541,8 @@ def curtain_bang(tree, s):
         z1 = (0.80 - 0.17 * math.sin(f * math.pi / 2) ** 0.8 - 0.12 * g + rnd.uniform(-0.03, 0.03)) * H
         rad = rnd.uniform(0.16, 0.24) * (1.15 - 0.3 * f)
         layer = 0.03 + 0.1 * (k % 2)        # alternate strands lie a little over their neighbours
-        rings, r_prev = [], None
+        # the path first (centre, outward direction, radius at each step), smoothed so the strand has no kinks
+        cs, ds, rrs, ts, r_prev = [], [], [], [], None
         for i in range(steps):
             t = i / (steps - 1)
             az = lerp(az0, az1, t ** 0.75)
@@ -551,17 +552,25 @@ def curtain_bang(tree, s):
                 r = max(r, r_prev - 0.35)
             r_prev = r
             tuck = min(1.0, t / 0.2)
-            rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.01
-            centre = o + d * (r + 0.04 + rr + layer * tuck - 0.3 * (1 - tuck))
-            # the strand's own frame: along it, out from the head, and across
-            if i == 0:
-                o2, d2, _ = skin(lerp(az0, az1, (1 / (steps - 1)) ** 0.75), lerp(z0, z1, math.sin(1 / (steps - 1) * math.pi / 2) ** 1.1))
-                T = (o2 + d2 * r - centre).normalized()
-            else:
-                T = (centre - prev).normalized()
-            prev = centre
+            rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.012
+            # (the tips settle onto the skin; the root starts under the cap)
+            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) - 0.3 * (1 - tuck)))
+            ds.append(d)
+            rrs.append(rr)
+            ts.append(t)
+        for _ in range(3):
+            cs = [cs[0]] + [(cs[i - 1] + cs[i] * 2 + cs[i + 1]) / 4 for i in range(1, steps - 1)] + [cs[-1]]
+        rings, B_prev = [], None
+        for i in range(steps):
+            T = (cs[min(i + 1, steps - 1)] - cs[max(i - 1, 0)]).normalized()
+            d, rr, t, centre = ds[i], rrs[i], ts[i], cs[i]
             Bv = T.cross(d).normalized()
+            if B_prev is not None and Bv.dot(B_prev) < 0:
+                Bv = -Bv
+            B_prev = Bv
             Nv = Bv.cross(T).normalized()
+            if Nv.dot(d) < 0:
+                Nv = -Nv
             ring = []
             for j in range(seg):
                 a_ = 2 * math.pi * j / seg
