@@ -898,7 +898,9 @@ def face_relief(x, z):
     d += h * math.exp(-(x / (0.04 + 0.03 * max(0.0, 1 - abs(z - 0.37) / 0.1))) ** 2)
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
     d += mouth_relief(x, z)
-    d += gauss(x, z, 0, 0.1, 0.08, 0.05, 0.055)      # chin: the ball of it stands nearly as far forward as the lower lip
+    d += gauss(x, z, 0, 0.1, 0.068, 0.048, 0.058)    # chin: the ball of it stands nearly as far forward as the lower lip
+    for s in (-1, 1):
+        d += gauss(x, z, s * 0.1, 0.11, 0.035, 0.05, -0.008)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
@@ -1045,6 +1047,10 @@ def sculpted_head():
             n = -n
         f = max(0.0, -n.y) ** 1.3       # only the parts facing forward carry the face
         d = face_relief(x, z) * f
+        # (and the sides carry the angle of the jaw: a soft swell where the ramus turns into the jaw's lower edge,
+        # with the masseter's plane rising from it, so the angle reads under the cheek without a corner)
+        side = abs(n.x) ** 1.5
+        d += side * (gauss(y, z, 0.05, 0.16, 0.08, 0.05, 0.014) + gauss(y, z, -0.02, 0.27, 0.09, 0.08, 0.006))
         v.co = (x + n.x * d, y + n.y * d, max(0.0, z + n.z * d))
     bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
     return bm
