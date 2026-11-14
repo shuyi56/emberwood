@@ -476,7 +476,7 @@ def face_relief(x, z):
     d = 0.0
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
+        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.035)    # eye socket
         d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
         d += gauss(x, z, s * 0.2, 0.31, 0.07, 0.06, -0.025)      # hollow under the cheekbone
         d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
@@ -1089,14 +1089,14 @@ def lid_top(u):
     and coming in tangent to the lower lid at each corner, so the two meet in a sharp point (a cusp) rather than at
     an angle."""
     u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
-    return EYE_RZ * (1 - u * u) ** 0.7 * (1 - abs(u) ** 3) ** 0.6 * (1 - 0.14 * u)
+    return EYE_RZ * (1 - u * u) ** 0.8 * (1 - abs(u) ** 3) ** 0.85 * (1 - 0.14 * u)
 
 
 def lid_bottom(u):
     """The lower lid's edge below the centre line: flatter than the upper lid, lowest a little toward the outer
     corner."""
     u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
-    return 0.72 * EYE_RZ * (1 - u * u) ** 0.75 * (1 - abs(u) ** 3) ** 0.65 * (1 + 0.16 * u)
+    return 0.72 * EYE_RZ * (1 - u * u) ** 0.85 * (1 - abs(u) ** 3) ** 0.9 * (1 + 0.16 * u)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1279,6 +1279,18 @@ def eye_relief(x, z, s, ex, ez):
     d += 0.045 * g(dz + (B - 0.01), 0.06) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     lz = -(B + 0.17 + 0.03 * uc)
     d -= 0.014 * g(dz - lz, 0.07) * smooth(0.9, 0.4, abs(u - 0.1))
+    # the corners drawn out into points, as on the eye of Horus: past the outer corner the lids close into a fine
+    # groove that runs on outward, rising a little, with the upper lid's rim carried along above it as a wing;
+    # at the inner corner a short groove dips down toward the nose
+    if u > 0.85:
+        tail = smooth(0.85, 1.0, u) * smooth(1.8, 1.15, u)
+        tz = (u - 1) * EYE_RX * 0.12
+        d -= 0.03 * g(dz - tz, 0.03) * tail
+        d += 0.04 * g(dz - tz - 0.06, 0.045) * tail
+    elif u < -0.85:
+        hook = smooth(-0.85, -1.0, u) * smooth(-1.45, -1.05, u)
+        tz = (u + 1) * EYE_RX * 0.3
+        d -= 0.022 * g(dz - tz, 0.03) * hook
     return d
 
 
