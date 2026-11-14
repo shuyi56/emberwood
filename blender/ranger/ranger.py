@@ -104,14 +104,14 @@ M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.18)
 M_STEEL = mat_def(13, 'buckle', ramp(0x9a978f, 0.09), 0.0)
 M_GOLD = mat_def(14, 'clasp', ramp(0xa8905c, 0.09), 0.0)
 M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
-# the eyes: a moss-green iris dark enough to hold against the white and the skin at sprite size, a near-black
-# pupil and lash line, a warm catchlight, and a lid tone a step down the skin for the creases
-M_EYE = mat_def(16, 'iris', [[40, 52, 36], [56, 86, 48], [72, 106, 60], [104, 134, 82], [226, 222, 210]], 0.0, flat=1)
-M_LASH = mat_def(20, 'lashes', [[84, 60, 50]] * 5, 0.0, flat=0)
+# the eyes: a moss-green iris dark enough to hold against the white and the skin at sprite size, and a lid tone a
+# step down the skin for the creases. (No lash line and no painted catchlight: the eye's highlight is the sun's
+# reflection in its glossy surface.)
+# the iris ramp runs from the dark ring at its rim, through the green, to the warm amber round the pupil; it is
+# painted onto the iris as vertex colours (see iris_colours), and the sprite picks its tone from that painting
+M_EYE = mat_def(16, 'iris', [[30, 42, 30], [50, 76, 44], [72, 104, 58], [104, 134, 74], [148, 146, 86]], 0.0, flat='painted')
 M_SCLERA = mat_def(21, 'eye white', [[206, 198, 186], [226, 220, 208], [224, 217, 205], [234, 229, 218], [242, 238, 230]], 0.0, flat=1)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
-M_PUPIL = mat_def(23, 'pupil', [[26, 22, 22]] * 5, 0.0, flat=0)
-M_GLINT = mat_def(24, 'catchlight', [[222, 220, 210]] * 5, 0.0, flat=0)
 M_LID = mat_def(25, 'eyelid', [[150, 94, 78], [164, 108, 90], [176, 120, 100], [190, 136, 116], [204, 152, 130]], 0.0, flat=2)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
@@ -138,6 +138,19 @@ def make_material(mid):
     lin = [((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92 for c in mid_rgb]
     bsdf.inputs['Color'].default_value = (*lin, 1.0)
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+    if mid in (M_EYE, M_SCLERA):
+        # the eye is wet: a glossy coat over the colour, so the sun leaves a real highlight that moves with the eye
+        # and the light (the sprites read only the diffuse light, so they are unaffected)
+        nt.nodes.remove(bsdf)
+        bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        bsdf.inputs['Base Color'].default_value = (*lin, 1.0)
+        bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.25
+        bsdf.inputs['IOR'].default_value = 1.38
+        nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+        if mid == M_EYE:
+            col = nt.nodes.new('ShaderNodeAttribute')
+            col.attribute_name = 'iris_col'
+            nt.links.new(col.outputs['Color'], bsdf.inputs['Base Color'])
     if mid in LEATHER:
         # the grain: fine pebbling and scattered pores pressed into the surface, so it catches the light in the
         # render itself (and reads as grain at sprite size, not only as a painted pattern)
@@ -274,6 +287,12 @@ def make_material(mid):
         nt.links.new(nt.nodes['hair tips'].outputs['Result'], tadd.inputs[0])
         nt.links.new(add.outputs[0], tadd.inputs[2])
         nt.links.new(tadd.outputs[0], adet.inputs['Value'])
+        return m
+    elif mid == M_EYE:
+        # the iris's painted tone, for the sprite renderer
+        sh = nt.nodes.new('ShaderNodeAttribute')
+        sh.attribute_name = 'iris_shade'
+        nt.links.new(sh.outputs['Fac'], adet.inputs['Value'])
         return m
     elif mid == M_MAIL:
         tex = nt.nodes.new('ShaderNodeTexChecker')
@@ -1050,13 +1069,81 @@ def almond(rx, ry, rz, seg=28, rings=16):
     return bm
 
 
+def iris_dome(r, depth, rings=20, seg=64):
+    """The iris (and the cornea over it) as one shallow dome facing -Y: rings round its centre, so the painted
+    pupil and the rings of the iris follow the mesh, and a smooth curve for the highlight to slide over."""
+    bm = bmesh.new()
+    tip = bm.verts.new((0, -depth, 0))
+    prev = None
+    for i in range(1, rings + 1):
+        t = i / rings
+        ring = [bm.verts.new((r * t * math.cos(2 * math.pi * k / seg), -depth * math.sqrt(max(0.0, 1 - t * t)),
+                              r * t * math.sin(2 * math.pi * k / seg))) for k in range(seg)]
+        if prev is None:
+            for k in range(seg):
+                bm.faces.new((tip, ring[(k + 1) % seg], ring[k]))
+        else:
+            for k in range(seg):
+                bm.faces.new((prev[k], prev[(k + 1) % seg], ring[(k + 1) % seg], ring[k]))
+        prev = ring
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:            # facing the camera
+        if f.calc_center_median().y < 0 and f.normal.y > 0:
+            f.normal_flip()
+    return bm
+
+
+def _srgb_lin(c):
+    return [((v + 0.055) / 1.055) ** 2.4 if v > 0.04045 else v / 12.92 for v in c]
+
+
+def iris_colours(me, to_disc, r, s):
+    """Paint the iris, the way a painter shades one: a dark ring at its rim, fine radial fibres in the green, a
+    warm amber collar round the pupil, the pupil itself, the top third in the shadow of the upper lid, and a
+    little light gathered in the lower part where the cornea focuses it. Stored as a colour attribute
+    ('iris_col', for the close-ups and the world model) and as a tone along the iris ramp ('iris_shade', which
+    the sprite renderer reads through the detail pass)."""
+    rmp = MATERIALS[M_EYE]['ramp']
+    pupil = np.array([20, 18, 18], dtype=np.float32)
+    amber = np.array([156, 134, 70], dtype=np.float32)
+    cols, shades = [], []
+    for v in me.vertices:
+        p = to_disc @ v.co
+        q = math.hypot(p.x, p.z) / r
+        a = math.atan2(p.z, p.x * s)
+        fib = 0.5 + 0.25 * math.sin(a * 23 + 2.0 * math.sin(a * 5)) + 0.25 * math.sin(a * 41 + 1.3)
+        t = 0.48 + 0.16 * (fib - 0.5)                       # the green, in fibres
+        t -= 0.36 * smooth(0.72, 1.0, q)                    # the dark ring at the rim
+        zn = p.z / r
+        t -= 0.3 * smooth(0.05, 0.7, zn)                    # the shadow of the upper lid
+        t += 0.12 * smooth(-0.15, -0.7, zn) * (1 - smooth(0.75, 0.95, q))   # light gathered low in the iris
+        warm = smooth(0.62, 0.42, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
+        t = min(1.0, max(0.0, t + 0.22 * warm))
+        k = t * 4
+        i0 = min(3, int(k))
+        c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)
+        c = c + (amber - c) * 0.45 * warm
+        dark = smooth(0.43, 0.37, q)                        # the pupil, with a soft edge
+        c = c + (pupil - c) * dark
+        cols.append(_srgb_lin(c / 255.0) + [1.0])
+        shades.append(t * (1 - dark) + 0.25 * dark)
+    ca = me.color_attributes.new('iris_col', 'FLOAT_COLOR', 'POINT')
+    ca.data.foreach_set('color', [x for c in cols for x in c])
+    sa = me.attributes.new('iris_shade', 'FLOAT', 'POINT')
+    sa.data.foreach_set('value', shades)
+
+
+def smooth(e0, e1, x):
+    t = min(1.0, max(0.0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+
+
 def build_eye(head, head_tree, s, x, ey, ez):
     """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
     across, ey the face's surface there, ez its height). The parts, front to back: the curve of the white; an
-    iris looking straight ahead whose top is tucked under the upper lid; a pupil and a catchlight; the upper lid
-    as a fine, soft-brown lash line, a little fuller toward the outer corner; a soft crease above that; a
-    fine lower lid; and an arched brow, full at the nose and tapering to a fine tail. At sprite size this paints
-    a white-iris-white row, the iris a dark, solid shape, under a light lash; in the
+    iris looking straight ahead, a shallow glossy dome with the pupil and its shading painted on (iris_colours), so
+    the sun leaves a real highlight on it; a soft crease over the upper lid; a fine lower lid; and an arched brow,
+    full at the nose and tapering to a fine tail. At sprite size this paints a white-iris-white row; in the
     close-up and the world model it holds as a set-in, curved eye."""
     RX, RY, RZ = 1.1, 0.5, 0.52
     TILT = 0.06                                     # the outer corner sits a touch higher than the inner one
@@ -1094,22 +1181,18 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # the iris, pupil and catchlight lie on the curve of the white, turned to face the way it faces there (the
     # white bends with the face, so a disc square to the camera sank into it on the nose side and read as a lens
     # with the pupil off centre)
-    iz = ez + 0.0
+    IR = 0.46                                       # inside the white's height, so it never overhangs the lids
+    iz = ez - 0.02
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.3, 0), (-0.3, 0), (0, 0.25), (0, -0.25))]
     n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
     c = hits[0][0]
     turn = Vector((0, -1, 0)).rotation_difference(n)
-    side = turn @ Vector((1, 0, 0))
-    up = turn @ Vector((0, 0, 1))
 
-    def disc(name, rx, ry, rz, mid, lift, off=Vector()):
-        bm = ellipsoid(rx, ry, rz, 16, 10)
-        bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=bm.verts)
-        mesh_obj(name, bm, mid, head, loc=c + n * lift + off, subdiv=0)
-    disc(f'Iris {s}', 0.52, 0.1, 0.52, M_EYE, 0.03)
-    disc(f'Pupil {s}', 0.21, 0.08, 0.23, M_PUPIL, 0.09, up * -0.02)
-    disc(f'Catchlight {s}', 0.075, 0.04, 0.075, M_GLINT, 0.12, side * (s * 0.14) + up * 0.14)
+    iris = iris_dome(IR, 0.19)
+    bmesh.ops.rotate(iris, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=iris.verts)
+    o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c + n * 0.04, subdiv=0)
+    iris_colours(o.data, turn.inverted(), IR, s)
 
     def on_face(us, zf, lift, inset=0.0):
         pts = []
@@ -1119,12 +1202,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
             pts.append((px, front(px, pz) - lift, pz))
         return pts
 
-    # upper lid: a fine lash line in a soft dark brown along the top of the white and over the top of the iris,
-    # a little fuller toward the outer corner with only a slight lift past it (a heavy black line read as liner)
-    us = [-0.9, -0.75, -0.5, -0.2, 0.1, 0.4, 0.7, 0.88, 0.98, 1.06]
-    lash = on_face(us, lambda u: lid_z(u, True) - 0.02 + (0.05 * (u - 0.88) / 0.18 if u > 0.88 else 0.0), 0.0)
-    mesh_obj(f'Lash {s}', tube(lash, [0.015, 0.03, 0.04, 0.045, 0.05, 0.055, 0.06, 0.055, 0.035, 0.012], flat=0.5), M_LASH, head, subdiv=0)
-    # the crease of the upper lid, a little above the lash line, fading out before either corner
+    # the crease of the upper lid, a little above the eye, fading out before either corner
     cus = [-0.6, -0.3, 0.0, 0.3, 0.6, 0.85]
     crease = on_face(cus, lambda u: lid_z(u, True) + 0.34 - 0.06 * u * u, -0.01)
     mesh_obj(f'Lid crease {s}', tube(crease, [0.01, 0.035, 0.045, 0.045, 0.035, 0.01], flat=0.5), M_LID, head, subdiv=0)
@@ -1569,7 +1647,11 @@ def to_pixels(ch):
         sel = solid & (mid == m)
         if not sel.any():
             continue
-        if d['flat'] is not None:
+        if d['flat'] == 'painted':
+            # the iris: its tone is the one painted on it (the detail pass carries it), kept off the two ends of
+            # the ramp so the two or three pixels of iris stay a readable green
+            tone = np.clip(np.rint(det[sel] * 4), 1, 3).astype(int)
+        elif d['flat'] is not None:
             tone = np.full(sel.sum(), d['flat'])
         else:
             L = light[sel] * (1.0 + (det[sel] - 0.5) * 2 * d['detail'])
@@ -1596,18 +1678,11 @@ def to_pixels(ch):
 
 def sprite_mode(on):
     """At sprite size the hair's strand relief is finer than a pixel and only adds speckle; the painted strands
-    (the detail pass) carry it there instead, so the relief is turned down for the sheet. The eyes are simplified
-    the same way (see below)."""
+    (the detail pass) carry it there instead, so the relief is turned down for the sheet."""
     m = bpy.data.materials.get('hair')
     for n in m.node_tree.nodes:
         if n.type == 'BUMP':
             n.inputs['Strength'].default_value = 0.1 if on else 0.6
-    # the pupil and catchlight are each smaller than a sprite pixel: where one happened to cover a pixel's centre
-    # it took the whole iris (a black dot for an eye), and it came and went from frame to frame. At sprite size the
-    # iris alone is the eye, a solid dark green between the whites; they show in the close-up and the world model
-    for o in bpy.data.objects:
-        if o.name.startswith(('Pupil', 'Catchlight')):
-            o.hide_render = on
 
 
 def render_sheet(out_png, tmp):
