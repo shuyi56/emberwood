@@ -884,7 +884,8 @@ def face_relief(x, z):
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
-        d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
+        d += gauss(x, z, s * 0.235, 0.455, 0.09, 0.04, 0.035)    # cheekbone, running back toward the ear
+        d += gauss(x, z, s * 0.14, 0.41, 0.065, 0.055, 0.035)    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.21, 0.34, 0.06, 0.04, -0.01)      # a shallow hollow under the cheekbone
         d += gauss(x, z, s * 0.17, 0.23, 0.07, 0.07, 0.016)      # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
@@ -971,8 +972,8 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(0.0, 0.06), (0.04, 0.105), (0.1, 0.145), (0.18, 0.19), (0.25, 0.232), (0.33, 0.275),
-                       (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
+HEAD_W = smooth_curve([(0.0, 0.065), (0.03, 0.115), (0.07, 0.152), (0.12, 0.182), (0.18, 0.212), (0.25, 0.25),
+                       (0.33, 0.29), (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
 HEAD_F = smooth_curve([(0.0, 0.24), (0.03, 0.34), (0.07, 0.38), (0.12, 0.39), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415),
                        (0.42, 0.42), (0.52, 0.42), (0.62, 0.42)])
 HEAD_B = smooth_curve([(0.0, -0.22), (0.03, -0.1), (0.07, 0.0), (0.12, 0.07), (0.16, 0.09), (0.24, 0.1),
@@ -980,7 +981,7 @@ HEAD_B = smooth_curve([(0.0, -0.22), (0.03, -0.1), (0.07, 0.0), (0.12, 0.07), (0
 HEAD_MID = smooth_curve([(0.0, -0.23), (0.03, -0.22), (0.07, -0.19), (0.12, -0.16), (0.18, -0.12), (0.24, -0.04), (0.3, 0.04), (1.0, 0.04)])
 # how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
 # narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
-HEAD_NF = smooth_curve([(0.0, 2.1), (0.06, 2.05), (0.14, 2.0), (0.3, 2.1), (0.45, 2.35), (0.6, 2.3), (0.8, 2.2)])
+HEAD_NF = smooth_curve([(0.0, 2.1), (0.06, 2.05), (0.14, 2.0), (0.3, 2.05), (0.45, 2.15), (0.6, 2.25), (0.8, 2.2)])
 HEAD_NB = smooth_curve([(0.0, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
 
 
@@ -1026,13 +1027,25 @@ def sculpted_head():
         r = math.hypot(sx, sy)
         c, s = (-sy / r, sx / r) if r > 1e-9 else (1.0, 0.0)
         x, y = head_section(z, c, s)
-        f = max(0.0, c) ** 1.4          # only the parts facing forward carry the face
-        # (and it fades out over the last of the chin, so the chin's ball rolls under into the jaw's underside
-        # instead of leaving a lip where the relief stops)
-        u = min(1.0, z / 0.08)
-        f *= u * u * (3 - 2 * u)
-        y -= face_relief(x, z) * f
-        v.co = (x, y, max(0.0, z))
+        # the face is pushed out along the base surface's normal, and only as far as that normal faces forward:
+        # where the surface turns under (the chin, the jaw's underside) the relief turns with it and fades, so the
+        # jawline stays a rounded turn instead of a ledge sheared forward of the underside
+        th, e = math.atan2(s, c), 1e-3
+        xa, ya = head_section(z, math.cos(th + e), math.sin(th + e))
+        xz, yz = head_section(min(1.0, z + e), c, s)
+        xb, yb = head_section(max(0.0, z - e), c, s)
+        t1 = Vector((xa - x, ya - y, 0.0))
+        t2 = Vector((xz - xb, yz - yb, min(1.0, z + e) - max(0.0, z - e)))
+        n = t1.cross(t2)
+        if n.length < 1e-12:
+            v.co = (x, y, max(0.0, z))
+            continue
+        n.normalize()
+        if n.x * x + n.y * (y - 0.04) < 0:
+            n = -n
+        f = max(0.0, -n.y) ** 1.3       # only the parts facing forward carry the face
+        d = face_relief(x, z) * f
+        v.co = (x + n.x * d, y + n.y * d, max(0.0, z + n.z * d))
     bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
     return bm
 
