@@ -104,8 +104,9 @@ M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.0)
 M_STEEL = mat_def(13, 'buckle', ramp(0x9a978f, 0.09), 0.0)
 M_GOLD = mat_def(14, 'clasp', ramp(0xa8905c, 0.09), 0.0)
 M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
-M_EYE = mat_def(16, 'eye', [[46, 40, 38], [58, 66, 46], [88, 108, 70], [120, 140, 100], [226, 222, 210]], 0.0, flat=1)
+M_EYE = mat_def(16, 'iris', [[46, 40, 38], [58, 66, 46], [88, 108, 70], [120, 140, 100], [226, 222, 210]], 0.0, flat=1)
 M_LASH = mat_def(20, 'lashes', [[46, 40, 38]] * 5, 0.0, flat=0)
+M_SCLERA = mat_def(21, 'eye white', [[226, 222, 210]] * 5, 0.0, flat=0)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
@@ -251,10 +252,87 @@ def box(sx, sy, sz):
 
 
 # ---------------------------------------------------------------- the figure
-HIP_Z, SH_Z = 24.0, 39.2
-THIGH, SHIN = 10.6, 10.0      # hip -> knee -> ankle (ankle at h 4 when straight-ish)
-UPPER, FORE = 7.6, 6.4
-LEG_X, SH_X = 3.4, 7.2
+# Realistic adult proportions, about 7.3 heads tall: the top of the head at 63 (the painted sprites' height),
+# a head 8.6 tall, shoulders at 1.5 heads down, the waist at 3, the hip joint at 3.7 and the knee at 2 heads up.
+HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
+HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.6, 3.4
+THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
+UPPER, FORE = 11.0, 8.6
+LEG_X, SH_X = 3.3, 6.3
+STRIDE, LIFT = 8.0, 3.2
+
+
+def gauss(x, z, x0, z0, sx, sz, amp):
+    return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
+
+
+def face_relief(x, z):
+    """How far the face stands forward of the base head at (x across, z up), in head heights. The planes a
+    painter would block in: brow ridge over the eye sockets, the nose (bridge, tip and wings), cheekbones with
+    the hollow under them, the lips parted by the mouth line, and the ball of the chin. (They are pushed a little
+    past life size, so they still read when the head is 17 pixels tall.)"""
+    d = 0.0
+    for s in (-1, 1):
+        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
+        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
+        d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
+        d += gauss(x, z, s * 0.2, 0.31, 0.07, 0.06, -0.025)      # hollow under the cheekbone
+        d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
+    # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply
+    if z > 0.36:
+        t = min(1.0, max(0.0, (0.6 - z) / 0.24))
+        h = (0.015 + 0.085 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
+    else:
+        h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
+    d += h * math.exp(-(x / (0.04 + 0.03 * max(0.0, 1 - abs(z - 0.37) / 0.1))) ** 2)
+    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.05)       # the muzzle: the teeth and jaw carry the mouth forward
+    d += gauss(x, z, 0, 0.29, 0.07, 0.025, 0.035)    # upper lip
+    d += gauss(x, z, 0, 0.225, 0.055, 0.025, 0.03)   # lower lip
+    d += gauss(x, z, 0, 0.258, 0.08, 0.01, -0.018)   # mouth line
+    d += gauss(x, z, 0, 0.17, 0.06, 0.02, -0.015)    # the crease above the chin
+    d += gauss(x, z, 0, 0.09, 0.075, 0.045, 0.04)    # chin
+    return d
+
+
+def _jaw_width(z):
+    # full through the cheeks, then the jaw: a clear angle at z 0.2, narrowing to a rounded chin
+    if z >= 0.42:
+        return 1.0
+    if z >= 0.2:
+        t = (0.42 - z) / 0.22
+        return 1.0 - 0.2 * t ** 1.3
+    t = (0.2 - z) / 0.2
+    return 0.8 - 0.42 * t ** 1.4
+
+
+def sculpted_head():
+    """The head as a sculpted mesh: a rounded skull, cheeks over a jaw with a defined angle, a rounded chin, and
+    the face's planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at
+    z 1, the face toward -Y."""
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=96, radius=1.0)
+    for v in bm.verts:
+        sx, sy, sz = v.co
+        z = 0.52 + 0.5 * sz
+        front = sy < 0
+        t = max(0.0, (0.5 - z) / 0.5)
+        # the face is flatter than an egg across the front; the back of the jaw tucks in under the ear
+        dep = (0.92 - 0.15 * t) if front else (0.98 - 0.6 * t ** 1.3)
+        x = sx * 0.36 * _jaw_width(z)
+        y = sy * 0.44 * dep
+        f = max(0.0, -sy) ** 1.4          # only the parts facing forward carry the face
+        y -= face_relief(x, z) * f
+        v.co = (x, y + 0.04, max(0.0, z))
+    bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
+    return bm
+
+
+def surface_y(bm, x, z):
+    """The front of the head's surface at (x, z): where a ray from the camera side first meets it."""
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromBMesh(bm)
+    hit = tree.ray_cast(Vector((x, -50, z)), Vector((0, 1, 0)))
+    return hit[0].y if hit[0] is not None else 0.0
 
 
 def build():
@@ -264,101 +342,113 @@ def build():
     body = empty('Body', (0, 0, 0), root)   # carries the walk's bob
 
     # ---- torso: the shirt underneath, then the jerkin over it
-    mesh_obj('Shirt', loft([(43.2, 2.2, 2.0), (41.6, 4.6, 3.0), (40.0, 6.6, 3.6), (38.0, 7.2, 4.0), (35.5, 7.0, 4.2),
-                            (32.5, 6.0, 3.8), (29.5, 4.4, 3.2), (27.0, 4.8, 3.4), (24.0, 6.8, 4.0), (21.0, 7.2, 4.2)]),
-             M_SHIRT, body)
-    jerk = lambda phi: -0.9 * math.cos(phi) ** 2   # the skirt dips a little at front and back
-    mesh_obj('Jerkin', loft([(36.6, 7.3, 4.45), (34.0, 7.1, 4.45), (31.5, 5.9, 4.0), (29.5, 4.75, 3.5), (27.5, 5.0, 3.6),
-                             (25.5, 6.5, 4.15), (23.0, 7.4, 4.6), (21.2, 7.75, 4.85, 0, 0, jerk), (20.2, 7.9, 4.95, 0, 0, jerk)],
+    mesh_obj('Shirt', loft([(53.0, 1.6, 1.6, 0, 0.4), (51.4, 2.7, 2.4, 0, 0.3), (50.3, 5.0, 2.9), (49.0, 6.3, 3.3), (47.0, 6.2, 3.5),
+                            (44.5, 5.9, 3.85), (42.0, 5.1, 3.35), (39.0, 4.5, 2.95), (36.0, 5.3, 3.25), (33.0, 6.3, 3.65),
+                            (30.5, 6.5, 3.75), (29.0, 5.4, 3.3)]), M_SHIRT, body)
+    jerk = lambda phi: -1.0 * math.cos(phi) ** 2   # the skirt dips a little at front and back
+    mesh_obj('Jerkin', loft([(47.6, 6.45, 3.75), (44.5, 6.2, 4.15), (42.0, 5.4, 3.65), (39.5, 4.8, 3.25), (37.5, 5.1, 3.4),
+                             (35.0, 6.05, 3.75), (32.5, 6.75, 3.95), (30.0, 7.0, 4.15, 0, 0, jerk), (28.0, 7.15, 4.25, 0, 0, jerk)],
                             cap_bot=False), M_JERKIN, body, solid=0.35)
     # a darker leather band binds the jerkin's hem
-    mesh_obj('Jerkin hem', loft([(21.3, 7.82, 4.92, 0, 0, jerk), (20.1, 7.98, 5.02, 0, 0, jerk)], cap_top=False, cap_bot=False),
+    mesh_obj('Jerkin hem', loft([(29.2, 7.12, 4.25, 0, 0, jerk), (28.0, 7.22, 4.32, 0, 0, jerk)], cap_top=False, cap_bot=False),
              M_BELT, body, solid=0.3, subdiv=0)
     # the shirt shows in a narrow V at the front of the jerkin, crossed by its lacing
     vee = bmesh.new()
-    vs = [vee.verts.new(p) for p in [(-1.5, -4.62, 36.5), (1.5, -4.62, 36.5), (0, -4.05, 31.2)]]
+    vs = [vee.verts.new(p) for p in [(-1.3, -4.18, 47.0), (1.3, -4.18, 47.0), (0, -3.8, 42.4)]]
     vee.faces.new(vs)
     mesh_obj('Shirt V', vee, M_SHIRT, body, subdiv=0)
-    for i, z in enumerate((35.4, 34.0, 32.6)):
-        w = 1.3 * (z - 31.2) / 5.3
-        mesh_obj(f'Lace {i}', box(2 * w + 0.4, 0.3, 0.45), M_LACE, body, loc=(0, -4.7 + 0.1 * i, z), subdiv=0)
-    # belt and buckle
-    mesh_obj('Belt', loft([(29.3, 5.15, 3.85), (27.7, 5.25, 3.9)]), M_BELT, body, subdiv=0)
-    mesh_obj('Buckle', box(1.9, 0.6, 1.9), M_STEEL, body, loc=(0, -3.95, 28.5), subdiv=0)
-    mesh_obj('Buckle hole', box(0.9, 0.3, 0.9), M_BELT, body, loc=(0, -4.2, 28.5), subdiv=0)
+    for i, z in enumerate((46.0, 44.7, 43.4)):
+        w = 1.15 * (z - 42.4) / 4.6
+        mesh_obj(f'Lace {i}', box(2 * w + 0.4, 0.3, 0.45), M_LACE, body, loc=(0, -4.25 + 0.08 * i, z), subdiv=0)
+    # belt and buckle at the waist
+    mesh_obj('Belt', loft([(40.0, 5.0, 3.45), (38.5, 5.05, 3.5)]), M_BELT, body, subdiv=0)
+    mesh_obj('Buckle', box(1.7, 0.6, 1.7), M_STEEL, body, loc=(0, -3.55, 39.25), subdiv=0)
+    mesh_obj('Buckle hole', box(0.8, 0.3, 0.8), M_BELT, body, loc=(0, -3.8, 39.25), subdiv=0)
 
     # ---- neck and head
-    mesh_obj('Neck', loft([(48.0, 1.9, 1.9, 0, 0.3), (42.0, 2.2, 2.1, 0, 0.3)]), M_SKIN, body)
-    head = empty('Head', (0, 0, 47.0), body)
-    mesh_obj('Head shape', loft([(14.3, 0.6, 0.6, 0, 0.3), (13.6, 2.7, 2.8, 0, 0.3), (12.2, 4.3, 4.3, 0, 0.1), (10.0, 5.0, 4.9),
-                                 (7.5, 5.1, 5.0), (5.0, 4.6, 4.6, 0, -0.2), (3.2, 3.6, 3.7, 0, -0.5), (1.8, 2.4, 2.6, 0, -1.0),
-                                 (0.8, 1.2, 1.2, 0, -1.6)], n=24), M_SKIN, head, subdiv=2)
-    mesh_obj('Nose', ellipsoid(0.55, 0.6, 0.9, 10, 6), M_SKIN, head, loc=(0, -4.95, 5.6))
+    mesh_obj('Neck', loft([(57.0, 1.45, 1.55, 0, 0.55), (51.0, 1.7, 1.75, 0, 0.45)]), M_SKIN, body)
+    head = empty('Head', (0, 0, HEAD_Z), body)
+    hb = sculpted_head()
+    # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
+    feat = {}
     for s in (-1, 1):
-        mesh_obj(f'Eye {s}', ellipsoid(0.72, 0.4, 1.0, 10, 6), M_EYE, head, loc=(s * 2.0, -4.55, 6.7), subdiv=0)
-        mesh_obj(f'Lash {s}', ellipsoid(0.9, 0.4, 0.35, 10, 6), M_LASH, head, loc=(s * 2.0, -4.6, 7.55), subdiv=0)
-        mesh_obj(f'Brow {s}', ellipsoid(1.1, 0.3, 0.3, 10, 6), M_BROW, head, loc=(s * 2.1, -4.65, 8.5), subdiv=0)
-    mesh_obj('Mouth', ellipsoid(0.75, 0.25, 0.2, 10, 6), M_LIPS, head, loc=(0, -4.3, 3.5), subdiv=0)
+        x = s * 0.14 * HEAD_H
+        feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
+    mouth_y = surface_y(hb, 0, 0.258 * HEAD_H)
+    fore_y = {s: surface_y(hb, s * 1.4, 0.79 * HEAD_H) for s in (-1, 1)}
+    mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    for s in (-1, 1):
+        x, ey, by = feat[s]
+        ez = 0.525 * HEAD_H
+        # an almond of white set into the socket, the iris in the middle, a dark lash line across the top
+        mesh_obj(f'Eye white {s}', ellipsoid(0.85, 0.2, 0.4, 12, 8), M_SCLERA, head, loc=(x, ey + 0.16, ez), subdiv=0)
+        mesh_obj(f'Iris {s}', ellipsoid(0.4, 0.2, 0.42, 10, 8), M_EYE, head, loc=(x - s * 0.05, ey + 0.02, ez - 0.03), subdiv=0)
+        mesh_obj(f'Lash {s}', ellipsoid(0.95, 0.25, 0.16, 12, 6), M_LASH, head, loc=(x + s * 0.06, ey + 0.02, ez + 0.38), subdiv=0)
+        brow = ellipsoid(0.9, 0.2, 0.15, 12, 6)
+        bmesh.ops.rotate(brow, cent=(0, 0, 0), matrix=Euler((0, -s * 0.1, 0)).to_matrix(), verts=brow.verts)
+        mesh_obj(f'Brow {s}', brow, M_BROW, head, loc=(x + s * 0.05, by + 0.2, 0.645 * HEAD_H), subdiv=0)
+    mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
 
-    # ---- hair: a cap over the skull with curtain bangs parted at the centre, side locks, and the long fall at the back
-    # (the cap is a shell over the whole skull with the face cut away along a sloping hairline)
-    cap = ellipsoid(5.65, 5.6, 6.2, 28, 16)
-    bmesh.ops.translate(cap, vec=(0, 0.25, 8.5), verts=cap.verts)
-    bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.6, 9.9),
-                           plane_no=Vector((0, -0.72, -0.69)).normalized(), clear_outer=True)
-    mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.5)
+    # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
+    # side locks framing the face, and the long fall down the back
+    cap = ellipsoid(0.395 * HEAD_H, 0.48 * HEAD_H, 0.54 * HEAD_H, 32, 20)
+    bmesh.ops.translate(cap, vec=(0, 0.06 * HEAD_H, 0.56 * HEAD_H), verts=cap.verts)
+    bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.1, 6.4),
+                           plane_no=Vector((0, -0.45, -0.89)).normalized(), clear_outer=True)
+    mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.4)
     for s in (-1, 1):
-        b = ellipsoid(2.7, 1.0, 2.3)
-        bmesh.ops.rotate(b, cent=(0, 0, 0), matrix=Euler((0, s * 0.45, 0)).to_matrix(), verts=b.verts)
-        mesh_obj(f'Bangs {s}', b, M_HAIR, head, loc=(s * 2.4, -3.75, 10.0))
-        mesh_obj(f'Side lock {s}', loft([(10.0, 1.7, 2.0, s * 4.7, -0.6), (7.0, 1.6, 1.9, s * 5.2, -0.2), (2.0, 1.5, 1.8, s * 5.4, 0.2),
-                                         (-2.5, 1.5, 1.6, s * 5.6, 0.4), (-4.6, 0.7, 0.8, s * 5.6, 0.4)]),
+        b = ellipsoid(1.55, 0.5, 1.15)
+        bmesh.ops.rotate(b, cent=(0, 0, 0), matrix=Euler((0.35, s * 0.55, 0)).to_matrix(), verts=b.verts)
+        mesh_obj(f'Bangs {s}', b, M_HAIR, head, loc=(s * 1.4, fore_y[s] + 0.25, 0.79 * HEAD_H))
+        mesh_obj(f'Side lock {s}', loft([(6.6, 0.85, 1.3, s * 3.05, 0.3), (4.5, 0.85, 1.35, s * 3.45, 0.9), (2.0, 0.8, 1.3, s * 3.6, 1.35),
+                                         (-1.0, 0.8, 1.25, s * 3.8, 1.5), (-3.2, 0.8, 1.1, s * 4.05, 1.5), (-4.4, 0.35, 0.5, s * 4.15, 1.5)]),
                  M_HAIR, head)
-    mesh_obj('Hair fall', loft([(10.5, 4.8, 3.6, 0, 1.4), (8.0, 5.85, 4.6, 0, 1.4), (3.0, 6.1, 3.2, 0, 3.2), (-3.0, 6.3, 2.0, 0, 5.4),
-                                (-8.0, 6.0, 1.7, 0, 5.6), (-13.0, 5.6, 1.55, 0, 5.0), (-16.6, 5.2, 1.45, 0, 4.7),
-                                (-17.4, 4.0, 1.0, 0, 4.7)]), M_HAIR, head)
+    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.3), (0.5, 3.7, 2.1, 0, 3.3), (-1.5, 3.8, 1.6, 0, 4.4),
+                                (-4.5, 4.15, 1.4, 0, 5.45), (-9.0, 4.25, 1.3, 0, 5.4), (-13.0, 3.95, 1.2, 0, 4.6),
+                                (-16.0, 3.55, 1.0, 0, 4.4), (-16.8, 2.4, 0.6, 0, 4.4)]), M_HAIR, head)
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
-    hem = lambda phi: 1.5 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)
-    mesh_obj('Mantle', loft([(44.2, 2.9, 2.7, 0, 0.3), (43.2, 4.6, 3.9, 0, 0.3), (41.6, 6.6, 4.9, 0, 0.3), (40.0, 8.5, 5.5, 0, 0.3),
-                             (38.0, 9.7, 5.8, 0, 0.3, hem), (35.3, 9.95, 5.95, 0, 0.3, hem)], cap_top=False, cap_bot=False),
+    hem = lambda phi: 1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)
+    mesh_obj('Mantle', loft([(53.4, 2.3, 2.3, 0, 0.35), (52.4, 3.6, 3.1, 0, 0.35), (50.8, 6.0, 4.15, 0, 0.3), (49.2, 7.9, 4.8, 0, 0.3),
+                             (47.4, 8.6, 5.05, 0, 0.3, hem), (45.4, 8.85, 5.2, 0, 0.3, hem)], cap_top=False, cap_bot=False),
              M_MANTLE, body, solid=0.45)
-    mesh_obj('Mail trim', loft([(35.8, 10.05, 6.05, 0, 0.3, hem), (34.9, 10.1, 6.1, 0, 0.3, hem)], cap_top=False, cap_bot=False),
+    mesh_obj('Mail trim', loft([(45.9, 8.95, 5.3, 0, 0.3, hem), (45.0, 9.0, 5.35, 0, 0.3, hem)], cap_top=False, cap_bot=False),
              M_MAIL, body, solid=0.4, subdiv=0)
-    mesh_obj('Collar', loft([(44.9, 2.6, 2.5, 0, 0.3), (43.6, 3.1, 3.0, 0, 0.3)], cap_top=False, cap_bot=False), M_SHIRT, body, solid=0.3)
-    clasp = ellipsoid(1.0, 0.45, 1.5, 12, 8)
+    mesh_obj('Collar', loft([(54.0, 2.0, 2.05, 0, 0.4), (52.8, 2.5, 2.55, 0, 0.35)], cap_top=False, cap_bot=False), M_SHIRT, body, solid=0.3)
+    clasp = ellipsoid(0.9, 0.4, 1.3, 12, 8)
     bmesh.ops.rotate(clasp, cent=(0, 0, 0), matrix=Euler((0, 0.6, 0)).to_matrix(), verts=clasp.verts)
-    mesh_obj('Leaf clasp', clasp, M_GOLD, body, loc=(-0.8, -5.55, 40.6), subdiv=0)
+    mesh_obj('Leaf clasp', clasp, M_GOLD, body, loc=(-0.7, -4.85, 50.6), subdiv=0)
 
     # ---- arms: shoulder -> elbow -> wrist pivots; sleeves with a rounded cap, shirt cuffs and hands
     for side, s in (('R', 1), ('L', -1)):
         x = -s * SH_X   # the figure's right is -X (she faces -Y)
         sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z), body)
-        mesh_obj(f'Sleeve cap.{side}', ellipsoid(2.5, 2.6, 2.4), M_SLEEVE, sh, loc=(0, 0, -0.6))
-        mesh_obj(f'Upper sleeve.{side}', loft([(0.0, 2.35, 2.4), (-3.5, 2.15, 2.2), (-UPPER, 1.95, 2.0)]), M_SLEEVE, sh)
+        mesh_obj(f'Sleeve cap.{side}', ellipsoid(2.15, 2.2, 2.2), M_SLEEVE, sh, loc=(0, 0, -0.6))
+        mesh_obj(f'Upper sleeve.{side}', loft([(0.0, 2.0, 2.05), (-5.0, 1.8, 1.85), (-UPPER, 1.6, 1.65)]), M_SLEEVE, sh)
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
-        mesh_obj(f'Fore sleeve.{side}', loft([(0.8, 1.95, 2.0), (-3.0, 1.95, 2.0), (-FORE + 0.6, 1.8, 1.85)]), M_SLEEVE, el)
-        mesh_obj(f'Shirt cuff.{side}', loft([(-FORE + 1.0, 1.95, 2.0), (-FORE - 0.4, 2.0, 2.05)]), M_SHIRT, el, subdiv=0)
+        mesh_obj(f'Fore sleeve.{side}', loft([(0.8, 1.6, 1.65), (-3.5, 1.6, 1.65), (-FORE + 0.6, 1.45, 1.5)]), M_SLEEVE, el)
+        mesh_obj(f'Shirt cuff.{side}', loft([(-FORE + 1.0, 1.6, 1.65), (-FORE - 0.4, 1.65, 1.7)]), M_SHIRT, el, subdiv=0)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
-        mesh_obj(f'Hand.{side}', ellipsoid(1.05, 1.3, 1.65, 12, 8), M_SKIN, wr, loc=(-s * 0.15, -0.2, -1.5))
+        mesh_obj(f'Hand.{side}', ellipsoid(0.8, 1.05, 1.65, 12, 8), M_SKIN, wr, loc=(-s * 0.1, -0.15, -1.55))
 
     # ---- legs: hip -> knee -> ankle pivots; trousers with knee patches, soft boots with a folded cuff
     for side, s in (('R', 1), ('L', -1)):
         x = -s * LEG_X
         hip = empty(f'Hip.{side}', (x, 0, HIP_Z), body)
-        mesh_obj(f'Thigh.{side}', loft([(1.5, 3.1, 3.2), (-1.0, 3.0, 3.1), (-5.0, 2.6, 2.7), (-THIGH, 2.2, 2.3)]), M_LEGS, hip)
+        mesh_obj(f'Thigh.{side}', loft([(2.0, 3.1, 3.2), (-1.0, 3.0, 3.1), (-6.0, 2.55, 2.65), (-THIGH, 1.95, 2.05)]), M_LEGS, hip)
         kn = empty(f'Knee.{side}', (0, 0, -THIGH), hip)
-        mesh_obj(f'Shin.{side}', loft([(0.6, 2.2, 2.3), (-4.0, 2.0, 2.05), (-SHIN, 1.7, 1.8)]), M_LEGS, kn)
-        mesh_obj(f'Knee patch.{side}', ellipsoid(1.2, 0.5, 1.3, 12, 8), M_KNEE, kn, loc=(0, -2.15, -0.3), subdiv=0)
-        # the boot shaft hangs from the shin; its top folds down into a cuff
-        mesh_obj(f'Boot shaft.{side}', loft([(-1.6, 2.35, 2.45), (-5.0, 2.3, 2.4), (-SHIN + 0.5, 2.15, 2.25), (-SHIN - 1.2, 2.2, 2.3)]),
+        mesh_obj(f'Shin.{side}', loft([(0.7, 1.95, 2.05), (-4.0, 2.0, 2.1), (-SHIN, 1.35, 1.45)]), M_LEGS, kn)
+        mesh_obj(f'Knee round.{side}', ellipsoid(2.0, 2.1, 2.2), M_LEGS, kn)   # rounds the joint, so the leg bends without a notch
+        mesh_obj(f'Knee patch.{side}', ellipsoid(1.15, 0.5, 1.3, 12, 8), M_KNEE, kn, loc=(0, -1.9, -0.2), subdiv=0)
+        # the boot shaft hangs from the shin, from just under the knee; its top folds down into a cuff
+        mesh_obj(f'Boot shaft.{side}', loft([(-2.2, 2.3, 2.4), (-6.0, 2.15, 2.25), (-SHIN + 0.5, 1.75, 1.85), (-SHIN - 1.2, 1.8, 1.9)]),
                  M_BOOTS, kn)
-        mesh_obj(f'Boot cuff.{side}', loft([(-1.0, 2.75, 2.85), (-2.8, 2.65, 2.75, 0, 0, lambda p: 0.5 * math.cos(p))]),
+        mesh_obj(f'Boot cuff.{side}', loft([(-1.6, 2.6, 2.7), (-3.5, 2.5, 2.6, 0, 0, lambda p: 0.5 * math.cos(p))]),
                  M_CUFF, kn, subdiv=1)
         an = empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
-        mesh_obj(f'Foot.{side}', loft([(-1.0, 2.15, 2.3, 0, -0.4), (-2.6, 2.2, 3.4, 0, -1.4), (-3.4, 2.15, 3.5, 0, -1.5)]),
+        mesh_obj(f'Foot.{side}', loft([(-0.8, 1.75, 1.95, 0, -0.3), (-2.2, 1.85, 3.3, 0, -1.6), (-2.85, 1.8, 3.4, 0, -1.7)]),
                  M_BOOTS, an)
-        mesh_obj(f'Sole.{side}', loft([(-3.3, 2.2, 3.55, 0, -1.5), (-4.0, 2.15, 3.45, 0, -1.5)]), M_SOLE, an, subdiv=1)
+        mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, an, subdiv=1)
 
     # ---- camera and light
     cam_data = bpy.data.cameras.new('Camera')
@@ -473,20 +563,20 @@ def pose(col):
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
         if walking:
             p = ph + (0 if s > 0 else math.pi)
-            fwd = math.sin(p) * 6.0
-            lift = 2.6 * max(0.0, math.cos(p)) ** 1.5     # the foot travelling forward is off the ground
+            fwd = math.sin(p) * STRIDE
+            lift = LIFT * max(0.0, math.cos(p)) ** 1.5     # the foot travelling forward is off the ground
             out = 0.0
             turn = 0.0
             toe = -0.25 * max(0.0, -math.cos(p)) * max(0.0, -math.sin(p))   # heel peels up behind
         else:
             # hip-width stance: weight on the right leg, under the body; the left foot eased forward, out, and turned out
-            fwd = -0.8 if s > 0 else 3.6
+            fwd = -1.0 if s > 0 else 4.6
             lift = 0.0
-            out = 0.0 if s > 0 else 0.5
+            out = 0.0 if s > 0 else 0.6
             turn = 0.0 if s > 0 else 0.35
             toe = 0.0
         hip.location = (-s * (LEG_X + out), 0, HIP_Z)
-        th, shn = leg_ik(hip_z, fwd, 4.0 + lift)
+        th, shn = leg_ik(hip_z, fwd, ANKLE_Z + lift)
         hip.rotation_euler = (-th, 0, 0)
         kn.rotation_euler = (-(shn - th), 0, 0)
         an.rotation_euler = (shn + toe, 0, -s * turn)
