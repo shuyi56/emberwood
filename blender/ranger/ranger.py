@@ -1411,7 +1411,15 @@ def build_eye(head, head_tree, s, x, ey, ez):
             co = lp.vert.co
             u = (co.x - x) * s / RX
             lp[uvl].uv = ((u + 1) / 2, ((co.z - ez - u * RX * TILT) / (RZ * EYE_K) + 1) / 2)
-    mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
+    wo = mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
+    # toward each corner the ball turns back under the skin, so the lids lap over its tips and the white narrows
+    # into the corner and passes beneath it, instead of ending at a cut edge level with the skin. (A shape key:
+    # the sprite sheet turns it off, since at sprite size the tips are the white pixel beside the iris.)
+    wo.shape_key_add(name='Basis')
+    tk = wo.shape_key_add(name='tuck', from_mix=False)
+    for kv in tk.data:
+        kv.co.y += 0.16 * smooth(0.55, 1.0, abs(kv.co.x - x) / RX) ** 1.5
+    tk.value = 1.0
 
     def front(px, pz):
         """The nearest surface (the face or the white) in front of (px, pz), seen from the camera."""
@@ -1945,6 +1953,8 @@ def sprite_mode(on):
     for o in bpy.data.objects:
         if o.name.startswith('Iris'):
             o.scale = (1.2,) * 3 if on else (1.0,) * 3
+        if o.name.startswith('Eye white') and o.data.shape_keys:
+            o.data.shape_keys.key_blocks['tuck'].value = 0.0 if on else 1.0
 
 
 def render_sheet(out_png, tmp):
