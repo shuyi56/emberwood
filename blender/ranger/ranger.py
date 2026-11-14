@@ -529,6 +529,21 @@ def sculpted_head():
     return bm
 
 
+def head_front_y(x, z):
+    """The front of the sculpted head (see sculpted_head) at (x across, z up), in head heights, worked out
+    exactly from its formula rather than from the mesh, or None off the head."""
+    sz = (z - 0.52) / 0.5
+    sx = x / (0.36 * _jaw_width(z))
+    r = 1 - sx * sx - sz * sz
+    if r <= 0:
+        return None
+    sy = -math.sqrt(r)
+    t = max(0.0, (0.5 - z) / 0.5)
+    y = sy * 0.44 * (0.92 - 0.15 * t)
+    y -= face_relief(x, z) * max(0.0, -sy) ** 1.4
+    return y + 0.04
+
+
 def surface_y(bm, x, z):
     """The front of the head's surface at (x, z): where a ray from the camera side first meets it."""
     from mathutils.bvhtree import BVHTree
@@ -1063,6 +1078,8 @@ def tube(pts, radii, flat=0.5, n=10):
 
 
 EYE_RX, EYE_RZ = 0.78, 0.36
+EYE_TILT = 0.06        # the outer corner sits a touch higher than the inner one
+EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
 def lid_top(u):
@@ -1082,14 +1099,15 @@ def lid_bottom(u):
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
-    """The eyeball as it shows between the lids: an ellipsoid reshaped so its outline seen from the front is the
-    opening of the lids (lid_top over lid_bottom), tapering to a point at each corner rather than a rounded oval."""
+    """The eyeball: an ellipsoid reshaped to the lids' opening (lid_top over lid_bottom, tapering to a point at
+    each corner rather than a rounded oval), a little larger than it, so its edge turns in under the skin of the
+    lids all round (see eye_relief) and the lids close over it with no seam."""
     bm = ellipsoid(rx, ry, rz, seg, rings)
     for v in bm.verts:
         u = max(-1.0, min(1.0, v.co.x / rx)) * s          # + toward the outer corner
         half = rz * math.sqrt(max(1e-6, 1 - u * u))
         zn = max(-1.0, min(1.0, v.co.z / half))
-        v.co.z = zn * (lid_top(u) if zn > 0 else lid_bottom(u))
+        v.co.z = zn * (lid_top(u) if zn > 0 else lid_bottom(u)) * EYE_K
     return bm
 
 
@@ -1174,7 +1192,7 @@ def sclera_image():
     if 'img' in SCLERA_TEX:
         return SCLERA_TEX['img']
     W = 512
-    H = int(W * EYE_RZ / EYE_RX)
+    H = int(W * EYE_RZ * EYE_K / EYE_RX)
     uu, ww = np.meshgrid((np.arange(W) + 0.5) / W * 2 - 1, 1 - (np.arange(H) + 0.5) / H * 2)
     c = np.zeros((H, W, 3), dtype=np.float32) + np.array([236, 231, 220], dtype=np.float32)
 
@@ -1187,7 +1205,7 @@ def sclera_image():
     blend([212, 196, 186], 0.7 * sm(0.45, 1.0, np.abs(uu)))
     blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))
     top = np.array([[lid_top(u) for u in row] for row in uu]) / EYE_RZ
-    blend([186, 176, 168], 0.75 * sm(0.2, 0.95, ww / np.maximum(top, 0.05)))
+    blend([186, 176, 168], 0.75 * sm(0.2, 0.95, ww * EYE_K / np.maximum(top, 0.05)))
     # the veins, grown as wandering, forking strokes from the corners, in pixels
     rng = np.random.default_rng(7)
     mask = np.zeros((H, W), dtype=np.float32)
@@ -1219,7 +1237,7 @@ def sclera_image():
             starts.append((W - 2 if side > 0 else 2, H / 2 + rng.normal(0, H * 0.1)))
         for top_, u in ((True, rng.uniform(0.45, 0.8)), (False, rng.uniform(0.4, 0.75))):
             u *= side
-            h = (lid_top(u) if top_ else -lid_bottom(u)) / EYE_RZ
+            h = (lid_top(u) if top_ else -lid_bottom(u)) / EYE_RZ / EYE_K
             starts.append(((u + 1) / 2 * W, (1 - h) / 2 * H))
     for px, py in starts:
         ang = math.atan2(H / 2 - py, W / 2 - px) + rng.normal(0, 0.3)
@@ -1234,17 +1252,72 @@ def sclera_image():
     return img
 
 
+def eye_relief(x, z, s, ex, ez):
+    """How far the skin round one eye stands forward (head coordinates; the eye's centre at ex, ez): the lids and
+    the folds about them, sculpted into the face's own surface so they flow out of it rather than sitting on it.
+    Each follows the curve of the opening (lid_top, lid_bottom) and fades out past the corners:
+    the rim of the upper lid, rolling over the top of the ball; the crease above it;
+    the rim of the lower lid; the fold under it where the lower lid meets the cheek; and the tear trough running down and out from the inner corner."""
+    def g(t, w):
+        return math.exp(-(t / w) ** 2)
+    u = (x - ex) * s / EYE_RX
+    if abs(u) > 1.9:
+        return 0.0
+    uc = max(-1.0, min(1.0, u))
+    dz = z - ez - u * EYE_RX * EYE_TILT
+    T, B = lid_top(uc), lid_bottom(uc)
+    past = smooth(1.0, 1.45, abs(u))                  # 0 within the corners, 1 well past them
+    env = 1 - past
+    d = 0.0
+    # upper lid: a rim along the edge of the opening, fullest over the iris, closing to the corners
+    d += 0.09 * g(dz - (T - 0.035), 0.06 + 0.02 * past) * (0.35 + 0.65 * (1 - uc * uc) ** 0.5) * env
+    # the crease above it
+    cz = T + 0.16 + 0.04 * (1 - uc * uc)
+    d -= 0.035 * g(dz - cz, 0.045) * smooth(1.25, 0.7, abs(u + 0.1))
+    # lower lid: its rim, then the fold where it meets the cheek, with a slight pad between
+    d += 0.05 * g(dz + (B - 0.01), 0.045) * (0.4 + 0.6 * (1 - uc * uc) ** 0.5) * env
+    lz = -(B + 0.15 + 0.03 * uc)
+    d -= 0.028 * g(dz - lz, 0.04) * smooth(1.15, 0.55, abs(u - 0.15))
+    # the tear trough: from below the inner corner, down and out across the top of the cheek
+    if u < 0.4:
+        tz = -(lid_bottom(-0.9) + 0.32) - 0.2 * (u + 0.9)
+        d -= 0.016 * g(dz - tz, 0.06) * smooth(-1.3, -0.95, u) * smooth(0.4, -0.1, u)
+    return d
+
+
+def sculpt_eyes(hb, eyes):
+    """Sculpt the lids and folds into the head mesh (see eye_relief): the faces round each eye are first cut
+    finer, so the folds, a few hundredths of a unit across, have the vertices to hold them."""
+    region = [f for f in hb.faces
+              if any(abs(f.calc_center_median().x - ex) < 1.6 and ez - 1.0 < f.calc_center_median().z < ez + 0.75
+                     and f.calc_center_median().y < 0 for ex, ez, s in eyes)]
+    edges = list({e for f in region for e in f.edges})
+    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=6, use_grid_fill=True, smooth=0.0)
+    # the new points lie on the old flat faces: put each back onto the head's own smooth surface before sculpting
+    for v in res['geom']:
+        if isinstance(v, bmesh.types.BMVert) and v.co.y < 0:
+            y = head_front_y(v.co.x / HEAD_H, v.co.z / HEAD_H)
+            if y is not None:
+                v.co.y = y * HEAD_H
+    for v in hb.verts:
+        if v.co.y >= 0:
+            continue
+        d = sum(eye_relief(v.co.x, v.co.z, s, ex, ez) for ex, ez, s in eyes)
+        if d:
+            v.co.y -= d
+
+
 def build_eye(head, head_tree, s, x, ey, ez):
     """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
     across, ey the face's surface there, ez its height). Sized from life: the eye is about a fifth of the face's
-    width and the iris a little over a third of the eye. The parts: the white, shaped to the lids' opening and painted with its shading and veins (sclera_image);
-    an iris looking straight ahead, laid onto the ball with a slight glossy swell and the pupil and its shading painted on
-    (iris_colours), so the sun leaves a real highlight on it; the upper lid, a fold of skin lying over the top of
-    the eye and the iris and casting its shadow on them, with the crease of the lid above it; the rim of the lower
-    lid; and an arched brow, full at the nose and tapering to a fine tail. At sprite size this paints a
-    white-iris-white row with the lid's shade over it."""
+    width and the iris a little over a third of the eye. The parts: the ball, shaped to the lids' opening and a
+    little larger, painted with its shading and veins (sclera_image); an iris looking straight ahead, laid onto
+    the ball with a slight glossy swell and the pupil and its shading painted on (iris_colours), so the sun leaves
+    a real highlight on it; and an arched brow, full at the nose and tapering to a fine tail. The lids and the
+    folds round the eye are sculpted into the head (eye_relief). At sprite size this paints a white-iris-white
+    row."""
     RX, RY, RZ = EYE_RX, 0.36, EYE_RZ
-    TILT = 0.06                                     # the outer corner sits a touch higher than the inner one
+    TILT = EYE_TILT
     cy = ey + 0.24                                  # the white's front stands 0.12 proud of the skin
     white = almond(RX, RY, RZ, s)
     bmesh.ops.rotate(white, cent=(0, 0, 0), matrix=Euler((0, -s * TILT, 0)).to_matrix(), verts=white.verts)
@@ -1265,7 +1338,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
         for lp in f.loops:
             co = lp.vert.co
             u = (co.x - x) * s / RX
-            lp[uvl].uv = ((u + 1) / 2, ((co.z - ez - u * RX * TILT) / RZ + 1) / 2)
+            lp[uvl].uv = ((u + 1) / 2, ((co.z - ez - u * RX * TILT) / (RZ * EYE_K) + 1) / 2)
     mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
 
     def front(px, pz):
@@ -1316,24 +1389,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
             pts.append((px, front(px, pz) - lift, pz))
         return pts, list(np.interp(fine, us, radii))
 
-    # the upper lid: a rounded rim of skin that follows the curve of the opening from corner to corner, lying
-    # over the top of the eye and the iris, fullest over the iris and thinning to nothing where it meets the lower
-    # lid at each corner
-    lus = list(np.linspace(-1.0, 1.0, 11))
-    lid, lr = on_face(lus, [0.004 + 0.06 * (1 - u * u) ** 1.1 for u in lus],
-                      lambda u: lid_z(u, True) - 0.02 * (1 - u * u), 0.025, n=48)
-    mesh_obj(f'Upper lid {s}', tube(lid, lr, flat=0.6, n=16), M_SKIN, head, subdiv=0)
-    # the crease of the upper lid: the skin folds in above the lid, following the same arch higher up (deepest
-    # over the middle of the eye) and running down into the lid toward the outer corner
-    cus = list(np.linspace(-0.8, 1.02, 11))
-    fold, fr = on_face(cus, [0.006 + 0.05 * (1 - min(1.0, abs(u)) ** 2) ** 0.8 for u in cus],
-                       lambda u: lid_z(u, True) + 0.05 + 0.15 * (1 - min(1.0, u * u)) ** 0.6, -0.022, n=40)
-    mesh_obj(f'Lid fold {s}', tube(fold, fr, flat=0.4, n=16), M_SKIN, head, subdiv=0)
-    # the lower lid: a fine rim of skin along the lower curve, meeting the upper lid at both corners
-    bus_ = list(np.linspace(-1.0, 1.0, 11))
-    low, wr = on_face(bus_, [0.003 + 0.034 * (1 - u * u) ** 1.1 for u in bus_],
-                      lambda u: lid_z(u, False) + 0.012 * (1 - u * u), -0.004, n=40)
-    mesh_obj(f'Lower lid {s}', tube(low, wr, flat=0.5, n=16), M_SKIN, head, subdiv=0)
+    # (the lids, their creases and the folds under the eye are sculpted into the skin itself: see eye_relief)
     # the brow: on the brow ridge, starting just outside the bridge of the nose, rising in a soft arch to its peak
     # two thirds of the way out and falling away to a fine tail past the outer corner
     bus = [-0.78, -0.55, -0.25, 0.05, 0.35, 0.6, 0.85, 1.1, 1.3]
@@ -1410,11 +1466,14 @@ def build():
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
     mouth_y = surface_y(hb, 0, 0.258 * HEAD_H)
     head_tree = bvh_of(hb)
-    mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    # (the eyes are set against the head before its lids are sculpted, so the balls follow the plain socket and
+    # the lids then close over their edges)
+    eyes = [(feat[s][0], 0.525 * HEAD_H, s) for s in (-1, 1)]
     for s in (-1, 1):
         x, ey, by = feat[s]
-        ez = 0.525 * HEAD_H
-        build_eye(head, head_tree, s, x, ey, ez)
+        build_eye(head, head_tree, s, x, ey, 0.525 * HEAD_H)
+    sculpt_eyes(hb, eyes)
+    mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
