@@ -90,7 +90,7 @@ def mat_def(mid, name, rmp, detail=0.0, flat=None):
 
 
 M_SKIN = mat_def(1, 'skin', SKIN, 0.0)
-M_HAIR = mat_def(2, 'hair', ramp(0x7e4c34, 0.1), 0.22)
+M_HAIR = mat_def(2, 'hair', ramp(0x7e4c34, 0.1), 0.1)
 M_MANTLE = mat_def(3, 'mantle', ramp(0x56663f, 0.1), 0.14)
 M_JERKIN = mat_def(4, 'jerkin', ramp(0x765a40, 0.1), 0.24)
 M_SHIRT = mat_def(5, 'shirt', ramp(0xaca48d, 0.09), 0.04)
@@ -176,7 +176,7 @@ def make_material(mid):
         tex.wave_type = 'BANDS'
         tex.bands_direction = 'X'
         tex.inputs['Scale'].default_value = 0.22
-        tex.inputs['Distortion'].default_value = 0.6
+        tex.inputs['Distortion'].default_value = 0.0
         tex.inputs['Detail'].default_value = 0.0
     elif mid == M_MAIL:
         tex = nt.nodes.new('ShaderNodeTexChecker')
@@ -252,7 +252,7 @@ def empty(name, loc, parent=None):
 RIG = {}   # the armature, once built (see build_rig)
 
 
-def mesh_obj(name, bm, mid, parent=None, loc=(0, 0, 0), smooth=True, subdiv=1, solid=0.0, skin=None):
+def mesh_obj(name, bm, mid, parent=None, loc=(0, 0, 0), smooth=True, subdiv=1, solid=0.0, skin=None, rest=None):
     """A mesh object in one material. skin, if given, maps a rest position to {bone: weight}: the mesh is then
     deformed by the rig instead of being parented, which lets a limb bend smoothly at its joints."""
     me = bpy.data.meshes.new(name)
@@ -260,8 +260,12 @@ def mesh_obj(name, bm, mid, parent=None, loc=(0, 0, 0), smooth=True, subdiv=1, s
     bm.free()
     for p in me.polygons:
         p.use_smooth = smooth
+    pattern = rest
     rest = me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT')
-    rest.data.foreach_set('vector', [c for v in me.vertices for c in (v.co + Vector(loc))])
+    if pattern is not None:     # (pattern coordinates given per vertex, e.g. running along a lock of hair)
+        rest.data.foreach_set('vector', [c for v in pattern for c in v])
+    else:
+        rest.data.foreach_set('vector', [c for v in me.vertices for c in (v.co + Vector(loc))])
     o = bpy.data.objects.new(name, me)
     o.location = loc
     me.materials.append(mat(mid))
@@ -655,6 +659,127 @@ def outward(p, d):
     return x + x / n * d, y + y / n * d
 
 
+# ---------------------------------------------------------------- hair
+# Each lock: (side, azimuth where it leaves the skull, azimuth it settles at below the shoulders (degrees from the
+# front), where its tip ends (z from the chin), width, layer). The under layer is broad and fills the volume; the
+# top layer's narrower locks give the clumps their creases. Locks that leave the skull over the ear are swept back
+# behind the shoulder, so no hair falls down the outside of the arm.
+HAIR_LOCKS = []
+for _s in (1, -1):
+    HAIR_LOCKS += [(_s, t0, t1, end, w, 0) for t0, t1, end, w in
+                   ((64, 48, -5.0, 2.7), (84, 138, -12.5, 3.0), (115, 150, -15.5, 3.2), (147, 162, -16.2, 3.2),
+                    (174, 176, -16.6, 3.0))]
+    HAIR_LOCKS += [(_s, t0, t1, end, w, 1) for t0, t1, end, w in
+                   ((66, 42, -5.4, 2.0), (75, 52, -6.2, 2.2), (86, 136, -11.5, 2.3), (97, 144, -14.6, 2.4),
+                    (122, 152, -15.9, 2.5), (142, 160, -16.4, 2.5), (160, 170, -16.8, 2.4), (178, 179, -17.0, 2.2))]
+
+
+def build_hair(head):
+    """Long hair parted at the centre, as a set of locks. Each lock starts on the parting (front locks near the
+    hairline, back locks at the crown), arcs over the skull to its side, then hangs: it falls straight, easing in
+    a little under its own weight, and is pushed out only where it meets the jaw, the mantle or the back. The
+    surface it rests on is found by casting rays at everything already built (head, hair cap, mantle, jerkin)."""
+    from mathutils.bvhtree import BVHTree
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    verts, polys = [], []
+    off = Vector((0, 0, HEAD_Z))
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or o.name.startswith(('Lock', 'Eye', 'Iris', 'Lash', 'Brow', 'Mouth')):
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        mw = o.matrix_world
+        base = len(verts)
+        verts += [mw @ v.co - off for v in me.vertices]
+        polys += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    bvh = BVHTree.FromPolygons(verts, polys)
+    C = Vector((0, 0.5, 4.8))             # the middle of the skull
+
+    def hull(o_, d):
+        """The distance from o_ along the unit direction d to the outermost surface."""
+        hit = bvh.ray_cast(o_ + d * 30.0, -d, 40.0)
+        return 30.0 - hit[3] if hit[0] is not None else 0.0
+
+    def az_dir(theta, s):
+        t = math.radians(theta)
+        return Vector((-s * math.sin(t), -math.cos(t), 0.0))
+
+    rnd = np.random.default_rng(7)
+    for i, (s, t0, t1, end_z, width, layer) in enumerate(HAIR_LOCKS):
+        lift = 0.04 if layer == 0 else 0.28
+        thick = 0.55 if layer == 0 else 0.62
+        tip = 0.5 if layer == 0 else 0.25      # the under layer stays broad to its ends, so nothing shows through
+        # where the lock leaves the parting: the parting runs from the front hairline (pointing forward and up) back
+        # over the top to the crown; the lock's place along it follows the side of the head it falls toward
+        q = math.radians(45 + (min(t0, 178) - 60) / 118 * 86)
+        d_root = Vector((-s * 0.06, -math.cos(q), math.sin(q))).normalized()
+        d_eq = az_dir(t0, s)
+        pts, nrm = [], []
+        # over the skull: along the great arc from the parting to the side
+        for k in range(12):
+            t = k / 11
+            d = d_root.slerp(d_eq, t) if (d_root - d_eq).length > 1e-6 else d_eq
+            r = hull(C, d) + lift - 0.55 * max(0.0, 1 - k / 3)     # the root grows out of the scalp
+            pts.append(C + d * r)
+            nrm.append(d)
+        # hanging: straight down, easing in under its weight but never into what is beneath
+        r = (pts[-1] - Vector((0, 0.4, C.z))).length
+        z = C.z
+        wob = rnd.uniform(0, 2 * math.pi)
+        while z > end_z:
+            z -= 0.45
+            f = min(1.0, max(0.0, (C.z - 1.5 - z) / 6.0))
+            f = f * f * (3 - 2 * f)
+            theta = t0 + (t1 - t0) * f + 3.0 * math.sin(wob + z * 0.35)
+            d = az_dir(theta, s)
+            axis = Vector((0, 0.4, z))
+            r = max(hull(axis, d) + lift, r - 0.13)
+            pts.append(axis + d * r)
+            nrm.append(d)
+        # a ribbon of elliptical cross-sections along the path, broad across the head and thin through it
+        n = len(pts)
+        seg = 12
+        bm = bmesh.new()
+        rest = []
+        normals = []
+        rings = []
+        along = 0.0
+        phase = rnd.uniform(0, 3.0)
+        for k in range(n):
+            if k:
+                along += (pts[k] - pts[k - 1]).length
+            T = (pts[min(k + 1, n - 1)] - pts[max(k - 1, 0)]).normalized()
+            N = (nrm[k] - T * nrm[k].dot(T)).normalized()
+            B = T.cross(N).normalized()
+            u = k / (n - 1)
+            # full width soon after the root, a rounded taper to the tip
+            ws = min(1.0, 0.55 + u * 4.0) * (1.0 if u < 0.75 else math.cos((u - 0.75) / 0.25 * math.pi / 2) ** 0.6 * (1 - tip) + tip)
+            w = width * 0.5 * ws
+            h = thick * 0.5 * (0.6 + 0.4 * ws)
+            ring = []
+            for j in range(seg):
+                a = 2 * math.pi * j / seg
+                p = pts[k] + N * h + B * (w * math.cos(a)) + N * (h * math.sin(a))
+                ring.append(bm.verts.new(p))
+                # shade the lock as a gently rounded ribbon: its normals lean mostly outward from the head, so
+                # each lock gets one broad lit band and a soft darker edge instead of black slivers at its sides
+                normals.append((N * 0.75 + (B * math.cos(a) + N * math.sin(a)) * 0.45).normalized())
+                rest.append((math.cos(a) * 2.2 + phase + i * 1.7, along * 0.15, 0.0))
+            rings.append(ring)
+        for ra, rb in zip(rings, rings[1:]):
+            for j in range(seg):
+                bm.faces.new((ra[j], ra[(j + 1) % seg], rb[(j + 1) % seg], rb[j]))
+        bm.faces.new(list(reversed(rings[0])))
+        bm.faces.new(rings[-1])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        lock = mesh_obj(f'Lock {i}', bm, M_HAIR, head, rest=rest, subdiv=0)
+        lock.data.normals_split_custom_set_from_vertices(normals)
+        # the locks' self-shadowing breaks into pixel speckle at sprite size; the hair cap underneath casts the
+        # hair's shadow on the face and neck instead
+        lock.visible_shadow = False
+
+
 def build():
     reset()
     sc = bpy.context.scene
@@ -735,23 +860,13 @@ def build():
         mesh_obj(f'Brow {s}', brow, M_BROW, head, loc=(x + s * 0.05, by + 0.2, 0.645 * HEAD_H), subdiv=0)
     mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
 
-    # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
-    # side locks framing the face, and the long fall down the back
+    # ---- hair: a cap over the scalp cut along a sloping hairline; the locks themselves are laid over it once the
+    # mantle is on (see build_hair), so they can rest on the shoulders
     cap = ellipsoid(0.395 * HEAD_H, 0.48 * HEAD_H, 0.54 * HEAD_H, 32, 20)
     bmesh.ops.translate(cap, vec=(0, 0.06 * HEAD_H, 0.56 * HEAD_H), verts=cap.verts)
     bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.1, 6.4),
                            plane_no=Vector((0, -0.45, -0.89)).normalized(), clear_outer=True)
     mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.4)
-    for s in (-1, 1):
-        b = ellipsoid(1.55, 0.5, 1.15)
-        bmesh.ops.rotate(b, cent=(0, 0, 0), matrix=Euler((0.35, s * 0.55, 0)).to_matrix(), verts=b.verts)
-        mesh_obj(f'Bangs {s}', b, M_HAIR, head, loc=(s * 1.4, fore_y[s] + 0.25, 0.79 * HEAD_H))
-        mesh_obj(f'Side lock {s}', loft([(6.6, 0.85, 1.3, s * 3.05, 0.3), (4.5, 0.85, 1.35, s * 3.45, 0.9), (2.0, 0.8, 1.3, s * 3.6, 1.35),
-                                         (-1.0, 0.8, 1.25, s * 3.8, 1.5), (-3.2, 0.8, 1.1, s * 4.05, 1.5), (-4.4, 0.35, 0.5, s * 4.15, 1.5)]),
-                 M_HAIR, head)
-    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.3), (0.5, 3.7, 2.1, 0, 3.3), (-1.5, 3.8, 1.6, 0, 4.4),
-                                (-4.5, 4.15, 1.4, 0, 5.45), (-9.0, 4.25, 1.3, 0, 5.4), (-13.0, 3.95, 1.2, 0, 4.6),
-                                (-16.0, 3.55, 1.0, 0, 4.4), (-16.8, 2.4, 0.6, 0, 4.4)]), M_HAIR, head)
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
     # (eased between a few rings; below the shoulders the wool falls in a few deep, slightly uneven folds that
@@ -783,6 +898,8 @@ def build():
     clasp = ellipsoid(0.9, 0.4, 1.3, 12, 8)
     bmesh.ops.rotate(clasp, cent=(0, 0, 0), matrix=Euler((0, 0.6, 0)).to_matrix(), verts=clasp.verts)
     mesh_obj('Leaf clasp', clasp, M_GOLD, body, loc=(-0.7, -4.85, 50.6), subdiv=0)
+
+    build_hair(head)
 
     # ---- the rig: one bone per limb segment, each following its pivot (the pivots carry the pose; see pose()).
     # Each limb is a single mesh weighted across its joints, so elbows and knees bend in one smooth piece.
