@@ -527,6 +527,14 @@ void main() {
   gl_FragColor = linearToOutputTexel(vec4(col, 1.0));
 }`, { uSheet: { value: sheet }, uGrid: { value: new THREE.Vector2(COLS, ROWS) }, uFrame: { value: new THREE.Vector3(0, 0, 0) }, uSize: { value: new THREE.Vector2(1.76, 2.2) } });
 
+  // The contact shadow and the rings lie flat on the ground, so grass tufts, the slope of the terrain and the
+  // ground's own surface would cut through them. For the depth test only, pull them along the view ray toward
+  // the camera (the picture stays where it is), so they draw over everything on the ground round the feet.
+  // The pull is less than the sprite's own (0.8, see spriteMat), so the feet still stand on the shadow.
+  const GROUND_PULL = `
+  vec4 pulledG = projectionMatrix * vec4(mv.xyz * (1.0 - 0.6 / max(length(mv.xyz), 1.0)), 1.0);
+  gl_Position.z = pulledG.z / pulledG.w * gl_Position.w;`;
+
   // Contact shadow under each sprite: a crisp, stylised disc rather than a soft blur, so it still reads on dark
   // grass and at night: a dark core inside a slightly lighter band, each with a hard edge (smoothed over a hair,
   // so it doesn't shimmer). The colour leans cool violet, as the
@@ -538,6 +546,7 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
+` + GROUND_PULL + `
 }`, `
 varying vec2 vDisc;
 void main() {
@@ -556,6 +565,7 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
+` + GROUND_PULL + `
 }`, `
 uniform vec3 uColor;
 uniform float uInner;
