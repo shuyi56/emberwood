@@ -5,3 +5,4 @@ dist/
 # sprite sheets painted by scripts/build-sprites.mjs (npm run sprites)
 public/sprites/
 __pycache__/
+*.blend1

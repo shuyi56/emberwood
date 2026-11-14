@@ -683,6 +683,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     build()
     bpy.context.scene.frame_set(1)
+    bpy.context.preferences.filepaths.save_version = 0   # no .blend1 backups
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out_dir, 'ranger.blend'), compress=True)
     if '--build-only' in argv:
         return
