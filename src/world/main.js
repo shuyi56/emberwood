@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import './styles.css';
 import { COLS, ROWS, WALK } from '../shared/sprites.js';
 import { loadSheet } from '../shared/sheet-loader.js';
-import { loadParty, memberSpec } from '../shared/party.js';
+import { ROSTER, loadParty, memberSpec } from '../shared/party.js';
 import { V_LIT, V_END, F_LIT, V_UNLIT, F_UNLIT, V_LOCAL } from './shaders.js';
 
 function main() {
@@ -1436,13 +1437,49 @@ void main() {
 
   // ---------- Party ----------
   const cardGeo = new THREE.PlaneGeometry(1, 1); cardGeo.translate(0, 0.5, 0);
+  // Characters modelled in 3D (blender/<name>/export_glb.py) walk the world as the model itself rather than a
+  // card. The model is in sheet units (a frame is 80 tall), scaled to the card's height in the world (and a
+  // fifth more, as the cards lean toward the camera and so look taller than they are). Its one
+  // timeline holds a walk cycle (frames 1-25, at 24 fps) and the idle stance (frame 40): the walk's phase
+  // follows the hero's stride, so the feet keep pace with the ground they cover.
+  const MODEL_SCALE = 2.2 / 80 * 1.2, WALK_SECONDS = 24 / 24, IDLE_SECONDS = 39 / 24;
+  const gltf = new GLTFLoader();
+  function loadModel(file, g) {
+    const anim = { mixer: null, actions: [] };
+    gltf.load(import.meta.env.BASE_URL + file, (res) => {
+      const m = res.scene;
+      m.scale.setScalar(MODEL_SCALE);
+      m.traverse((o) => {
+        if (!o.isMesh) return;
+        o.castShadow = true;
+        o.receiveShadow = true;
+        o.frustumCulled = false;      // (a skinned mesh's bounds are its rest pose)
+      });
+      g.add(m);
+      anim.mixer = new THREE.AnimationMixer(m);
+      anim.actions = res.animations.map((clip) => {
+        const a = anim.mixer.clipAction(clip);
+        a.setLoop(THREE.LoopOnce);
+        a.clampWhenFinished = true;
+        a.play();
+        return a;
+      });
+      anim.mixer.setTime(IDLE_SECONDS);
+    }, undefined, (err) => console.warn('model failed to load:', file, err));
+    return anim;
+  }
+  function poseModel(h) {
+    if (!h.anim || !h.anim.mixer) return;
+    const t = h.moving ? ((h.stride % (Math.PI * 2)) / (Math.PI * 2)) * WALK_SECONDS : IDLE_SECONDS;
+    h.anim.mixer.setTime(t);
+  }
   function makeHero(key, spec, ringColour) {
     const g = new THREE.Group();
     // the sheet is a pre-painted image (scripts/build-sprites.mjs); until it arrives the texture is empty and
     // the card draws nothing. (An image texture is flipped on upload, so its top row is the top of the card.)
     const tex = new THREE.Texture();
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
-    loadSheet(key, spec.hairStyle || null, spec).then((img) => { tex.image = img; tex.needsUpdate = true; });
+    if (!ROSTER.find((r) => r.key === key).model) loadSheet(key, spec.hairStyle || null, spec).then((img) => { tex.image = img; tex.needsUpdate = true; });
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 64), blobShadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.05;
@@ -1450,18 +1487,23 @@ void main() {
     shadow.scale.set(0.9, 0.66, 1);
     shadow.renderOrder = 2;
     g.add(shadow);
-    const material = spriteMat(tex);
-    const card = new THREE.Mesh(cardGeo, material);
-    card.frustumCulled = false;
-    card.receiveShadow = true;
-    g.add(card);
+    const model = ROSTER.find((r) => r.key === key).model;
+    let material = null, anim = null;
+    if (model) anim = loadModel(model, g);
+    else {
+      material = spriteMat(tex);
+      const card = new THREE.Mesh(cardGeo, material);
+      card.frustumCulled = false;
+      card.receiveShadow = true;
+      g.add(card);
+    }
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.62, 48), ringMat(ringColour, 0.44, 0.58, false));
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.07;
     ring.renderOrder = 2;
     g.add(ring);
     scene.add(g);
-    return { g, x: 0, z: 0, moving: false, stride: rand() * 6, breath: Math.floor(rand() * 2), frame: material.uniforms.uFrame.value, facing: 0 };
+    return { g, anim, x: 0, z: 0, moving: false, stride: rand() * 6, breath: Math.floor(rand() * 2), frame: material ? material.uniforms.uFrame.value : new THREE.Vector3(), facing: 0 };
   }
 
   // the party picked on the sprite bench (the first member leads), each in their chosen hairstyle
@@ -1547,6 +1589,7 @@ void main() {
       const step = Math.floor((h.stride % (Math.PI * 2)) / (Math.PI * 2 / WALK));
       const idle = Math.floor(now / 650 + h.breath) % 2;
       h.frame.set(h.moving ? 2 + step : idle, h.facing, 0);
+      poseModel(h);
     });
     if (marker.visible && !reduceMotion) marker.scale.setScalar(1 + 0.12 * Math.sin(now / 160));
   }
