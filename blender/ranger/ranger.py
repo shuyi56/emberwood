@@ -255,10 +255,10 @@ def box(sx, sy, sz):
 # Realistic adult proportions, about 7.3 heads tall: the top of the head at 63 (the painted sprites' height),
 # a head 8.6 tall, shoulders at 1.5 heads down, the waist at 3, the hip joint at 3.7 and the knee at 2 heads up.
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
-HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.6, 3.4
+HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 11.0, 8.6
-LEG_X, SH_X = 3.3, 6.3
+LEG_X, SH_X = 3.3, 6.1
 STRIDE, LIFT = 8.0, 3.2
 
 
@@ -330,9 +330,85 @@ def sculpted_head():
 def surface_y(bm, x, z):
     """The front of the head's surface at (x, z): where a ray from the camera side first meets it."""
     from mathutils.bvhtree import BVHTree
-    tree = BVHTree.FromBMesh(bm)
+    tri = bm.copy()       # (built from triangles: FromBMesh can crash on a large n-gon cap)
+    bmesh.ops.triangulate(tri, faces=tri.faces[:])
+    tri.verts.index_update()
+    tree = BVHTree.FromPolygons([v.co.copy() for v in tri.verts], [[v.index for v in f.verts] for f in tri.faces])
+    tri.free()
     hit = tree.ray_cast(Vector((x, -50, z)), Vector((0, 1, 0)))
     return hit[0].y if hit[0] is not None else 0.0
+
+
+# ---------------------------------------------------------------- the torso's shape
+# Half-width, front depth and back depth of the body at each height (eased smoothly between), for an adult female
+# figure: shoulders, a ribcage that narrows to the waist, the waist itself, and hips that swell out over the seat.
+TORSO = [(53.0, 1.6, 1.5, 1.7), (51.4, 2.8, 2.2, 2.5), (50.4, 5.0, 2.6, 2.9), (49.2, 6.0, 2.8, 3.1), (47.2, 5.6, 2.9, 3.1),
+         (44.5, 5.2, 3.0, 3.0), (42.0, 4.35, 2.85, 2.75), (39.4, 3.65, 2.6, 2.5), (37.0, 4.5, 2.75, 2.85), (34.5, 5.9, 3.1, 3.6),
+         (32.0, 6.6, 3.3, 4.0), (30.0, 6.3, 3.3, 3.8), (28.5, 5.6, 3.1, 3.4)]
+
+
+def _torso_dims(z):
+    T = TORSO
+    if z >= T[0][0]:
+        return T[0][1:]
+    if z <= T[-1][0]:
+        return T[-1][1:]
+    for a, b in zip(T, T[1:]):
+        if b[0] <= z <= a[0]:
+            t = (a[0] - z) / (a[0] - b[0])
+            t = (1 - math.cos(math.pi * t)) / 2
+            return tuple(lerp(p, q, t) for p, q in zip(a[1:], b[1:]))
+
+
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def torso_point(z, phi, off=0.0, bust=1.0):
+    """A point on the body at height z, angle phi round from the front toward the figure's right, pushed out by
+    off. The bust is two rounded forms on the front of the ribcage, fuller below their centre than above; the
+    seat rounds out the back over the hips."""
+    rx, fy, by = _torso_dims(z)
+    sx, c = math.sin(phi), math.cos(phi)
+    x = -(rx + off) * sx
+    if c >= 0:
+        y = -(fy + off) * c
+        for s in (-1, 1):
+            zc = 44.6
+            sz = 1.5 if z > zc else 1.15                 # a soft slope above, a rounder curve under
+            y -= bust * 2.15 * math.exp(-((x - s * 2.3) / 1.85) ** 2 - ((z - zc) / sz) ** 2) * c ** 0.6
+    else:
+        y = -(by + off) * c
+        for s in (-1, 1):
+            y -= 0.9 * math.exp(-((x - s * 2.6) / 2.3) ** 2 - ((z - 32.3) / 2.3) ** 2) * c
+    return x, y
+
+
+def loft_fn(zs, point, n=40, cap_top=True, cap_bot=True):
+    """A tube through rings at the heights zs, each ring traced by point(z, phi) -> (x, y[, dz])."""
+    bm = bmesh.new()
+    loops = []
+    for z in zs:
+        loop = []
+        for k in range(n):
+            phi = 2 * math.pi * k / n
+            p = point(z, phi)
+            loop.append(bm.verts.new((p[0], p[1], z + (p[2] if len(p) > 2 else 0.0))))
+        loops.append(loop)
+    for a, b in zip(loops, loops[1:]):
+        for k in range(n):
+            bm.faces.new((a[k], a[(k + 1) % n], b[(k + 1) % n], b[k]))
+    if cap_top:
+        bm.faces.new(list(reversed(loops[0])))
+    if cap_bot:
+        bm.faces.new(loops[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
+def front_y(bm, x, z):
+    """Where the front of a mesh is at (x, z), seen from the camera side."""
+    return surface_y(bm, x, z)
 
 
 def build():
@@ -341,29 +417,47 @@ def build():
     root = empty('Ranger', (0, 0, 0))
     body = empty('Body', (0, 0, 0), root)   # carries the walk's bob
 
-    # ---- torso: the shirt underneath, then the jerkin over it
-    mesh_obj('Shirt', loft([(53.0, 1.6, 1.6, 0, 0.4), (51.4, 2.7, 2.4, 0, 0.3), (50.3, 5.0, 2.9), (49.0, 6.3, 3.3), (47.0, 6.2, 3.5),
-                            (44.5, 5.9, 3.85), (42.0, 5.1, 3.35), (39.0, 4.5, 2.95), (36.0, 5.3, 3.25), (33.0, 6.3, 3.65),
-                            (30.5, 6.5, 3.75), (29.0, 5.4, 3.3)]), M_SHIRT, body)
-    jerk = lambda phi: -1.0 * math.cos(phi) ** 2   # the skirt dips a little at front and back
-    mesh_obj('Jerkin', loft([(47.6, 6.45, 3.75), (44.5, 6.2, 4.15), (42.0, 5.4, 3.65), (39.5, 4.8, 3.25), (37.5, 5.1, 3.4),
-                             (35.0, 6.05, 3.75), (32.5, 6.75, 3.95), (30.0, 7.0, 4.15, 0, 0, jerk), (28.0, 7.15, 4.25, 0, 0, jerk)],
-                            cap_bot=False), M_JERKIN, body, solid=0.35)
+    # ---- torso: the body in its shirt, then a fitted jerkin over it: shaped to the bust, drawn in at the waist,
+    # following the hips and flaring a little below them into a short skirt
+    zs = [53.0 - 0.5 * i for i in range(50)]          # 53 down to 28.5
+    mesh_obj('Shirt', loft_fn(zs, lambda z, p: torso_point(z, p)), M_SHIRT, body)
+    J = 0.35       # the jerkin's leather stands this far off the shirt
+
+    def jerkin_pt(z, phi):
+        if z >= 32.0:
+            x, y = torso_point(z, phi, J)
+            return x, y
+        # below the widest point of the hips the skirt falls straight on, opening a little
+        x, y = torso_point(32.0, phi, J + (32.0 - z) * 0.06)
+        return x, y, -0.9 * math.cos(phi) ** 2 * (32.0 - z) / 4.0   # the hem dips at front and back
+
+    jz = [47.6 - 0.4 * i for i in range(47)]          # 47.6 down to 29.2
+    jb = loft_fn(jz, jerkin_pt, cap_bot=False)
+    vee_pts = []
+    for zz, w in ((47.0, 1.25), (45.5, 0.85), (44.0, 0.45), (42.6, 0.0)):
+        for xx in ((-w, w) if w else (0.0,)):
+            vee_pts.append((xx, front_y(jb, xx, zz) - 0.12, zz))
+    lace_y = {z: front_y(jb, 0.0, z) - 0.1 for z in (46.2, 44.9)}
+    mesh_obj('Jerkin', jb, M_JERKIN, body, solid=0.3)
     # a darker leather band binds the jerkin's hem
-    mesh_obj('Jerkin hem', loft([(29.2, 7.12, 4.25, 0, 0, jerk), (28.0, 7.22, 4.32, 0, 0, jerk)], cap_top=False, cap_bot=False),
-             M_BELT, body, solid=0.3, subdiv=0)
-    # the shirt shows in a narrow V at the front of the jerkin, crossed by its lacing
+    mesh_obj('Jerkin hem', loft_fn([30.3, 29.2], lambda z, p: jerkin_pt(z, p),
+                                   cap_top=False, cap_bot=False), M_BELT, body, solid=0.5, subdiv=0)
+    # the shirt shows in a narrow V at the front of the jerkin, crossed by its lacing (laid on the jerkin's surface)
     vee = bmesh.new()
-    vs = [vee.verts.new(p) for p in [(-1.3, -4.18, 47.0), (1.3, -4.18, 47.0), (0, -3.8, 42.4)]]
-    vee.faces.new(vs)
+    vv = [vee.verts.new(p) for p in vee_pts]
+    for a, b, c, d in ((0, 1, 3, 2), (2, 3, 5, 4)):
+        vee.faces.new((vv[a], vv[b], vv[d], vv[c]))
+    vee.faces.new((vv[4], vv[5], vv[6]))
     mesh_obj('Shirt V', vee, M_SHIRT, body, subdiv=0)
-    for i, z in enumerate((46.0, 44.7, 43.4)):
-        w = 1.15 * (z - 42.4) / 4.6
-        mesh_obj(f'Lace {i}', box(2 * w + 0.4, 0.3, 0.45), M_LACE, body, loc=(0, -4.25 + 0.08 * i, z), subdiv=0)
+    for i, z in enumerate((46.2, 44.9)):
+        w = 1.25 * (z - 42.6) / 4.4
+        mesh_obj(f'Lace {i}', box(2 * w + 0.5, 0.3, 0.4), M_LACE, body, loc=(0, lace_y[z], z), subdiv=0)
     # belt and buckle at the waist
-    mesh_obj('Belt', loft([(40.0, 5.0, 3.45), (38.5, 5.05, 3.5)]), M_BELT, body, subdiv=0)
-    mesh_obj('Buckle', box(1.7, 0.6, 1.7), M_STEEL, body, loc=(0, -3.55, 39.25), subdiv=0)
-    mesh_obj('Buckle hole', box(0.8, 0.3, 0.8), M_BELT, body, loc=(0, -3.8, 39.25), subdiv=0)
+    belt = loft_fn([40.1, 39.4, 38.7], lambda z, p: torso_point(z, p, J + 0.3, bust=0.0), cap_top=False, cap_bot=False)
+    mesh_obj('Belt', belt, M_BELT, body, solid=0.3, subdiv=0)
+    by_ = torso_point(39.4, 0.0, J + 0.3, bust=0.0)[1]
+    mesh_obj('Buckle', box(1.6, 0.6, 1.6), M_STEEL, body, loc=(0, by_ - 0.45, 39.4), subdiv=0)
+    mesh_obj('Buckle hole', box(0.75, 0.3, 0.75), M_BELT, body, loc=(0, by_ - 0.7, 39.4), subdiv=0)
 
     # ---- neck and head
     mesh_obj('Neck', loft([(57.0, 1.45, 1.55, 0, 0.55), (51.0, 1.7, 1.75, 0, 0.45)]), M_SKIN, body)
@@ -409,10 +503,10 @@ def build():
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
     hem = lambda phi: 1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)
-    mesh_obj('Mantle', loft([(53.4, 2.3, 2.3, 0, 0.35), (52.4, 3.6, 3.1, 0, 0.35), (50.8, 6.0, 4.15, 0, 0.3), (49.2, 7.9, 4.8, 0, 0.3),
-                             (47.4, 8.6, 5.05, 0, 0.3, hem), (45.4, 8.85, 5.2, 0, 0.3, hem)], cap_top=False, cap_bot=False),
+    mesh_obj('Mantle', loft([(53.4, 2.3, 2.3, 0, 0.35), (52.4, 3.6, 3.1, 0, 0.35), (51.2, 6.0, 3.9, 0, 0.3), (50.2, 7.6, 4.35, 0, 0.3),
+                             (49.0, 8.2, 4.6, 0, 0.3, hem), (47.9, 8.35, 4.7, 0, 0.3, hem)], cap_top=False, cap_bot=False),
              M_MANTLE, body, solid=0.45)
-    mesh_obj('Mail trim', loft([(45.9, 8.95, 5.3, 0, 0.3, hem), (45.0, 9.0, 5.35, 0, 0.3, hem)], cap_top=False, cap_bot=False),
+    mesh_obj('Mail trim', loft([(48.4, 8.45, 4.85, 0, 0.3, hem), (47.6, 8.5, 4.9, 0, 0.3, hem)], cap_top=False, cap_bot=False),
              M_MAIL, body, solid=0.4, subdiv=0)
     mesh_obj('Collar', loft([(54.0, 2.0, 2.05, 0, 0.4), (52.8, 2.5, 2.55, 0, 0.35)], cap_top=False, cap_bot=False), M_SHIRT, body, solid=0.3)
     clasp = ellipsoid(0.9, 0.4, 1.3, 12, 8)
@@ -423,13 +517,13 @@ def build():
     for side, s in (('R', 1), ('L', -1)):
         x = -s * SH_X   # the figure's right is -X (she faces -Y)
         sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z), body)
-        mesh_obj(f'Sleeve cap.{side}', ellipsoid(2.15, 2.2, 2.2), M_SLEEVE, sh, loc=(0, 0, -0.6))
-        mesh_obj(f'Upper sleeve.{side}', loft([(0.0, 2.0, 2.05), (-5.0, 1.8, 1.85), (-UPPER, 1.6, 1.65)]), M_SLEEVE, sh)
+        mesh_obj(f'Sleeve cap.{side}', ellipsoid(1.8, 1.85, 1.95), M_SLEEVE, sh, loc=(0, 0, -0.6))
+        mesh_obj(f'Upper sleeve.{side}', loft([(0.0, 1.7, 1.75), (-5.0, 1.55, 1.6), (-UPPER, 1.35, 1.4)]), M_SLEEVE, sh)
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
-        mesh_obj(f'Fore sleeve.{side}', loft([(0.8, 1.6, 1.65), (-3.5, 1.6, 1.65), (-FORE + 0.6, 1.45, 1.5)]), M_SLEEVE, el)
-        mesh_obj(f'Shirt cuff.{side}', loft([(-FORE + 1.0, 1.6, 1.65), (-FORE - 0.4, 1.65, 1.7)]), M_SHIRT, el, subdiv=0)
+        mesh_obj(f'Fore sleeve.{side}', loft([(0.8, 1.38, 1.42), (-3.5, 1.38, 1.42), (-FORE + 0.6, 1.15, 1.2)]), M_SLEEVE, el)
+        mesh_obj(f'Shirt cuff.{side}', loft([(-FORE + 1.0, 1.32, 1.36), (-FORE - 0.4, 1.38, 1.42)]), M_SHIRT, el, subdiv=0)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
-        mesh_obj(f'Hand.{side}', ellipsoid(0.8, 1.05, 1.65, 12, 8), M_SKIN, wr, loc=(-s * 0.1, -0.15, -1.55))
+        mesh_obj(f'Hand.{side}', ellipsoid(0.7, 0.95, 1.55, 12, 8), M_SKIN, wr, loc=(-s * 0.1, -0.15, -1.55))
 
     # ---- legs: hip -> knee -> ankle pivots; trousers with knee patches, soft boots with a folded cuff
     for side, s in (('R', 1), ('L', -1)):
@@ -588,7 +682,7 @@ def pose(col):
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
-        sh.rotation_euler = (-a, s * 0.1, 0)
+        sh.rotation_euler = (-a, s * 0.17, 0)   # held a little off the body, so the waist shows
         el.rotation_euler = (-bend, 0, 0)
         wr.rotation_euler = (0.1, 0, 0)
 
