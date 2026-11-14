@@ -1257,6 +1257,10 @@ def sclera_image():
     blend([128, 104, 100], 0.75 * sm(0.75, 1.0, up))
     blend([182, 162, 156], 0.45 * sm(0.45, 0.85, lo))
     blend([196, 128, 120], 0.7 * sm(0.82, 1.0, lo))
+    # the corners: where the lids close over the ball it is in their shade and wet with the pink of the lid's
+    # inner skin, so toward each point the white warms and darkens into the skin's own tone, and the lids'
+    # edges continue round it rather than stopping at a pale tip
+    blend([204, 154, 132], sm(0.42, 0.88, ru) ** 0.8)
     # the veins, grown as wandering, forking strokes from the corners, in pixels
     rng = np.random.default_rng(7)
     mask = np.zeros((H, W), dtype=np.float32)
@@ -1318,7 +1322,7 @@ def eye_relief(x, z, s, ex, ez):
     uc = max(-1.0, min(1.0, u))
     dz = z - ez - u * EYE_RX * EYE_TILT
     T, B = lid_top(uc), lid_bottom(uc)
-    inside = smooth(1.08, 0.8, abs(u))                # 1 within the opening, 0 just past its corners
+    inside = smooth(1.3, 0.85, abs(u))                # 1 within the opening, easing out past its corners
     d = 0.0
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
     d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
