@@ -1092,11 +1092,11 @@ def _skew(u, peak):
 
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    an asymmetric lens. The lid rises steeply from the inner corner to its highest point a quarter of the way
-    in from the nose, then runs down in a long slope that narrows into a sharp point at the outer corner;
-    the inner corner is a shorter, blunter point."""
+    an asymmetric lens. From a sharp inner point the lid leaves almost flat and sweeps up ever faster to its
+    highest point a quarter of the way in from the nose, then runs down in a long slope to a sharp point at the
+    outer corner."""
     v = _skew(u, -0.25)
-    h = (1 - v * v) ** 1.0 if v >= 0 else (1 - v * v) ** 0.6
+    h = (1 - v * v) ** 1.0 if v >= 0 else (1 - (-v) ** 1.6) ** 1.8
     return 0.97 * EYE_RZ * h
 
 
@@ -1104,7 +1104,7 @@ def lid_bottom(u):
     """The lower lid's edge below the centre line: a shallow curve, lowest a little toward the nose, rising
     gently into the outer point."""
     v = _skew(u, -0.1)
-    h = (1 - v * v) ** 1.1 if v >= 0 else (1 - v * v) ** 0.6
+    h = (1 - v * v) ** 1.1 if v >= 0 else (1 - (-v) ** 1.6) ** 1.6
     return 0.72 * EYE_RZ * h
 
 
