@@ -498,6 +498,76 @@ def hair_flow(co):
     return (math.atan2(co.x, co.y - 0.5) * max(2.5, math.hypot(co.x, co.y - 0.5)), 0.0, co.z * 0.6)
 
 
+def drape_fall(dg):
+    """The long hair down her back, draped rather than modelled as a solid: for each strip across it, the surface
+    it rests on (the hair at the back of the head, the mantle, her back) is found by casting at the figure from behind, and the
+    hair lies on that, then hangs: it may fall away from what is under it only gradually, as hair does over the edge
+    of the mantle, never through it. Across, it is thickest down the middle and thins to soft edges where it wraps
+    round the shoulders; its end is uneven, a few locks longer than the rest."""
+    from mathutils.bvhtree import BVHTree
+    off = Vector((0, 0, HEAD_Z))
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or o.parent is None or not (o.parent.name == 'Body' or o.name in ('Head shape', 'Hair fall', 'Hair cap')):
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        base = len(vs)
+        vs += [o.matrix_world @ v.co - off for v in me.vertices]
+        ps += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    body = BVHTree.FromPolygons(vs, ps)
+
+    def back_y(x, z):
+        hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
+        return hit[0].y if hit[0] is not None else 0.0
+
+    W = [(1.5, 3.3), (-1.5, 3.7), (-4.5, 4.0), (-9.0, 4.0), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+
+    def width(z):
+        for (z0, w0), (z1, w1) in zip(W, W[1:]):
+            if z1 <= z <= z0:
+                return lerp(w0, w1, (z0 - z) / (z0 - z1))
+        return W[0][1] if z > W[0][0] else W[-1][1]
+
+    NX, NZ = 41, 70
+    z_top = 1.5
+    def end_z(u):     # u from -1 (her right) to 1: an uneven end, the middle longest
+        return -16.2 - 0.9 * (1 - u * u) - 0.7 * max(0.0, math.sin(5.0 * u + 0.6)) ** 2 - 0.4 * max(0.0, math.sin(9.0 * u + 2.1)) ** 2
+    inner, outer = [], []
+    for i in range(NX):
+        u = -1 + 2 * i / (NX - 1)
+        zs = [lerp(z_top, end_z(u), j / (NZ - 1)) for j in range(NZ)]
+        col_in, col_out, y_prev, z_prev = [], [], None, None
+        for j, z in enumerate(zs):
+            x = u * width(z)
+            y = back_y(x, z) + 0.12
+            if y_prev is not None:
+                y = max(y, y_prev - 0.45 * (z_prev - z))     # it eases in under its weight, never steps in
+            y_prev, z_prev = y, z
+            v = j / (NZ - 1)
+            # thick down the middle, thin to soft edges; thinner toward the end, and rounded off at the tip
+            t = (0.95 - 0.35 * v) * max(0.0, 1 - u * u) ** 0.6 * (1.0 if v < 0.9 else math.cos((v - 0.9) / 0.1 * math.pi / 2) ** 0.5)
+            col_in.append(Vector((x, y, z)))
+            col_out.append(Vector((x, y + max(t, 0.03), z)))
+        inner.append(col_in)
+        outer.append(col_out)
+    bm = bmesh.new()
+    vin = [[bm.verts.new(p) for p in c] for c in inner]
+    vout = [[bm.verts.new(p) for p in c] for c in outer]
+    for i in range(NX - 1):
+        for j in range(NZ - 1):
+            bm.faces.new((vout[i][j], vout[i + 1][j], vout[i + 1][j + 1], vout[i][j + 1]))
+            bm.faces.new((vin[i][j + 1], vin[i + 1][j + 1], vin[i + 1][j], vin[i][j]))
+    for i in range(NX - 1):          # top and bottom edges
+        for j in (0, NZ - 1):
+            bm.faces.new((vin[i][j], vin[i + 1][j], vout[i + 1][j], vout[i][j]))
+    for i in (0, NX - 1):            # the two sides
+        for j in range(NZ - 1):
+            bm.faces.new((vin[i][j], vout[i][j], vout[i][j + 1], vin[i][j + 1]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
 HAIR_PARTS = []
 
 
@@ -505,6 +575,10 @@ def fuse_hair(head, names, voxel=0.1):
     """Melt the hair's pieces (the cap over the skull, the side locks and the long fall) into one surface: their
     shapes are joined, remeshed as a single volume, and relaxed so each join becomes a soft fillet instead of a
     seam where one piece sits on another."""
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    mesh_obj('Hair drape', drape_fall(dg), M_HAIR, head, subdiv=0)
+    names = names + ['Hair drape']
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     bm = bmesh.new()
@@ -539,41 +613,6 @@ def fuse_hair(head, names, voxel=0.1):
     bpy.data.meshes.remove(fused)
     for _ in range(6):
         bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.6, lambda_border=0.0,
-                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
-    # nothing passes through the mantle or the back: the body below the head is found by casting out from the
-    # middle of the figure, and any hair inside it (or too close) is pushed out onto it
-    from mathutils.bvhtree import BVHTree
-    off = Vector((0, 0, HEAD_Z))
-    vs, ps = [], []
-    for o in bpy.data.objects:
-        if o.type != 'MESH' or o.parent is None or o.parent.name != 'Body' or o.name in ('Neck',):
-            continue
-        me = o.evaluated_get(dg).to_mesh()
-        base = len(vs)
-        vs += [o.matrix_world @ v.co - off for v in me.vertices]
-        ps += [[base + i for i in p.vertices] for p in me.polygons]
-        o.evaluated_get(dg).to_mesh_clear()
-    body = BVHTree.FromPolygons(vs, ps)
-    bm.normal_update()
-    for v in bm.verts:
-        if v.co.z > 0.5:
-            continue
-        a = Vector((0.0, 0.4, v.co.z))
-        d = Vector((v.co.x, v.co.y - 0.4, 0.0))
-        if d.length < 1e-6:
-            continue
-        d.normalize()
-        if d.y < 0.45:      # (only the hair behind her: at the sides it falls clear of the shoulders)
-            continue
-        hit = body.ray_cast(a + d * 20.0, -d, 19.9)
-        if hit[0] is None:
-            continue
-        need = (hit[0] - a).length + 0.18
-        have = (v.co - a).dot(d)
-        if have < need:
-            v.co += d * (need - have)
-    for _ in range(2):
-        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.4, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
     # below the ears the hair breaks into a few broad clumps: soft vertical ridges across the fall and the sides
     bm.normal_update()
@@ -1053,12 +1092,10 @@ def build():
         mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.62, 1.35, s * 3.3, 0.9), (2.0, 0.6, 1.3, s * 3.45, 1.35),
                                          (-1.0, 0.6, 1.25, s * 3.65, 1.5), (-2.0, 0.5, 1.0, s * 3.75, 1.6), (-2.6, 0.25, 0.45, s * 3.8, 1.7)]),
                  M_HAIR, head)
-    # (the fall stands far enough back to lie over the mantle, and its end is uneven: a few locks hang lower than
-    # the rest instead of the whole fall stopping in one rounded edge)
-    ragged = lambda phi: -1.8 * max(0.0, math.sin(3 * phi + 0.5)) ** 2 - 0.8 * max(0.0, math.sin(5 * phi + 2.0)) ** 2
-    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.4), (0.5, 3.7, 2.1, 0, 3.6), (-1.5, 3.8, 1.6, 0, 5.0),
-                                (-4.5, 4.15, 1.4, 0, 6.4), (-7.0, 4.25, 1.3, 0, 6.5), (-9.5, 4.2, 1.25, 0, 6.0), (-13.0, 3.95, 1.2, 0, 5.1),
-                                (-16.0, 3.55, 1.0, 0, 4.7, ragged), (-16.8, 2.4, 0.6, 0, 4.7, ragged)]), M_HAIR, head)
+    # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
+    # (see drape_fall)
+    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.3), (0.5, 3.6, 2.0, 0, 3.0),
+                                (-0.4, 3.2, 1.4, 0, 3.3)]), M_HAIR, head)
     HAIR_PARTS[:] = [head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall']]
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
