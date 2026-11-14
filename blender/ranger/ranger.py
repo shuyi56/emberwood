@@ -887,7 +887,7 @@ def face_relief(x, z):
         d += gauss(x, z, s * 0.235, 0.455, 0.09, 0.04, 0.035)    # cheekbone, running back toward the ear
         d += gauss(x, z, s * 0.14, 0.41, 0.065, 0.055, 0.035)    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.21, 0.34, 0.06, 0.04, -0.01)      # a shallow hollow under the cheekbone
-        d += gauss(x, z, s * 0.17, 0.23, 0.07, 0.07, 0.016)      # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.16, 0.23, 0.06, 0.06, 0.01)       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply
     if z > 0.36:
@@ -974,13 +974,13 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(0.0, 0.065), (0.03, 0.115), (0.07, 0.152), (0.12, 0.182), (0.18, 0.212), (0.25, 0.25),
+HEAD_W = smooth_curve([(0.0, 0.1), (0.03, 0.122), (0.07, 0.145), (0.12, 0.17), (0.18, 0.195), (0.25, 0.232),
                        (0.33, 0.29), (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
-HEAD_F = smooth_curve([(0.0, 0.24), (0.03, 0.34), (0.07, 0.38), (0.12, 0.39), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415),
+HEAD_F = smooth_curve([(0.0, 0.33), (0.03, 0.36), (0.07, 0.38), (0.12, 0.39), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415),
                        (0.42, 0.42), (0.52, 0.42), (0.62, 0.42)])
-HEAD_B = smooth_curve([(0.0, -0.22), (0.03, -0.1), (0.07, 0.0), (0.12, 0.07), (0.16, 0.09), (0.24, 0.1),
-                       (0.3, 0.16), (0.36, 0.3), (0.44, 0.39), (0.54, 0.43), (0.64, 0.445)])
-HEAD_MID = smooth_curve([(0.0, -0.23), (0.03, -0.22), (0.07, -0.19), (0.12, -0.16), (0.18, -0.12), (0.24, -0.04), (0.3, 0.04), (1.0, 0.04)])
+HEAD_B = smooth_curve([(0.0, -0.1), (0.03, -0.06), (0.07, -0.01), (0.12, 0.04), (0.16, 0.05), (0.24, 0.06),
+                       (0.3, 0.12), (0.36, 0.27), (0.44, 0.38), (0.54, 0.43), (0.64, 0.445)])
+HEAD_MID = smooth_curve([(0.0, -0.215), (0.03, -0.205), (0.07, -0.19), (0.12, -0.16), (0.18, -0.12), (0.24, -0.04), (0.3, 0.04), (1.0, 0.04)])
 # how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
 # narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
 HEAD_NF = smooth_curve([(0.0, 2.1), (0.06, 2.05), (0.14, 2.0), (0.3, 2.05), (0.45, 2.15), (0.6, 2.25), (0.8, 2.2)])
@@ -1002,8 +1002,24 @@ def _dome(f, z, z0, top=1.0):
     return f(z0) * math.sqrt(max(0.0, 1 - t * t))
 
 
+CHIN_CAP = 0.08
+
+
 def head_section(z, c, s):
-    """The point of the base head (no face relief) at height z and direction (c forward, s across) round it."""
+    """The point of the base head (no face relief) at height z and direction (c forward, s across) round it.
+    Below CHIN_CAP the sections round off along a quarter ellipse into the bottom of the chin, so the chin's front
+    and the jaw's underside meet in a rounded turn instead of a keel."""
+    if z < CHIN_CAP:
+        # (each section is drawn in toward its middle by a quarter ellipse, which meets the sections above with
+        # the same slope and turns them under to a rounded bottom)
+        k = math.sqrt(max(0.0, 1 - ((CHIN_CAP - z) / CHIN_CAP) ** 2))
+        x, y = _section(z, c, s)
+        yw = HEAD_MID(z)
+        return x * k, yw + (y - yw) * k
+    return _section(z, c, s)
+
+
+def _section(z, c, s):
     w = _dome(HEAD_W, z, 0.7)
     yw = HEAD_MID(z)
     front = _dome(HEAD_F, z, 0.62) + yw
@@ -1047,11 +1063,7 @@ def sculpted_head():
             n = -n
         f = max(0.0, -n.y) ** 1.3       # only the parts facing forward carry the face
         d = face_relief(x, z) * f
-        # (and the sides carry the angle of the jaw: a soft swell where the ramus turns into the jaw's lower edge,
-        # with the masseter's plane rising from it, so the angle reads under the cheek without a corner)
-        side = abs(n.x) ** 1.5
-        d += side * (gauss(y, z, 0.05, 0.16, 0.08, 0.05, 0.014) + gauss(y, z, -0.02, 0.27, 0.09, 0.08, 0.006))
-        v.co = (x + n.x * d, y + n.y * d, max(0.0, z + n.z * d))
+        v.co = (x + n.x * d, y + n.y * d, z + n.z * d)
     bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
     return bm
 
