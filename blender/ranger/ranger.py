@@ -486,7 +486,8 @@ def face_relief(x, z):
         h = (0.015 + 0.085 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
         h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
-    d += h * math.exp(-(x / (0.04 + 0.03 * max(0.0, 1 - abs(z - 0.37) / 0.1))) ** 2)
+    # (the ridge widens smoothly toward the tip: a width that eased in by a straight ramp drew a line across it)
+    d += h * math.exp(-(x / (0.04 + 0.03 * math.exp(-((z - 0.37) / 0.065) ** 2))) ** 2)
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.05)       # the muzzle: the teeth and jaw carry the mouth forward
     d += gauss(x, z, 0, 0.29, 0.07, 0.025, 0.035)    # upper lip
     d += gauss(x, z, 0, 0.225, 0.055, 0.025, 0.03)   # lower lip
@@ -1159,13 +1160,13 @@ def iris_colours(me, to_disc, r, s):
         zn = p.z / r
         t -= 0.3 * smooth(0.05, 0.7, zn)                    # the shadow of the upper lid
         t += 0.12 * smooth(-0.15, -0.7, zn) * (1 - smooth(0.75, 0.95, q))   # light gathered low in the iris
-        warm = smooth(0.58, 0.36, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
+        warm = smooth(0.62, 0.4, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
         t = min(1.0, max(0.0, t + 0.22 * warm))
         k = t * 4
         i0 = min(3, int(k))
         c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)
         c = c + (amber - c) * 0.45 * warm
-        dark = smooth(0.35, 0.29, q)                        # the pupil, with a soft edge
+        dark = smooth(0.39, 0.33, q)                        # the pupil, with a soft edge
         c = c + (pupil - c) * dark
         cols.append(_srgb_lin(c / 255.0) + [1.0])
         shades.append(t * (1 - dark) + 0.25 * dark)
@@ -1255,9 +1256,10 @@ def sclera_image():
 def eye_relief(x, z, s, ex, ez):
     """How far the skin round one eye stands forward (head coordinates; the eye's centre at ex, ez): the lids and
     the folds about them, sculpted into the face's own surface so they flow out of it rather than sitting on it.
-    Each follows the curve of the opening (lid_top, lid_bottom) and fades out past the corners:
-    the rim of the upper lid, rolling over the top of the ball; the crease above it;
-    the rim of the lower lid; the fold under it where the lower lid meets the cheek; and the tear trough running down and out from the inner corner."""
+    A few broad, soft forms, each following the curve of the opening (lid_top, lid_bottom) and ending at or before
+    its corners (lines carried on past the corners, or several narrow bands, read as stray creases): the rim of the
+    upper lid rolling over the top of the ball, one crease above it, the rim of the lower lid, and one shallow fold
+    under it where the lower lid meets the cheek."""
     def g(t, w):
         return math.exp(-(t / w) ** 2)
     u = (x - ex) * s / EYE_RX
@@ -1266,39 +1268,52 @@ def eye_relief(x, z, s, ex, ez):
     uc = max(-1.0, min(1.0, u))
     dz = z - ez - u * EYE_RX * EYE_TILT
     T, B = lid_top(uc), lid_bottom(uc)
-    past = smooth(1.0, 1.45, abs(u))                  # 0 within the corners, 1 well past them
-    env = 1 - past
+    inside = smooth(1.08, 0.8, abs(u))                # 1 within the opening, 0 just past its corners
     d = 0.0
-    # upper lid: a rim along the edge of the opening, fullest over the iris, closing to the corners
-    d += 0.09 * g(dz - (T - 0.035), 0.06 + 0.02 * past) * (0.35 + 0.65 * (1 - uc * uc) ** 0.5) * env
-    # the crease above it
-    cz = T + 0.16 + 0.04 * (1 - uc * uc)
-    d -= 0.035 * g(dz - cz, 0.045) * smooth(1.25, 0.7, abs(u + 0.1))
-    # lower lid: its rim, then the fold where it meets the cheek, with a slight pad between
-    d += 0.05 * g(dz + (B - 0.01), 0.045) * (0.4 + 0.6 * (1 - uc * uc) ** 0.5) * env
-    lz = -(B + 0.15 + 0.03 * uc)
-    d -= 0.028 * g(dz - lz, 0.04) * smooth(1.15, 0.55, abs(u - 0.15))
-    # the tear trough: from below the inner corner, down and out across the top of the cheek
-    if u < 0.4:
-        tz = -(lid_bottom(-0.9) + 0.32) - 0.2 * (u + 0.9)
-        d -= 0.016 * g(dz - tz, 0.06) * smooth(-1.3, -0.95, u) * smooth(0.4, -0.1, u)
+    # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
+    d += 0.085 * g(dz - (T - 0.035), 0.075) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    # one soft crease above it, fading out before either corner
+    cz = T + 0.17 + 0.03 * (1 - uc * uc)
+    d -= 0.022 * g(dz - cz, 0.06) * smooth(0.95, 0.5, abs(u + 0.05))
+    # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
+    d += 0.045 * g(dz + (B - 0.01), 0.06) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    lz = -(B + 0.17 + 0.03 * uc)
+    d -= 0.014 * g(dz - lz, 0.07) * smooth(0.9, 0.4, abs(u - 0.1))
     return d
 
 
 def sculpt_eyes(hb, eyes):
     """Sculpt the lids and folds into the head mesh (see eye_relief): the faces round each eye are first cut
     finer, so the folds, a few hundredths of a unit across, have the vertices to hold them."""
+    # one patch over the whole middle of the face, from above the brows to below the nose, so its edge (where the
+    # finer mesh meets the coarser) is nowhere near the eyes or the nose
+    ez = eyes[0][1]
     region = [f for f in hb.faces
-              if any(abs(f.calc_center_median().x - ex) < 1.6 and ez - 1.0 < f.calc_center_median().z < ez + 0.75
-                     and f.calc_center_median().y < 0 for ex, ez, s in eyes)]
+              if abs(f.calc_center_median().x) < 3.0 and ez - 1.75 < f.calc_center_median().z < ez + 1.35
+              and f.calc_center_median().y < 0]
+    inside = set(region)
     edges = list({e for f in region for e in f.edges})
-    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=6, use_grid_fill=True, smooth=0.0)
-    # the new points lie on the old flat faces: put each back onto the head's own smooth surface before sculpting
-    for v in res['geom']:
-        if isinstance(v, bmesh.types.BMVert) and v.co.y < 0:
-            y = head_front_y(v.co.x / HEAD_H, v.co.z / HEAD_H)
-            if y is not None:
-                v.co.y = y * HEAD_H
+    # the patch's edge: new points along it stay on the straight edges the coarser faces beyond still share
+    rim = [(e.verts[0].co.copy(), e.verts[1].co.copy()) for e in edges if any(lf not in inside for lf in e.link_faces)]
+    ra = np.array([a for a, b in rim]); rb = np.array([b for a, b in rim])
+    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=5, use_grid_fill=True, smooth=0.0)
+    new = [v for v in res['geom'] if isinstance(v, bmesh.types.BMVert) and v.co.y < 0]
+    P = np.array([v.co for v in new])
+    rim_d = np.full(len(new), 1e9)
+    for a_, b_ in zip(ra, rb):
+        ab = b_ - a_
+        t = np.clip(((P - a_) @ ab) / (ab @ ab), 0, 1)
+        rim_d = np.minimum(rim_d, np.linalg.norm(P - (a_ + t[:, None] * ab), axis=1))
+    # the rest lie on the old flat faces: put each back onto the head's own smooth surface before sculpting, easing
+    # from the flat faces at the patch's edge to the smooth surface a little way in, so no step shows where the
+    # finer mesh meets the coarser (a hard switch drew a line across the nose)
+    for v, r in zip(new, rim_d):
+        w = smooth(0.0, 0.9, float(r))
+        if w <= 0:
+            continue
+        y = head_front_y(v.co.x / HEAD_H, v.co.z / HEAD_H)
+        if y is not None:
+            v.co.y += w * (y * HEAD_H - v.co.y)
     for v in hb.verts:
         if v.co.y >= 0:
             continue
@@ -1359,7 +1374,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # the iris lies on the curve of the white, turned to face the way it faces there (the white bends with the
     # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
     # centre)
-    IR = 0.23                                       # well inside the opening, its top under the upper lid
+    IR = 0.27                                       # its top under the upper lid, its foot on the lower one
     iz = ez + 0.03
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
@@ -1872,7 +1887,7 @@ def sprite_mode(on):
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
         if o.name.startswith('Iris'):
-            o.scale = (1.35,) * 3 if on else (1.0,) * 3
+            o.scale = (1.2,) * 3 if on else (1.0,) * 3
 
 
 def render_sheet(out_png, tmp):
