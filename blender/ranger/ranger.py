@@ -490,9 +490,52 @@ def surface_y(bm, x, z):
 
 
 def hair_flow(co):
-    """Pattern coordinates for the cap's hair, parted at the centre and combed down each side: across the
-    strands is front to back, along them the way down from the parting."""
-    return (co.y * 1.2, 0.0, -math.atan2(abs(co.x), co.z - 0.56 * HEAD_H) * 6.0)
+    """Pattern coordinates for the head of hair: across the strands is the angle round the head (seen from
+    above), along them is height, so the strands fall straight down the sides and back. (Coordinates that followed
+    the curve from the parting drew rings round the back of the head, like the ridges of a shell.)"""
+    return (math.atan2(co.x, -(co.y - 0.5)) * 4.0, 0.0, co.z * 0.6)
+
+
+def fuse_hair(head, names, voxel=0.1):
+    """Melt the hair's pieces (the cap over the skull, the side locks and the long fall) into one surface: their
+    shapes are joined, remeshed as a single volume, and relaxed so each join becomes a soft fillet instead of a
+    seam where one piece sits on another."""
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    bm = bmesh.new()
+    for n in names:
+        o = bpy.data.objects[n]
+        me = o.evaluated_get(dg).to_mesh()
+        part = bmesh.new()
+        part.from_mesh(me)
+        o.evaluated_get(dg).to_mesh_clear()
+        bmesh.ops.transform(part, matrix=o.matrix_local, verts=part.verts)
+        tmp = bpy.data.meshes.new('part')
+        part.to_mesh(tmp)
+        part.free()
+        bm.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
+        bpy.data.objects.remove(o)
+    me = bpy.data.meshes.new('hair-union')
+    bm.to_mesh(me)
+    bm.free()
+    ob = bpy.data.objects.new('hair-union', me)
+    link(ob)
+    rm = ob.modifiers.new('fuse', 'REMESH')
+    rm.mode = 'VOXEL'
+    rm.voxel_size = voxel
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    fused = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob)
+    bpy.data.meshes.remove(me)
+    bm = bmesh.new()
+    bm.from_mesh(fused)
+    bpy.data.meshes.remove(fused)
+    for _ in range(6):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.6, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    return mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
 
 
 def bvh_of(bm):
@@ -532,13 +575,13 @@ def curtain_bang(tree, s):
     N, steps, seg = 22, 18, 10
     for k in range(N):
         f = (k + rnd.uniform(0.1, 0.9)) / N               # 0 at the parting, 1 at the temple
-        az0 = math.radians(2.5 + f * 4)
+        az0 = math.radians(-2.0 + f * 7)     # (the inner roots cross the parting a little, so the halves meet)
         # the strands reaching the temple carry on down and back under the side lock, so the bangs run into the
         # side hair instead of ending in a clump of tips at the temple
         g = max(0.0, (f - 0.6) / 0.4)
         az1 = math.radians(12 + f * 80 + 14 * g)
         z0 = (0.93 + 0.07 * rnd.uniform()) * H
-        z1 = (0.80 - 0.17 * math.sin(f * math.pi / 2) ** 0.8 - 0.12 * g + rnd.uniform(-0.03, 0.03)) * H
+        z1 = (0.77 - 0.14 * math.sin(f * math.pi / 2) ** 0.8 - 0.12 * g + rnd.uniform(-0.03, 0.03)) * H
         rad = rnd.uniform(0.16, 0.24) * (1.15 - 0.3 * f)
         layer = 0.03 + 0.1 * (k % 2)        # alternate strands lie a little over their neighbours
         # the path first (centre, outward direction, radius at each step), smoothed so the strand has no kinks
@@ -948,7 +991,7 @@ def build():
     for i_, w_ in cap_thick.items():
         vg.add([i_], w_, 'REPLACE')
     cap_o.modifiers['thickness'].vertex_group = 'thick'
-    cap_o.modifiers['thickness'].thickness_vertex_group = 0.0
+    cap_o.modifiers['thickness'].thickness_vertex_group = 0.3     # (kept thick enough to fuse; see fuse_hair)
     for s in (-1, 1):
         bm_, rest_, nrm_ = curtain_bang((head_tree, cap_tree), s)
         bang = mesh_obj(f'Bangs {s}', bm_, M_HAIR, head, rest=rest_, subdiv=0)
@@ -962,6 +1005,7 @@ def build():
     mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.3), (0.5, 3.7, 2.1, 0, 3.3), (-1.5, 3.8, 1.6, 0, 4.4),
                                 (-4.5, 4.15, 1.4, 0, 5.45), (-9.0, 4.25, 1.3, 0, 5.4), (-13.0, 3.95, 1.2, 0, 4.6),
                                 (-16.0, 3.55, 1.0, 0, 4.4), (-16.8, 2.4, 0.6, 0, 4.4)]), M_HAIR, head)
+    fuse_hair(head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall'])
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
     # (eased between a few rings; below the shoulders the wool falls in a few deep, slightly uneven folds that
