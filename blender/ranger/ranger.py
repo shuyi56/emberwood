@@ -476,7 +476,7 @@ def face_relief(x, z):
     d = 0.0
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.035)    # eye socket
+        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.02)     # eye socket
         d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
         d += gauss(x, z, s * 0.2, 0.31, 0.07, 0.06, -0.025)      # hollow under the cheekbone
         d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
@@ -1083,20 +1083,29 @@ EYE_TILT = 0.06        # the outer corner sits a touch higher than the inner one
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
+def _skew(u, peak):
+    """u (-1 inner corner .. 1 outer) remapped so the point `peak` sits at 0: -1..0 on the inner side of it,
+    0..1 on the outer."""
+    u = max(-1.0, min(1.0, u))
+    return (u - peak) / (1 - peak) if u >= peak else (u - peak) / (1 + peak)
+
+
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    the curve of the eye's opening, highest a little toward the nose (where the upper lid arches over the iris),
-    and coming in tangent to the lower lid at each corner, so the two meet in a sharp point (a cusp) rather than at
-    an angle."""
-    u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
-    return EYE_RZ * (1 - u * u) ** 0.8 * (1 - abs(u) ** 3) ** 0.85 * (1 - 0.14 * u)
+    an asymmetric lens. The lid rises steeply from the inner corner to its highest point a quarter of the way
+    in from the nose, then runs down in a long slope that narrows into a sharp point at the outer corner;
+    the inner corner is a shorter, blunter point."""
+    v = _skew(u, -0.25)
+    h = (1 - v * v) ** 1.0 if v >= 0 else (1 - v * v) ** 0.6
+    return 0.97 * EYE_RZ * h
 
 
 def lid_bottom(u):
-    """The lower lid's edge below the centre line: flatter than the upper lid, lowest a little toward the outer
-    corner."""
-    u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
-    return 0.72 * EYE_RZ * (1 - u * u) ** 0.85 * (1 - abs(u) ** 3) ** 0.9 * (1 + 0.16 * u)
+    """The lower lid's edge below the centre line: a shallow curve, lowest a little toward the nose, rising
+    gently into the outer point."""
+    v = _skew(u, -0.1)
+    h = (1 - v * v) ** 1.1 if v >= 0 else (1 - v * v) ** 0.6
+    return 0.72 * EYE_RZ * h
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1274,23 +1283,11 @@ def eye_relief(x, z, s, ex, ez):
     d += 0.085 * g(dz - (T - 0.035), 0.075) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     # one soft crease above it, fading out before either corner
     cz = T + 0.17 + 0.03 * (1 - uc * uc)
-    d -= 0.022 * g(dz - cz, 0.06) * smooth(0.95, 0.5, abs(u + 0.05))
+    d -= 0.012 * g(dz - cz, 0.07) * smooth(0.95, 0.5, abs(u + 0.05))
     # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
     d += 0.045 * g(dz + (B - 0.01), 0.06) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     lz = -(B + 0.17 + 0.03 * uc)
     d -= 0.014 * g(dz - lz, 0.07) * smooth(0.9, 0.4, abs(u - 0.1))
-    # the corners drawn out into points, as on the eye of Horus: past the outer corner the lids close into a fine
-    # groove that runs on outward, rising a little, with the upper lid's rim carried along above it as a wing;
-    # at the inner corner a short groove dips down toward the nose
-    if u > 0.85:
-        tail = smooth(0.85, 1.0, u) * smooth(1.8, 1.15, u)
-        tz = (u - 1) * EYE_RX * 0.12
-        d -= 0.03 * g(dz - tz, 0.03) * tail
-        d += 0.04 * g(dz - tz - 0.06, 0.045) * tail
-    elif u < -0.85:
-        hook = smooth(-0.85, -1.0, u) * smooth(-1.45, -1.05, u)
-        tz = (u + 1) * EYE_RX * 0.3
-        d -= 0.022 * g(dz - tz, 0.03) * hook
     return d
 
 
