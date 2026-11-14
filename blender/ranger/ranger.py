@@ -1219,19 +1219,44 @@ def sclera_image():
     def sm(e0, e1, x):
         t = np.clip((x - e0) / (e1 - e0), 0, 1)
         return t * t * (3 - 2 * t)
-    blend([212, 196, 186], 0.7 * sm(0.45, 1.0, np.abs(uu)))
-    blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))
+    def field(nx, ny, seed):
+        """Smooth noise over the texture in -1..1: random values on an nx by ny lattice, eased between."""
+        g = np.random.default_rng(seed).uniform(-1, 1, (ny + 1, nx + 1))
+        fx = (np.arange(W) + 0.5) / W * nx
+        fy = (np.arange(H) + 0.5) / H * ny
+        ix, iy = np.minimum(fx.astype(int), nx - 1), np.minimum(fy.astype(int), ny - 1)
+        tx, ty = fx - ix, fy - iy
+        tx, ty = tx * tx * (3 - 2 * tx), ty * ty * (3 - 2 * ty)
+        a_ = g[iy][:, ix] * (1 - tx) + g[iy][:, ix + 1] * tx
+        b_ = g[iy + 1][:, ix] * (1 - tx) + g[iy + 1][:, ix + 1] * tx
+        return a_ * (1 - ty)[:, None] + b_ * ty[:, None]
+    # where each point lies between the eye's centre line (0) and the lid's edge (1), above and below
     top = np.array([[lid_top(u) for u in row] for row in uu]) / EYE_RZ
-    blend([186, 176, 168], 0.75 * sm(0.2, 0.95, ww * EYE_K / np.maximum(top, 0.05)))
-    # the ball's own roundness: it is a marble, lit from the front and above, so its tone falls away toward the
-    # edge all round as the surface turns from the light, most in the lower half, with a thin contact shadow
-    # where the lower lid meets it
-    xr, zr = uu * EYE_RX, ww * EYE_RZ * EYE_K
-    nz = np.sqrt(np.clip(1 - (xr * xr + zr * zr) / (0.92 * EYE_RX) ** 2, 0, 1))
-    blend([70, 62, 80], 1.0 * (1 - nz) ** 0.6)
-    blend([168, 158, 156], 0.35 * sm(0.0, -0.5, zr / EYE_RX))
     bot = np.array([[lid_bottom(u) for u in row] for row in uu]) / EYE_RZ
-    blend([170, 150, 146], 0.5 * sm(0.55, 1.0, -ww * EYE_K / np.maximum(bot, 0.05)))
+    e = np.where(ww > 0, ww * EYE_K / np.maximum(top, 0.05), -ww * EYE_K / np.maximum(bot, 0.05))
+    # the ball's roundness: a marble lit from the front, brightest a little above and inside the middle, its
+    # tone turning warmer and darker as it curves away toward each corner, where it sinks into the socket
+    ru = np.abs(uu)
+    rr = np.clip((uu / 0.78) ** 2 + (0.7 * np.clip(e, 0, 1.2) - 0.15) ** 2, 0, 1)
+    shade = 1 - np.sqrt(1 - rr)                                               # 0 facing the camera, 1 at the rim
+    blend([176, 160, 158], 0.95 * sm(0.0, 0.22, shade))
+    blend([104, 86, 92], 0.95 * sm(0.18, 0.85, shade))
+    blend([168, 140, 134], 0.5 * sm(0.75, 1.0, ru))
+    blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))                         # the caruncle, at the inner corner
+    # the skin of the white: faint warm and cool patches and a fine grain, so it never reads as flat paint
+    m = field(9, 4, 11) * 0.6 + field(23, 9, 12) * 0.4
+    blend([234, 212, 178], 0.35 * np.clip(m, 0, 1))
+    blend([196, 204, 222], 0.3 * np.clip(-m, 0, 1))
+    c[:] = c * (1 + 0.04 * field(90, 30, 13) + 0.02 * field(200, 70, 14))[..., None]
+    # where it meets the lids: the upper lid shades the top of the ball in a soft, broad band that deepens
+    # into the lid's edge, and the lower lid's wet rim is a thin pink line with a little shade above it, so the
+    # white passes into the skin through a tone rather than meeting it at a hard edge
+    up = np.where(ww > 0, e, 0)
+    lo = np.where(ww < 0, e, 0)
+    blend([176, 160, 154], 0.6 * sm(0.15, 0.85, up))
+    blend([128, 104, 100], 0.75 * sm(0.75, 1.0, up))
+    blend([182, 162, 156], 0.45 * sm(0.45, 0.85, lo))
+    blend([196, 128, 120], 0.7 * sm(0.82, 1.0, lo))
     # the veins, grown as wandering, forking strokes from the corners, in pixels
     rng = np.random.default_rng(7)
     mask = np.zeros((H, W), dtype=np.float32)
@@ -1296,15 +1321,15 @@ def eye_relief(x, z, s, ex, ez):
     inside = smooth(1.08, 0.8, abs(u))                # 1 within the opening, 0 just past its corners
     d = 0.0
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
-    d += 0.065 * g(dz - (T - 0.035), 0.075) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     # the crease of the upper lid: a clear, narrow fold a lid's breadth above the edge, following its curve and
     # fading out toward either corner, with the soft fullness under the brow rolling over it from above (the
     # upper lid is the one that moves, so it carries the eye's one strong fold)
     cz = T + 0.13 + 0.035 * (1 - uc * uc)
     cf = smooth(1.05, 0.55, abs(u + 0.05))
-    d -= 0.016 * g(dz - cz, 0.03) * cf
+    d -= 0.014 * g(dz - cz, 0.045) * cf
     # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
-    d += 0.045 * g(dz + (B - 0.01), 0.06) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    d += 0.04 * g(dz + (B - 0.02), 0.085) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     lz = -(B + 0.17 + 0.03 * uc)
     d -= 0.007 * g(dz - lz, 0.08) * smooth(0.9, 0.4, abs(u - 0.1))
     return d
