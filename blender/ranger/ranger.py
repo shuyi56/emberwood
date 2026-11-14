@@ -107,11 +107,11 @@ M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
 # the eyes: a moss-green iris dark enough to hold against the white and the skin at sprite size, a near-black
 # pupil and lash line, a warm catchlight, and a lid tone a step down the skin for the creases
 M_EYE = mat_def(16, 'iris', [[40, 52, 36], [56, 86, 48], [72, 106, 60], [104, 134, 82], [226, 222, 210]], 0.0, flat=1)
-M_LASH = mat_def(20, 'lashes', [[40, 30, 28]] * 5, 0.0, flat=0)
+M_LASH = mat_def(20, 'lashes', [[84, 60, 50]] * 5, 0.0, flat=0)
 M_SCLERA = mat_def(21, 'eye white', [[206, 198, 186], [226, 220, 208], [224, 217, 205], [234, 229, 218], [242, 238, 230]], 0.0, flat=1)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
 M_PUPIL = mat_def(23, 'pupil', [[26, 22, 22]] * 5, 0.0, flat=0)
-M_GLINT = mat_def(24, 'catchlight', [[246, 242, 232]] * 5, 0.0, flat=0)
+M_GLINT = mat_def(24, 'catchlight', [[222, 220, 210]] * 5, 0.0, flat=0)
 M_LID = mat_def(25, 'eyelid', [[150, 94, 78], [164, 108, 90], [176, 120, 100], [190, 136, 116], [204, 152, 130]], 0.0, flat=2)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
@@ -1054,9 +1054,9 @@ def build_eye(head, head_tree, s, x, ey, ez):
     """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
     across, ey the face's surface there, ez its height). The parts, front to back: the curve of the white; an
     iris looking straight ahead whose top is tucked under the upper lid; a pupil and a catchlight; the upper lid
-    as a dark lash line that thickens toward the outer corner and flicks up past it; a soft crease above that; a
+    as a fine, soft-brown lash line, a little fuller toward the outer corner; a soft crease above that; a
     fine lower lid; and an arched brow, full at the nose and tapering to a fine tail. At sprite size this paints
-    the same eye a painter would (a lash row over a white-iris-white row, the iris a dark, solid shape); in the
+    a white-iris-white row, the iris a dark, solid shape, under a light lash; in the
     close-up and the world model it holds as a set-in, curved eye."""
     RX, RY, RZ = 1.1, 0.5, 0.52
     TILT = 0.06                                     # the outer corner sits a touch higher than the inner one
@@ -1109,7 +1109,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
         mesh_obj(name, bm, mid, head, loc=c + n * lift + off, subdiv=0)
     disc(f'Iris {s}', 0.52, 0.1, 0.52, M_EYE, 0.03)
     disc(f'Pupil {s}', 0.21, 0.08, 0.23, M_PUPIL, 0.09, up * -0.02)
-    disc(f'Catchlight {s}', 0.13, 0.06, 0.13, M_GLINT, 0.15, side * (s * 0.18) + up * 0.18)
+    disc(f'Catchlight {s}', 0.075, 0.04, 0.075, M_GLINT, 0.12, side * (s * 0.14) + up * 0.14)
 
     def on_face(us, zf, lift, inset=0.0):
         pts = []
@@ -1119,11 +1119,11 @@ def build_eye(head, head_tree, s, x, ey, ez):
             pts.append((px, front(px, pz) - lift, pz))
         return pts
 
-    # upper lid: the lash line, riding just above the top of the white and over the top of the iris,
-    # thickening to the outer corner and flicking up and out past it
-    us = [-0.92, -0.75, -0.5, -0.2, 0.1, 0.4, 0.7, 0.9, 1.02, 1.12]
-    lash = on_face(us, lambda u: lid_z(u, True) + 0.0 + (0.1 * (u - 0.9) / 0.22 if u > 0.9 else 0.0), 0.03)
-    mesh_obj(f'Lash {s}', tube(lash, [0.03, 0.06, 0.08, 0.09, 0.1, 0.11, 0.12, 0.11, 0.07, 0.02], flat=0.5), M_LASH, head, subdiv=0)
+    # upper lid: a fine lash line in a soft dark brown along the top of the white and over the top of the iris,
+    # a little fuller toward the outer corner with only a slight lift past it (a heavy black line read as liner)
+    us = [-0.9, -0.75, -0.5, -0.2, 0.1, 0.4, 0.7, 0.88, 0.98, 1.06]
+    lash = on_face(us, lambda u: lid_z(u, True) - 0.02 + (0.05 * (u - 0.88) / 0.18 if u > 0.88 else 0.0), 0.0)
+    mesh_obj(f'Lash {s}', tube(lash, [0.015, 0.03, 0.04, 0.045, 0.05, 0.055, 0.06, 0.055, 0.035, 0.012], flat=0.5), M_LASH, head, subdiv=0)
     # the crease of the upper lid, a little above the lash line, fading out before either corner
     cus = [-0.6, -0.3, 0.0, 0.3, 0.6, 0.85]
     crease = on_face(cus, lambda u: lid_z(u, True) + 0.34 - 0.06 * u * u, -0.01)
