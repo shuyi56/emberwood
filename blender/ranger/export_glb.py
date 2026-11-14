@@ -71,6 +71,11 @@ def plain_materials():
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
+        if mid == ranger.M_GOLD:
+            # the brooch's engraving, as dark lines in its colour (the 'gold' colour; see bake_gold)
+            col = nt.nodes.new('ShaderNodeVertexColor')
+            col.layer_name = 'gold'
+            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
         nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
 
 
@@ -115,6 +120,22 @@ def bake_hair_shade(rays=10, dist=1.6):
                 hit += 1
         cols[i, :3] *= 1.0 - 0.55 * hit / rays
     attr.data.foreach_set('color', cols.ravel())
+
+
+def bake_gold():
+    """The brooch's engraving for the world: its 'etch' depth turned into a vertex colour, the gold's middle
+    tone darkening to tarnish in the cut lines."""
+    import numpy as np
+    o = bpy.data.objects['Leaf clasp']
+    me = o.data
+    rgb = ranger.MATERIALS[ranger.M_GOLD]['ramp'][2] / 255.0
+    lin = np.where(rgb > 0.04045, ((rgb + 0.055) / 1.055) ** 2.4, rgb / 12.92)
+    dark = np.array([0.05, 0.03, 0.012])
+    e = np.zeros(len(me.vertices), dtype=np.float32)
+    me.attributes['etch'].data.foreach_get('value', e)
+    k = np.clip((e - 0.2) / 0.4, 0, 1)[:, None] * 0.85
+    cols = np.concatenate([lin * (1 - k) + dark * k, np.ones((len(e), 1))], axis=1).astype(np.float32)
+    me.color_attributes.new('gold', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', cols.ravel())
 
 
 def bake_wool(rays=12, dist=1.4):
@@ -199,6 +220,7 @@ def main():
     plain_materials()
     bake_hair_shade()
     bake_wool()
+    bake_gold()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
     for name, ratio in (('Hair', 0.11),):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')

@@ -196,7 +196,6 @@ def wool_closeup(nt, bsdf, out, rmp):
     shade = _node(nt, 'ShaderNodeVectorMath', 'SCALE', Vector=c3.outputs['Result'], Scale=aok.outputs['Result'])
     # relief: the nap, a finer fuzz over it, and the slow undulation of fulled cloth
     h = _math(nt, 'MULTIPLY_ADD', fib.outputs['Fac'], 0.7, _math(nt, 'MULTIPLY', fuzz.outputs['Fac'], 0.45))
-    h = _math(nt, 'MULTIPLY_ADD', patch.outputs['Fac'], 0.5, h)
     bump = _node(nt, 'ShaderNodeBump', Height=h, Strength=0.45, Distance=0.12)
     wb = _node(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': shade.outputs['Vector'], 'Normal': bump.outputs['Normal']})
     wb.name = 'close bsdf'
@@ -212,27 +211,20 @@ def gold_closeup(nt, bsdf, out):
     """The brooch up close: worn gold, brighter on its raised midrib and rim than down in the hollows, where the
     tarnish and the shadow of the wool collect."""
     bsdf.name = 'sprite bsdf'
-    # veins chased into the face of the leaf: pairs running out and up from the midrib
-    rest = nt.nodes.new('ShaderNodeAttribute')
-    rest.attribute_name = 'rest'
-    sep = _node(nt, 'ShaderNodeSeparateXYZ', Vector=rest.outputs['Vector'])
-    ax = _math(nt, 'ABSOLUTE', sep.outputs['X'])
-    ph = _math(nt, 'MULTIPLY', _math(nt, 'MULTIPLY_ADD', ax, -0.9, sep.outputs['Y']), 2.6)
-    fr = _math(nt, 'ABSOLUTE', _math(nt, 'SUBTRACT', _math(nt, 'FRACT', ph), 0.5))
-    vein = _node(nt, 'ShaderNodeMapRange', Value=fr, **{'From Min': 0.38, 'From Max': 0.5})
-    # (fading out toward the rim, and off the midrib itself)
-    keep = _node(nt, 'ShaderNodeMapRange', Value=ax, **{'From Min': 0.08, 'From Max': 0.2})
-    rimk = _node(nt, 'ShaderNodeMapRange', Value=ax, **{'From Min': 0.75, 'From Max': 0.55})
-    vein_k = _math(nt, 'MULTIPLY', _math(nt, 'MULTIPLY', vein.outputs['Result'], keep.outputs['Result']), rimk.outputs['Result'])
-    bump = _node(nt, 'ShaderNodeBump', Height=_math(nt, 'MULTIPLY', vein_k, -1.0), Strength=0.6, Distance=0.04)
+    # the engraving (cut into the mesh; its depth is the 'etch' attribute): sharpened, and filled with dark
+    # tarnish, so each line reads as a crisp dark groove with the polished gold standing either side of it
+    et = nt.nodes.new('ShaderNodeAttribute')
+    et.attribute_name = 'etch'
+    vein_k = _node(nt, 'ShaderNodeMapRange', Value=et.outputs['Fac'], **{'From Min': 0.2, 'From Max': 0.6}).outputs['Result']
+    bump = _node(nt, 'ShaderNodeBump', Height=_math(nt, 'MULTIPLY', vein_k, -1.0), Strength=0.5, Distance=0.03)
     ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.6)
     ao.samples = 8
     col = _node(nt, 'ShaderNodeMix', Factor=ao.outputs['AO'])
     col.inputs['A'].default_value = (0.20, 0.12, 0.04, 1)
     col.inputs['B'].default_value = (0.78, 0.55, 0.24, 1)
     rough = _node(nt, 'ShaderNodeMapRange', Value=ao.outputs['AO'], **{'To Min': 0.7, 'To Max': 0.32})
-    dk = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', vein_k, 0.55), A=col.outputs['Result'])
-    dk.inputs['B'].default_value = (0.2, 0.12, 0.04, 1)
+    dk = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', vein_k, 0.85), A=col.outputs['Result'])
+    dk.inputs['B'].default_value = (0.05, 0.03, 0.012, 1)
     gb = _node(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': dk.outputs['Result'], 'Roughness': rough.outputs['Result'],
                                                  'Normal': bump.outputs['Normal']})
     gb.name = 'close bsdf'
@@ -285,6 +277,11 @@ def fuzz_shells(src, rmp, layers=3, step=0.07):
         bpy.context.scene.collection.objects.link(o)
         o.parent = src.parent
         o['fuzz_layer'] = i / max(1, layers - 1)
+        # (eased over the pinched valleys of the pleats first, so the shells bridge them instead of folding into
+        # them and showing as dark nicks)
+        sm = o.modifiers.new('ease', 'SMOOTH')
+        sm.factor = 0.5
+        sm.iterations = 4
         d = o.modifiers.new('stand off', 'DISPLACE')
         d.direction = 'NORMAL'
         d.mid_level = 0.0
@@ -1192,11 +1189,34 @@ def loft_fn(zs, point, n=40, cap_top=True, cap_bot=True):
     return bm
 
 
-def leaf_brooch(hl=1.4, hw=0.82, t=0.36, nu=28, nv=12):
+def leaf_etching(u, v, hl, w):
+    """How deep the engraving cuts at a point of the leaf's face (0 none, 1 the full cut): a line round the
+    rim just inside the edge, a line down each side of the midrib, and the side veins, which leave the midrib
+    and sweep out and up toward the edge, stopping short of the border. u runs along the leaf (-1 at the stem
+    to 1 at the tip), v across it (-1 to 1); w is the half-width there."""
+    def line(d, c, hw):
+        return min(1.0, max(0.0, 1.0 - abs(d - c) / hw)) ** 0.6
+
+    x, y = v * w, u * hl
+    ax, edge = abs(x), (1 - abs(v)) * w
+    border = line(edge, 0.11, 0.032) * min(1.0, max(0.0, (0.94 - abs(u)) / 0.06))
+    rib = line(ax, 0.075, 0.026) * min(1.0, max(0.0, (0.9 - abs(u)) / 0.1))
+    ph = (y + 0.2 - 0.85 * ax - 0.25 * ax * ax) * 2.3
+    f = abs(ph - math.floor(ph) - 0.5)
+    vein = min(1.0, max(0.0, 1.0 - (0.5 - f) / 0.055)) ** 0.6
+    vein *= min(1.0, max(0.0, (ax - 0.1) / 0.05)) * min(1.0, max(0.0, (edge - 0.17) / 0.05))
+    vein *= min(1.0, max(0.0, (0.8 - u) / 0.15)) * min(1.0, max(0.0, (u + 0.85) / 0.15))
+    return max(border, rib, vein)
+
+
+def leaf_brooch(hl=1.4, hw=0.82, t=0.36, nu=128, nv=60):
     """A gold leaf, its length along local Y and its face toward local +Z: a domed blade with a raised midrib,
     pointed at both ends, the tips and edges curling back so they press down into the cloth under it. Its back
-    sits 0.14 below the surface it is set on."""
+    sits 0.14 below the surface it is set on. Its face is engraved (see leaf_etching): the lines are cut into
+    the mesh itself, fine enough to hold them, and their depth is kept as the 'etch' attribute, which the
+    close-up gold fills with dark tarnish and the world model bakes into its colour."""
     bm = bmesh.new()
+    etch = bm.verts.layers.float.new('etch')
 
     def width(u):
         return hw * max(0.0, 1 - u * u) ** 0.7 * (1 + 0.14 * u)
@@ -1211,11 +1231,16 @@ def leaf_brooch(hl=1.4, hw=0.82, t=0.36, nu=28, nv=12):
 
     us = [-1 + 2 * i / nu for i in range(nu + 1)]
     vs = [-1 + 2 * j / nv for j in range(nv + 1)]
-    grids = []
-    for fn in (top, back):
-        g = [[bm.verts.new((v * width(u), u * hl, fn(u, v))) for v in vs] for u in us]
-        grids.append(g)
-    T, Bk = grids
+    T = []
+    for u in us:
+        row = []
+        for v in vs:
+            e = leaf_etching(u, v, hl, width(u))
+            vert = bm.verts.new((v * width(u), u * hl, top(u, v) - 0.045 * e))
+            vert[etch] = e
+            row.append(vert)
+        T.append(row)
+    Bk = [[bm.verts.new((v * width(u), u * hl, back(u, v))) for v in vs] for u in us]
     for i in range(nu):
         for j in range(nv):
             bm.faces.new((T[i][j], T[i][j + 1], T[i + 1][j + 1], T[i + 1][j]))
@@ -1256,7 +1281,7 @@ def place_brooch(mantle, point, phi, z, parent, tilt=0.6):
     bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=rot, verts=bm.verts)
     inv = rot.inverted()
     # (its pattern coordinates are the leaf's own: x across, y along it, so the veins follow the leaf)
-    return mesh_obj('Leaf clasp', bm, M_GOLD, parent, loc=tuple(hit), subdiv=1, rest=lambda co: inv @ co)
+    return mesh_obj('Leaf clasp', bm, M_GOLD, parent, loc=tuple(hit), subdiv=0, rest=lambda co: inv @ co)
 
 
 def front_y(bm, x, z):
@@ -1588,46 +1613,61 @@ def build():
         """(inward pull, lift of the hem) at a point of the mantle, from the brooch."""
         dx, dz = (phi - B_PHI) * 6.6, z - B_Z
         r = math.hypot(dx, dz)
-        # a shallow dish where the pin draws the cloth in, ringed by a few short creases that fan out from it
+        # a shallow dish where the pin draws the cloth in, and round it the wool gathered into tight pleats that
+        # fan out from the pin: pinched to a crease in each valley, rounded over each crest, and running further
+        # down than up, as the gathered cloth falls from it
         dish = 0.2 * math.exp(-(r / 1.5) ** 2)
         ang = math.atan2(dz, dx)
-        ring = (r / 1.7) ** 2 * math.exp(1 - (r / 1.7) ** 2)
-        crease = 0.16 * ring * (0.65 * math.cos(5 * ang + 0.7) + 0.35 * math.cos(3 * ang - 0.4))
+        re = math.hypot(dx, dz * (0.55 if dz < 0 else 2.6))
+        ring = min(1.0, max(0.0, (re - 0.75) / 0.5)) * math.exp(-max(0.0, re - 1.3) / 1.5)
+        crease = 0.24 * ring * pinch(9 * ang + 0.5 + 0.35 * math.sin(2 * ang))
         # the parting: from just under the brooch to the hem the two edges draw apart in a narrow, rounded V
         n = math.exp(-((phi - B_PHI) / 0.075) ** 2)
         s = min(1.0, max(0.0, (49.6 - z) / (49.6 - 47.9)))
         return dish - crease, n * s * 1.35
 
+    def pinch(t):
+        """A row of gathered folds: -1 at a sharp, pinched valley, rising to a rounded crest at +1."""
+        return 2 * math.sqrt(math.sin(t / 2) ** 2 + 0.02) - 1
+
     def mantle_pt(z, phi, off=0.0):
+        # one smooth curve through the rings (an ease between each pair of rings would flatten the cloth at every
+        # ring and stack it into padded bands, like quilting)
         R = MANTLE_RINGS
-        for a_, b_ in zip(R, R[1:]):
+        rx, ry, cy = R[-1][1:]
+        for i in range(len(R) - 1):
+            a_, b_ = R[i], R[i + 1]
             if b_[0] <= z <= a_[0]:
                 t = (a_[0] - z) / (a_[0] - b_[0])
-                t = (1 - math.cos(math.pi * t)) / 2
-                rx, ry, cy = (lerp(p_, q_, t) for p_, q_ in zip(a_[1:], b_[1:]))
+                p0, p3 = R[max(0, i - 1)], R[min(len(R) - 1, i + 2)]
+                t2, t3 = t * t, t * t * t
+                rx, ry, cy = (0.5 * (2 * q1 + (q2 - q0) * t + (2 * q0 - 5 * q1 + 4 * q2 - q3) * t2 + (3 * q1 - q0 - 3 * q2 + q3) * t3)
+                              for q0, q1, q2, q3 in zip(p0[1:], a_[1:], b_[1:], p3[1:]))
                 break
-        else:
-            rx, ry, cy = R[-1][1:]
         # across the back the wool is drawn in close over the shoulder blades, so the hair can hang straight past it
         w = max(0.0, -math.cos(phi)) ** 1.5
         ry = lerp(ry, max(0.0, back_y(z) - cy), w)
         f = min(1.0, max(0.0, (51.4 - z) / (51.4 - 47.9))) ** 1.3
-        fold = (0.7 * math.sin(6 * phi + 0.4) + 0.3 * math.sin(10 * phi + 1.3)) * (1 - 0.8 * w)
+        # the folds: a few deep ones, and finer ruffles between them that grow toward the hem, all pinched at the
+        # valleys (gathered cloth, not padded), each wandering a little off true as it runs down
+        fold = (0.62 * pinch(6 * phi + 0.4 + 0.3 * math.sin(2.1 * z)) +
+                0.38 * f * pinch(14 * phi + 1.3 + 0.5 * z)) * (1 - 0.8 * w)
         pull, lift = brooch_pull(z, phi)
         k = 1 + 0.085 * f * fold - pull / max(ry, 1.0)
         hem = (1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
-        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.4 * f * math.sin(6 * phi + 0.4) + lift
+        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.4 * f * fold + lift
 
-    mz = [53.4 - 0.25 * i for i in range(22)] + [47.9]
-    mantle = mesh_obj('Mantle', loft_fn(mz, mantle_pt, n=120, cap_top=False, cap_bot=False), M_MANTLE, body, solid=0.45)
-    mesh_obj('Mail trim', loft_fn([48.3, 48.0, 47.75], lambda z, p: mantle_pt(z, p, 0.08), n=120, cap_top=False, cap_bot=False),
+    MN = 200     # (fine enough round for the pleats at the brooch)
+    mz = [53.4 - 0.2 * i for i in range(28)] + [47.9]
+    mantle = mesh_obj('Mantle', loft_fn(mz, mantle_pt, n=MN, cap_top=False, cap_bot=False), M_MANTLE, body, solid=0.45)
+    mesh_obj('Mail trim', loft_fn([48.3, 48.0, 47.75], lambda z, p: mantle_pt(z, p, 0.08), n=MN, cap_top=False, cap_bot=False),
              M_MAIL, body, solid=0.25, subdiv=0)
     mesh_obj('Collar', loft([(54.0, 2.0, 2.05, 0, 0.4), (52.8, 2.5, 2.55, 0, 0.35)], cap_top=False, cap_bot=False), M_SHIRT, body, solid=0.3)
     # the cut edges of the wool (the hem and the neck), fulled up a little fluffier: 1 at the edge, fading over a
     # pixel or so (read by the mantle's material)
     edge = mantle.data.attributes.new('edge', 'FLOAT', 'POINT')
-    edge.data.foreach_set('value', [max(min(1.0, max(0.0, (48.75 - mz[i // 120]) / 0.85)),
-                                        min(1.0, max(0.0, (mz[i // 120] - 52.9) / 0.5)))
+    edge.data.foreach_set('value', [max(min(1.0, max(0.0, (48.75 - mz[i // MN]) / 0.85)),
+                                        min(1.0, max(0.0, (mz[i // MN] - 52.9) / 0.5)))
                                     for i in range(len(mantle.data.vertices))])
     place_brooch(mantle, mantle_pt, B_PHI, B_Z, body)
     fuzz_shells(mantle, MATERIALS[M_MANTLE]['ramp'])
