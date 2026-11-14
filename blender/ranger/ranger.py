@@ -887,7 +887,7 @@ def face_relief(x, z):
     else:
         h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
     d += h * math.exp(-(x / (0.04 + 0.03 * max(0.0, 1 - abs(z - 0.37) / 0.1))) ** 2)
-    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.05)       # the muzzle: the teeth and jaw carry the mouth forward
+    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
     d += gauss(x, z, 0, 0.29, 0.07, 0.025, 0.035)    # upper lip
     d += gauss(x, z, 0, 0.225, 0.055, 0.025, 0.03)   # lower lip
     d += gauss(x, z, 0, 0.258, 0.08, 0.01, -0.018)   # mouth line
@@ -896,35 +896,94 @@ def face_relief(x, z):
     return d
 
 
-def _jaw_width(z):
-    # full through the cheeks, then the jaw: a clear angle at z 0.2, narrowing to a rounded chin
-    if z >= 0.42:
-        return 1.0
-    if z >= 0.2:
-        t = (0.42 - z) / 0.22
-        return 1.0 - 0.2 * t ** 1.3
-    t = (0.2 - z) / 0.2
-    return 0.8 - 0.42 * t ** 1.4
+def smooth_curve(knots):
+    """A smooth curve through (z, value) knots: monotone cubic (Fritsch-Carlson), so it never overshoots between
+    them and leaves no kink at a knot the way straight segments would."""
+    zs = [k[0] for k in knots]
+    vs = [k[1] for k in knots]
+    n = len(zs)
+    d = [(vs[i + 1] - vs[i]) / (zs[i + 1] - zs[i]) for i in range(n - 1)]
+    m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else (d[i - 1] + d[i]) / 2 for i in range(1, n - 1)] + [d[-1]]
+    for i in range(n - 1):
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+            continue
+        a, b = m[i] / d[i], m[i + 1] / d[i]
+        if a * a + b * b > 9:
+            t = 3 / math.sqrt(a * a + b * b)
+            m[i], m[i + 1] = t * a * d[i], t * b * d[i]
+
+    def f(z):
+        if z <= zs[0]:
+            return vs[0]
+        if z >= zs[-1]:
+            return vs[-1]
+        i = max(k for k in range(n - 1) if zs[k] <= z)
+        h = zs[i + 1] - zs[i]
+        t = (z - zs[i]) / h
+        h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+        return h00 * vs[i] + h10 * h * m[i] + h01 * vs[i + 1] + h11 * h * m[i + 1]
+    return f
+
+
+# ---- the head's construction (sculpt rounds): the skull and jaw as a stack of horizontal sections, each a
+# rounded box (a superellipse) with its own half-width, front, back and widest point, read off smooth curves of
+# height. In head heights: chin at z 0, crown at z 1, the face toward -y.
+#   below z 0.2 the sections are the jaw: each ends at the front in the chin and at the back in the underside of
+#   the jaw, which rises from the chin to the angle of the jaw under the ear;
+#   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
+#   back from the brow; over the top the sections round off along ellipses into the crown.
+HEAD_W = smooth_curve([(0.0, 0.1), (0.04, 0.13), (0.1, 0.16), (0.18, 0.2), (0.25, 0.245), (0.33, 0.29),
+                       (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
+HEAD_F = smooth_curve([(0.0, 0.27), (0.04, 0.355), (0.1, 0.385), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415),
+                       (0.42, 0.42), (0.52, 0.42), (0.62, 0.42)])
+HEAD_B = smooth_curve([(0.0, -0.22), (0.03, -0.1), (0.07, 0.0), (0.12, 0.07), (0.16, 0.09), (0.24, 0.1),
+                       (0.3, 0.16), (0.36, 0.3), (0.44, 0.39), (0.54, 0.43), (0.64, 0.445)])
+HEAD_MID = smooth_curve([(0.0, -0.245), (0.03, -0.18), (0.07, -0.08), (0.14, 0.0), (0.3, 0.04), (1.0, 0.04)])
+# how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
+# narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
+HEAD_NF = smooth_curve([(0.0, 2.4), (0.06, 2.3), (0.14, 2.0), (0.3, 2.1), (0.45, 2.35), (0.6, 2.3), (0.8, 2.2)])
+HEAD_NB = smooth_curve([(0.0, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
+
+
+def _dome(f, z, z0, top=1.0):
+    """f below z0; above it the value rounds off along a quarter ellipse to nothing at the crown."""
+    if z <= z0:
+        return f(z)
+    t = min(1.0, (z - z0) / (top - z0))
+    return f(z0) * math.sqrt(max(0.0, 1 - t * t))
+
+
+def head_section(z, c, s):
+    """The point of the base head (no face relief) at height z and direction (c forward, s across) round it."""
+    w = _dome(HEAD_W, z, 0.7)
+    yw = HEAD_MID(z)
+    front = _dome(HEAD_F, z, 0.62) + yw
+    back = _dome(HEAD_B, z, 0.66) - yw
+    n = HEAD_NF(z) if c >= 0 else HEAD_NB(z)
+
+    def sp(t):
+        return math.copysign(abs(t) ** (2 / n), t)
+    x = w * sp(s)
+    y = yw - front * sp(c) if c >= 0 else yw + back * sp(-c)
+    return x, y
 
 
 def sculpted_head():
-    """The head as a sculpted mesh: a rounded skull, cheeks over a jaw with a defined angle, a rounded chin, and
-    the face's planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at
-    z 1, the face toward -Y."""
+    """The head as a sculpted mesh: the skull and jaw built up from sections (see head_section), then the face's
+    planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at z 1, the face
+    toward -Y."""
     bm = bmesh.new()
     bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=96, radius=1.0)
     for v in bm.verts:
         sx, sy, sz = v.co
-        z = 0.52 + 0.5 * sz
-        front = sy < 0
-        t = max(0.0, (0.5 - z) / 0.5)
-        # the face is flatter than an egg across the front; the back of the jaw tucks in under the ear
-        dep = (0.92 - 0.15 * t) if front else (0.98 - 0.6 * t ** 1.3)
-        x = sx * 0.36 * _jaw_width(z)
-        y = sy * 0.44 * dep
-        f = max(0.0, -sy) ** 1.4          # only the parts facing forward carry the face
+        z = 0.5 + 0.5 * sz
+        r = math.hypot(sx, sy)
+        c, s = (-sy / r, sx / r) if r > 1e-9 else (1.0, 0.0)
+        x, y = head_section(z, c, s)
+        f = max(0.0, c) ** 1.4          # only the parts facing forward carry the face
         y -= face_relief(x, z) * f
-        v.co = (x, y + 0.04, max(0.0, z))
+        v.co = (x, y, max(0.0, z))
     bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
     return bm
 
@@ -2084,7 +2143,11 @@ def build():
     mesh_obj('Belt keeper', belt_strip(1.35, 1.75, 0.82, 0.52, nseg=2), M_BELT, body, subdiv=0, solid=0.16)
 
     # ---- neck and head
-    mesh_obj('Neck', loft([(57.0, 1.45, 1.55, 0, 0.55), (51.0, 1.7, 1.75, 0, 0.45)]), M_SKIN, body)
+    # (a column about 0.45 head heights wide and as deep, leaning forward as it rises: its back runs up into the base of
+    # the skull, its front (the throat) slopes up from the collar to meet the underside of the jaw well behind the
+    # chin, and it widens a little at the top where it takes the skull behind the jaw)
+    mesh_obj('Neck', loft([(58.6, 2.0, 1.4, 0, 1.8), (57.0, 2.0, 1.5, 0, 1.47), (55.2, 1.9, 1.6, 0, 1.15),
+                           (54.0, 1.9, 1.75, 0, 0.82), (52.5, 2.0, 1.95, 0, 0.45), (51.0, 2.2, 2.1, 0, 0.2)]), M_SKIN, body)
     head = empty('Head', (0, 0, HEAD_Z), body)
     hb = sculpted_head()
     # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
