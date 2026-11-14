@@ -528,13 +528,17 @@ def curtain_bang(tree, s):
     rnd = np.random.default_rng(11 if s > 0 else 12)
     bm = bmesh.new()
     rest = {}
-    N, steps, seg = 22, 18, 8
+    normals = []
+    N, steps, seg = 22, 18, 10
     for k in range(N):
         f = (k + rnd.uniform(0.1, 0.9)) / N               # 0 at the parting, 1 at the temple
         az0 = math.radians(2.5 + f * 4)
-        az1 = math.radians(12 + f * 80)
-        z0 = (0.95 - 0.04 * rnd.uniform()) * H
-        z1 = (0.80 - 0.17 * math.sin(f * math.pi / 2) ** 0.8 + rnd.uniform(-0.012, 0.012)) * H
+        # the strands reaching the temple carry on down and back under the side lock, so the bangs run into the
+        # side hair instead of ending in a clump of tips at the temple
+        g = max(0.0, (f - 0.6) / 0.4)
+        az1 = math.radians(12 + f * 80 + 14 * g)
+        z0 = (0.93 + 0.07 * rnd.uniform()) * H
+        z1 = (0.80 - 0.17 * math.sin(f * math.pi / 2) ** 0.8 - 0.12 * g + rnd.uniform(-0.03, 0.03)) * H
         rad = rnd.uniform(0.16, 0.24) * (1.15 - 0.3 * f)
         layer = 0.03 + 0.1 * (k % 2)        # alternate strands lie a little over their neighbours
         rings, r_prev = [], None
@@ -563,6 +567,9 @@ def curtain_bang(tree, s):
                 a_ = 2 * math.pi * j / seg
                 q = centre + Bv * (rr * 1.25 * math.cos(a_)) + Nv * (rr * 0.8 * math.sin(a_))
                 ring.append(bm.verts.new(q))
+                # lit as part of the hair's outer surface: the normals lean out from the head, so a strand's
+                # underside and tip do not turn dark against the forehead
+                normals.append((d * 0.8 + (Bv * math.cos(a_) + Nv * math.sin(a_)) * 0.35).normalized())
                 rest[q.freeze()] = (k * 2.3 + math.cos(a_) * 0.25, 0.0, -t * 3.0)
             rings.append(ring)
         for ra, rb in zip(rings, rings[1:]):
@@ -577,7 +584,7 @@ def curtain_bang(tree, s):
     for k, co in enumerate(keys):
         kd.insert(co, k)
     kd.balance()
-    return bm, lambda co: rest[keys[kd.find(co)[1]]]
+    return bm, lambda co: rest[keys[kd.find(co)[1]]], normals
 
 
 # ---------------------------------------------------------------- the torso's shape
@@ -906,7 +913,13 @@ def build():
     # the head reads as hair growing from the scalp rather than as a cap; the back and the crown keep their volume
     hl_n = Vector((0, -0.45, -0.89)).normalized()
     hc = Vector((0, 0.5, 4.8))
+    cap.verts.index_update()
+    cap_thick = {}
     for v in cap.verts:
+        # (and its thickness thins out to the hairline too, so the edge leaves no lip under the bangs)
+        dh_ = -(v.co - Vector((0, -2.1, 6.4))).dot(hl_n)
+        ff = min(1.0, max(0.0, (-(v.co - hc).normalized().y - 0.25) / 0.45))
+        cap_thick[v.index] = 1.0 - ff * (1.0 - min(1.0, max(0.0, dh_) / 1.8))
         d = (v.co - hc).normalized()
         f = min(1.0, max(0.0, (-d.y - 0.25) / 0.45))      # how squarely it faces forward
         f = f * f * (3 - 2 * f)
@@ -921,11 +934,19 @@ def build():
         v.co = hc + d * lerp(rc, min(rc, close), f)
     cap_tree = bvh_of(cap)
     # (strands run from the centre parting down each side; see hair_flow)
-    mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.4,
-             rest=hair_flow)
+    cap_o = mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.4, rest=hair_flow)
+    vg = cap_o.vertex_groups.new(name='thick')
+    for i_, w_ in cap_thick.items():
+        vg.add([i_], w_, 'REPLACE')
+    cap_o.modifiers['thickness'].vertex_group = 'thick'
+    cap_o.modifiers['thickness'].thickness_vertex_group = 0.0
     for s in (-1, 1):
-        bm_, rest_ = curtain_bang((head_tree, cap_tree), s)
-        mesh_obj(f'Bangs {s}', bm_, M_HAIR, head, rest=rest_)
+        bm_, rest_, nrm_ = curtain_bang((head_tree, cap_tree), s)
+        bang = mesh_obj(f'Bangs {s}', bm_, M_HAIR, head, rest=rest_, subdiv=0)
+        bang.data.normals_split_custom_set_from_vertices(nrm_)
+        # (the strands cast no shadow of their own: their dark undersides and the shade they threw on the cap
+        # marked the bangs off from the rest of the hair; the cap still shades the forehead)
+        bang.visible_shadow = False
         mesh_obj(f'Side lock {s}', loft([(6.6, 0.85, 1.3, s * 3.05, 0.3), (4.5, 0.85, 1.35, s * 3.45, 0.9), (2.0, 0.8, 1.3, s * 3.6, 1.35),
                                          (-1.0, 0.8, 1.25, s * 3.8, 1.5), (-3.2, 0.8, 1.1, s * 4.05, 1.5), (-4.4, 0.35, 0.5, s * 4.15, 1.5)]),
                  M_HAIR, head)
