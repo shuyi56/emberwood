@@ -513,6 +513,66 @@ def finish_rig():
     arm.hide_render = True
 
 
+def _capsule(bm, p0, p1, r0, r1, seg=10):
+    """A tapered rounded segment from p0 to p1 (radii r0, r1), added to bm."""
+    a, b = Vector(p0), Vector(p1)
+    d = b - a
+    L = d.length
+    rot = d.normalized().to_track_quat('Z', 'Y').to_matrix()
+    tmp = bmesh.new()
+    bmesh.ops.create_uvsphere(tmp, u_segments=seg, v_segments=8, radius=1.0)
+    for v in tmp.verts:
+        x, y, z = v.co
+        t = (z + 1) / 2                      # 0 at the p0 end, 1 at p1
+        r = lerp(r0, r1, t)
+        # a sphere stretched along the segment, reaching a radius past each end so neighbours overlap at the joint
+        zz = -r0 + t * (L + r0 + r1)
+        v.co = rot @ Vector((x * r, y * r, zz)) + a
+    me = bpy.data.meshes.new('tmp')
+    tmp.to_mesh(me)
+    tmp.free()
+    bm.from_mesh(me)
+    bpy.data.meshes.remove(me)
+
+
+def hand_mesh(s):
+    """A hand hanging relaxed from the wrist (at the origin, fingers down): a palm, four fingers curled loosely
+    toward the palm in two joints each, longest at the middle, and the thumb lying forward along the index
+    finger. The palm faces the body (s = 1 for the right hand, whose inside faces +X); the front is -Y."""
+    bm = bmesh.new()
+    inward = s
+    # the palm: a flattened rounded block, broader at the knuckles than at the heel
+    palm = bmesh.new()
+    bmesh.ops.create_uvsphere(palm, u_segments=16, v_segments=12, radius=1.0)
+    for v in palm.verts:
+        x, y, z = v.co
+        w = 1.0 + 0.12 * (-z)                # wider toward the knuckles (z < 0)
+        v.co = Vector((x * 0.68, y * 1.22 * w, z * 1.5 - 1.5))
+    me = bpy.data.meshes.new('tmp')
+    palm.to_mesh(me)
+    palm.free()
+    bm.from_mesh(me)
+    bpy.data.meshes.remove(me)
+    # fingers: index at the front, pinky at the back; each curls a little more at its second joint
+    for y0, L, r in ((-0.93, 1.95, 0.4), (-0.31, 2.1, 0.41), (0.3, 2.0, 0.39), (0.88, 1.6, 0.35)):
+        p = Vector((0.05 * inward, y0, -2.7))
+        ang = 0.3
+        for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.9)):
+            ang += extra
+            d = Vector((inward * math.sin(ang), 0.0, -math.cos(ang)))
+            q = p + d * (L * frac)
+            _capsule(bm, p, q, rr, rr * 0.9)
+            p = q
+    # the thumb: from the heel of the palm on the inner front edge, angled forward and down, its tip bent in
+    t0 = Vector((0.3 * inward, -1.0, -0.8))
+    t1 = t0 + Vector((0.35 * inward, -0.45, -1.0))
+    t2 = t1 + Vector((0.3 * inward, -0.05, -0.75))
+    _capsule(bm, t0, t1, 0.52, 0.42)
+    _capsule(bm, t1, t2, 0.42, 0.34)
+    bmesh.ops.scale(bm, vec=(1.22, 1.22, 1.22), verts=bm.verts)   # about the length of the face, as in life
+    return bm
+
+
 def build():
     reset()
     sc = bpy.context.scene
@@ -648,8 +708,10 @@ def build():
         return table[-1][1]
 
     # ---- arms: one sleeve from a rounded cap at the shoulder to the wrist, then the shirt cuff and the hand
-    ARM = [(1.35, 0.25), (1.1, 1.05), (0.7, 1.5), (0.0, 1.72), (-1.5, 1.7), (-5.0, 1.55), (-UPPER, 1.36), (-UPPER - 3.0, 1.36),
-           (-UPPER - FORE + 0.6, 1.14)]
+    # (a fuller upper arm and forearm than before: the shoulder cap, the swell of the upper arm, a slight narrowing
+    # at the elbow, the forearm's muscle just below it, tapering to the wrist)
+    ARM = [(1.45, 0.3), (1.2, 1.15), (0.75, 1.7), (0.0, 2.0), (-2.0, 2.05), (-5.5, 1.9), (-UPPER, 1.65), (-UPPER - 2.2, 1.78),
+           (-UPPER - 5.0, 1.55), (-UPPER - FORE + 0.6, 1.3)]
     for side, s in (('R', 1), ('L', -1)):
         x = -s * SH_X   # the figure's right is -X (she faces -Y)
         sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z), body)
@@ -664,9 +726,9 @@ def build():
             back = 0.25 * math.exp(-((z + UPPER) / 0.9) ** 2) * max(0.0, -math.cos(phi))
             return -r * math.sin(phi), -(r * 1.03 + back * 0) * math.cos(phi) + back
         mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=28), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
-        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.3, 1.34), (-UPPER - FORE - 0.4, 1.36, 1.4)]), M_SHIRT,
+        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.45, 1.5), (-UPPER - FORE - 0.4, 1.52, 1.57)]), M_SHIRT,
                  loc=(x, 0.2, SH_Z), subdiv=0, skin=w)
-        mesh_obj(f'Hand.{side}', ellipsoid(0.7, 0.95, 1.55, 12, 8), M_SKIN, loc=(x - s * 0.1, 0.05, SH_Z - UPPER - FORE - 1.55), skin=w)
+        mesh_obj(f'Hand.{side}', hand_mesh(s), M_SKIN, loc=(x, 0.2, SH_Z - UPPER - FORE - 0.1), skin=w)
 
     # ---- legs: one trouser leg from the hip to the ankle with a rounded kneecap and a patch over it, soft boots
     # with a folded cuff
