@@ -56,6 +56,18 @@ def plain_materials():
             p.inputs['Sheen Weight'].default_value = 1.0
             p.inputs['Sheen Roughness'].default_value = 0.5
             p.inputs['Sheen Tint'].default_value = (0.42, 0.22, 0.13, 1.0)
+        if mid == ranger.M_MANTLE:
+            # the wool: its felted patches, the fluffed-up hem and neck and the shade where it is shut in, baked
+            # into the 'wool' colour (see bake_wool), fully matte, with a soft sheen at the edges where the
+            # renderer has one
+            col = nt.nodes.new('ShaderNodeVertexColor')
+            col.layer_name = 'wool'
+            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            p.inputs['Roughness'].default_value = 1.0
+            p.inputs['Specular IOR Level'].default_value = 0.1
+            p.inputs['Sheen Weight'].default_value = 1.0
+            p.inputs['Sheen Roughness'].default_value = 0.6
+            p.inputs['Sheen Tint'].default_value = (0.2, 0.25, 0.13, 1.0)
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
@@ -105,6 +117,61 @@ def bake_hair_shade(rays=10, dist=1.6):
     attr.data.foreach_set('color', cols.ravel())
 
 
+def bake_wool(rays=12, dist=1.4):
+    """The mantle's wool for the world, baked into its vertex colour 'wool' (linear RGB): soft felted patches
+    between the darker and lighter tones of its ramp, the cut edges (hem and neck) a shade lighter where the
+    wool is fulled up, and the shade where it is shut in (round the brooch, in the creases, against the neck)
+    from rays cast over the outside of the cloth, as for the hair."""
+    from mathutils import Vector, noise
+    from mathutils.bvhtree import BVHTree
+    import numpy as np
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in bpy.context.scene.objects:
+        if o.type != 'MESH':
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        base = len(vs)
+        vs += [o.matrix_world @ v.co for v in me.vertices]
+        ps += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    tree = BVHTree.FromPolygons(vs, ps)
+    mantle = bpy.data.objects['Mantle']
+    me = mantle.data
+    rmp = ranger.MATERIALS[ranger.M_MANTLE]['ramp'] / 255.0
+    lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
+    dark, mid, light = lin[1], lin[2], lin[3]
+    rest = me.attributes['rest'].data
+    edge = me.attributes['edge'].data
+    mw = mantle.matrix_world
+    nm = mw.to_3x3().inverted().transposed()
+    rng = np.random.default_rng(5)
+    dirs = rng.normal(size=(rays, 3))
+    dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+    attr = me.color_attributes.new('wool', 'FLOAT_COLOR', 'POINT')
+    cols = []
+    for v, r, e in zip(me.vertices, rest, edge):
+        q = r.vector
+        t = 0.7 * noise.noise(q * 0.55) + 0.3 * noise.noise(q * 1.7 + Vector((3.1, 0.4, 7.7)))
+        t = min(1.0, max(-1.0, 1.5 * t))
+        c = mid + (light - mid) * t * 0.6 if t > 0 else mid + (mid - dark) * t * 0.6
+        c = c + (light - c) * 0.4 * e.value
+        p = mw @ v.co
+        n = (nm @ v.normal).normalized()
+        p = p + n * 0.5          # (the outside of the cloth: the thickness is laid on along the normal)
+        hit = 0
+        for d in dirs:
+            d = Vector(d)
+            if d.dot(n) < 0:
+                d = -d
+            d = (d + n).normalized()
+            if tree.ray_cast(p + n * 0.05, d, dist)[0] is not None:
+                hit += 1
+        c = c * (1.0 - 0.45 * hit / rays)
+        cols += [*c, 1.0]
+    attr.data.foreach_set('color', cols)
+
+
 def main():
     argv = sys.argv[1:]
     out = argv[argv.index('--out') + 1] if '--out' in argv else os.path.join(HERE, '..', '..', 'public', 'models', 'ranger.glb')
@@ -126,8 +193,12 @@ def main():
     sc.frame_start, sc.frame_end = 1, IDLE_FRAME
     sc.render.fps = FPS
     sc.frame_set(1)
+    # the loose fibres standing off the wool are see-through shells for the close-up renders: not for the world
+    for o in [o for o in sc.objects if o.name.startswith('Wool fuzz')]:
+        bpy.data.objects.remove(o)
     plain_materials()
     bake_hair_shade()
+    bake_wool()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
     for name, ratio in (('Hair', 0.11),):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')
