@@ -7,9 +7,12 @@ import { HAIRSTYLES } from './presets/female-head.js';
 const SHEET_DIR = 'sprites';
 const sheetFile = (key, hair) => (hair ? `${key}-${hair}.png` : `${key}.png`);
 
-// every sheet to paint: { key, hair (or null), file, spec }
+// every sheet: { key, hair (or null), file, spec }, plus source for a sheet rendered elsewhere (a path from the
+// repository root) that is copied in instead of painted
 function allSheets() {
-  return ROSTER.flatMap((c) => (c.spec.hairStyle
+  return ROSTER.flatMap((c) => (c.rendered
+    ? [{ key: c.key, hair: null, file: sheetFile(c.key, null), spec: c.spec, source: c.rendered }]
+    : c.spec.hairStyle
     ? HAIRSTYLES.map((h) => ({ key: c.key, hair: h.key, file: sheetFile(c.key, h.key), spec: { ...c.spec, hairStyle: h.key } }))
     : [{ key: c.key, hair: null, file: sheetFile(c.key, null), spec: c.spec }]));
 }
