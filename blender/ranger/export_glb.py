@@ -45,12 +45,17 @@ def plain_materials():
         p.inputs['Base Color'].default_value = (*lin, 1.0)
         p.inputs['Roughness'].default_value = 0.6 if mid == ranger.M_HAIR else 0.9
         if mid in (ranger.M_EYE, ranger.M_SCLERA):
-            # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris and the white
-            # keep their painted shading (and the white its veins) as vertex colours
+            # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris keeps its
+            # painted shading as vertex colours, the white its painting (shading and veins) as a texture
             p.inputs['Roughness'].default_value = 0.12 if mid == ranger.M_EYE else 0.3
-            col = nt.nodes.new('ShaderNodeVertexColor')
-            col.layer_name = 'eye_col'
-            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            if mid == ranger.M_EYE:
+                col = nt.nodes.new('ShaderNodeVertexColor')
+                col.layer_name = 'eye_col'
+                nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            else:
+                tex = nt.nodes.new('ShaderNodeTexImage')
+                tex.image = ranger.sclera_image()
+                nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
@@ -90,7 +95,7 @@ def main():
         filepath=out, export_format='GLB', export_apply=True, export_yup=True,
         export_animations=True, export_force_sampling=True, export_frame_range=True,
         export_animation_mode='SCENE', export_skins=True, export_attributes=False,
-        export_texcoords=False, export_materials='EXPORT', export_cameras=False, export_lights=False)
+        export_texcoords=True, export_materials='EXPORT', export_cameras=False, export_lights=False)
     print('wrote', out, os.path.getsize(out) // 1024, 'KB')
 
 

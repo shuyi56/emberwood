@@ -145,9 +145,15 @@ def make_material(mid):
         bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.25
         bsdf.inputs['IOR'].default_value = 1.38
         nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
-        col = nt.nodes.new('ShaderNodeAttribute')         # their painting (iris_colours, sclera_colours)
-        col.attribute_name = 'eye_col'
-        nt.links.new(col.outputs['Color'], bsdf.inputs['Base Color'])
+        if mid == M_EYE:
+            col = nt.nodes.new('ShaderNodeAttribute')     # its painting (iris_colours)
+            col.attribute_name = 'eye_col'
+            nt.links.new(col.outputs['Color'], bsdf.inputs['Base Color'])
+        else:
+            tex = nt.nodes.new('ShaderNodeTexImage')      # its painting (sclera_image)
+            tex.image = sclera_image()
+            tex.interpolation = 'Cubic'
+            nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
     if mid in LEATHER:
         # the grain: fine pebbling and scattered pores pressed into the surface, so it catches the light in the
         # render itself (and reads as grain at sprite size, not only as a painted pattern)
@@ -1056,13 +1062,33 @@ def tube(pts, radii, flat=0.5, n=10):
     return bm
 
 
-def almond(rx, ry, rz, seg=28, rings=16):
-    """The eyeball as it shows between the lids: an ellipsoid pinched toward the corners (the inner one rounder,
-    the outer one a little sharper), so the white reads as an almond rather than a pill."""
+EYE_RX, EYE_RZ = 0.78, 0.36
+
+
+def lid_top(u):
+    """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
+    the curve of the eye's opening, meeting the lower lid in a point at each corner, highest a little toward the
+    nose (where the upper lid arches over the iris)."""
+    u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
+    return EYE_RZ * (1 - u * u) ** 0.8 * (1 - 0.14 * u)
+
+
+def lid_bottom(u):
+    """The lower lid's edge below the centre line: flatter than the upper lid, lowest a little toward the outer
+    corner."""
+    u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
+    return 0.72 * EYE_RZ * (1 - u * u) ** 0.85 * (1 + 0.16 * u)
+
+
+def almond(rx, ry, rz, s, seg=96, rings=64):
+    """The eyeball as it shows between the lids: an ellipsoid reshaped so its outline seen from the front is the
+    opening of the lids (lid_top over lid_bottom), tapering to a point at each corner rather than a rounded oval."""
     bm = ellipsoid(rx, ry, rz, seg, rings)
     for v in bm.verts:
-        u = min(1.0, abs(v.co.x) / rx)
-        v.co.z *= (1 - u ** 2.2) ** 0.22
+        u = max(-1.0, min(1.0, v.co.x / rx)) * s          # + toward the outer corner
+        half = rz * math.sqrt(max(1e-6, 1 - u * u))
+        zn = max(-1.0, min(1.0, v.co.z / half))
+        v.co.z = zn * (lid_top(u) if zn > 0 else lid_bottom(u))
     return bm
 
 
@@ -1135,55 +1161,91 @@ def smooth(e0, e1, x):
     return t * t * (3 - 2 * t)
 
 
-def sclera_colours(verts, x, ez, rx, rz, s):
-    """Paint the white of the eye: never pure white but a soft ivory, cooler and greyer toward the corners where it
-    turns away into the socket, the pink of the caruncle at the inner corner, the shadow the upper lid casts across
-    the top, and a few fine red veins that start at the corners and thin out before they reach the iris."""
-    base = np.array([236, 231, 220], dtype=np.float32)
-    corner = np.array([212, 196, 186], dtype=np.float32)
-    pink = np.array([214, 150, 138], dtype=np.float32)
-    shade = np.array([188, 178, 170], dtype=np.float32)
-    vein = np.array([196, 92, 80], dtype=np.float32)
-    # veins: (side: 1 outer / -1 inner, height at the corner, slope, waviness, phase, reach, strength)
-    VEINS = ((1, 0.15, -0.15, 0.08, 0.3, 0.42, 1.0), (1, -0.25, 0.3, 0.06, 1.9, 0.5, 0.8),
-             (1, -0.02, 0.05, 0.05, 4.0, 0.62, 0.55), (-1, 0.1, -0.2, 0.07, 2.6, 0.5, 0.85),
-             (-1, -0.28, 0.25, 0.05, 0.9, 0.55, 0.7))
-    out = []
-    for v in verts:
-        u = (v.co.x - x) * s / rx                 # -1 inner corner .. 1 outer corner
-        w = (v.co.z - ez) / rz
-        c = base.copy()
-        c += (corner - c) * 0.7 * smooth(0.45, 1.0, abs(u))
-        if u < 0:
-            c += (pink - c) * 0.8 * smooth(0.78, 0.97, -u)
-        c += (shade - c) * 0.75 * smooth(0.15, 0.85, w)
-        c += (shade - c) * 0.3 * smooth(-0.55, -1.0, w)
-        k = 0.0
-        for side, z0, slope, wav, ph, reach, st in VEINS:
-            a = u * side                           # 1 at the corner the vein starts from
-            if a <= reach:
-                continue
-            zc = z0 + slope * (1 - a) + wav * math.sin(9 * a + ph)
-            width = 0.035 + 0.04 * (a - reach)
-            k = max(k, st * math.exp(-((w - zc) / width) ** 2) * smooth(reach, reach + 0.25, a))
-        c += (vein - c) * 0.7 * k
-        out.append(_srgb_lin(c / 255.0) + [1.0])
-    return out
+SCLERA_TEX = {}
+
+
+def sclera_image():
+    """The white of the eye, painted into a texture laid across the eye's opening (u from the inner corner to the
+    outer one across, w from the bottom to the top; one texture for both eyes, mirrored). Never pure white but a
+    soft ivory, cooler and greyer toward the corners where it turns away into the socket, the pink of the caruncle
+    at the inner corner, the shadow the upper lid casts across the top, and fine red veins: each starts at a corner
+    and wanders in toward the iris, thinning and forking as it goes, and fades before it reaches it."""
+    if 'img' in SCLERA_TEX:
+        return SCLERA_TEX['img']
+    W = 512
+    H = int(W * EYE_RZ / EYE_RX)
+    uu, ww = np.meshgrid((np.arange(W) + 0.5) / W * 2 - 1, 1 - (np.arange(H) + 0.5) / H * 2)
+    c = np.zeros((H, W, 3), dtype=np.float32) + np.array([236, 231, 220], dtype=np.float32)
+
+    def blend(col, k):
+        c[:] = c + (np.array(col, dtype=np.float32) - c) * k[..., None]
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    blend([212, 196, 186], 0.7 * sm(0.45, 1.0, np.abs(uu)))
+    blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))
+    top = np.array([[lid_top(u) for u in row] for row in uu]) / EYE_RZ
+    blend([186, 176, 168], 0.75 * sm(0.2, 0.95, ww / np.maximum(top, 0.05)))
+    # the veins, grown as wandering, forking strokes from the corners, in pixels
+    rng = np.random.default_rng(7)
+    mask = np.zeros((H, W), dtype=np.float32)
+    yy, xx = np.mgrid[0:H, 0:W]
+
+    def splat(px, py, r, k):
+        x0, x1 = int(max(0, px - 3 * r - 1)), int(min(W, px + 3 * r + 2))
+        y0, y1 = int(max(0, py - 3 * r - 1)), int(min(H, py + 3 * r + 2))
+        if x0 >= x1 or y0 >= y1:
+            return
+        d2 = (xx[y0:y1, x0:x1] - px) ** 2 + (yy[y0:y1, x0:x1] - py) ** 2
+        np.maximum(mask[y0:y1, x0:x1], k * np.exp(-d2 / (2 * r * r)), out=mask[y0:y1, x0:x1])
+
+    def grow(px, py, ang, r, k, steps, depth):
+        for _ in range(steps):
+            splat(px, py, r, k)
+            ang += rng.normal(0, 0.28)
+            px += math.cos(ang) * 1.2
+            py += math.sin(ang) * 1.2
+            r = max(0.6, r * 0.99)
+            k *= 0.995
+            if depth < 2 and rng.random() < 0.03:
+                grow(px, py, ang + rng.choice([-1, 1]) * rng.uniform(0.5, 1.0), r * 0.7, k * 0.8,
+                     int(steps * rng.uniform(0.3, 0.5)), depth + 1)
+    # from the corners, and from under the lids above and below, each heading in toward the iris
+    starts = []
+    for side, n in ((1, 2), (-1, 2)):
+        for _ in range(n):
+            starts.append((W - 2 if side > 0 else 2, H / 2 + rng.normal(0, H * 0.1)))
+        for top_, u in ((True, rng.uniform(0.45, 0.8)), (False, rng.uniform(0.4, 0.75))):
+            u *= side
+            h = (lid_top(u) if top_ else -lid_bottom(u)) / EYE_RZ
+            starts.append(((u + 1) / 2 * W, (1 - h) / 2 * H))
+    for px, py in starts:
+        ang = math.atan2(H / 2 - py, W / 2 - px) + rng.normal(0, 0.3)
+        grow(px, py, ang, rng.uniform(1.6, 2.4), rng.uniform(0.85, 1.0), int(rng.uniform(80, 140)), 0)
+    mask *= sm(0.2, 0.45, np.abs(uu))           # they fade before the iris
+    blend([178, 62, 58], 0.8 * mask)
+    img = bpy.data.images.new('sclera', W, H, alpha=False)
+    px = np.concatenate([c / 255, np.ones((H, W, 1), dtype=np.float32)], axis=2)[::-1]
+    img.pixels.foreach_set(px.ravel().astype(np.float32))
+    img.pack()
+    SCLERA_TEX['img'] = img
+    return img
 
 
 def build_eye(head, head_tree, s, x, ey, ez):
     """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
     across, ey the face's surface there, ez its height). Sized from life: the eye is about a fifth of the face's
-    width and the iris a little over a third of the eye. The parts: the white, shaded and veined (sclera_colours);
+    width and the iris a little over a third of the eye. The parts: the white, shaped to the lids' opening and painted with its shading and veins (sclera_image);
     an iris looking straight ahead, a shallow glossy dome with the pupil and its shading painted on
     (iris_colours), so the sun leaves a real highlight on it; the upper lid, a fold of skin lying over the top of
     the eye and the iris and casting its shadow on them, with the crease of the lid above it; the rim of the lower
     lid; and an arched brow, full at the nose and tapering to a fine tail. At sprite size this paints a
     white-iris-white row with the lid's shade over it."""
-    RX, RY, RZ = 0.78, 0.36, 0.36
+    RX, RY, RZ = EYE_RX, 0.36, EYE_RZ
     TILT = 0.06                                     # the outer corner sits a touch higher than the inner one
     cy = ey + 0.24                                  # the white's front stands 0.12 proud of the skin
-    white = almond(RX, RY, RZ, 96, 64)
+    white = almond(RX, RY, RZ, s)
     bmesh.ops.rotate(white, cent=(0, 0, 0), matrix=Euler((0, -s * TILT, 0)).to_matrix(), verts=white.verts)
     bmesh.ops.translate(white, vec=(x, cy, ez), verts=white.verts)
     # bend the white round the face, so it stands the same height proud of the skin all round its edge: a straight
@@ -1195,10 +1257,15 @@ def build_eye(head, head_tree, s, x, ey, ez):
     for v in white.verts:
         v.co.y += skin_y(v.co.x, v.co.z) - ey
     wtree = bvh_of(white)
-    cols = sclera_colours(white.verts, x, ez, RX, RZ, s)
-    o = mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
-    ca = o.data.color_attributes.new('eye_col', 'FLOAT_COLOR', 'POINT')
-    ca.data.foreach_set('color', [c for col in cols for c in col])
+    # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
+    # and up from the centre line, so one painting serves both eyes
+    uvl = white.loops.layers.uv.new('UVMap')
+    for f in white.faces:
+        for lp in f.loops:
+            co = lp.vert.co
+            u = (co.x - x) * s / RX
+            lp[uvl].uv = ((u + 1) / 2, ((co.z - ez - u * RX * TILT) / RZ + 1) / 2)
+    mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
 
     def front(px, pz):
         """The nearest surface (the face or the white) in front of (px, pz), seen from the camera."""
@@ -1212,21 +1279,20 @@ def build_eye(head, head_tree, s, x, ey, ez):
         return best
 
     def lid_z(u, top):
-        """The edge of the white at u (-1 inner corner .. 1 outer corner across), upper or lower."""
-        e = RZ * (1 - min(1.0, abs(u)) ** 2.2) ** 0.22
-        return ez + (e if top else -e) + u * RX * TILT
+        """The edge of the eye's opening at u (-1 inner corner .. 1 outer corner across), upper or lower."""
+        return ez + (lid_top(u) if top else -lid_bottom(u)) + u * RX * TILT
 
     # the iris lies on the curve of the white, turned to face the way it faces there (the white bends with the
     # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
     # centre)
-    IR = 0.31
-    iz = ez - 0.01
+    IR = 0.28
+    iz = ez + 0.02                                  # just meets the lower lid, its top under the upper one
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
     n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
     c = hits[0][0]
     turn = Vector((0, -1, 0)).rotation_difference(n)
-    iris = iris_dome(IR, 0.13)
+    iris = iris_dome(IR, 0.12)
     bmesh.ops.rotate(iris, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=iris.verts)
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c + n * 0.03, subdiv=0)
     iris_colours(o.data, turn.inverted(), IR, s)
@@ -1242,18 +1308,23 @@ def build_eye(head, head_tree, s, x, ey, ez):
             pts.append((px, front(px, pz) - lift, pz))
         return pts, list(np.interp(fine, us, radii))
 
-    # the upper lid: a rounded fold of skin along the top of the eye, over the top of the iris, so the eye is
-    # framed by the lid's own thickness and shadow rather than by a drawn line
-    lus = [-0.9, -0.75, -0.5, -0.25, 0.0, 0.3, 0.6, 0.8, 0.92]
-    lid, lr = on_face(lus, [0.02, 0.05, 0.075, 0.09, 0.095, 0.09, 0.08, 0.055, 0.02], lambda u: lid_z(u, True) - 0.035, 0.03)
+    # the upper lid: a rounded rim of skin that follows the curve of the opening from corner to corner, lying
+    # over the top of the eye and the iris, fullest over the iris and thinning to nothing where it meets the lower
+    # lid at each corner
+    lus = list(np.linspace(-1.0, 1.0, 11))
+    lid, lr = on_face(lus, [0.008 + 0.06 * (1 - u * u) ** 0.7 for u in lus],
+                      lambda u: lid_z(u, True) - 0.02 * (1 - u * u), 0.025, n=48)
     mesh_obj(f'Upper lid {s}', tube(lid, lr, flat=0.6, n=16), M_SKIN, head, subdiv=0)
-    # the crease of the upper lid: the skin folds in a little above the lid and rolls over the fold
-    cus = [-0.75, -0.45, -0.1, 0.25, 0.6, 0.9, 1.05]
-    fold, fr = on_face(cus, [0.01, 0.045, 0.06, 0.06, 0.055, 0.035, 0.01], lambda u: lid_z(u, True) + 0.2 - 0.05 * u * u, -0.025)
+    # the crease of the upper lid: the skin folds in above the lid, following the same arch higher up (deepest
+    # over the middle of the eye) and running down into the lid toward the outer corner
+    cus = list(np.linspace(-0.8, 1.02, 11))
+    fold, fr = on_face(cus, [0.006 + 0.05 * (1 - min(1.0, abs(u)) ** 2) ** 0.8 for u in cus],
+                       lambda u: lid_z(u, True) + 0.05 + 0.15 * (1 - min(1.0, u * u)) ** 0.6, -0.022, n=40)
     mesh_obj(f'Lid fold {s}', tube(fold, fr, flat=0.4, n=16), M_SKIN, head, subdiv=0)
-    # the lower lid: a fine rim of skin under the white, from the inner corner to the outer one
-    bus_ = [-0.85, -0.55, -0.2, 0.15, 0.5, 0.8, 0.98]
-    low, wr = on_face(bus_, [0.01, 0.03, 0.04, 0.04, 0.035, 0.025, 0.008], lambda u: lid_z(u, False) + 0.025, -0.005)
+    # the lower lid: a fine rim of skin along the lower curve, meeting the upper lid at both corners
+    bus_ = list(np.linspace(-1.0, 1.0, 11))
+    low, wr = on_face(bus_, [0.006 + 0.034 * (1 - u * u) ** 0.7 for u in bus_],
+                      lambda u: lid_z(u, False) + 0.012 * (1 - u * u), -0.004, n=40)
     mesh_obj(f'Lower lid {s}', tube(low, wr, flat=0.5, n=16), M_SKIN, head, subdiv=0)
     # the brow: on the brow ridge, starting just outside the bridge of the nose, rising in a soft arch to its peak
     # two thirds of the way out and falling away to a fine tail past the outer corner
