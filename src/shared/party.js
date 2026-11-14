@@ -7,7 +7,10 @@ import { HAIRSTYLES } from './presets/female-head.js';
 const ROSTER = [
   { key: 'knight', name: 'Knight', note: 'Mail and leather', spec: FIGHTER },
   { key: 'mage', name: 'Mage', note: 'Robe and pointed hat', spec: MAGE },
-  { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle', spec: RANGER },
+  // the ranger is modelled in Blender (blender/ranger/): the world shows the model itself (public/models/ranger.glb,
+  // from export_glb.py); her sheet, for the bench, is the 3D render, copied in rather than painted, so she has no
+  // hairstyle choice (the painted spec is only the fallback if the render is missing)
+  { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle, modelled in 3D', spec: { ...RANGER, hairStyle: null }, rendered: 'blender/ranger/ranger-blender.png', model: 'models/ranger.glb' },
   { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC },
   { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger', spec: ROGUE }
 ];

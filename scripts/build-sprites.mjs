@@ -53,7 +53,7 @@ async function paint(files) {
 }
 
 // ---------- main ----------
-function sourceHash() {
+function sourceHash(sheets) {
   const h = createHash('sha256');
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).forEach((e) => {
     const p = path.join(dir, e.name);
@@ -63,24 +63,33 @@ function sourceHash() {
   });
   walk(SHARED);
   h.update(fs.readFileSync(fileURLToPath(import.meta.url)));
+  // sheets rendered elsewhere (the Blender ranger) count too, so a new render is copied in
+  for (const s of sheets) if (s.source && fs.existsSync(path.join(ROOT, s.source))) h.update(fs.readFileSync(path.join(ROOT, s.source)));
   return h.digest('hex').slice(0, 16);
 }
 
 async function main() {
   const force = process.argv.includes('--force');
   const { allSheets } = await import(shared('sheets.js'));
-  const sheets = allSheets(), hash = sourceHash(), manifestPath = path.join(OUT, 'manifest.json');
+  const sheets = allSheets(), hash = sourceHash(sheets), manifestPath = path.join(OUT, 'manifest.json');
   let old = null;
   try { old = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch { /* first run */ }
-  if (!force && old && old.hash === hash && sheets.every((s) => fs.existsSync(path.join(OUT, s.file)))) {
+  if (!force && old && old.hash === hash && sheets.every((s) => s.source || fs.existsSync(path.join(OUT, s.file)))) {
     console.log(`sprites: up to date (${sheets.length} sheets)`);
     return;
   }
   fs.mkdirSync(OUT, { recursive: true });
-  const t0 = Date.now(), n = Math.max(1, Math.min(sheets.length, +process.env.SPRITE_THREADS || Math.min(8, availableParallelism() - 1)));
-  console.log(`sprites: painting ${sheets.length} sheets on ${n} threads...`);
+  // rendered sheets are copied in; a missing render is left out, and the page paints a fallback
+  for (const s of sheets.filter((s) => s.source)) {
+    const src = path.join(ROOT, s.source);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(OUT, s.file));
+    else console.warn(`sprites: ${s.source} is missing; ${s.file} will be painted in the page instead`);
+  }
+  const toPaint = sheets.filter((s) => !s.source);
+  const t0 = Date.now(), n = Math.max(1, Math.min(toPaint.length, +process.env.SPRITE_THREADS || Math.min(8, availableParallelism() - 1)));
+  console.log(`sprites: painting ${toPaint.length} sheets on ${n} threads...`);
   const groups = Array.from({ length: n }, () => []);
-  sheets.forEach((s, i) => groups[i % n].push(s.file));
+  toPaint.forEach((s, i) => groups[i % n].push(s.file));
   let done = 0;
   await Promise.all(groups.map((files) => new Promise((resolve, reject) => {
     const w = new Worker(fileURLToPath(import.meta.url), { workerData: files });
