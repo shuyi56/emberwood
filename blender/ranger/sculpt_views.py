@@ -18,7 +18,7 @@ from mathutils import Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ranger as R  # noqa: E402
 
-VIEWS = [('front', 0, 0.0), ('3/4', 45, 0.0), ('profile', 90, 0.0), ('back 3/4', 135, 0.0), ('low 3/4', 35, -0.35)]
+VIEWS = [('front', 0, 0.0), ('3/4', 45, 0.0), ('profile', 90, 0.0), ('back 3/4', 135, 0.0), ('low 3/4', 35, -0.35), ('under', 20, -1.1)]
 
 
 def setup(size, samples):
@@ -120,6 +120,8 @@ def main():
     if '--views' in argv:
         keep = opt('--views', '').split(',')
         VIEWS[:] = [v for v in VIEWS if v[0].replace(' ', '') in keep]
+    else:
+        VIEWS[:] = VIEWS[:5]      # (the view from under the jaw only on request)
     os.makedirs(out_dir, exist_ok=True)
     R.build()
     bpy.context.scene.frame_set(1)
