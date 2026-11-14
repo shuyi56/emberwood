@@ -161,7 +161,7 @@ def make_material(mid):
         rest = nt.nodes.new('ShaderNodeAttribute')
         rest.attribute_name = 'rest'
         h = None
-        for sc_, k_ in (((0.9, 0.9, 0.07), 0.55), ((7.0, 7.0, 0.25), 0.45)):
+        for sc_, k_ in (((0.9, 0.9, 0.07), 0.6), ((4.0, 4.0, 0.15), 0.18)):
             st = nt.nodes.new('ShaderNodeVectorMath')
             st.operation = 'MULTIPLY'
             st.inputs[1].default_value = sc_
@@ -180,10 +180,29 @@ def make_material(mid):
                 nt.links.new(h, m_.inputs[2])
             h = m_.outputs[0]
         bump = nt.nodes.new('ShaderNodeBump')
-        bump.inputs['Strength'].default_value = 0.9
+        bump.inputs['Strength'].default_value = 0.6
         bump.inputs['Distance'].default_value = 0.25
         nt.links.new(h, bump.inputs['Height'])
         nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
+        # the ends: the last hand's breadth of the hair is finer and catches the light, so it goes a little lighter
+        rsep = nt.nodes.new('ShaderNodeSeparateXYZ')
+        nt.links.new(rest.outputs['Vector'], rsep.inputs['Vector'])
+        tip = nt.nodes.new('ShaderNodeMapRange')
+        tip.name = 'hair tips'
+        tip.inputs['From Min'].default_value = -7.6
+        tip.inputs['From Max'].default_value = -10.2
+        nt.links.new(rsep.outputs['Z'], tip.inputs['Value'])
+        light = d['ramp'][3] / 255.0
+        tint = nt.nodes.new('ShaderNodeMix')
+        tint.data_type = 'RGBA'
+        tint.inputs['A'].default_value = (*lin, 1.0)
+        tint.inputs['B'].default_value = (*[((c + 0.055) / 1.055) ** 2.4 for c in light], 1.0)
+        tip_k = nt.nodes.new('ShaderNodeMath')
+        tip_k.operation = 'MULTIPLY'
+        tip_k.inputs[1].default_value = 0.6
+        nt.links.new(tip.outputs['Result'], tip_k.inputs[0])
+        nt.links.new(tip_k.outputs[0], tint.inputs['Factor'])
+        nt.links.new(tint.outputs['Result'], bsdf.inputs['Color'])
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -243,7 +262,13 @@ def make_material(mid):
         add.inputs[1].default_value = 0.55
         nt.links.new(band.outputs[0], add.inputs[0])
         nt.links.new(tex.outputs['Result'], add.inputs[2])
-        nt.links.new(add.outputs[0], adet.inputs['Value'])
+        # lighter ends in the sprite too
+        tadd = nt.nodes.new('ShaderNodeMath')
+        tadd.operation = 'MULTIPLY_ADD'
+        tadd.inputs[1].default_value = 0.3
+        nt.links.new(nt.nodes['hair tips'].outputs['Result'], tadd.inputs[0])
+        nt.links.new(add.outputs[0], tadd.inputs[2])
+        nt.links.new(tadd.outputs[0], adet.inputs['Value'])
         return m
     elif mid == M_MAIL:
         tex = nt.nodes.new('ShaderNodeTexChecker')
@@ -521,7 +546,7 @@ def drape_fall(dg):
         hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
         return hit[0].y if hit[0] is not None else 0.0
 
-    W = [(1.5, 3.3), (-1.5, 3.7), (-4.5, 4.0), (-9.0, 4.0), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+    W = [(4.5, 3.6), (1.5, 3.7), (-1.5, 4.1), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
 
     def width(z):
         for (z0, w0), (z1, w1) in zip(W, W[1:]):
@@ -530,9 +555,11 @@ def drape_fall(dg):
         return W[0][1] if z > W[0][0] else W[-1][1]
 
     NX, NZ = 41, 70
-    z_top = 1.5
+    z_top = 4.5      # it starts inside the hair over the back of the head and grows out of it, so there is no seam
     def end_z(u):     # u from -1 (her right) to 1: an uneven end, the middle longest
-        return -16.2 - 0.9 * (1 - u * u) - 0.7 * max(0.0, math.sin(5.0 * u + 0.6)) ** 2 - 0.4 * max(0.0, math.sin(9.0 * u + 2.1)) ** 2
+        # a few rounded locks, each ending in a soft point (a smooth curve, so the remesh leaves no tatters)
+        lock = 0.5 + 0.5 * math.cos(2 * math.pi * (1.6 * u + 0.1))
+        return -16.2 - 1.0 * (1 - u * u) - 0.45 * lock
     inner, outer = [], []
     for i in range(NX):
         u = -1 + 2 * i / (NX - 1)
@@ -540,15 +567,33 @@ def drape_fall(dg):
         col_in, col_out, y_prev, z_prev = [], [], None, None
         for j, z in enumerate(zs):
             x = u * width(z)
-            y = back_y(x, z) + 0.12
-            if y_prev is not None:
-                y = max(y, y_prev - 0.45 * (z_prev - z))     # it eases in under its weight, never steps in
-            y_prev, z_prev = y, z
             v = j / (NZ - 1)
             # thick down the middle, thin to soft edges; thinner toward the end, and rounded off at the tip
-            t = (0.95 - 0.35 * v) * max(0.0, 1 - u * u) ** 0.6 * (1.0 if v < 0.9 else math.cos((v - 0.9) / 0.1 * math.pi / 2) ** 0.5)
-            col_in.append(Vector((x, y, z)))
-            col_out.append(Vector((x, y + max(t, 0.03), z)))
+            # (never thinner than a few voxels: a sheet thinner than the remesh breaks up into rods and tatters)
+            grow = min(1.0, (z_top - z) / 3.0)
+            grow = grow * grow * (3 - 2 * grow)
+            t = (0.95 - 0.3 * v) * max(0.0, 1 - u * u) ** 0.5 * (1.0 if v < 0.92 else math.cos((v - 0.92) / 0.08 * math.pi / 2) ** 0.5)
+            t = max(t, 0.4)
+            sup = back_y(x, z)
+            # the outside of the hair: it starts flush with the hair over the head and hangs from the back of the
+            # skull, easing in only gradually under its weight; below the nape it always lies over what is under it
+            y = sup + t * grow
+            if y_prev is not None:
+                y = min(max(y, y_prev - 0.45 * (z_prev - z)), y_prev + 0.2 * (z_prev - z))
+            if z < -0.5:
+                y = max(y, sup + 0.52)
+            if v > 0.8:          # the ends turn in a little toward her back rather than flicking out
+                y = lerp(y, sup + 0.52, ((v - 0.8) / 0.2) ** 2 * 0.7)
+            y_prev, z_prev = y, z
+            col_out.append([x, y, z, t, sup])
+        # and where something lower down holds it out (the mantle), it is already leaning out above it: no ledges
+        dz = (z_top - end_z(u)) / (NZ - 1)
+        for j in range(NZ - 2, -1, -1):
+            col_out[j][1] = max(col_out[j][1], col_out[j + 1][1] - 0.35 * dz)
+        for x, y, z, t, sup in col_out:
+            # where it lies on the mantle the hair is pressed thinner rather than pushed out
+            col_in.append(Vector((x, max(y - t, sup + 0.12) if z < -0.5 else y - t, z)))
+        col_out = [Vector((x, y, z)) for x, y, z, t, sup in col_out]
         inner.append(col_in)
         outer.append(col_out)
     bm = bmesh.new()
@@ -621,8 +666,9 @@ def fuse_hair(head, names, voxel=0.1):
         if fade <= 0.0:
             continue
         arc = math.atan2(v.co.x, v.co.y - 0.5) * max(2.5, math.hypot(v.co.x, v.co.y - 0.5))
-        ridge = 0.3 * math.sin(1.5 * (arc + 0.5 * math.sin(v.co.z * 0.25)) + 0.9) + 0.08 * math.sin(3.7 * arc + 1.3)
-        v.co += v.normal * ridge * fade
+        ridge = 0.16 * math.sin(1.5 * (arc + 0.5 * math.sin(v.co.z * 0.25)) + 0.9) + 0.04 * math.sin(3.7 * arc + 1.3)
+        n_ = Vector((v.normal.x, v.normal.y, 0.0))      # across the hair only: the ends must not be scalloped
+        v.co += n_ * ridge * fade
     return mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
 
 
@@ -1094,8 +1140,8 @@ def build():
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
-    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.3), (0.5, 3.6, 2.0, 0, 3.0),
-                                (-0.4, 3.2, 1.4, 0, 3.3)]), M_HAIR, head)
+    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.6, 0, 2.1), (0.5, 3.6, 1.8, 0, 2.8),
+                                (-0.4, 3.2, 1.3, 0, 3.0)]), M_HAIR, head)
     HAIR_PARTS[:] = [head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall']]
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
@@ -1430,7 +1476,7 @@ def sprite_mode(on):
     m = bpy.data.materials.get('hair')
     for n in m.node_tree.nodes:
         if n.type == 'BUMP':
-            n.inputs['Strength'].default_value = 0.1 if on else 0.9
+            n.inputs['Strength'].default_value = 0.1 if on else 0.6
 
 
 def render_sheet(out_png, tmp):
