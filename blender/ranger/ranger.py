@@ -681,6 +681,9 @@ THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than 
 UPPER, FORE = 11.0, 8.6
 LEG_X, SH_X = 3.3, 6.1
 STRIDE, LIFT = 8.0, 3.2
+# the walk's range of motion: the arms' swing (radians either way), and how far the body drops from its height at
+# the passing pose to where the legs are furthest apart (the world model takes a longer stride: see export_glb.py)
+ARM_SWING, BOB_PASS, BOB_APART = 0.38, -1.1, 1.0
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -1279,9 +1282,9 @@ def jerkin_form(z, phi):
     # the front panels: a seam down each side of the bust to the waist, a fine line drawn into the leather
     for x0 in (-2.9, 2.9):
         a = math.asin(max(-1.0, min(1.0, x0 / 6.0)))
-        seam = _gs(phi, -a, 0.045) * max(0.0, c) * _gs(z, 43.5, 3.6)
+        seam = _gs(phi, -a, 0.045) * max(0.0, c) * _gs(z, 42.6, 2.8)
         off -= 0.05 * seam
-        cr += 0.45 * seam
+        cr += 0.25 * seam
     # under the arms the leather creases where it is drawn in to the waist
     for p0 in (math.pi / 2, -math.pi / 2):
         band = _gs(phi, p0, 0.45) * _gs(z, 46.0, 2.0)
@@ -1345,6 +1348,16 @@ def body_hull(z, a, cy):
         for k in range(96):
             x, y = torso_point(z, 2 * math.pi * k / 96, 0.65, bust=1.0)
             pts.append((round(x, 5), round(y - cy, 5)))
+        # the slope of the shoulders, from the base of the neck out to the tops of the arms (the trapezius over the
+        # collarbones), so the cloth runs down it in one line instead of sinking in under the neck and rolling up
+        # again over the arms in a collar
+        t = min(1.0, max(0.0, (53.3 - z) / 3.0))
+        t = t * t * (3 - 2 * t)
+        if 0.0 < t:
+            tw, td = lerp(2.0, SH_X + 0.9, t), lerp(2.1, 2.6, t)
+            for k in range(48):
+                u = 2 * math.pi * k / 48
+                pts.append((round(tw * math.cos(u), 5), round(0.25 - cy + td * math.sin(u), 5)))
         zl = z - SH_Z
         if zl < 1.6:
             R = _profile(ARM_PROFILE, zl) + 0.42 * math.exp(-((zl + 1.4) / 2.1) ** 2) + 0.1
@@ -1848,7 +1861,7 @@ def build():
         rr = math.hypot(xr, yr)
         gap = 0.25 + 0.4 * f
         hull = body_hull(z, a, cy) + gap
-        dw = min(1.0, max(0.0, (52.6 - z) / 2.4))
+        dw = min(1.0, max(0.0, (53.2 - z) / 1.6))
         dw = dw * dw * (3 - 2 * dw)
         rd = max(lerp(rr, hull, dw), hull) if dw > 0 else rr
         rx, ry = rx * rd / rr, ry * rd / rr
@@ -2058,7 +2071,7 @@ def pose(col):
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
     swing = math.sin(ph)
     if walking:
-        bob = 0.4 - 1.5 * (1 - abs(swing)) + 0.6 * abs(swing)
+        bob = lerp(BOB_PASS, BOB_APART, abs(swing))
     else:
         bob = 1.0 if col == 1 else 0.0
     bob = round(bob * RES) / RES          # whole sheet pixels, so the face never shifts by a fraction
@@ -2091,7 +2104,7 @@ def pose(col):
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = -math.sin(ph + (0 if s > 0 else math.pi)) * 0.38
+            a = -math.sin(ph + (0 if s > 0 else math.pi)) * ARM_SWING
             bend = 0.25 + 0.3 * max(0.0, a)
         else:
             a = 0.12 if s > 0 else -0.04
