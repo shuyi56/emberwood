@@ -1443,6 +1443,10 @@ void main() {
   // timeline holds a walk cycle (frames 1-25, at 24 fps) and the idle stance (frame 40): the walk's phase
   // follows the hero's stride, so the feet keep pace with the ground they cover.
   const MODEL_SCALE = 2.2 / 80 * 1.2, WALK_SECONDS = 24 / 24, IDLE_SECONDS = 39 / 24;
+  // The ground one walk cycle of a model covers: two steps, each carrying the planted foot back through twice the
+  // model's stride (10.5 units; see export_glb.py), let out a third so the cadence stays a brisk walk at the party's
+  // pace rather than a scurry. A model's walk phase advances with the ground it covers, so its legs keep up with it.
+  const WORLD_CYCLE = 4 * 10.5 * MODEL_SCALE * 1.35;
   const gltf = new GLTFLoader();
   function loadModel(file, g) {
     const anim = { mixer: null, actions: [] };
@@ -1480,14 +1484,16 @@ void main() {
     const tex = new THREE.Texture();
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
     if (!ROSTER.find((r) => r.key === key).model) loadSheet(key, spec.hairStyle || null, spec).then((img) => { tex.image = img; tex.needsUpdate = true; });
+    const model = ROSTER.find((r) => r.key === key).model;
+    // (a card has a soft blob of shadow under it; a model casts its own shadow from the sun, so it has none)
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 64), blobShadowMat);
+    shadow.visible = !model;
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.05;
     // an ellipse, wider across than deep, just inside the selection ring; drawn after the see-through grass
     shadow.scale.set(0.9, 0.66, 1);
     shadow.renderOrder = 2;
     g.add(shadow);
-    const model = ROSTER.find((r) => r.key === key).model;
     let material = null, anim = null;
     if (model) anim = loadModel(model, g);
     else {
@@ -1578,7 +1584,9 @@ void main() {
       f.moving = gap > 0.2 && stepHero(f, spot.x, spot.z, gap > 3 ? 6.6 : 5.4, dt) > 0.0005;
     });
     [leader].concat(followers).forEach((h) => {
-      if (h.moving) h.stride += dt * 14;
+      const ran = Math.hypot(h.x - (h.lastX ?? h.x), h.z - (h.lastZ ?? h.z));
+      h.lastX = h.x; h.lastZ = h.z;
+      if (h.moving) h.stride += h.anim ? ran / WORLD_CYCLE * Math.PI * 2 : dt * 14;
       h.g.position.set(h.x, height(h.x, h.z), h.z);
       // pick one of eight facings from the heading relative to the camera; a margin keeps it from flickering
       let rel = h.g.rotation.y - cam.yaw;

@@ -68,6 +68,18 @@ def plain_materials():
             p.inputs['Sheen Weight'].default_value = 1.0
             p.inputs['Sheen Roughness'].default_value = 0.6
             p.inputs['Sheen Tint'].default_value = (0.2, 0.25, 0.13, 1.0)
+        if mid in ranger.FORM_SHADED:
+            # the sleeves and the jerkin: their folds, the shade where they are shut in and the leather's mottling,
+            # baked into the 'form' colour (see bake_cloth_form)
+            col = nt.nodes.new('ShaderNodeVertexColor')
+            col.layer_name = 'form'
+            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            p.inputs['Roughness'].default_value = 0.95 if mid == ranger.M_SLEEVE else 0.7
+            p.inputs['Specular IOR Level'].default_value = 0.15 if mid == ranger.M_SLEEVE else 0.35
+            if mid == ranger.M_SLEEVE:
+                p.inputs['Sheen Weight'].default_value = 0.6
+                p.inputs['Sheen Roughness'].default_value = 0.5
+                p.inputs['Sheen Tint'].default_value = (0.2, 0.24, 0.15, 1.0)
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
@@ -193,6 +205,84 @@ def bake_wool(rays=12, dist=1.4):
     attr.data.foreach_set('color', cols)
 
 
+def bake_cloth_form(rays=16, dist=2.4):
+    """The sleeves and the jerkin for the world, baked into the vertex colour 'form' (linear RGB). The world has
+    no ambient occlusion and no crease shading of its own, so the cloth would read as flat tubes: here each point
+    takes the shade of how shut in it is (rays cast over its surface that meet the body within a short distance:
+    under the mantle and the belt, in the armpits, between the arms and the body, in the folds), a little more in
+    the creases of its folds (the 'crease' attribute), a lift on the crests, and, on the leather, broad soft patches
+    of tone. Cast against the figure in her idle stance (the arms held a little off the body), which is how she
+    stands in the world and close to how she passes through the walk."""
+    from mathutils import Vector, noise
+    from mathutils.bvhtree import BVHTree
+    import numpy as np
+    sc = bpy.context.scene
+    sc.frame_set(IDLE_FRAME)
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in sc.objects:
+        if o.type != 'MESH':
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        base = len(vs)
+        vs += [o.matrix_world @ v.co for v in me.vertices]
+        ps += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    tree = BVHTree.FromPolygons(vs, ps)
+    rng = np.random.default_rng(7)
+    dirs = rng.normal(size=(rays, 3))
+    dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+    targets = [o for o in sc.objects if o.type == 'MESH' and o.name == 'Jerkin' or o.name.startswith('Sleeve.')]
+    for o in targets:
+        # each point where it stands in the pose: the mesh deformed by the rig alone, so its points still match
+        # the mesh's own (the smoothing and thickness modifiers are held off while it is read)
+        held = [m for m in o.modifiers if m.type in ('SUBSURF', 'SOLIDIFY')]
+        for m in held:
+            m.show_viewport = False
+        dg = bpy.context.evaluated_depsgraph_get()
+        pm = o.evaluated_get(dg).to_mesh()
+        posed = [(o.matrix_world @ v.co, (o.matrix_world.to_3x3().inverted().transposed() @ v.normal).normalized())
+                 for v in pm.vertices]
+        o.evaluated_get(dg).to_mesh_clear()
+        for m in held:
+            m.show_viewport = True
+        me = o.data
+        mid = ranger.M_JERKIN if o.name == 'Jerkin' else ranger.M_SLEEVE
+        rmp = ranger.MATERIALS[mid]['ramp'] / 255.0
+        lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
+        dark, midc, light = lin[1], lin[2], lin[3]
+        crease = np.zeros(len(me.vertices), dtype=np.float32)
+        me.attributes['crease'].data.foreach_get('value', crease)
+        rest = me.attributes['rest'].data
+        solid = o.modifiers.get('thickness')
+        lift = solid.thickness if solid else 0.0
+        cols = []
+        for (p, n), r, cr in zip(posed, rest, crease):
+            q = r.vector
+            if mid == ranger.M_JERKIN:
+                t = 0.65 * noise.noise(q * 0.32) + 0.35 * noise.noise(q * 1.1 + Vector((2.3, 5.1, 0.7)))
+                t = min(1.0, max(-1.0, 1.6 * t))
+                c = midc + (light - midc) * t * 0.5 if t > 0 else midc + (midc - dark) * t * 0.5
+            else:
+                t = noise.noise(q * 0.4)
+                c = midc + (light - midc) * 0.25 * t
+            p = p + n * (lift + 0.02)
+            hit = 0.0
+            for d in dirs:
+                d = Vector(d)
+                if d.dot(n) < 0:
+                    d = -d
+                d = (d + n).normalized()
+                h = tree.ray_cast(p + n * 0.05, d, dist)
+                if h[0] is not None:
+                    hit += 1.0 - 0.5 * h[3] / dist          # (nearer cover shades more)
+            ao = hit / rays
+            c = c * (1.0 - 0.6 * ao) * (1.0 - 0.3 * cr)
+            cols += [*c, 1.0]
+        me.color_attributes.new('form', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', cols)
+    sc.frame_set(1)
+
+
 def main():
     argv = sys.argv[1:]
     out = argv[argv.index('--out') + 1] if '--out' in argv else os.path.join(HERE, '..', '..', 'public', 'models', 'ranger.glb')
@@ -200,6 +290,11 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ranger.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
+    # in the world she covers ground at a good pace, so the walk takes a longer stride than the sprite sheet's,
+    # lifts the knee higher, swings the arms further, and drops the body lower where the legs are furthest apart
+    # (so the planted foot stays on the ground). WORLD_CYCLE in src/world/main.js is the ground one cycle covers.
+    ranger.STRIDE, ranger.LIFT = 10.5, 4.4
+    ranger.ARM_SWING, ranger.BOB_PASS, ranger.BOB_APART = 0.55, -0.2, 1.9
     ranger.build()
     sc = bpy.context.scene
     for o in sc.objects:
@@ -220,6 +315,7 @@ def main():
     plain_materials()
     bake_hair_shade()
     bake_wool()
+    bake_cloth_form()
     bake_gold()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
     for name, ratio in (('Hair', 0.11),):

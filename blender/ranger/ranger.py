@@ -113,6 +113,8 @@ M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
 M_STITCH = mat_def(22, 'stitching', ramp(0xb39a74, 0.08), 0.0, flat=2)
 # leather is matte, with a pebbled grain pressed into its surface
 LEATHER = {M_JERKIN, M_BELT, M_BOOTS, M_CUFF}
+# the cloth whose form is shaded by its folds and by the shade where it is shut in (see 'shoulders and cloth form')
+FORM_SHADED = {M_SLEEVE, M_JERKIN}
 
 
 # ---------------------------------------------------------------- scene and materials
@@ -442,6 +444,13 @@ def make_material(mid):
     # a surface pattern (hair strands, cloth weave, leather mottling), added to the light before it is banded
     adet = nt.nodes.new('ShaderNodeOutputAOV')
     adet.aov_name = 'detail'
+    if mid in FORM_SHADED:
+        # how deep in a fold the cloth lies (the 'crease' attribute; see sleeve_folds and jerkin_form)
+        acr = nt.nodes.new('ShaderNodeOutputAOV')
+        acr.aov_name = 'crease'
+        cra = nt.nodes.new('ShaderNodeAttribute')
+        cra.attribute_name = 'crease'
+        nt.links.new(cra.outputs['Fac'], acr.inputs['Value'])
     # patterns are laid out in each mesh's rest position (stored as the 'rest' attribute), so they stay fixed to
     # the cloth while the limbs bend
     coord = nt.nodes.new('ShaderNodeAttribute')
@@ -672,6 +681,9 @@ THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than 
 UPPER, FORE = 11.0, 8.6
 LEG_X, SH_X = 3.3, 6.1
 STRIDE, LIFT = 8.0, 3.2
+# the walk's range of motion: the arms' swing (radians either way), and how far the body drops from its height at
+# the passing pose to where the legs are furthest apart (the world model takes a longer stride: see export_glb.py)
+ARM_SWING, BOB_PASS, BOB_APART = 0.38, -1.1, 1.0
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -1189,6 +1201,193 @@ def loft_fn(zs, point, n=40, cap_top=True, cap_bot=True):
     return bm
 
 
+# ---------------------------------------------------------------- shoulders and cloth form
+# The shoulders and the form of the sleeves and the jerkin. The deltoid rounds the top of each arm out past the
+# shoulder joint, so the line from the neck runs down over a curve into the arm instead of turning a square corner.
+# The cloth itself carries its folds in its shape: the sleeves gather in creases at the armpit, crumple in a few
+# curved wrinkles at the inside of the elbow and bunch above the cuff; the jerkin's stiffer leather takes a few
+# soft compression wrinkles at the waist above and below the belt, its front panels are shaped by seams, and the
+# short skirt falls in a few broad folds. Each fold function returns a radial offset and how deep in a crease the
+# point lies (0 on open cloth, 1 at the bottom of a crease), stored on the mesh as 'crease' and read by the sprite
+# and world shading as shade where the cloth is shut in.
+def _gs(v, c, w):
+    return math.exp(-((v - c) / w) ** 2)
+
+
+def fold_ridge(t):
+    """A run of folds along t: -1 at a pinched crease, rising to a broad rounded crest at +1 (cloth folds are
+    narrow in the valleys and full over the tops)."""
+    return 2 * math.sqrt(math.sin(t / 2) ** 2 + 0.03) - 1
+
+
+def deltoid(z, phi, s):
+    """Extra radius of the upper arm at local height z (0 at the shoulder joint): the deltoid, a rounded cap over
+    the outside, front and back of the joint that tapers into the arm about halfway to the elbow."""
+    out = s * math.sin(phi)                         # 1 straight out from the body, -1 toward it
+    wrap = max(0.0, 0.45 + 0.55 * out) ** 1.6       # (round the front and back too, but not the inside)
+    return 0.42 * wrap * math.exp(-((z + 1.4) / 2.1) ** 2) * (1.0 if z < 0.6 else math.exp(-((z - 0.6) / 0.7) ** 2))
+
+
+# The sleeve's creases, each a single short groove of its own: (height, angle round the arm, half-width as an
+# angle, slant, curl at the ends, depth). Angles are mirrored per arm: 0 faces front, +pi/2 straight out from the
+# body, -pi/2 toward it. Each sits at its own height and angle, runs only part of the way round, slants its own
+# way and curls up at the ends a little, so together they read as cloth crumpling rather than as rings.
+EZ = -UPPER
+SLEEVE_CREASES = [
+    # the armpit: two creases fanning down and out from the pit, over the front and the back of the arm
+    (-1.5, -1.05, 0.55, -0.9, 0.0, 0.1), (-2.3, -2.2, 0.5, 0.8, 0.0, 0.08),
+    # the inside of the elbow: three uneven crumples, the ends curling up round the arm
+    (EZ + 0.9, 0.25, 0.75, 0.35, 0.5, 0.11), (EZ - 0.05, -0.2, 0.95, -0.25, 0.6, 0.13), (EZ - 1.1, 0.4, 0.55, 0.5, 0.4, 0.08),
+    # above the cuff: a couple of short, slanting folds where the sleeve settles on the wrist
+    (EZ - FORE + 2.3, 0.6, 0.8, 0.45, 0.3, 0.07), (EZ - FORE + 1.6, -0.9, 0.9, -0.35, 0.3, 0.08), (EZ - FORE + 1.9, 2.6, 0.7, 0.3, 0.3, 0.06),
+]
+
+
+def sleeve_folds(z, phi, s):
+    """(radial offset, crease) of the sleeve at local height z, angle phi (phi 0 faces front)."""
+    pm = s * phi                                    # (mirrored: +pi/2 is out from the body on either arm)
+    off, cr = 0.0, 0.0
+    for z0, p0, wd, slant, curl, depth in SLEEVE_CREASES:
+        dp = math.atan2(math.sin(pm - p0), math.cos(pm - p0))
+        win = math.exp(-(dp / wd) ** 4)              # (fading out at the ends of the crease, not cut off)
+        if win < 1e-3:
+            continue
+        d = z - (z0 + slant * dp + curl * dp * dp)
+        groove = math.exp(-(d / 0.3) ** 2)
+        ridge = math.exp(-((d - 0.42) / 0.38) ** 2) + 0.6 * math.exp(-((d + 0.45) / 0.38) ** 2)
+        off += depth * win * (0.55 * ridge - groove)
+        cr += win * groove * min(1.0, depth / 0.11)
+    # a long soft fold down each part of the arm, where the cloth hangs from the shoulder and twists down the
+    # forearm, faint
+    v = fold_ridge(2.0 * pm + 0.55 * z + 0.6)
+    k = 0.6 * _gs(z, -5.5, 2.4) + 0.8 * _gs(z, EZ - 4.2, 2.0)
+    off += 0.07 * k * v
+    cr += 0.3 * k * max(0.0, -v)
+    return off, min(1.0, cr)
+
+
+def jerkin_form(z, phi):
+    """(radial offset, crease) of the jerkin's leather at height z, angle phi round from the front."""
+    off, cr = 0.0, 0.0
+    sx, c = math.sin(phi), math.cos(phi)
+    # the waist: above and below the belt the leather is pushed into a few short wrinkles at the sides, where it
+    # bends as she moves, running off on a slant toward the front and back (none across the front itself, where
+    # rows of them would read as a muscled belly)
+    side = abs(sx) ** 3
+    for zc, w, sign in ((41.6, 1.0, 1), (37.3, 0.9, -1)):
+        band = _gs(z, zc, w) * side
+        v = fold_ridge(3.4 * (z - zc) + sign * 2.4 * c)
+        off += 0.12 * band * v
+        cr += 0.7 * band * max(0.0, -v)
+    # the front panels: a seam down each side of the bust to the waist, a fine line drawn into the leather
+    for x0 in (-2.9, 2.9):
+        a = math.asin(max(-1.0, min(1.0, x0 / 6.0)))
+        seam = _gs(phi, -a, 0.045) * max(0.0, c) * _gs(z, 42.6, 2.8)
+        off -= 0.05 * seam
+        cr += 0.25 * seam
+    # under the arms the leather creases where it is drawn in to the waist
+    for p0 in (math.pi / 2, -math.pi / 2):
+        band = _gs(phi, p0, 0.45) * _gs(z, 46.0, 2.0)
+        v = fold_ridge(2.6 * (z - 46.0) + 3.0 * (phi - p0))
+        off += 0.1 * band * v
+        cr += 0.7 * band * max(0.0, -v)
+    # the skirt: below the hips the leather falls in a few broad folds that deepen toward the hem
+    k = min(1.0, max(0.0, (33.0 - z) / 3.5)) ** 1.2
+    v = fold_ridge(5.0 * phi + 0.8 + 0.4 * math.sin(3 * phi))
+    off += 0.32 * k * v
+    cr += 0.8 * k * max(0.0, -v)
+    # (and under the belt the leather lies smooth and is drawn in a little, so the belt cinches it)
+    belt = _gs(z, 39.4, 0.8)
+    return off * (1 - belt) - 0.12 * belt, min(1.0, cr * (1 - belt) + 0.5 * belt)
+
+
+# the sleeve's radius down the arm (local height from the shoulder joint, radius), before the deltoid and folds
+ARM_PROFILE = [(1.6, 0.3), (1.35, 1.3), (0.85, 1.95), (0.0, 2.15), (-2.0, 2.1), (-5.5, 1.88), (-UPPER, 1.65), (-UPPER - 2.2, 1.78),
+               (-UPPER - 5.0, 1.55), (-UPPER - FORE + 0.6, 1.3)]
+
+
+def _profile(table, z):
+    if z >= table[0][0]:
+        return table[0][1]
+    for (za, ra), (zb, rb) in zip(table, table[1:]):
+        if zb <= z <= za:
+            t = (za - z) / (za - zb)
+            return lerp(ra, rb, (1 - math.cos(math.pi * t)) / 2)
+    return table[-1][1]
+
+
+_HULL = {}
+
+
+def _convex(points):
+    """The convex hull of 2D points, counter-clockwise (Andrew's monotone chain)."""
+    pts = sorted(set(points))
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, hi = [], []
+    for p in pts:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p) <= 0:
+            lo.pop()
+        lo.append(p)
+    for p in reversed(pts):
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], p) <= 0:
+            hi.pop()
+        hi.append(p)
+    return lo[:-1] + hi[:-1]
+
+
+def body_hull(z, a, cy):
+    """How far out from (0, cy), in the direction a (round from the front toward her right, as phi), cloth laid
+    over the body reaches at height z: it spans the convex hull of the jerkin over the torso and the sleeves at the
+    tops of the arms (deltoids included, each held a little out from the body as it is in her stance), so it
+    bridges the hollow between the arm and the chest instead of sinking into it."""
+    key = (round(z, 3), round(cy, 3))
+    if key not in _HULL:
+        pts = []
+        for k in range(96):
+            x, y = torso_point(z, 2 * math.pi * k / 96, 0.65, bust=1.0)
+            pts.append((round(x, 5), round(y - cy, 5)))
+        # the slope of the shoulders, from the base of the neck out to the tops of the arms (the trapezius over the
+        # collarbones), so the cloth runs down it in one line instead of sinking in under the neck and rolling up
+        # again over the arms in a collar
+        t = min(1.0, max(0.0, (53.3 - z) / 3.0))
+        t = t * t * (3 - 2 * t)
+        if 0.0 < t:
+            tw, td = lerp(2.0, SH_X + 0.9, t), lerp(2.1, 2.6, t)
+            for k in range(48):
+                u = 2 * math.pi * k / 48
+                pts.append((round(tw * math.cos(u), 5), round(0.25 - cy + td * math.sin(u), 5)))
+        zl = z - SH_Z
+        if zl < 1.6:
+            R = _profile(ARM_PROFILE, zl) + 0.42 * math.exp(-((zl + 1.4) / 2.1) ** 2) + 0.1
+            for s in (-1, 1):
+                cx = s * (SH_X + 0.17 * max(0.0, -zl))
+                for k in range(48):
+                    t = 2 * math.pi * k / 48
+                    pts.append((round(cx + R * math.cos(t), 5), round(0.2 - cy + R * math.sin(t), 5)))
+        _HULL[key] = _convex(pts)
+    poly = _HULL[key]
+    dx, dy = -math.sin(a), -math.cos(a)
+    best = 0.0
+    for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+        ex, ey = x1 - x0, y1 - y0
+        den = dx * ey - dy * ex
+        if abs(den) < 1e-9:
+            continue
+        t = (x0 * ey - y0 * ex) / den
+        u = (x0 * dy - y0 * dx) / den
+        if t > 0 and -1e-6 <= u <= 1 + 1e-6:
+            best = max(best, t)
+    return best
+
+
+def crease_attr(o, fn):
+    """Store fn(local co) -> crease on the mesh's points, as the 'crease' attribute."""
+    a = o.data.attributes.new('crease', 'FLOAT', 'POINT')
+    a.data.foreach_set('value', [fn(v.co) for v in o.data.vertices])
+
+
 def leaf_etching(u, v, hl, w):
     """How deep the engraving cuts at a point of the leaf's face (0 none, 1 the full cut): a line round the
     rim just inside the edge, a line down each side of the midrib, and the side veins, which leave the midrib
@@ -1466,24 +1665,26 @@ def build():
     J = 0.35       # the jerkin's leather stands this far off the shirt
 
     def jerkin_pt(z, phi):
+        off = jerkin_form(z, phi)[0]       # (its wrinkles, seams and folds: see jerkin_form)
         if z >= 32.0:
-            x, y = torso_point(z, phi, J)
+            x, y = torso_point(z, phi, J + off)
             return x, y
         # below the widest point of the hips the skirt falls straight on, opening a little
-        x, y = torso_point(32.0, phi, J + (32.0 - z) * 0.06)
+        x, y = torso_point(32.0, phi, J + (32.0 - z) * 0.06 + off)
         return x, y, -0.9 * math.cos(phi) ** 2 * (32.0 - z) / 4.0   # the hem dips at front and back
 
     # (its top runs up under the mantle, so the leather shows where the mantle parts below the brooch)
     jz = [49.6 - 0.4 * i for i in range(52)]          # 49.6 down to 29.2
-    jb = loft_fn(jz, jerkin_pt, cap_bot=False)
+    jb = loft_fn(jz, jerkin_pt, n=96, cap_bot=False)
     vee_pts = []
     for zz, w in ((47.0, 1.25), (45.5, 0.85), (44.0, 0.45), (42.6, 0.0)):
         for xx in ((-w, w) if w else (0.0,)):
             vee_pts.append((xx, front_y(jb, xx, zz) - 0.12, zz))
     lace_y = {z: front_y(jb, 0.0, z) - 0.1 for z in (46.2, 44.9)}
-    mesh_obj('Jerkin', jb, M_JERKIN, body, solid=0.3)
+    jo = mesh_obj('Jerkin', jb, M_JERKIN, body, solid=0.3)
+    crease_attr(jo, lambda co: jerkin_form(co.z, math.atan2(-co.x, -co.y))[1])
     # a darker leather band binds the jerkin's hem
-    mesh_obj('Jerkin hem', loft_fn([30.3, 29.2], lambda z, p: jerkin_pt(z, p),
+    mesh_obj('Jerkin hem', loft_fn([30.3, 29.2], lambda z, p: jerkin_pt(z, p), n=96,
                                    cap_top=False, cap_bot=False), M_BELT, body, solid=0.5, subdiv=0)
     # stitching: a running stitch above the hem band (set into the leather, so it shows where the surface faces
     # the viewer and drops out at the silhouette instead of dotting the outline)
@@ -1592,10 +1793,14 @@ def build():
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
     # (eased between a few rings; below the shoulders the wool falls in a few deep, slightly uneven folds that
     # grow toward the hem, and the hem itself waves with them)
-    MANTLE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.6, 3.1, 0.35), (51.2, 6.0, 3.9, 0.3), (50.2, 7.6, 4.35, 0.3),
-                    (49.0, 8.2, 4.6, 0.3), (47.9, 8.35, 4.7, 0.3)]
+    # (the shoulder line slopes from the neck and rounds over the deltoids into the arms, one convex curve with no
+    # shelf: the wool does not stand out flat at the height of the shoulder and stop, it falls over the round of
+    # the arm and ends a little below it at the sides)
+    M_HEM = 47.6
+    MANTLE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.7, 3.1, 0.35), (51.3, 5.55, 3.8, 0.3), (50.3, 7.0, 4.25, 0.3),
+                    (49.3, 8.0, 4.55, 0.3), (48.4, 8.55, 4.7, 0.3), (M_HEM, 8.75, 4.75, 0.3)]
 
-    MANTLE_BACK = [(53.4, 2.65), (52.4, 3.3), (51.2, 3.25), (50.2, 3.3), (49.0, 3.4), (47.9, 3.55)]
+    MANTLE_BACK = [(53.4, 2.65), (52.4, 3.3), (51.3, 3.25), (50.3, 3.3), (49.3, 3.4), (M_HEM, 3.6)]
 
     def back_y(z):     # the inside of the mantle down the middle of her back, just clear of it
         B = MANTLE_BACK
@@ -1623,7 +1828,7 @@ def build():
         crease = 0.24 * ring * pinch(9 * ang + 0.5 + 0.35 * math.sin(2 * ang))
         # the parting: from just under the brooch to the hem the two edges draw apart in a narrow, rounded V
         n = math.exp(-((phi - B_PHI) / 0.075) ** 2)
-        s = min(1.0, max(0.0, (49.6 - z) / (49.6 - 47.9)))
+        s = min(1.0, max(0.0, (49.6 - z) / (49.6 - M_HEM)))
         return dish - crease, n * s * 1.35
 
     def pinch(t):
@@ -1647,26 +1852,39 @@ def build():
         # across the back the wool is drawn in close over the shoulder blades, so the hair can hang straight past it
         w = max(0.0, -math.cos(phi)) ** 1.5
         ry = lerp(ry, max(0.0, back_y(z) - cy), w)
-        f = min(1.0, max(0.0, (51.4 - z) / (51.4 - 47.9))) ** 1.3
+        f = min(1.0, max(0.0, (51.4 - z) / (51.4 - M_HEM))) ** 1.3
+        # the drape: below the tops of the shoulders the wool hangs on the body under it (the chest, the shoulder
+        # blades and the round of each arm) a little way off it, falling a touch looser toward the hem, instead of
+        # standing out round her as a stiff box; above, it keeps the rings' shape over the neck and shoulder line
+        xr, yr = -rx * math.sin(phi), -ry * math.cos(phi)
+        a = math.atan2(-xr, -yr)
+        rr = math.hypot(xr, yr)
+        gap = 0.25 + 0.4 * f
+        hull = body_hull(z, a, cy) + gap
+        dw = min(1.0, max(0.0, (53.2 - z) / 1.6))
+        dw = dw * dw * (3 - 2 * dw)
+        rd = max(lerp(rr, hull, dw), hull) if dw > 0 else rr
+        rx, ry = rx * rd / rr, ry * rd / rr
         # the folds: a few deep ones, and finer ruffles between them that grow toward the hem, all pinched at the
         # valleys (gathered cloth, not padded), each wandering a little off true as it runs down
         fold = (0.62 * pinch(6 * phi + 0.4 + 0.3 * math.sin(2.1 * z)) +
                 0.38 * f * pinch(14 * phi + 1.3 + 0.5 * z)) * (1 - 0.8 * w)
         pull, lift = brooch_pull(z, phi)
         k = 1 + 0.085 * f * fold - pull / max(ry, 1.0)
-        hem = (1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
-        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.4 * f * fold + lift
+        # (the hem drops a little at the sides, where it lies over the round of the arm)
+        hem = (-0.75 * math.sin(phi) ** 4 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
+        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.55 * f * fold + lift
 
     MN = 200     # (fine enough round for the pleats at the brooch)
-    mz = [53.4 - 0.2 * i for i in range(28)] + [47.9]
+    mz = [53.4 - 0.2 * i for i in range(29)] + [M_HEM]
     mantle = mesh_obj('Mantle', loft_fn(mz, mantle_pt, n=MN, cap_top=False, cap_bot=False), M_MANTLE, body, solid=0.45)
-    mesh_obj('Mail trim', loft_fn([48.3, 48.0, 47.75], lambda z, p: mantle_pt(z, p, 0.08), n=MN, cap_top=False, cap_bot=False),
+    mesh_obj('Mail trim', loft_fn([M_HEM + 0.4, M_HEM + 0.1, M_HEM - 0.15], lambda z, p: mantle_pt(z, p, 0.08), n=MN, cap_top=False, cap_bot=False),
              M_MAIL, body, solid=0.25, subdiv=0)
     mesh_obj('Collar', loft([(54.0, 2.0, 2.05, 0, 0.4), (52.8, 2.5, 2.55, 0, 0.35)], cap_top=False, cap_bot=False), M_SHIRT, body, solid=0.3)
     # the cut edges of the wool (the hem and the neck), fulled up a little fluffier: 1 at the edge, fading over a
     # pixel or so (read by the mantle's material)
     edge = mantle.data.attributes.new('edge', 'FLOAT', 'POINT')
-    edge.data.foreach_set('value', [max(min(1.0, max(0.0, (48.75 - mz[i // MN]) / 0.85)),
+    edge.data.foreach_set('value', [max(min(1.0, max(0.0, (M_HEM + 0.85 - mz[i // MN]) / 0.85)),
                                         min(1.0, max(0.0, (mz[i // MN] - 52.9) / 0.5)))
                                     for i in range(len(mantle.data.vertices))])
     place_brooch(mantle, mantle_pt, B_PHI, B_Z, body)
@@ -1691,22 +1909,23 @@ def build():
     # ---- arms: one sleeve from a rounded cap at the shoulder to the wrist, then the shirt cuff and the hand
     # (a fuller upper arm and forearm than before: the shoulder cap, the swell of the upper arm, a slight narrowing
     # at the elbow, the forearm's muscle just below it, tapering to the wrist)
-    ARM = [(1.45, 0.3), (1.2, 1.15), (0.75, 1.7), (0.0, 2.0), (-2.0, 2.05), (-5.5, 1.9), (-UPPER, 1.65), (-UPPER - 2.2, 1.78),
-           (-UPPER - 5.0, 1.55), (-UPPER - FORE + 0.6, 1.3)]
+    # (the cap is fuller and rounder, and the deltoid swells it outward: see deltoid)
+    ARM = ARM_PROFILE
     for side, s in (('R', 1), ('L', -1)):
         x = -s * SH_X   # the figure's right is -X (she faces -Y)
         sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z), body)
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
         w = arm_weights(side)
-        zs = [1.35 - 0.35 * i for i in range(int((1.35 + UPPER + FORE - 0.6) / 0.35) + 1)]
+        zs = [1.55 - 0.22 * i for i in range(int((1.55 + UPPER + FORE - 0.6) / 0.22) + 1)]
 
         def arm_pt(z, phi, s=s):
-            r = profile(ARM, z)
+            r = profile(ARM, z) + deltoid(z, phi, s) + sleeve_folds(z, phi, s)[0]
             # the elbow: a little point at the back of the joint
             back = 0.25 * math.exp(-((z + UPPER) / 0.9) ** 2) * max(0.0, -math.cos(phi))
             return -r * math.sin(phi), -(r * 1.03 + back * 0) * math.cos(phi) + back
-        mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=28), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
+        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
+        crease_attr(so, lambda co, s=s: sleeve_folds(co.z, math.atan2(-co.x, -co.y), s)[1])
         mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.45, 1.5), (-UPPER - FORE - 0.4, 1.52, 1.57)]), M_SHIRT,
                  loc=(x, 0.2, SH_Z), subdiv=0, skin=w)
         mesh_obj(f'Hand.{side}', hand_mesh(s), M_SKIN, loc=(x, 0.2, SH_Z - UPPER - FORE - 0.1), subdiv=0, skin=w)
@@ -1788,7 +2007,10 @@ def build():
     vl = sc.view_layers[0]
     vl.use_pass_diffuse_direct = True
     vl.use_pass_normal = True
-    for name in ('matid', 'detail'):
+    # (and ambient occlusion, for the shade in the folds and where the cloth is shut in: see form_shade)
+    vl.use_pass_ambient_occlusion = True
+    world.light_settings.distance = 2.2
+    for name in ('matid', 'detail', 'crease'):
         a = vl.aovs.add()
         a.name = name
         a.type = 'VALUE'
@@ -1849,7 +2071,7 @@ def pose(col):
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
     swing = math.sin(ph)
     if walking:
-        bob = 0.4 - 1.5 * (1 - abs(swing)) + 0.6 * abs(swing)
+        bob = lerp(BOB_PASS, BOB_APART, abs(swing))
     else:
         bob = 1.0 if col == 1 else 0.0
     bob = round(bob * RES) / RES          # whole sheet pixels, so the face never shifts by a fraction
@@ -1882,7 +2104,7 @@ def pose(col):
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = -math.sin(ph + (0 if s > 0 else math.pi)) * 0.38
+            a = -math.sin(ph + (0 if s > 0 else math.pi)) * ARM_SWING
             bend = 0.25 + 0.3 * max(0.0, a)
         else:
             a = 0.12 if s > 0 else -0.04
@@ -1913,6 +2135,22 @@ def find(ch, *keys):
 TONE_EDGES = np.array([0.36, 0.62, 0.95, 1.25], dtype=np.float32)
 
 
+def form_shade(ch, light, mid, cov, sun, nz, ny):
+    """On the sleeves and the jerkin, the sky's fill is shut out where the cloth is hidden (in the folds, under the
+    mantle and the belt, between the arm and the body) and the creases of the folds take a little shade of
+    their own, so the cloth reads as rounded forms rather than flat bands."""
+    sel = np.isin(mid, list(FORM_SHADED))
+    if not sel.any():
+        return light
+    ao = np.clip(find(ch, 'Ambient Occlusion', 'R') / cov, 0, 1) if any('Ambient Occlusion' in k for k in ch) else np.ones_like(light)
+    cr = np.clip(find(ch, 'crease') / cov, 0, 1)
+    fill = 0.30 + 0.12 * nz - 0.08 * ny
+    # (and the cloth darkens as it turns away from the viewer, so the arms and the body read round)
+    turn = (1.0 - np.clip(-ny, 0, 1)) ** 2
+    shaded = sun * (1.0 - 0.25 * cr) + fill * (0.2 + 0.8 * ao) - 0.1 * cr - 0.2 * turn
+    return np.where(sel, shaded, light)
+
+
 def to_pixels(ch):
     alpha = find(ch, 'Combined', 'A')
     # every pass comes premultiplied by coverage: divide it out, or the edge pixels read as another material
@@ -1923,6 +2161,7 @@ def to_pixels(ch):
     # fill: a soft sky light, brighter on surfaces facing up and toward the camera (normals are in world space)
     nz, ny = find(ch, 'Normal.Z') / cov, find(ch, 'Normal.Y') / cov
     light = sun + 0.30 + 0.12 * nz - 0.08 * ny
+    light = form_shade(ch, light, mid, cov, sun, nz, ny)
     h, w = alpha.shape
     out = np.zeros((h, w, 4), dtype=np.float32)
     solid = (alpha > 0.5) & (mid > 0)
