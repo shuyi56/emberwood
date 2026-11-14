@@ -600,7 +600,7 @@ def hand_mesh(s):
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
     # fingers, index at the front to pinky at the back
-    for y0, L, r in ((-0.9, 1.95, 0.36), (-0.3, 2.1, 0.37), (0.3, 2.0, 0.35), (0.86, 1.6, 0.32)):
+    for y0, L, r in ((-0.9, 1.95, 0.36), (-0.3, 2.1, 0.37), (0.3, 2.0, 0.35), (0.78, 1.6, 0.32)):
         p = Vector((0.05 * inward, y0, -2.55))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.88)):
@@ -613,7 +613,10 @@ def hand_mesh(s):
     # wrist into the root of the thumb and a smaller hypothenar mound on the little-finger side, so the thumb,
     # the palm and the four fingers all grow out of one fleshy heel instead of meeting in a crease
     blob((0.18 * inward, -0.5, -0.95), (0.5, 0.6, 0.8), 0.9)
-    blob((0.12 * inward, 0.55, -1.05), (0.42, 0.42, 0.75), 0.8)
+    blob((0.1 * inward, 0.5, -1.1), (0.4, 0.4, 0.75), 0.75)
+    # the little-finger edge of the palm: one straight ridge from the wrist to the pinky knuckle, so the
+    # outline runs smoothly down that side with no dip between the heel of the hand and the pinky
+    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.72, -2.45), 0.46)
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
