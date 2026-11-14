@@ -1067,17 +1067,18 @@ EYE_RX, EYE_RZ = 0.78, 0.36
 
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    the curve of the eye's opening, meeting the lower lid in a point at each corner, highest a little toward the
-    nose (where the upper lid arches over the iris)."""
+    the curve of the eye's opening, highest a little toward the nose (where the upper lid arches over the iris),
+    and coming in tangent to the lower lid at each corner, so the two meet in a sharp point (a cusp) rather than at
+    an angle."""
     u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
-    return EYE_RZ * (1 - u * u) ** 0.8 * (1 - 0.14 * u)
+    return EYE_RZ * (1 - u * u) ** 0.7 * (1 - abs(u) ** 3) ** 0.6 * (1 - 0.14 * u)
 
 
 def lid_bottom(u):
     """The lower lid's edge below the centre line: flatter than the upper lid, lowest a little toward the outer
     corner."""
     u = min(1.0, abs(u)) * (1 if u >= 0 else -1)
-    return 0.72 * EYE_RZ * (1 - u * u) ** 0.85 * (1 + 0.16 * u)
+    return 0.72 * EYE_RZ * (1 - u * u) ** 0.75 * (1 - abs(u) ** 3) ** 0.65 * (1 + 0.16 * u)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1140,13 +1141,13 @@ def iris_colours(me, to_disc, r, s):
         zn = p.z / r
         t -= 0.3 * smooth(0.05, 0.7, zn)                    # the shadow of the upper lid
         t += 0.12 * smooth(-0.15, -0.7, zn) * (1 - smooth(0.75, 0.95, q))   # light gathered low in the iris
-        warm = smooth(0.62, 0.42, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
+        warm = smooth(0.58, 0.36, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
         t = min(1.0, max(0.0, t + 0.22 * warm))
         k = t * 4
         i0 = min(3, int(k))
         c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)
         c = c + (amber - c) * 0.45 * warm
-        dark = smooth(0.43, 0.37, q)                        # the pupil, with a soft edge
+        dark = smooth(0.35, 0.29, q)                        # the pupil, with a soft edge
         c = c + (pupil - c) * dark
         cols.append(_srgb_lin(c / 255.0) + [1.0])
         shades.append(t * (1 - dark) + 0.25 * dark)
@@ -1237,7 +1238,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
     across, ey the face's surface there, ez its height). Sized from life: the eye is about a fifth of the face's
     width and the iris a little over a third of the eye. The parts: the white, shaped to the lids' opening and painted with its shading and veins (sclera_image);
-    an iris looking straight ahead, a shallow glossy dome with the pupil and its shading painted on
+    an iris looking straight ahead, laid onto the ball with a slight glossy swell and the pupil and its shading painted on
     (iris_colours), so the sun leaves a real highlight on it; the upper lid, a fold of skin lying over the top of
     the eye and the iris and casting its shadow on them, with the crease of the lid above it; the rim of the lower
     lid; and an arched brow, full at the nose and tapering to a fine tail. At sprite size this paints a
@@ -1285,16 +1286,23 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # the iris lies on the curve of the white, turned to face the way it faces there (the white bends with the
     # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
     # centre)
-    IR = 0.28
-    iz = ez + 0.02                                  # just meets the lower lid, its top under the upper one
+    IR = 0.23                                       # well inside the opening, its top under the upper lid
+    iz = ez + 0.03
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
     n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
     c = hits[0][0]
     turn = Vector((0, -1, 0)).rotation_difference(n)
-    iris = iris_dome(IR, 0.12)
+    iris = iris_dome(IR, 0.05)
     bmesh.ops.rotate(iris, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=iris.verts)
-    o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c + n * 0.03, subdiv=0)
+    # laid onto the ball itself: each point of the iris sits just over the white's surface, with only the slight
+    # swell of the cornea in the middle, so it never stands out from the eye (or is cut by it) at any angle
+    for v in iris.verts:
+        t = min(1.0, math.hypot(v.co.x, v.co.z) / IR)
+        h = wtree.ray_cast(Vector((c.x + v.co.x, -50, c.z + v.co.z)), Vector((0, 1, 0)))
+        if h[0] is not None:
+            v.co.y = h[0].y - c.y - (0.006 + 0.03 * (1 - t * t))
+    o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
     iris_colours(o.data, turn.inverted(), IR, s)
 
     def on_face(us, radii, zf, lift, span=RX, n=36):
@@ -1312,7 +1320,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # over the top of the eye and the iris, fullest over the iris and thinning to nothing where it meets the lower
     # lid at each corner
     lus = list(np.linspace(-1.0, 1.0, 11))
-    lid, lr = on_face(lus, [0.008 + 0.06 * (1 - u * u) ** 0.7 for u in lus],
+    lid, lr = on_face(lus, [0.004 + 0.06 * (1 - u * u) ** 1.1 for u in lus],
                       lambda u: lid_z(u, True) - 0.02 * (1 - u * u), 0.025, n=48)
     mesh_obj(f'Upper lid {s}', tube(lid, lr, flat=0.6, n=16), M_SKIN, head, subdiv=0)
     # the crease of the upper lid: the skin folds in above the lid, following the same arch higher up (deepest
@@ -1323,7 +1331,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     mesh_obj(f'Lid fold {s}', tube(fold, fr, flat=0.4, n=16), M_SKIN, head, subdiv=0)
     # the lower lid: a fine rim of skin along the lower curve, meeting the upper lid at both corners
     bus_ = list(np.linspace(-1.0, 1.0, 11))
-    low, wr = on_face(bus_, [0.006 + 0.034 * (1 - u * u) ** 0.7 for u in bus_],
+    low, wr = on_face(bus_, [0.003 + 0.034 * (1 - u * u) ** 1.1 for u in bus_],
                       lambda u: lid_z(u, False) + 0.012 * (1 - u * u), -0.004, n=40)
     mesh_obj(f'Lower lid {s}', tube(low, wr, flat=0.5, n=16), M_SKIN, head, subdiv=0)
     # the brow: on the brow ridge, starting just outside the bridge of the nose, rising in a soft arch to its peak
@@ -1795,11 +1803,17 @@ def to_pixels(ch):
 
 def sprite_mode(on):
     """At sprite size the hair's strand relief is finer than a pixel and only adds speckle; the painted strands
-    (the detail pass) carry it there instead, so the relief is turned down for the sheet."""
+    (the detail pass) carry it there instead, so the relief is turned down for the sheet; the iris is drawn larger
+    (see below)."""
     m = bpy.data.materials.get('hair')
     for n in m.node_tree.nodes:
         if n.type == 'BUMP':
             n.inputs['Strength'].default_value = 0.1 if on else 0.6
+    # the iris is life-size, a pixel and a bit across in the sheet, and in the 3/4 views it fell between pixel
+    # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
+    for o in bpy.data.objects:
+        if o.name.startswith('Iris'):
+            o.scale = (1.35,) * 3 if on else (1.0,) * 3
 
 
 def render_sheet(out_png, tmp):
