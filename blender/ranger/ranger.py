@@ -142,8 +142,12 @@ def make_material(mid):
         nt.nodes.remove(bsdf)
         bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
         bsdf.inputs['Base Color'].default_value = (*lin, 1.0)
-        bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.25
+        bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.22
         bsdf.inputs['IOR'].default_value = 1.38
+        # the film of tears: a clear, mirror-smooth coat over the whole ball, as on a glass marble
+        bsdf.inputs['Coat Weight'].default_value = 1.0
+        bsdf.inputs['Coat Roughness'].default_value = 0.03
+        bsdf.inputs['Coat IOR'].default_value = 1.38
         nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
         if mid == M_EYE:
             col = nt.nodes.new('ShaderNodeAttribute')     # its painting (iris_colours)
@@ -1163,10 +1167,10 @@ def iris_colours(me, to_disc, r, s):
         a = math.atan2(p.z, p.x * s)
         fib = 0.5 + 0.25 * math.sin(a * 23 + 2.0 * math.sin(a * 5)) + 0.25 * math.sin(a * 41 + 1.3)
         t = 0.48 + 0.16 * (fib - 0.5)                       # the green, in fibres
-        t -= 0.36 * smooth(0.72, 1.0, q)                    # the dark ring at the rim
+        t -= 0.46 * smooth(0.66, 1.0, q)                    # the dark ring at the rim
         zn = p.z / r
         t -= 0.3 * smooth(0.05, 0.7, zn)                    # the shadow of the upper lid
-        t += 0.12 * smooth(-0.15, -0.7, zn) * (1 - smooth(0.75, 0.95, q))   # light gathered low in the iris
+        t += 0.22 * smooth(-0.1, -0.65, zn) * (1 - smooth(0.7, 0.92, q))   # light gathered low in the iris
         warm = smooth(0.62, 0.4, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
         t = min(1.0, max(0.0, t + 0.22 * warm))
         k = t * 4
@@ -1214,6 +1218,15 @@ def sclera_image():
     blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))
     top = np.array([[lid_top(u) for u in row] for row in uu]) / EYE_RZ
     blend([186, 176, 168], 0.75 * sm(0.2, 0.95, ww * EYE_K / np.maximum(top, 0.05)))
+    # the ball's own roundness: it is a marble, lit from the front and above, so its tone falls away toward the
+    # edge all round as the surface turns from the light, most in the lower half, with a thin contact shadow
+    # where the lower lid meets it
+    xr, zr = uu * EYE_RX, ww * EYE_RZ * EYE_K
+    nz = np.sqrt(np.clip(1 - (xr * xr + zr * zr) / (0.92 * EYE_RX) ** 2, 0, 1))
+    blend([70, 62, 80], 1.0 * (1 - nz) ** 0.6)
+    blend([168, 158, 156], 0.35 * sm(0.0, -0.5, zr / EYE_RX))
+    bot = np.array([[lid_bottom(u) for u in row] for row in uu]) / EYE_RZ
+    blend([170, 150, 146], 0.5 * sm(0.55, 1.0, -ww * EYE_K / np.maximum(bot, 0.05)))
     # the veins, grown as wandering, forking strokes from the corners, in pixels
     rng = np.random.default_rng(7)
     mask = np.zeros((H, W), dtype=np.float32)
@@ -1279,13 +1292,17 @@ def eye_relief(x, z, s, ex, ez):
     d = 0.0
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
     d += 0.085 * g(dz - (T - 0.035), 0.075) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
-    # one soft crease above it, fading out before either corner
-    cz = T + 0.17 + 0.03 * (1 - uc * uc)
-    d -= 0.012 * g(dz - cz, 0.07) * smooth(0.95, 0.5, abs(u + 0.05))
+    # the crease of the upper lid: a clear, narrow fold a lid's breadth above the edge, following its curve and
+    # fading out toward either corner, with the soft fullness under the brow rolling over it from above (the
+    # upper lid is the one that moves, so it carries the eye's one strong fold)
+    cz = T + 0.13 + 0.035 * (1 - uc * uc)
+    cf = smooth(1.05, 0.55, abs(u + 0.05))
+    d -= 0.03 * g(dz - cz, 0.042) * cf
+    d += 0.007 * g(dz - (cz + 0.12), 0.09) * cf
     # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
     d += 0.045 * g(dz + (B - 0.01), 0.06) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     lz = -(B + 0.17 + 0.03 * uc)
-    d -= 0.014 * g(dz - lz, 0.07) * smooth(0.9, 0.4, abs(u - 0.1))
+    d -= 0.007 * g(dz - lz, 0.08) * smooth(0.9, 0.4, abs(u - 0.1))
     return d
 
 
@@ -1396,7 +1413,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
         t = min(1.0, math.hypot(v.co.x, v.co.z) / IR)
         h = wtree.ray_cast(Vector((c.x + v.co.x, -50, c.z + v.co.z)), Vector((0, 1, 0)))
         if h[0] is not None:
-            v.co.y = h[0].y - c.y - (0.006 + 0.03 * (1 - t * t))
+            v.co.y = h[0].y - c.y - (0.006 + 0.045 * (1 - t * t))
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
     iris_colours(o.data, turn.inverted(), IR, s)
 

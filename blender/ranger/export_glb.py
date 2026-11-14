@@ -47,7 +47,7 @@ def plain_materials():
         if mid in (ranger.M_EYE, ranger.M_SCLERA):
             # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris keeps its
             # painted shading as vertex colours, the white its painting (shading and veins) as a texture
-            p.inputs['Roughness'].default_value = 0.12 if mid == ranger.M_EYE else 0.3
+            p.inputs['Roughness'].default_value = 0.06 if mid == ranger.M_EYE else 0.14
             if mid == ranger.M_EYE:
                 col = nt.nodes.new('ShaderNodeVertexColor')
                 col.layer_name = 'eye_col'
