@@ -91,11 +91,11 @@ def mat_def(mid, name, rmp, detail=0.0, flat=None):
 
 M_SKIN = mat_def(1, 'skin', SKIN, 0.0)
 M_HAIR = mat_def(2, 'hair', ramp(0x7e4c34, 0.1), 0.22)
-M_MANTLE = mat_def(3, 'mantle', ramp(0x56663f, 0.1), 0.06)
+M_MANTLE = mat_def(3, 'mantle', ramp(0x56663f, 0.1), 0.14)
 M_JERKIN = mat_def(4, 'jerkin', ramp(0x765a40, 0.1), 0.10)
 M_SHIRT = mat_def(5, 'shirt', ramp(0xaca48d, 0.09), 0.04)
-M_SLEEVE = mat_def(6, 'sleeve', ramp(0x63704a, 0.1), 0.06)
-M_LEGS = mat_def(7, 'trousers', ramp(0x5b5547, 0.1), 0.06)
+M_SLEEVE = mat_def(6, 'sleeve', ramp(0x63704a, 0.1), 0.07)
+M_LEGS = mat_def(7, 'trousers', ramp(0x5b5547, 0.1), 0.05)
 M_KNEE = mat_def(8, 'knee patch', ramp(0x7a6c52, 0.1), 0.0)
 M_BOOTS = mat_def(9, 'boots', ramp(0x684a32, 0.1), 0.10)
 M_CUFF = mat_def(10, 'boot cuff', ramp(0x7a5b40, 0.1), 0.06)
@@ -140,7 +140,11 @@ def make_material(mid):
     # a surface pattern (hair strands, cloth weave, leather mottling), added to the light before it is banded
     adet = nt.nodes.new('ShaderNodeOutputAOV')
     adet.aov_name = 'detail'
-    coord = nt.nodes.new('ShaderNodeTexCoord')
+    # patterns are laid out in each mesh's rest position (stored as the 'rest' attribute), so they stay fixed to
+    # the cloth while the limbs bend
+    coord = nt.nodes.new('ShaderNodeAttribute')
+    coord.attribute_name = 'rest'
+    vec = coord.outputs['Vector']
     if mid == M_HAIR:
         tex = nt.nodes.new('ShaderNodeTexWave')
         tex.wave_type = 'BANDS'
@@ -148,19 +152,29 @@ def make_material(mid):
         tex.inputs['Scale'].default_value = 0.22
         tex.inputs['Distortion'].default_value = 0.6
         tex.inputs['Detail'].default_value = 0.0
-        nt.links.new(coord.outputs['Object'], tex.inputs['Vector'])
-        nt.links.new(tex.outputs['Fac'], adet.inputs['Value'])
     elif mid == M_MAIL:
         tex = nt.nodes.new('ShaderNodeTexChecker')
         tex.inputs['Scale'].default_value = 1.0
-        nt.links.new(coord.outputs['Object'], tex.inputs['Vector'])
-        nt.links.new(tex.outputs['Fac'], adet.inputs['Value'])
+    elif mid in (M_SLEEVE, M_LEGS):
+        # a twill: fine diagonal ribs, with a little drift so they read as woven rather than ruled
+        tex = nt.nodes.new('ShaderNodeTexWave')
+        tex.wave_type = 'BANDS'
+        tex.bands_direction = 'DIAGONAL'
+        tex.inputs['Scale'].default_value = 0.22
+        tex.inputs['Distortion'].default_value = 0.8
+        tex.inputs['Detail'].default_value = 0.0
+    elif mid == M_MANTLE:
+        # felted wool: soft mottling at two scales
+        tex = nt.nodes.new('ShaderNodeTexNoise')
+        tex.inputs['Scale'].default_value = 0.8
+        tex.inputs['Detail'].default_value = 3.0
+        tex.inputs['Roughness'].default_value = 0.6
     else:
         tex = nt.nodes.new('ShaderNodeTexNoise')
         tex.inputs['Scale'].default_value = 0.35
         tex.inputs['Detail'].default_value = 0.0
-        nt.links.new(coord.outputs['Object'], tex.inputs['Vector'])
-        nt.links.new(tex.outputs['Fac'], adet.inputs['Value'])
+    nt.links.new(vec, tex.inputs['Vector'])
+    nt.links.new(tex.outputs['Fac'], adet.inputs['Value'])
     return m
 
 
@@ -188,16 +202,35 @@ def empty(name, loc, parent=None):
     return link(e, parent)
 
 
-def mesh_obj(name, bm, mid, parent=None, loc=(0, 0, 0), smooth=True, subdiv=1, solid=0.0):
+RIG = {}   # the armature, once built (see build_rig)
+
+
+def mesh_obj(name, bm, mid, parent=None, loc=(0, 0, 0), smooth=True, subdiv=1, solid=0.0, skin=None):
+    """A mesh object in one material. skin, if given, maps a rest position to {bone: weight}: the mesh is then
+    deformed by the rig instead of being parented, which lets a limb bend smoothly at its joints."""
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
     for p in me.polygons:
         p.use_smooth = smooth
+    rest = me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT')
+    rest.data.foreach_set('vector', [c for v in me.vertices for c in (v.co + Vector(loc))])
     o = bpy.data.objects.new(name, me)
     o.location = loc
     me.materials.append(mat(mid))
-    link(o, parent)
+    link(o, None if skin else parent)
+    if skin:
+        groups = {}
+        for v in me.vertices:
+            for bone, w in skin(Vector(loc) + v.co).items():
+                if w <= 1e-4:
+                    continue
+                if bone not in groups:
+                    groups[bone] = o.vertex_groups.new(name=bone)
+                groups[bone].add([v.index], w, 'REPLACE')
+        m = o.modifiers.new('rig', 'ARMATURE')
+        m.object = RIG['arm']
+        m.use_deform_preserve_volume = True
     if solid:
         m = o.modifiers.new('thickness', 'SOLIDIFY')
         m.thickness = solid
@@ -374,9 +407,9 @@ def torso_point(z, phi, off=0.0, bust=1.0):
     if c >= 0:
         y = -(fy + off) * c
         for s in (-1, 1):
-            zc = 44.6
-            sz = 1.5 if z > zc else 1.15                 # a soft slope above, a rounder curve under
-            y -= bust * 2.15 * math.exp(-((x - s * 2.3) / 1.85) ** 2 - ((z - zc) / sz) ** 2) * c ** 0.6
+            zc = 44.3
+            sz = 2.3 if z > zc else 1.6                  # a long soft slope above, a rounder curve under
+            y -= bust * 1.25 * math.exp(-((x - s * 2.2) / 2.2) ** 2 - ((z - zc) / sz) ** 2) * c
     else:
         y = -(by + off) * c
         for s in (-1, 1):
@@ -409,6 +442,75 @@ def loft_fn(zs, point, n=40, cap_top=True, cap_bot=True):
 def front_y(bm, x, z):
     """Where the front of a mesh is at (x, z), seen from the camera side."""
     return surface_y(bm, x, z)
+
+
+# ---------------------------------------------------------------- the rig
+def _smooth(a, b, z):
+    """0 above a, 1 below b, eased between (a > b)."""
+    t = min(1.0, max(0.0, (a - z) / (a - b)))
+    return t * t * (3 - 2 * t)
+
+
+def leg_weights(side):
+    kz, az = HIP_Z - THIGH, HIP_Z - THIGH - SHIN
+
+    def w(co):
+        lower = _smooth(kz + 1.4, kz - 1.4, co.z)      # thigh -> shin across the knee
+        foot = _smooth(az + 0.5, az - 0.5, co.z)       # shin -> foot across the ankle
+        return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot}
+    return w
+
+
+def arm_weights(side):
+    ez, wz = SH_Z - UPPER, SH_Z - UPPER - FORE
+
+    def w(co):
+        lower = _smooth(ez + 1.1, ez - 1.1, co.z)      # upper arm -> forearm across the elbow
+        hand = _smooth(wz + 0.4, wz - 0.4, co.z)       # forearm -> hand across the wrist
+        return {f'UpperArm.{side}': 1 - lower, f'Forearm.{side}': lower * (1 - hand), f'Hand.{side}': lower * hand}
+    return w
+
+
+def build_rig(body):
+    """An armature with a bone for each limb segment, built in the rest pose (limbs straight down). It sits
+    unparented at the origin: each bone follows its pivot empty through a Child Of constraint (set up in
+    finish_rig, once the pivots exist), so the pivots stay the one place the pose is keyed."""
+    arm_data = bpy.data.armatures.new('Rig')
+    arm = bpy.data.objects.new('Rig', arm_data)
+    link(arm)
+    RIG['arm'] = arm
+    vl = bpy.context.view_layer
+    vl.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    eb = arm_data.edit_bones
+    for side, s in (('R', 1), ('L', -1)):
+        lx, ax = -s * LEG_X, -s * SH_X
+        segs = [('Thigh', (lx, 0, HIP_Z), (lx, 0, HIP_Z - THIGH)),
+                ('Shin', (lx, 0, HIP_Z - THIGH), (lx, 0, HIP_Z - THIGH - SHIN)),
+                ('Foot', (lx, 0, ANKLE_Z), (lx, -3.0, 0.5)),
+                ('UpperArm', (ax, 0.2, SH_Z), (ax, 0.2, SH_Z - UPPER)),
+                ('Forearm', (ax, 0.2, SH_Z - UPPER), (ax, 0.2, SH_Z - UPPER - FORE)),
+                ('Hand', (ax, 0.2, SH_Z - UPPER - FORE), (ax, 0.2, SH_Z - UPPER - FORE - 2.5))]
+        for name, h, t in segs:
+            b = eb.new(f'{name}.{side}')
+            b.head, b.tail = h, t
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist'}
+
+
+def finish_rig():
+    arm = RIG['arm']
+    bpy.context.view_layer.update()
+    for pb in arm.pose.bones:
+        seg, side = pb.name.split('.')
+        target = bpy.data.objects[f'{PIVOT_OF[seg]}.{side}']
+        c = pb.constraints.new('CHILD_OF')
+        c.target = target
+        # (taken in the rest pose: the bone then moves exactly as its pivot moves away from rest)
+        c.inverse_matrix = target.matrix_world.inverted()
+    arm.hide_render = True
 
 
 def build():
@@ -502,47 +604,100 @@ def build():
                                 (-16.0, 3.55, 1.0, 0, 4.4), (-16.8, 2.4, 0.6, 0, 4.4)]), M_HAIR, head)
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
-    hem = lambda phi: 1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)
-    mesh_obj('Mantle', loft([(53.4, 2.3, 2.3, 0, 0.35), (52.4, 3.6, 3.1, 0, 0.35), (51.2, 6.0, 3.9, 0, 0.3), (50.2, 7.6, 4.35, 0, 0.3),
-                             (49.0, 8.2, 4.6, 0, 0.3, hem), (47.9, 8.35, 4.7, 0, 0.3, hem)], cap_top=False, cap_bot=False),
-             M_MANTLE, body, solid=0.45)
-    mesh_obj('Mail trim', loft([(48.4, 8.45, 4.85, 0, 0.3, hem), (47.6, 8.5, 4.9, 0, 0.3, hem)], cap_top=False, cap_bot=False),
-             M_MAIL, body, solid=0.4, subdiv=0)
+    # (eased between a few rings; below the shoulders the wool falls in a few deep, slightly uneven folds that
+    # grow toward the hem, and the hem itself waves with them)
+    MANTLE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.6, 3.1, 0.35), (51.2, 6.0, 3.9, 0.3), (50.2, 7.6, 4.35, 0.3),
+                    (49.0, 8.2, 4.6, 0.3), (47.9, 8.35, 4.7, 0.3)]
+
+    def mantle_pt(z, phi, off=0.0):
+        R = MANTLE_RINGS
+        for a_, b_ in zip(R, R[1:]):
+            if b_[0] <= z <= a_[0]:
+                t = (a_[0] - z) / (a_[0] - b_[0])
+                t = (1 - math.cos(math.pi * t)) / 2
+                rx, ry, cy = (lerp(p_, q_, t) for p_, q_ in zip(a_[1:], b_[1:]))
+                break
+        else:
+            rx, ry, cy = R[-1][1:]
+        f = min(1.0, max(0.0, (51.4 - z) / (51.4 - 47.9))) ** 1.3
+        fold = 0.7 * math.sin(6 * phi + 0.4) + 0.3 * math.sin(10 * phi + 1.3)
+        k = 1 + 0.085 * f * fold
+        hem = (1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
+        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.4 * f * math.sin(6 * phi + 0.4)
+
+    mz = [53.4 - 0.3 * i for i in range(19)] + [47.9]
+    mesh_obj('Mantle', loft_fn(mz, mantle_pt, n=72, cap_top=False, cap_bot=False), M_MANTLE, body, solid=0.45)
+    mesh_obj('Mail trim', loft_fn([48.3, 48.0, 47.75], lambda z, p: mantle_pt(z, p, 0.08), n=72, cap_top=False, cap_bot=False),
+             M_MAIL, body, solid=0.25, subdiv=0)
     mesh_obj('Collar', loft([(54.0, 2.0, 2.05, 0, 0.4), (52.8, 2.5, 2.55, 0, 0.35)], cap_top=False, cap_bot=False), M_SHIRT, body, solid=0.3)
     clasp = ellipsoid(0.9, 0.4, 1.3, 12, 8)
     bmesh.ops.rotate(clasp, cent=(0, 0, 0), matrix=Euler((0, 0.6, 0)).to_matrix(), verts=clasp.verts)
     mesh_obj('Leaf clasp', clasp, M_GOLD, body, loc=(-0.7, -4.85, 50.6), subdiv=0)
 
-    # ---- arms: shoulder -> elbow -> wrist pivots; sleeves with a rounded cap, shirt cuffs and hands
+    # ---- the rig: one bone per limb segment, each following its pivot (the pivots carry the pose; see pose()).
+    # Each limb is a single mesh weighted across its joints, so elbows and knees bend in one smooth piece.
+    build_rig(body)
+
+    def profile(table, z):
+        if z >= table[0][0]:
+            return table[0][1]
+        for (za, ra), (zb, rb) in zip(table, table[1:]):
+            if zb <= z <= za:
+                t = (za - z) / (za - zb)
+                return lerp(ra, rb, (1 - math.cos(math.pi * t)) / 2)
+        return table[-1][1]
+
+    # ---- arms: one sleeve from a rounded cap at the shoulder to the wrist, then the shirt cuff and the hand
+    ARM = [(1.35, 0.25), (1.1, 1.05), (0.7, 1.5), (0.0, 1.72), (-1.5, 1.7), (-5.0, 1.55), (-UPPER, 1.36), (-UPPER - 3.0, 1.36),
+           (-UPPER - FORE + 0.6, 1.14)]
     for side, s in (('R', 1), ('L', -1)):
         x = -s * SH_X   # the figure's right is -X (she faces -Y)
         sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z), body)
-        mesh_obj(f'Sleeve cap.{side}', ellipsoid(1.8, 1.85, 1.95), M_SLEEVE, sh, loc=(0, 0, -0.6))
-        mesh_obj(f'Upper sleeve.{side}', loft([(0.0, 1.7, 1.75), (-5.0, 1.55, 1.6), (-UPPER, 1.35, 1.4)]), M_SLEEVE, sh)
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
-        mesh_obj(f'Fore sleeve.{side}', loft([(0.8, 1.38, 1.42), (-3.5, 1.38, 1.42), (-FORE + 0.6, 1.15, 1.2)]), M_SLEEVE, el)
-        mesh_obj(f'Shirt cuff.{side}', loft([(-FORE + 1.0, 1.32, 1.36), (-FORE - 0.4, 1.38, 1.42)]), M_SHIRT, el, subdiv=0)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
-        mesh_obj(f'Hand.{side}', ellipsoid(0.7, 0.95, 1.55, 12, 8), M_SKIN, wr, loc=(-s * 0.1, -0.15, -1.55))
+        w = arm_weights(side)
+        zs = [1.35 - 0.35 * i for i in range(int((1.35 + UPPER + FORE - 0.6) / 0.35) + 1)]
 
-    # ---- legs: hip -> knee -> ankle pivots; trousers with knee patches, soft boots with a folded cuff
+        def arm_pt(z, phi, s=s):
+            r = profile(ARM, z)
+            # the elbow: a little point at the back of the joint
+            back = 0.25 * math.exp(-((z + UPPER) / 0.9) ** 2) * max(0.0, -math.cos(phi))
+            return -r * math.sin(phi), -(r * 1.03 + back * 0) * math.cos(phi) + back
+        mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=28), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
+        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.3, 1.34), (-UPPER - FORE - 0.4, 1.36, 1.4)]), M_SHIRT,
+                 loc=(x, 0.2, SH_Z), subdiv=0, skin=w)
+        mesh_obj(f'Hand.{side}', ellipsoid(0.7, 0.95, 1.55, 12, 8), M_SKIN, loc=(x - s * 0.1, 0.05, SH_Z - UPPER - FORE - 1.55), skin=w)
+
+    # ---- legs: one trouser leg from the hip to the ankle with a rounded kneecap and a patch over it, soft boots
+    # with a folded cuff
+    LEG = [(2.0, 3.1), (-1.0, 3.0), (-6.0, 2.55), (-THIGH + 1.2, 2.05), (-THIGH, 2.0), (-THIGH - 1.5, 2.0), (-THIGH - 4.0, 2.05),
+           (-THIGH - SHIN, 1.35)]
     for side, s in (('R', 1), ('L', -1)):
         x = -s * LEG_X
         hip = empty(f'Hip.{side}', (x, 0, HIP_Z), body)
-        mesh_obj(f'Thigh.{side}', loft([(2.0, 3.1, 3.2), (-1.0, 3.0, 3.1), (-6.0, 2.55, 2.65), (-THIGH, 1.95, 2.05)]), M_LEGS, hip)
         kn = empty(f'Knee.{side}', (0, 0, -THIGH), hip)
-        mesh_obj(f'Shin.{side}', loft([(0.7, 1.95, 2.05), (-4.0, 2.0, 2.1), (-SHIN, 1.35, 1.45)]), M_LEGS, kn)
-        mesh_obj(f'Knee round.{side}', ellipsoid(2.0, 2.1, 2.2), M_LEGS, kn)   # rounds the joint, so the leg bends without a notch
-        mesh_obj(f'Knee patch.{side}', ellipsoid(1.15, 0.5, 1.3, 12, 8), M_KNEE, kn, loc=(0, -1.9, -0.2), subdiv=0)
-        # the boot shaft hangs from the shin, from just under the knee; its top folds down into a cuff
-        mesh_obj(f'Boot shaft.{side}', loft([(-2.2, 2.3, 2.4), (-6.0, 2.15, 2.25), (-SHIN + 0.5, 1.75, 1.85), (-SHIN - 1.2, 1.8, 1.9)]),
-                 M_BOOTS, kn)
-        mesh_obj(f'Boot cuff.{side}', loft([(-1.6, 2.6, 2.7), (-3.5, 2.5, 2.6, 0, 0, lambda p: 0.5 * math.cos(p))]),
-                 M_CUFF, kn, subdiv=1)
         an = empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
+        w = leg_weights(side)
+        zs = [2.0 - 0.35 * i for i in range(int((2.0 + THIGH + SHIN) / 0.35) + 1)]
+
+        def leg_pt(z, phi):
+            r = profile(LEG, z)
+            cap = 0.4 * math.exp(-((z + THIGH + 0.3) / 1.1) ** 2) * max(0.0, math.cos(phi)) ** 2   # kneecap
+            return -r * math.sin(phi), -(r * 1.04 + cap) * math.cos(phi)
+        kz = HIP_Z - THIGH
+        mesh_obj(f'Leg.{side}', loft_fn(zs, leg_pt, n=28), M_LEGS, loc=(x, 0, HIP_Z), skin=w)
+        mesh_obj(f'Knee patch.{side}', ellipsoid(1.25, 0.45, 1.45, 12, 8), M_KNEE, loc=(x, -2.4, kz - 0.3), subdiv=0, skin=w)
+        # the boot shaft from just under the knee; its top folds down into a cuff
+        mesh_obj(f'Boot shaft.{side}', loft([(-2.2, 2.3, 2.4), (-6.0, 2.15, 2.25), (-SHIN + 0.5, 1.75, 1.85), (-SHIN - 1.2, 1.8, 1.9)]),
+                 M_BOOTS, loc=(x, 0, kz), skin=w)
+        mesh_obj(f'Boot cuff.{side}', loft([(-1.6, 2.6, 2.7), (-3.5, 2.5, 2.6, 0, 0, lambda p: 0.5 * math.cos(p))]),
+                 M_CUFF, loc=(x, 0, kz), subdiv=1, skin=w)
+        az = kz - SHIN
         mesh_obj(f'Foot.{side}', loft([(-0.8, 1.75, 1.95, 0, -0.3), (-2.2, 1.85, 3.3, 0, -1.6), (-2.85, 1.8, 3.4, 0, -1.7)]),
-                 M_BOOTS, an)
-        mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, an, subdiv=1)
+                 M_BOOTS, loc=(x, 0, az), skin=w)
+        mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, loc=(x, 0, az),
+                 subdiv=1, skin=w)
+    finish_rig()
 
     # ---- camera and light
     cam_data = bpy.data.cameras.new('Camera')
