@@ -1,14 +1,15 @@
 // The party picked on the sprite bench: which characters walk in the world, in what order (the first
 // leads), and the hairstyle each one wears. Kept in the browser's storage, which both pages share.
 // Storage can be missing or blocked (private windows), so every read falls back to the default party.
-import { FIGHTER, MAGE, RANGER, CLERIC } from './sprites.js';
+import { FIGHTER, MAGE, RANGER, CLERIC, ROGUE } from './sprites.js';
 import { HAIRSTYLES } from './presets/female-head.js';
 
 const ROSTER = [
   { key: 'knight', name: 'Knight', note: 'Mail and leather', spec: FIGHTER },
   { key: 'mage', name: 'Mage', note: 'Robe and pointed hat', spec: MAGE },
   { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle', spec: RANGER },
-  { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC }
+  { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC },
+  { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger', spec: ROGUE }
 ];
 const DEFAULT_MEMBERS = ['knight', 'mage', 'ranger'];
 const STORE = 'emberwood.party';

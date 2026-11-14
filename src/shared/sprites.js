@@ -557,7 +557,7 @@ function drawFigure(P, S, theta, f) {
       const sweep = (y0f, y1f, swf) => { for (let k = 0; k < slices.length - 1; k++) { const a = slices[k], b = slices[k + 1]; P.p(hull(section(a.x, y0f(a), y1f(a), swf(a)).concat(section(b.x, y0f(b), y1f(b), swf(b))))); } };
       // (the shaft stands straight above its own ankle, tipped by depth as the ankle is: from a fixed point by
       // the inner leg it would lean out to a foot set wide, and the boot would look drawn from another angle)
-      const top = tip(hipA * (out - 0.02), fb * 0.85, (S.robe ? 5 : 9.5) + lift, 1);
+      const top = tip(hipA * (out - 0.02), fb * 0.85, (S.robe ? 5 : S.bootH || 9.5) + lift, 1);
       // sole first: a welt standing a little proud of the upper, thicker under the heel, lifting at the
       // arch. The upper then sits on it, so from the front the near toe covers the sole of the far heel.
       const SOLE = S.sole || S.boots;
@@ -592,8 +592,10 @@ function drawFigure(P, S, theta, f) {
   // pelvis: one rounded form the legs grow out of, with a soft crease where they part
   if (!S.robe) add(-4.05, () => {
     // (a little narrower than the hips and not too tall, so from behind it reads as a seat, not a bulge)
-    P.e(V.x(0, 0.4), V.y(18.8), V.w(B.hip - 1.1, B.depth - 0.4), 4.1).fill(S.legs, { pattern: S.legPattern, round: 0.8 });
-    if (V.fz > 0.4) P.l(V.x(0, B.depth - 0.4), V.y(17), V.x(0, B.depth - 0.6), V.y(14.2), 0.6).fill(S.legs, { flat: true, tone: 1 });
+    // (seat: [height of its centre, half-height], for a spec whose legs should part higher, nearer the hips)
+    const [seatH, seatR] = S.seat || [18.8, 4.1];
+    P.e(V.x(0, 0.4), V.y(seatH), V.w(B.hip - 1.1, B.depth - 0.4), seatR).fill(S.legs, { pattern: S.legPattern, round: 0.8 });
+    if (V.fz > 0.4) P.l(V.x(0, B.depth - 0.4), V.y(seatH - 1.8), V.x(0, B.depth - 0.6), V.y(seatH - seatR - 0.5), 0.6).fill(S.legs, { flat: true, tone: 1 });
   });
 
   // cape or cloak, hanging behind; its lining shows at the edges
@@ -611,7 +613,14 @@ function drawFigure(P, S, theta, f) {
     const cx = V.x(0, 0), D = B.depth;
     const wN = V.w(3.4, 3), wS = V.w(B.sh, D * 0.8), wD = V.w(B.sh + 0.4, D), wc = V.w(B.chest, D + 0.5), ww = V.w(B.waist, D - 0.3), wh = V.w(B.hip, D);
     const top = 41.5 + B.slope * 0.3 - (B.neckDrop || 0);
-    const neckline = [[-wN, top + 1.5], [-wN - 1, top], [-(wN + wS) / 2 - 0.5, top - B.slope * 0.55], [-wS, shH + 0.2]];
+    // (neckCurve: a spec's own neckline, as [half-width, height] points from the neck down to the shoulder, for a
+    // smooth concave curve where the neck flares into the slope of the shoulders; the default's few straight
+    // segments turn sharply out from the neck, which shows wherever the neck is bare)
+    const neckDepth = (w) => (w < 3.4 ? w * 0.88 : lerp(3, D * 0.8, Math.min(1, (w - 3.4) / Math.max(0.1, B.sh - 3.4))));
+    const neckline = S.neckCurve ? S.neckCurve.map(([w, h]) => [-V.w(w, neckDepth(w)), h]).concat([[-wS, shH + 0.2]])
+      : [[-wN, top + 1.5], [-wN - 1, top], [-(wN + wS) / 2 - 0.5, top - B.slope * 0.55], [-wS, shH + 0.2]];
+    // (kept for gear that follows the neckline, such as a bare neckline's skin)
+    A.neckline = neckline;
     const side = [];
     for (let h = shH - 1; h >= 21; h -= 0.5) side.push([A.halfW(h), h]);
     const outline = neckline.concat(side.map(([w, h]) => [-w, h]), side.slice().reverse().map(([w, h]) => [w, h]), neckline.slice().reverse().map(([x, h]) => [-x, h]));
@@ -674,12 +683,19 @@ function drawFigure(P, S, theta, f) {
     // forearm angles back in, leaving a clear space between arm and body that echoes the weight shift in the
     // legs, so the pose reads from the front too. (Bell sleeves keep the arm hanging: on a bent arm the bell
     // would hang wrong.)
-    // (a spec with akimbo: false keeps both arms relaxed at rest)
-    const akimbo = !walking && !grip && s > 0 && S.sleeveStyle !== 'bell' && S.akimbo !== false;
+    // (a spec with akimbo: false keeps both arms relaxed at rest; akimbo: 'left' puts the left hand on the hip;
+    // akimboOut pushes the elbow of the hip arm further out to the side; pocket: true slips that hand into a
+    // pocket at the front of the hip instead of resting it on top)
+    const akimboSide = S.akimbo === false ? 0 : S.akimbo === 'left' ? -1 : 1;
+    const akimbo = !walking && !grip && s === akimboSide && S.sleeveStyle !== 'bell';
+    const pocket = akimbo && S.pocket;
     // (the resting hands are placed from the hips they rest on or hang beside, not from the shoulders: on a
     // slim figure, placed from the shoulders they float off the body)
     const hangA = B.sh + 1.4 + (S.blendArms ? 0.6 : B.armOut == null ? 1.2 : B.armOut) + rest[0];
-    const hand = grip || (akimbo ? [s * (A.lw(22.6) - 0.4), A.ld(A.lw(22.6)) * 0.45, 22.6] : [s * (walking ? hangA : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + rest[1], 22 + Math.max(0, hb) * 0.35 + rest[2]]);
+    // (a hand in the pocket sits lower and further forward, on the front of the hip where the pocket opens)
+    // (akimboH: the height the hand rests at, for a hand on the waist rather than the hip)
+    const aH = S.akimboH || 22.6;
+    const hand = grip || (pocket ? [s * (A.lw(21.4) - 1.3), A.ld(A.lw(21.4)) * 0.75, 21.4] : akimbo ? [s * (A.lw(aH) - 0.4), A.ld(A.lw(aH)) * 0.45, aH] : [s * (walking ? hangA : Math.min(hangA + 0.6, A.lw(21.5) + 3.4)), hb + 0.6 + rest[1], 22 + Math.max(0, hb) * 0.35 + rest[2]]);
     const sh = [s * (B.sh - 1), 0, 38.8 - B.slope * 0.3];
     // The hand on the hip rests on the side of it, a little forward, fingers curling over the hip toward the
     // front: seen from the front the whole hand shows on the hip (a hand tucked behind it left only a stub of
@@ -695,7 +711,7 @@ function drawFigure(P, S, theta, f) {
       // (elbowTuck draws the resting elbows in toward a narrow waist, so the forearm angles softly out to the
       // hand beside the thigh and the arm bends a little at the elbow instead of hanging as one straight slant)
       const restElbow = Math.abs(sh[0]) + 2.6 + (S.blendArms ? 0.3 : 0) - (S.elbowTuck || 0);
-      const elbow = akimbo ? [s * (B.sh + 1.7), -2.0, 30.4] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : Math.min(restElbow, Math.abs(hand[0]) - 0.3)), walking ? hand[1] * 0.45 - 1.4 : -0.9, (sh[2] + hand[2]) / 2 + 0.8];
+      const elbow = akimbo ? [s * (B.sh + (pocket ? 1.2 : 1.7) + (S.akimboOut || 0)), pocket ? -1.4 : -2.0, pocket ? 30.0 : 30.4 + Math.max(0, aH - 22.6) * 0.3] : [s * (walking ? B.sh + 0.9 + (S.blendArms ? 0.4 : (B.armOut == null ? 1.2 : B.armOut) * 0.5) : Math.min(restElbow, Math.abs(hand[0]) - 0.3)), walking ? hand[1] * 0.45 - 1.4 : -0.9, (sh[2] + hand[2]) / 2 + 0.8];
       // a point up the forearm from the hand, dist along it toward the elbow, so the wrist, the cuffs and the
       // bracer follow the forearm when it angles forward instead of sitting straight above the hand
       // Points on the arm are tipped down by their depth like the knees and ankles (LEG_TILT): seen a little from
@@ -734,9 +750,21 @@ function drawFigure(P, S, theta, f) {
         // it), so a bent arm turns in an arc instead of two straight pieces meeting at a point: a quadratic whose
         // control point lies a little past the elbow. Q(t) is a point on it, Tq(t) its direction, W(t) its width.
         const ctl = [pE[0] * 1.1 - (pS[0] + pH[0]) * 0.05, pE[1] * 1.1 - (pS[1] + pH[1]) * 0.05];
-        const Q = (t) => [(1 - t) * (1 - t) * pS[0] + 2 * t * (1 - t) * ctl[0] + t * t * pH[0], (1 - t) * (1 - t) * pS[1] + 2 * t * (1 - t) * ctl[1] + t * t * pH[1]];
-        const Tq = (t) => { const x = 2 * (1 - t) * (ctl[0] - pS[0]) + 2 * t * (pH[0] - ctl[0]), y = 2 * (1 - t) * (ctl[1] - pS[1]) + 2 * t * (pH[1] - ctl[1]), L = Math.hypot(x, y) || 1; return [x / L, y / L]; };
-        const W = (t) => (t < 0.5 ? lerp(wU + 0.3, wU + 0.1, t * 2) : t < 0.75 ? lerp(wU + 0.1, wU - 0.1, (t - 0.5) * 4) : lerp(wU - 0.1, B.fore, (t - 0.75) * 4));
+        // (sharpElbow: the arm runs as two straight sections meeting at the elbow, so a bent arm turns at a clear
+        // angle instead of a soft arc)
+        const Q = S.sharpElbow
+          ? (t) => (t < 0.5 ? [lerp(pS[0], pE[0], t * 2), lerp(pS[1], pE[1], t * 2)] : [lerp(pE[0], pH[0], (t - 0.5) * 2), lerp(pE[1], pH[1], (t - 0.5) * 2)])
+          : (t) => [(1 - t) * (1 - t) * pS[0] + 2 * t * (1 - t) * ctl[0] + t * t * pH[0], (1 - t) * (1 - t) * pS[1] + 2 * t * (1 - t) * ctl[1] + t * t * pH[1]];
+        const Tq = S.sharpElbow
+          ? (t) => { const [a, b] = t < 0.5 ? [pS, pE] : [pE, pH], x = b[0] - a[0], y = b[1] - a[1], L = Math.hypot(x, y) || 1; return [x / L, y / L]; }
+          : (t) => { const x = 2 * (1 - t) * (ctl[0] - pS[0]) + 2 * t * (pH[0] - ctl[0]), y = 2 * (1 - t) * (ctl[1] - pS[1]) + 2 * t * (pH[1] - ctl[1]), L = Math.hypot(x, y) || 1; return [x / L, y / L]; };
+        // (sleeveFull: a blouse sleeve that billows out from the shoulder to just below the elbow, then gathers
+        // into the bracer or cuff; the bulge is one smooth swell, widest a little above the elbow)
+        // (the fullness hangs: it grows slowly down the upper arm and is widest just above the gather, where the
+        // loose cloth sags and blouses over the bracer, as a bishop sleeve does; a swell centred on the upper arm
+        // read as a bulging muscle)
+        const full = S.sleeveFull || 0, billow = (t) => (t <= 0.06 || t >= 0.94 ? 0 : t < 0.78 ? Math.pow((t - 0.06) / 0.72, 1.4) : Math.pow(Math.cos(Math.PI / 2 * (t - 0.78) / 0.16), 0.6));
+        const W = (t) => full * billow(t) + (t < 0.5 ? lerp(wU + 0.3, wU + 0.1, t * 2) : t < 0.75 ? lerp(wU + 0.1, wU - 0.1, (t - 0.5) * 4) : lerp(wU - 0.1, B.fore, (t - 0.75) * 4));
         const NQ = 14, segs = [];
         for (let k = 0; k < NQ; k++) { const t0 = k / NQ, t1 = (k + 1) / NQ; segs.push([Q(t0), Q(t1), W(t0), W(t1), t0]); }
         segs.forEach(([a, b, w0, w1]) => P.t(a[0], a[1], b[0], b[1], w0, w1));
@@ -753,6 +781,38 @@ function drawFigure(P, S, theta, f) {
         const u0 = Q(0.14), u1 = Q(0.44);
         P.l(u0[0] - outward * 0.8, u0[1], u1[0] - outward * 0.9, u1[1], 0.5).fill(S.sleeve, { flat: true, tone: T(1), on: onSleeve });
         P.l(u0[0] + outward * 0.6, u0[1] - 0.2, u1[0] + outward * 0.7, u1[1] - 0.2, 0.5).fill(S.sleeve, { flat: true, tone: T(3), on: onSleeve });
+        // a full sleeve hangs in a few soft folds down the swell, each a dark trough with a lit ridge beside it,
+        // and gathers into a dark crease where it is drawn into the bracer
+        if (full) {
+          // (two folds, not more, and broken off before the ends: several full-length lines read as stripes)
+          // The sleeve as a round tube of cloth in the light from the upper left: its right edge turns into
+          // shadow (two fine pixels, then a half-tone), its left catches a lit band a little in from the edge, so
+          // it reads as a soft round form rather than a flat strip with lines on it.
+          // Across its whole width, not just at the edges: from the left, a lit rim, the highlight band, the mid
+          // tone, the core shadow, and a touch of light reflected back into the far edge, with a dither between the
+          // bands. Underneath, where the loose cloth sags and blouses over the cuff, it turns down into shadow,
+          // and near the shoulder it lies a little lighter. (Lit only at its edges, the sleeve read as a flat strip.)
+          const band = (u) => (u < -0.8 ? 3 : u < -0.25 ? 4 : u < 0.22 ? 3 : u < 0.5 ? 2.5 : u < 0.86 ? 1.6 : 2);
+          for (let t = 0.03; t <= 0.93; t += 0.015) {
+            const [qx, qy] = Q(t), [ux, uy] = Tq(t), w = W(t) / 2, nx = -uy, ny = ux, sgn = nx >= 0 ? 1 : -1;
+            const sag = t > 0.8 ? -Math.min(1, (t - 0.8) / 0.08) : t < 0.12 ? 0.4 : 0;
+            for (let d = -w + 0.25; d <= w - 0.24; d += 0.5) {
+              const x = qx + nx * sgn * d, y = qy + ny * sgn * d, X = Math.floor(x * RES), Y = Math.floor(y * RES);
+              if (!onSleeve(Y * PW + X)) continue;
+              const v = band(d / w) + sag + (d / w > 0.2 ? sag * 0.5 : 0), dith = (BAYER[Y & 1][X & 1] - 0.375) * 0.9;
+              P.dot(x, y, S.sleeve[T(Math.max(0, Math.min(4, Math.round(v + dith))))]);
+            }
+          }
+          // (one fold, not more, broken off before the ends: several full-length lines read as stripes)
+          [[0.12, 0.34, 0.84]].forEach(([o, ta, tb]) => {
+            for (let t = ta; t <= tb; t += 0.04) {
+              const [qx, qy] = Q(t), [ux, uy] = Tq(t), w = W(t) / 2, sw = o * w;
+              const px = qx - uy * sw * outward, py = qy + ux * sw * outward, mid = Math.sin(Math.PI * (t - ta) / (tb - ta)) > 0.4;
+              P.dotOn(px, py, S.sleeve[T(mid ? 1 : 2)]); if (mid) P.dotOn(px + outward * 0.5, py, S.sleeve[T(3)]);
+            }
+          });
+          for (let u = -1; u <= 1; u += 0.25) { const [qx, qy] = Q(0.9), [ux, uy] = Tq(0.9), w = W(0.88) / 2 - 0.4; P.dotOn(qx - uy * u * w, qy + ux * u * w - 0.3, S.sleeve[T(0)]); }
+        }
         // The inner edge of the sleeve, toward the body, turns away from us into shadow, and the arm casts a soft
         // neutral shadow onto the body just beside it, so the arm reads as standing in front of the torso rather
         // than as one flat shape with it (seen from the front and three-quarters)
@@ -766,9 +826,11 @@ function drawFigure(P, S, theta, f) {
               if (onSleeve(kIn)) P.dot(x + inward * (hw - 0.3), y, S.sleeve[T(1)]);
               const kIn2 = Math.floor(y * RES) * PW + Math.floor((x + inward * (hw - 0.8)) * RES);
               if (i % 2 === 0 && onSleeve(kIn2)) P.dot(x + inward * (hw - 0.8), y, S.sleeve[T(2)]);
-              [0.35, 0.85].forEach((o, j) => {
+              // (a full sleeve stands further off the body, so its shadow is deeper and wider: without it the arm
+              // and the corset beside it read as one plane)
+              (S.sleeveFull ? [[0.35, 0.64], [0.85, 0.76], [1.35, 0.9]] : [[0.35, 0.8], [0.85, 0.9]]).forEach(([o, kk]) => {
                 const sx = x + inward * (hw + o), k = Math.floor(y * RES) * PW + Math.floor(sx * RES);
-                if (!onSleeve(k) && P.buf[k * 4 + 3]) P.darken(sx, y, j ? 0.9 : 0.8, 0);
+                if (!onSleeve(k) && P.buf[k * 4 + 3]) P.darken(sx, y, kk, 0);
               });
               // Below the elbow, whatever shows through the gap between the arm and the body (long hair falling
               // behind the back, mostly) lies deep in their shadow: darkened, it reads as a gap, so the arm
@@ -798,7 +860,7 @@ function drawFigure(P, S, theta, f) {
         P.fill(S.sleeve, S.blendArms ? { flat: true, round: 0.7, dim: depth < -4, pattern: S.sleevePattern } : { dim, pattern: S.sleevePattern, contour: !S.softArms });
       }
       // sleeve cap: the top of the sleeve overlaps the shoulder so the seam reads as part of the garment
-      if (S.softArms) P.e(pS[0], pS[1] + 0.6, (S.sleeveW || B.arm) / 2 + 0.6, 2.4).fill(S.sleeve, { dim, round: 0.7, pattern: S.sleevePattern });
+      if (S.softArms) P.e(pS[0], pS[1] + 0.6, (S.sleeveW || B.arm) / 2 + 0.6 + (S.sleeveFull || 0) * 0.08, 2.4).fill(S.sleeve, { dim, round: 0.7, pattern: S.sleevePattern });
       // (on the hip the cuffs are drawn with the hand, turned to its angle; see below)
       // Cuffs: the end of the sleeve itself, the last few units before the wrist, turned to the cuff's cloth. Its
       // pixels keep the sleeve's own shading, recoloured tone for tone, so the cuff follows the sleeve's form and
@@ -844,7 +906,42 @@ function drawFigure(P, S, theta, f) {
       const H = (x, y) => [hx + (x * uy + y * ux) * hk, hy + (-x * ux + y * uy) * hk];
       const Dh = (x, y, c) => { const q = H(x, y); P.dotOn(q[0], q[1], c); };
       const ellipseAt = (cx, cy, rx, ry) => { const pts = []; for (let k = 0; k < 24; k++) { const t = k / 24 * Math.PI * 2; pts.push(H(cx + Math.cos(t) * rx, cy + Math.sin(t) * ry)); } return P.p(pts); };
-      if (akimbo) {
+      if (pocket) {
+        // In the pocket. Only the back of the hand shows, going in at the pocket's mouth: a dark slit where the
+        // cloth opens, the fingers a soft bulge under the cloth below it, and the thumb hooked outside the
+        // pocket, set apart on the inner side with a clear gap of the jerkin between it and the hand.
+        const inward = -outward;
+        ellipseAt(0, -1.25, 1.9, 1.05).fill(HS, { dim, round: 1 });
+        for (let x = -1.5; x <= 1.51; x += 0.5) Dh(x, -1.75 + 0.1 * x * x, T(x * outward > 0.4 ? 4 : 3));
+        // the pocket's mouth: a dark slit across the wrist, and the hand's shadow just inside it
+        for (let x = -2.5; x <= 2.51; x += 0.5) {
+          const q = H(x, -0.35 + 0.06 * x * x), r = H(x, 0.15 + 0.06 * x * x);
+          P.darken(q[0], q[1], 0.5, 0).darken(r[0], r[1], 0.8, 0);
+        }
+        // the fingers under the cloth: a soft rounded shadow along the bottom of the bulge
+        for (let t = 0.15; t < Math.PI - 0.15; t += 0.12) { const q = H(Math.cos(t) * 2.1, 0.7 + Math.sin(t) * 1.6); P.darken(q[0], q[1], 0.8, 0); }
+        // (the gap first: a dark line of shadow on the jerkin between thumb and hand)
+        for (let y = -1.4; y <= 0.6; y += 0.25) { const q = H(inward * 2.3, y); P.darken(q[0], q[1], 0.55, 0); }
+        ellipseAt(inward * 3.05, -0.65, 0.6, 1.15).fill(HS, { dim, round: 0.8 });
+        Dh(inward * 3.05, -1.3, T(3));
+      } else if (akimbo && S.openHands) {
+        // An open hand on the waist (openHands): the palm flat against the body and four fingers lying side by
+        // side down and in along it, parted by dark creases, with a gap of the cloth showing between them at
+        // the tips, and the thumb set apart above, pointing back. It casts a soft shadow on the cloth below.
+        const inward = -outward;
+        for (let t = 0; t < Math.PI * 2; t += 0.12) {
+          const ex = Math.cos(t), ey = Math.sin(t);
+          if (ey < 0.1 && ex * inward < 0.3) continue;
+          const q = H(ex * 2.4 + inward * 0.25, 0.5 + ey * 2.9);
+          P.darken(q[0], q[1], 0.8, 0);
+        }
+        ellipseAt(0, -0.9, 1.9, 1.35).fill(HS, { dim, round: 1 });
+        [-1.35, -0.45, 0.45, 1.35].forEach((x, i) => ellipseAt(x, 1.0, 0.46, i === 1 || i === 2 ? 1.55 : 1.3).fill(HS, { dim, round: 0.8 }));
+        [-0.9, 0, 0.9].forEach((x) => { for (let y = 0.0; y <= 2.2; y += 0.5) Dh(x, y, T(y > 1.4 ? 0 : 1)); });
+        for (let x = -1.5; x <= 1.51; x += 0.5) Dh(x, -1.4 + 0.08 * x * x, T(x * outward > 0.4 ? 4 : 3));
+        [-1.35, -0.45, 0.45, 1.35].forEach((x) => Dh(x + outward * 0.15, 0.4, T(3)));
+        ellipseAt(outward * 1.4, -2.0, 0.55, 1.0).fill(HS, { dim, round: 0.8 });
+      } else if (akimbo) {
         // On the hip. Its own simple shading
         // (the hanging hand's assumes fingers pointing straight down): light along the knuckles at the top, the
         // fingers parted by short creases running down the tilt and darker where they curl round the hip, and
@@ -875,6 +972,20 @@ function drawFigure(P, S, theta, f) {
         [-1.3, -0.43, 0.43, 1.3].forEach((x) => { Dh(x, 0.25, T(x * outward > 0 ? 3 : 2)); Dh(x, 1.45, T(1)); });
         [-0.86, 0, 0.86].forEach((x) => { for (let y = 0.25; y <= 1.9; y += 0.5) Dh(x, y, T(y > 1.1 ? 0 : 1)); });
       // (a hanging hand is a little narrower than it is long, so at a distance it reads as a hand, not a square)
+      } else if (S.openHands) {
+        // An open, relaxed hand (openHands): the palm, and below it four fingers hanging side by side, the middle
+        // two longest, parted by dark creases with a notch between their tips, each tip lit; the thumb hangs
+        // apart from them on the inner side (forward, seen from three-quarters), with a gap showing between.
+        const thumbSide = Math.abs(V.fx) > 0.3 ? Math.sign(V.fx) : -outward;
+        ellipseAt(0, -1.0, 1.95, 1.45).fill(HS, { dim, round: 1.1 });
+        [-1.35, -0.45, 0.45, 1.35].forEach((x, i) => ellipseAt(x, 1.05, 0.46, i === 1 || i === 2 ? 1.6 : 1.3).fill(HS, { dim, round: 0.8 }));
+        [-0.9, 0, 0.9].forEach((x) => { for (let y = -0.1; y <= 2.3; y += 0.5) Dh(x, y, T(y > 1.4 ? 0 : 1)); });
+        [-1.35, -0.45, 0.45, 1.35].forEach((x, i) => Dh(x, (i === 1 || i === 2 ? 2.3 : 2.0), T(x * outward > 0 ? 3 : 2)));
+        ellipseAt(thumbSide * 2.35, -0.2, 0.55, 1.25).fill(HS, { dim, round: 0.8 });
+        Dh(thumbSide * 2.35, -1.0, T(3));
+        // the cuff's shadow across the top of the hand and the side away from the light
+        for (let dx = -1.5; dx <= 1.5; dx += 0.5) Dh(dx, -2.0, T(1));
+        for (let y = -1.6; y <= 0.4; y += 0.5) Dh(outward > 0 ? 1.7 : -1.7, y, T(outward > 0 ? 1 : 2));
       } else {
         // its lower half is fuller than an ellipse (a superellipse), so the fingertips end in a soft round edge
         // rather than narrowing to a point
@@ -887,7 +998,7 @@ function drawFigure(P, S, theta, f) {
       }
       // front view: the cuff casts a soft shadow across the top of the hand, the side against the body
       // falls into shadow, the fingers curl under into a darker underside, and the outer knuckle catches the light
-      if (V.fz > 0.3 && !akimbo) {
+      if (V.fz > 0.3 && !akimbo && !S.openHands) {
         const inward = -outward, rx = 2.0, ry = 2.5, half = (dy) => rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / (ry * ry)));
         for (let dy = -ry + 0.25; dy <= ry - 0.25; dy += 0.5) {
           const w = half(dy);
@@ -905,14 +1016,15 @@ function drawFigure(P, S, theta, f) {
       // and the outer ones shorter, as the middle fingers are longer, so the lower edge reads as fingers rather
       // than a mitten; each fingertip catches a little light.
       const fp = (v) => (Math.floor(v * RES) + 0.5) / RES, ox = (fp(hx) - hx) / hk, oy = (fp(hy) - hy) / hk;
-      if (!akimbo) [-1, 0, 1].forEach((o) => { if (o === 0) Dh(ox + o, oy, T(1)); Dh(ox + o, oy + 0.5, T(1)); Dh(ox + o, oy + 1, T(0)); Dh(ox + o, oy + 1.5, T(0)); });
-      if (!akimbo) [-1.5, -0.5, 0.5, 1.5].forEach((o) => Dh(ox + o, oy + 1.5 - (Math.abs(o) > 1 ? 0.5 : 0), T(o * outward > 0 ? 3 : 2)));
-      if (Math.abs(V.fx) < 0.8 && !akimbo) { Dh(ox - outward * 1.5, oy - 0.5, T(1)); Dh(ox - outward * 1, oy, T(0)); }
+      const fist = !akimbo && !S.openHands;
+      if (fist) [-1, 0, 1].forEach((o) => { if (o === 0) Dh(ox + o, oy, T(1)); Dh(ox + o, oy + 0.5, T(1)); Dh(ox + o, oy + 1, T(0)); Dh(ox + o, oy + 1.5, T(0)); });
+      if (fist) [-1.5, -0.5, 0.5, 1.5].forEach((o) => Dh(ox + o, oy + 1.5 - (Math.abs(o) > 1 ? 0.5 : 0), T(o * outward > 0 ? 3 : 2)));
+      if (Math.abs(V.fx) < 0.8 && fist) { Dh(ox - outward * 1.5, oy - 0.5, T(1)); Dh(ox - outward * 1, oy, T(0)); }
       // the cuff's shadow across the top of the hand, from every side (the front view's own loop draws it there)
-      if (V.fz <= 0.3 && !akimbo) for (let dx = -1.5; dx <= 1.5; dx += 0.5) Dh(dx, -1.65, T(1));
+      if (V.fz <= 0.3 && fist) for (let dx = -1.5; dx <= 1.5; dx += 0.5) Dh(dx, -1.65, T(1));
       // in three-quarter and side views the thumb shows on the forward side of the hand: a small rounded pad
       // standing off the hand's edge, parted from it by a crease and lit along its top
-      if (Math.abs(V.fx) > 0.3 && V.d(hand[0], hand[1] + 2) > V.d(hand[0], hand[1]) - 0.2) {
+      if (fist && Math.abs(V.fx) > 0.3 && V.d(hand[0], hand[1] + 2) > V.d(hand[0], hand[1]) - 0.2) {
         const fwd = Math.sign(V.fx);
         ellipseAt(fwd * 1.85, -0.3, 0.95, 1.35).fill(HS, { dim, round: 1 });
         for (let dy = -0.75; dy <= 0.75; dy += 0.5) Dh(fwd * 1.1, -0.3 + dy, T(1));
@@ -1084,15 +1196,29 @@ function drawFigure(P, S, theta, f) {
     const was = new Map(face.map((k, i) => [k, faceWas[i]]));
     const over = (k) => was.has(k) && rgb(k) !== was.get(k);
     const hits = [];
+    // the screen side away from the light: the right, except in profile, where faceShade turns the light to
+    // come from the side the face points to
+    const turnK = Math.pow(V.fx, 4), shadowDir = (1 - turnK + turnK * (-Math.sign(V.fx) || 1)) >= 0 ? 1 : -1;
     face.forEach((k) => {
       if (over(k) || !tone.has(rgb(k))) return;
       // the shadow is two fine pixels deep, with a soft dithered third row
       const X = k % PW, Y = (k - X) / PW;
       const near = [[0, -1], [-1, -1], [0, -2], [-1, -2]].some(([dx, dy]) => over((Y + dy) * PW + X + dx));
       const far = !near && ((X + Y) & 1) === 0 && [[0, -3], [-1, -3]].some(([dx, dy]) => over((Y + dy) * PW + X + dx));
-      if (near || far) hits.push(k);
+      // The edges of the face turn away: skin beside the hair or the outline at the sides (where the cheek
+      // rounds back under the hair) steps down, deeper on the side away from the light, so the face reads as
+      // rounded rather than a flat disc; and the bottom of the jaw turns under toward the neck.
+      const edge = (dx, dy) => { const j = (Y + dy) * PW + X + dx; return over(j) || !was.has(j); };
+      const sideD = (dir) => { for (let d = 1; d <= 4; d++) if (edge(dir * d, 0)) return d; return 9; };
+      // (clean bands, not dithered: at this size a checker of two tones reads as noise)
+      const dShadow = sideD(shadowDir), dLit = sideD(-shadowDir);
+      let n = near || far ? 1 : 0;
+      if (dShadow <= 3) n = Math.max(n, dShadow === 1 ? 2 : 1);
+      if (dLit === 1) n = Math.max(n, 1);
+      if (edge(0, 1)) n = Math.max(n, 1);
+      if (n) hits.push([k, n]);
     });
-    hits.forEach((k) => { const c = tone.get(rgb(k)); P.buf[k * 4] = c[0]; P.buf[k * 4 + 1] = c[1]; P.buf[k * 4 + 2] = c[2]; });
+    hits.forEach(([k, n]) => { for (let i = 0; i < n; i++) { const c = tone.get(rgb(k)); if (!c) break; P.buf[k * 4] = c[0]; P.buf[k * 4 + 1] = c[1]; P.buf[k * 4 + 2] = c[2]; } });
   });
 
   if (S.gear) S.gear(add, P, A);
@@ -1231,6 +1357,90 @@ const MAGE = {
   }
 };
 
+// Short mantle: a ring of cloth around the shoulders, projected for each facing like the body,
+// so it keeps one smooth outline from every side. hemH(phi) is the hem's height round the body (phi 0 at the
+// front); under lists the ramps of whatever the hem lies over, which its shadow steps down; clasp draws the
+// brass clasp at the throat. cloth is the cloth's ramp.
+function drawMantle(P, A, cloth, hemH, under, clasp) {
+  const V = A.V, B = A.B;
+  const N = 28, ring = [];
+  for (let k = 0; k <= N; k++) {
+    const phi = k / N * Math.PI * 2;
+    const top = V.seam(4.4, 4, phi, 40.2), hem = V.seam(B.sh + 2.2, B.depth + 2, phi, hemH(phi));
+    ring.push({ phi, top, hem });
+  }
+  // From the neck to the hem the cloth follows a rounded shoulder rather than a straight cone: it slopes
+  // gently out from the neck and rounds down over the shoulder (outward fast at first, then mostly down),
+  // so the shoulders come out sloped and soft instead of a flat top with square corners.
+  const M = 6, at = (r, t) => {
+    const e = 1 - Math.pow(1 - t, 1.8), R = lerp(4.4, B.sh + 2.2, e), D = lerp(4, B.depth + 2, e);
+    return V.seam(R, D, r.phi, lerp(40.2, hemH(r.phi), Math.pow(t, 1.25)));
+  };
+  for (let k = 0; k < N; k++) {
+    const a = ring[k], b = ring[k + 1];
+    for (let m = 0; m < M; m++) {
+      const a0 = at(a, m / M), a1 = at(a, (m + 1) / M), b0 = at(b, m / M), b1 = at(b, (m + 1) / M);
+      P.p([[a0[0], a0[1]], [b0[0], b0[1]], [b1[0], b1[1]], [a1[0], a1[1]]]);
+    }
+  }
+  P.e(V.x(0, 0), V.y(39.9), V.w(6.0, 5.0), 1.6);
+  // the cloth lying over each shoulder: a rounded cap, so the mantle covers the top of the sleeve beneath
+  // (which otherwise pokes out past the sloped shoulder as a step in the outline) and keeps a soft outline
+  [-1, 1].forEach((sd) => { const c = V.seam(B.sh - 0.9, B.depth - 1.4, sd * Math.PI / 2, 37.5); P.e(c[0], c[1], 3.0, 2.7); });
+  P.fill(cloth, { pattern: weave, round: 0.6, lift: -0.06 });
+  // folds: shadowed lines from the shoulders to the hem, each with a lit edge, on the side facing us
+  const folds = [-1.35, -0.75, -0.3, 0.3, 0.75, 1.35, Math.PI - 0.5, Math.PI + 0.5];
+  folds.forEach((phi) => {
+    const t = V.seam(5, 4.4, phi, 40.2), h = V.seam(B.sh + 2.1, B.depth + 1.9, phi, hemH(phi) + 0.3);
+    if (h[2] > 2.6 && t[2] > 2) P.l(t[0], t[1], h[0], h[1], 0.7);
+  });
+  P.fill(cloth, { flat: true, tone: 1 });
+  folds.forEach((phi) => {
+    const t = V.seam(5, 4.4, phi + 0.12, 40), h = V.seam(B.sh + 2.1, B.depth + 1.9, phi + 0.14, hemH(phi + 0.14) + 0.5);
+    if (h[2] > 2.6 && t[2] > 2) P.l(t[0], t[1], h[0], h[1], 0.45);
+  });
+  P.fill(cloth, { flat: true, tone: 3 });
+  // light across the tops of the shoulders, set on the shoulder's curve and painted only on the mantle's own
+  // pixels (placed by a straight cone it stood off the rounded shoulder as a pale fleck on the hair)
+  const MSET = new Set(cloth.map((c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2])));
+  const onMantle = (k) => MSET.has((P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2]);
+  [-1, 1].forEach((sd) => { const c = at({ phi: sd * Math.PI / 2 }, 0.45); if (c[2] > 1.5) P.e(c[0] - sd * Math.abs(V.fz) * 0.4, c[1] + 0.3, 1.5, 0.6).fill(cloth, { flat: true, tone: 3, pattern: weave, on: onMantle }); });
+  // The hem: a defined edge, so the mantle reads as a layer lying over the sleeves rather than melting into
+  // them (they are close greens): a dark line along the hem itself, the stitching lit just above it where
+  // the hem faces us, and a lit lip where it turns away over the arms. Below it the mantle casts its shadow,
+  // stepping whatever lies under it (sleeve, jerkin, shirt) one tone down its own ramp, following the hem's
+  // curve: two rows, the second softened. (A plain darken there turned the cloth blue and muddy.)
+  const UNDER = under.map((r) => r.map((c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2])));
+  const stepDown = (x, y) => {
+    const X = Math.floor(x * RES), Y = Math.floor(y * RES);
+    if (X < 0 || Y < 0 || X >= PW || Y >= PH) return;
+    const k = Y * PW + X, c = (P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2];
+    for (let r = 0; r < UNDER.length; r++) { const i = UNDER[r].indexOf(c); if (i > 0) { const R = under[r][i - 1]; P.dot(x, y, R); return; } if (i === 0) return; }
+  };
+  const done = new Set();
+  for (let k = 0; k <= 160; k++) {
+    const phi = k / 160 * Math.PI * 2, h = V.seam(B.sh + 2.2, B.depth + 2, phi, hemH(phi));
+    if (h[2] < 0.3) continue;
+    P.dotOn(h[0], h[1] - 0.2, cloth[0]);
+    if (h[2] > 3) P.dotOn(h[0], h[1] - 0.8, cloth[3]);
+    else P.dotOn(h[0], h[1] - 0.7, cloth[2]);
+    [[0.4, 1], [0.9, k % 2]].forEach(([dy, on]) => {
+      if (!on) return;
+      const key = Math.floor(h[0] * RES) + ',' + Math.floor((h[1] + dy) * RES);
+      if (done.has(key)) return;
+      done.add(key); stepDown(h[0], h[1] + dy);
+    });
+  }
+  // clasp at the throat
+  if (!clasp) return;
+  const cl = V.seam(4.6, 4.4, 0, 39);
+  if (cl[2] > 1) {
+    P.e(cl[0], cl[1], 1.4, 1.3).fill(GOLD, { round: 0.5 });
+    P.dot(cl[0] - 0.5, cl[1] - 0.5, GOLD[4]);
+    P.dot(cl[0] + 1, cl[1] + 1, cloth[3]).dot(cl[0] + 1.5, cl[1] + 1.5, cloth[2]);
+  }
+}
+
 // Ranger: bare-headed, auburn hair cut in a bob to just below the jaw, a short olive mantle with a leaf clasp, a laced leather
 // jerkin with stitched edges over a linen shirt, belt with pouch, patched trousers, folded
 // boot cuffs and a bracer on the left forearm.
@@ -1283,9 +1493,10 @@ const RANGER = {
   // folded-over boot tops: a narrow band with a row of stitches, a shadow under the fold and another
   // cast up onto the trousers
   cuffBand: [6, 2.2],
-  cuffDetail(P, top, dim) {
-    const [x, y] = top, C = RANGER.cuff, L = RANGER.legs, d = dim ? 1 : 0;
-    for (let t = -2.6; t <= 2.6; t += 0.5) P.dotOn(x + t, y - 3, L[1 - d]).dotOn(x + t, y - 0.3, C[0]).dotOn(x + t, y + 0.3, RANGER.boots[1 - d]);
+  // (these boot details read their colours from the spec being drawn, so the Rogue wears the same boots)
+  cuffDetail(P, top, dim, A) {
+    const [x, y] = top, C = A.S.cuff, L = A.S.legs, d = dim ? 1 : 0;
+    for (let t = -2.6; t <= 2.6; t += 0.5) P.dotOn(x + t, y - 3, L[1 - d]).dotOn(x + t, y - 0.3, C[0]).dotOn(x + t, y + 0.3, A.S.boots[1 - d]);
     // fine running stitches in a pale thread, not studs
     for (let t = -2.25; t <= 2.25; t += 0.75) P.dotOn(x + t, y - 1.9, C[3 - d]);
   },
@@ -1294,7 +1505,7 @@ const RANGER = {
   bootRound: 0.7,
   bootPattern: (x, y) => grain(x, y) * 0.8 + (((x * 3 + y * 7) % 13) === 0 ? -0.1 : 0),
   bootDetail(P, J, dim, A) {
-    const V = A.V, B = RANGER.boots, T = (i) => B[Math.max(0, i - (dim ? 1 : 0))], [ax, ay] = J.ankle, [tx, ty] = J.top;
+    const V = A.V, B = A.S.boots, T = (i) => B[Math.max(0, i - (dim ? 1 : 0))], [ax, ay] = J.ankle, [tx, ty] = J.top;
     // slouch creases: short curved folds across the shaft, alternating sides, each dark with a lit lip above
     [[0.45, -0.5, 1.4], [0.75, 0.6, 1.1]].forEach(([t, off, len]) => {
       const cx = lerp(tx, ax, t) + off, cy = lerp(ty, ay, t) + 0.6;
@@ -1310,8 +1521,8 @@ const RANGER = {
   torso: SHIRT, sleeve: ramp(0x63704a, 0.1), legs: ramp(0x5b5547, 0.1), kneePatch: ramp(0x7a6c52, 0.1),
   boots: ramp(0x684a32, 0.1), cuff: ramp(0x7a5b40, 0.1), sole: ramp(0x2f2620, 0.08), belt: ramp(0x3d342b, 0.09), buckle: ramp(0x9a978f, 0.09), trim: GOLD,
   hands: SKIN, sleeveStyle: 'puff', shirtCuff: SHIRT,
-  // both arms hang relaxed at rest, the elbows drawn in toward the waist
-  akimbo: false, elbowTuck: 1.4,
+  // at rest the right hand is in the pocket at the front of the hip; the left arm hangs relaxed, the elbow drawn in toward the waist
+  akimbo: 'right', pocket: true, akimboOut: 0, elbowTuck: 1.4,
   // a little asymmetry so the relaxed pose is not flat: the arms set against the feet (the left foot is
   // forward), the right hand eased out from the body and forward, the left closer in and back. Both are at the
   // same height: they differ on screen only by their depth (see the arms' tilt), as the feet do.
@@ -1385,89 +1596,372 @@ const RANGER = {
     }
   },
   gear(add, P, A) {
-    const V = A.V, B = A.B;
-    // Short mantle: a ring of cloth around the shoulders, projected for each facing like the body,
-    // so it keeps one smooth outline from every side. The hem dips at front and back and lifts over the arms.
-    add(9, () => {
-      const N = 28, ring = [];
-      const hemH = (phi) => 32.6 + 1.6 * Math.sin(phi) * Math.sin(phi) - 0.4 * Math.cos(phi);
-      for (let k = 0; k <= N; k++) {
-        const phi = k / N * Math.PI * 2;
-        const top = V.seam(4.4, 4, phi, 40.2), hem = V.seam(B.sh + 2.2, B.depth + 2, phi, hemH(phi));
-        ring.push({ phi, top, hem });
-      }
-      // From the neck to the hem the cloth follows a rounded shoulder rather than a straight cone: it slopes
-      // gently out from the neck and rounds down over the shoulder (outward fast at first, then mostly down),
-      // so the shoulders come out sloped and soft instead of a flat top with square corners.
-      const M = 6, at = (r, t) => {
-        const e = 1 - Math.pow(1 - t, 1.8), R = lerp(4.4, B.sh + 2.2, e), D = lerp(4, B.depth + 2, e);
-        return V.seam(R, D, r.phi, lerp(40.2, hemH(r.phi), Math.pow(t, 1.25)));
-      };
-      for (let k = 0; k < N; k++) {
-        const a = ring[k], b = ring[k + 1];
-        for (let m = 0; m < M; m++) {
-          const a0 = at(a, m / M), a1 = at(a, (m + 1) / M), b0 = at(b, m / M), b1 = at(b, (m + 1) / M);
-          P.p([[a0[0], a0[1]], [b0[0], b0[1]], [b1[0], b1[1]], [a1[0], a1[1]]]);
-        }
-      }
-      P.e(V.x(0, 0), V.y(39.9), V.w(6.0, 5.0), 1.6);
-      // the cloth lying over each shoulder: a rounded cap, so the mantle covers the top of the sleeve beneath
-      // (which otherwise pokes out past the sloped shoulder as a step in the outline) and keeps a soft outline
-      [-1, 1].forEach((sd) => { const c = V.seam(B.sh - 0.9, B.depth - 1.4, sd * Math.PI / 2, 37.5); P.e(c[0], c[1], 3.0, 2.7); });
-      P.fill(MANTLE, { pattern: weave, round: 0.6, lift: -0.06 });
-      // folds: shadowed lines from the shoulders to the hem, each with a lit edge, on the side facing us
-      const folds = [-1.35, -0.75, -0.3, 0.3, 0.75, 1.35, Math.PI - 0.5, Math.PI + 0.5];
-      folds.forEach((phi) => {
-        const t = V.seam(5, 4.4, phi, 40.2), h = V.seam(B.sh + 2.1, B.depth + 1.9, phi, hemH(phi) + 0.3);
-        if (h[2] > 2.6 && t[2] > 2) P.l(t[0], t[1], h[0], h[1], 0.7);
-      });
-      P.fill(MANTLE, { flat: true, tone: 1 });
-      folds.forEach((phi) => {
-        const t = V.seam(5, 4.4, phi + 0.12, 40), h = V.seam(B.sh + 2.1, B.depth + 1.9, phi + 0.14, hemH(phi + 0.14) + 0.5);
-        if (h[2] > 2.6 && t[2] > 2) P.l(t[0], t[1], h[0], h[1], 0.45);
-      });
-      P.fill(MANTLE, { flat: true, tone: 3 });
-      // light across the tops of the shoulders, set on the shoulder's curve and painted only on the mantle's own
-      // pixels (placed by a straight cone it stood off the rounded shoulder as a pale fleck on the hair)
-      const MSET = new Set(MANTLE.map((c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2])));
-      const onMantle = (k) => MSET.has((P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2]);
-      [-1, 1].forEach((sd) => { const c = at({ phi: sd * Math.PI / 2 }, 0.45); if (c[2] > 1.5) P.e(c[0] - sd * Math.abs(V.fz) * 0.4, c[1] + 0.3, 1.5, 0.6).fill(MANTLE, { flat: true, tone: 3, pattern: weave, on: onMantle }); });
-      // The hem: a defined edge, so the mantle reads as a layer lying over the sleeves rather than melting into
-      // them (they are close greens): a dark line along the hem itself, the stitching lit just above it where
-      // the hem faces us, and a lit lip where it turns away over the arms. Below it the mantle casts its shadow,
-      // stepping whatever lies under it (sleeve, jerkin, shirt) one tone down its own ramp, following the hem's
-      // curve: two rows, the second softened. (A plain darken there turned the cloth blue and muddy.)
-      const UNDER = [A.S.sleeve, JERKIN, SHIRT, A.S.belt].map((r) => r.map((c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2])));
-      const stepDown = (x, y) => {
-        const X = Math.floor(x * RES), Y = Math.floor(y * RES);
-        if (X < 0 || Y < 0 || X >= PW || Y >= PH) return;
-        const k = Y * PW + X, c = (P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2];
-        for (let r = 0; r < UNDER.length; r++) { const i = UNDER[r].indexOf(c); if (i > 0) { const R = [A.S.sleeve, JERKIN, SHIRT, A.S.belt][r][i - 1]; P.dot(x, y, R); return; } if (i === 0) return; }
-      };
-      const done = new Set();
-      for (let k = 0; k <= 160; k++) {
-        const phi = k / 160 * Math.PI * 2, h = V.seam(B.sh + 2.2, B.depth + 2, phi, hemH(phi));
-        if (h[2] < 0.3) continue;
-        P.dotOn(h[0], h[1] - 0.2, MANTLE[0]);
-        if (h[2] > 3) P.dotOn(h[0], h[1] - 0.8, MANTLE[3]);
-        else P.dotOn(h[0], h[1] - 0.7, MANTLE[2]);
-        [[0.4, 1], [0.9, k % 2]].forEach(([dy, on]) => {
-          if (!on) return;
-          const key = Math.floor(h[0] * RES) + ',' + Math.floor((h[1] + dy) * RES);
-          if (done.has(key)) return;
-          done.add(key); stepDown(h[0], h[1] + dy);
-        });
-      }
-      // clasp at the throat
-      const cl = V.seam(4.6, 4.4, 0, 39);
-      if (cl[2] > 1) {
-        P.e(cl[0], cl[1], 1.4, 1.3).fill(GOLD, { round: 0.5 });
-        P.dot(cl[0] - 0.5, cl[1] - 0.5, GOLD[4]);
-        P.dot(cl[0] + 1, cl[1] + 1, MANTLE[3]).dot(cl[0] + 1.5, cl[1] + 1.5, MANTLE[2]);
-      }
-    });
+    // short mantle with a leaf clasp (see drawMantle); the hem dips at front and back and lifts over the arms
+    add(9, () => drawMantle(P, A, MANTLE, (phi) => 32.6 + 1.6 * Math.sin(phi) * Math.sin(phi) - 0.4 * Math.cos(phi), [A.S.sleeve, JERKIN, SHIRT, A.S.belt], true));
     // hair: the female head preset's bob with fringe and side parting, in her auburn
     drawFemaleHead(add, P, A, HAIR);
+  }
+};
+
+// Rogue: the ranger's figure and face: an oxblood leather corset laced up the front and cut to a point below
+// the waist, over a cream linen blouse with a wide ruffled neckline drawn in by a drawstring, soft gathers over
+// the bust, and full sleeves that hang into frilled cuffs at the wrist; a belt at the waist with a dagger at the
+// left hip, dark leggings and the ranger's soft folded-top boots. She stands with her right arm bent and its hand
+// on her waist, and her hair is pulled back in a ponytail.
+const RG_HAIR = ramp(0x3b2b27, 0.1), RG_CORSET = ramp(0x6a3a33, 0.1), RG_SHIRT = ramp(0xbab09b, 0.09),
+      RG_LEATHER = ramp(0x4a3a30, 0.1), RG_STEEL = ramp(0x9a9c9e, 0.08), RG_LACE = ramp(0xb3a58a, 0.08);
+// leather: the tone drifts in broad soft patches (smoothly interpolated over cells a few fine pixels across),
+// with a rare darker pore, so the surface reads as smooth hide rather than woven cloth
+const leatherHash = (i, j) => (((i * 73856093) ^ (j * 19349663)) >>> 0) % 1000 / 1000;
+const leather = (x, y) => {
+  const cx = x / 5, cy = y / 4, i = Math.floor(cx), j = Math.floor(cy), u = cx - i, v = cy - j, su = u * u * (3 - 2 * u), sv = v * v * (3 - 2 * v);
+  const n = lerp(lerp(leatherHash(i, j), leatherHash(i + 1, j), su), lerp(leatherHash(i, j + 1), leatherHash(i + 1, j + 1), su), sv);
+  return (n - 0.5) * 0.12 + ((x * 7 + y * 13) % 29 === 0 ? -0.05 : 0);
+};
+const ROGUE = {
+  ...FEMALE_BODY,
+  ...FEMALE_HEAD,
+  hairStyle: 'ponytail',
+  brow: [52, 38, 34], iris: [92, 84, 108],
+  torso: RG_SHIRT, sleeve: RG_SHIRT, sleeveStyle: 'puff', sleeveFull: 2.4,
+  // a quiet linen weave on the blouse (the coarser default texture broke the sleeves' shading into specks)
+  sleevePattern: (x, y) => ((x * 3 + y) % 7 === 0 ? -0.035 : (x + y * 5) % 11 === 0 ? 0.025 : 0),
+  torsoPattern: (x, y) => ((x * 3 + y) % 7 === 0 ? -0.035 : (x + y * 5) % 11 === 0 ? 0.025 : 0),
+  // a smaller seat set higher, so the legs part near the hips instead of at mid-thigh
+  seat: [20.6, 2.5],
+  // the neck flares into the slope of the shoulders in one smooth curve (see drawFigure's torso)
+  // (the base of the neck sits half a unit higher than the default's, for a neck about 15% shorter)
+  neckCurve: [[1.95, 44.8], [2.0, 43.9], [2.2, 42.9], [2.7, 42.1], [3.5, 41.5], [4.5, 41.0], [5.4, 40.45], [6.2, 39.7], [6.8, 38.9]],
+  // the sleeve starts narrow at the shoulder and the fullness comes in below, so the top of the arm sits inside
+  // the shoulder line instead of standing out past it in a square corner
+  sleeveW: 3.2,
+  legs: ramp(0x3a3a42, 0.1), legPattern: (x, y) => ((x + y * 2) % 7 === 0 ? -0.04 : 0),
+  // the ranger's soft folded-top boots, in a darker leather
+  boots: ramp(0x4a362c, 0.1), sole: ramp(0x231c18, 0.08), cuff: ramp(0x5c4536, 0.1), cuffBand: RANGER.cuffBand,
+  belt: ramp(0x2c2420, 0.09), buckle: RG_STEEL, trim: RG_STEEL, hands: SKIN,
+  bootRound: RANGER.bootRound, bootPattern: RANGER.bootPattern, bootDetail: RANGER.bootDetail, cuffDetail: RANGER.cuffDetail,
+  // at rest the right arm is bent with the hand on the waist; the left arm hangs relaxed
+  akimbo: 'right', akimboH: 25.6, akimboOut: 1.4, elbowTuck: 0.9, restArms: RANGER.restArms, sharpElbow: true,
+  // open hands with the fingers apart, rather than loose fists
+  openHands: true,
+  // the hanging arm held just off the body, so a small gap shows between the sleeve and the corset
+  body: { ...FEMALE_BODY.body, armOut: 0.8 },
+  // the leggings: shadow down the inner edge where the legs meet, a lit edge down the front
+  legArmor(P, J, dim, A) {
+    const V = A.V, [hx, hy] = J.hip, [kx, ky] = J.knee, T = (i) => ROGUE.legs[Math.max(0, i - (dim ? 1 : 0))];
+    const inner = Math.sign(V.x(0, 0) - hx) || 1;
+    // (each thigh shaded as its own round form from the hip down, so the two legs never read as one block: a
+    // deep shadow on the inner edge, a softer one on the side away from the light, a lit band toward it)
+    for (let y = hy - 1.5; y <= ky; y += 0.5) {
+      const t = Math.max(0, (y - hy) / (ky - hy || 1)), x = lerp(hx, kx, t), w = lerp(A.B.leg, A.B.shin + 0.4, t) / 2;
+      if (Math.abs(V.fx) < 0.5) P.dotOn(x + inner * (w - 0.3), y, T(0)).dotOn(x + inner * (w - 0.8), y, T(0)).dotOn(x + inner * (w - 1.3), y, T(1));
+      P.dotOn(x + w - 0.3, y, T(1));
+      if (V.d(0, 1) > 0.15) P.dotOn(x - w * 0.35, y, T(3)).dotOn(x - w * 0.1, y, T(3));
+    }
+  },
+  // The blouse's frilled cuff at the wrist: the sleeve gathered into a narrow band, and below it a short
+  // flounce, wider than the wrist, falling over the back of the hand in soft scallops, lit along the top of
+  // each and dark in the dips between.
+  armArmor(P, J, dim) {
+    const C = (i) => RG_SHIRT[Math.max(0, i - (dim ? 1 : 0))];
+    const dx = J.pH[0] - J.pE[0], dy = J.pH[1] - J.pE[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+    const fx = lerp(J.pE[0], J.pH[0], 0.86), fy = lerp(J.pE[1], J.pH[1], 0.86);
+    const pt = (u, v) => [fx + nx * u + ux * v, fy + ny * u + uy * v];
+    const scal = (u) => 2.0 + 0.45 * Math.abs(Math.sin(u * 2.6));
+    const outline = [];
+    for (let u = -2.3; u <= 2.31; u += 0.25) outline.push(pt(u, scal(u) * (1 - 0.15 * u * u / 5.3)));
+    for (let u = 1.8; u >= -1.81; u -= 0.5) outline.push(pt(u, -0.4));
+    P.p(outline).fill(RG_SHIRT, { dim, round: 0.8 });
+    for (let u = -2.0; u <= 2.01; u += 0.25) {
+      const dip = Math.abs(Math.sin(u * 2.6)) < 0.35, v = scal(u) * (1 - 0.15 * u * u / 5.3);
+      const a = pt(u, v - 0.3), b = pt(u, 0.2);
+      P.dotOn(a[0], a[1], C(dip ? 1 : 2)).dotOn(b[0], b[1], C(4));
+      if (dip) { const c = pt(u, v - 0.9); P.dotOn(c[0], c[1], C(1)); }
+    }
+    // the gathered band: a dark crease where the sleeve is drawn in
+    for (let u = -1.6; u <= 1.61; u += 0.5) { const q = pt(u, -0.6); P.dotOn(q[0], q[1], C(1)); }
+  },
+  chest(P, A) {
+    const V = A.V, cx = V.x(0, 0);
+    const onShirt = (phi, h, out) => { const w = A.lw(h, out == null ? 0.2 : out); const q = V.seam(w, A.ld(w) + 0.2, phi, h); return [q[0], q[1] + q[2] * 0.12, q[2]]; };
+    // The blouse over the chest hangs loose rather than clinging: one deep, slightly off-centre swag sags across
+    // it below the frill (a soft U, its trough shadowed and its upper lip lit), and two short folds drop straight
+    // down from it into the corset. (Gathers slanting out from the neckline, and seams curving round the
+    // shoulders, outlined the chest like muscle.)
+    if (V.fz > 0.2) {
+      const swag = (t) => onShirt(lerp(-1.0, 0.85, t), 35.9 - 1.1 * Math.sin(Math.PI * Math.pow(t, 0.9)));
+      for (let k = 0; k <= 40; k++) {
+        const t = k / 40, q = swag(t), mid = Math.sin(Math.PI * t);
+        if (q[2] < 1.5 || mid < 0.25) continue;
+        P.dotOn(q[0], q[1], RG_SHIRT[mid > 0.6 ? 1 : 2]).dotOn(q[0], q[1] + 0.5, RG_SHIRT[2]).dotOn(q[0], q[1] - 0.5, RG_SHIRT[4]);
+      }
+      [[-0.3, 0.42], [0.45, 0.62]].forEach(([phi, t0]) => {
+        const s0 = swag(t0);
+        for (let h = V.h(s0[1]) - 0.8; h >= 34.0; h -= 0.5) {
+          const q = onShirt(phi + 0.04 * (V.h(s0[1]) - h), h);
+          if (q[2] < 1.5) continue;
+          P.dotOn(q[0], q[1], RG_SHIRT[2]).dotOn(q[0] - 0.5, q[1], RG_SHIRT[4]);
+        }
+      });
+    }
+    // The corset: from under the bust down past the waist, its top curving down a little at the front and its
+    // lower edge cut to a point over the belly. The sides follow the body, so it hugs the narrow waist.
+    const H_TOP = 33.6, H_BOT = 23.2;
+    const topH = (phi) => H_TOP - 0.7 * Math.pow(Math.max(0, Math.cos(phi)), 2);
+    const hemH = (phi) => H_BOT - 2.6 * Math.pow(Math.max(0, Math.cos(phi)), 8);
+    const wT = A.lw(H_TOP, 0.3), wB = A.lw(H_BOT, 0.3);
+    // (its edges are rings round the body seen a little from above, curved more than the default so the corset
+    // reads as wrapping round her rather than as a flat panel; the lacing and boning follow the same curve)
+    const TILT = 0.24;
+    const top = A.ring(wT, A.ld(wT) + 0.3, topH, TILT), hem = A.ring(wB, A.ld(wB) + 0.3, hemH, TILT);
+    const L = [], R = [];
+    for (let h = H_TOP; h >= H_BOT; h -= 0.5) { const w = A.halfW(h, 0.3); L.push([cx - w, V.y(h)]); R.push([cx + w, V.y(h)]); }
+    P.p(L.concat(hem.map(([x, y]) => [x, y])).concat(R.reverse()).concat(top.slice().reverse().map(([x, y]) => [x, y])));
+    // Leather, not cloth: a smooth surface whose tone drifts in broad soft patches (a fine grain read as
+    // woven cloth), with only a rare fine pore, and a soft sheen where the curve of the body turns toward the
+    // light, creases where it is laced in tight at the waist, and a lit edge on the thick binding.
+    P.fill(RG_CORSET, { pattern: leather, round: 0.9, dither: 0.5 });
+    const onBody = (phi, h) => { const w = A.lw(h, 0.4); const q = V.seam(w, A.ld(w) + 0.4, phi, h); return [q[0], q[1] + q[2] * TILT, q[2]]; };
+    // The leather wraps round the body: each point darkens as its surface turns away from us and from the light
+    // (from the upper left), so the side away from the light falls into shadow and the near side keeps its tone,
+    // over the leather's own texture. (Evenly lit, it read as a flat panel.)
+    const shadedPx = new Set();
+    for (let h = H_TOP; h >= H_BOT - 2.6; h -= 0.4) for (let phi = -Math.PI; phi <= Math.PI; phi += 0.04) {
+      if (h > topH(phi) - 0.2 || h < hemH(phi) + 0.2) continue;
+      const q = onBody(phi, h);
+      if (q[2] < 0) continue;
+      const key = Math.floor(q[0] * RES) + ',' + Math.floor(q[1] * RES);
+      if (shadedPx.has(key)) continue;
+      shadedPx.add(key);
+      const facing = V.d(Math.sin(phi), Math.cos(phi)), sx = V.x(Math.sin(phi), Math.cos(phi)) - V.x(0, 0);
+      const f = Math.max(0, Math.min(1, 0.55 * facing + 0.45 * (0.5 - 0.5 * sx) + 0.05));
+      if (f < 0.85) P.darken(q[0], q[1], lerp(0.62, 1, f / 0.85), 0);
+    }
+    // the sheen: a soft lit streak down the front on the side toward the light, brightest over the bust and
+    // fading out toward the waist and the hem
+    const phiS = onBody(0.55, 30)[0] < onBody(-0.55, 30)[0] ? 0.55 : -0.55;
+    for (let h = topH(phiS) - 1.0; h >= hemH(phiS) + 1.2; h -= 0.5) {
+      const q = onBody(phiS, h), f = Math.sin(Math.PI * (h - hemH(phiS) - 1.2) / (topH(phiS) - hemH(phiS) - 2.2));
+      if (q[2] < 1.5) continue;
+      P.dotOn(q[0], q[1], RG_CORSET[f > 0.55 ? 4 : 3]);
+      if (f > 0.35) P.dotOn(q[0] - 0.5, q[1], RG_CORSET[3]);
+    }
+    // creases across the front where the leather is drawn in at the narrow waist: short shallow curves, each a
+    // dark line with light along its upper lip
+    [[27.6, -0.35, 0.7], [26.4, 0.3, 0.6], [28.6, 0.45, 0.45]].forEach(([h, phi, len]) => {
+      for (let t = -len; t <= len; t += 0.12) {
+        const q = onBody(phi + t * 0.5, h - 0.25 * (1 - (t * t) / (len * len)));
+        if (q[2] < 2) continue;
+        P.dotOn(q[0], q[1], RG_CORSET[1]).dotOn(q[0], q[1] - 0.5, RG_CORSET[3]);
+      }
+    });
+    // bound edges: a thick binding along the top, dark with a lit upper edge where it faces the light, and along
+    // the pointed hem, with the hem's shadow on what lies below
+    top.forEach(([x, y, d]) => { if (d > 0.2) P.dotOn(x, y + 0.3, RG_CORSET[0]).dotOn(x, y + 0.8, RG_CORSET[1]).dotOn(x, y - 0.2, RG_CORSET[x < cx ? 3 : 2]); });
+    hem.forEach(([x, y, d]) => { if (d > 0.2) { P.dotOn(x, y - 0.3, RG_CORSET[0]); P.darken(x, y + 0.6, 0.72, 0); P.darken(x, y + 1.1, 0.86, 0); } });
+    // boning seams curving down the front and sides, each a dark line with a lit edge beside it
+    [-0.95, 0.95, -1.5, 1.5].forEach((phi) => {
+      const pts = []; for (let h = topH(phi) - 0.8; h >= hemH(phi) + 0.6; h -= 0.5) pts.push(onBody(phi, h));
+      if (!pts.length || pts[Math.floor(pts.length / 2)][2] < 0.8) return;
+      pts.forEach((q) => { P.dotOn(q[0], q[1], RG_CORSET[0]); P.dotOn(q[0] - 0.5, q[1], RG_CORSET[3]); });
+    });
+    // laced up the front: the two edges of the opening, with a cord crossing between eyelets
+    if (V.fz > 0.25) {
+      const pts = []; for (let h = topH(0) - 0.6; h >= hemH(0) + 1.4; h -= 0.5) pts.push(onBody(0, h));
+      // (the opening is the dark shirt showing through, and the cord crosses it only every few rows, in a dull
+      // tone: a bright cord on every row read as a pale stripe down the front)
+      pts.forEach((q) => { P.dotOn(q[0] - 0.5, q[1], RG_CORSET[0]).dotOn(q[0] + 0.5, q[1], RG_CORSET[0]).dotOn(q[0], q[1], RG_SHIRT[0]); });
+      for (let i = 1; i < pts.length; i += 3) {
+        const a = pts[i];
+        P.dotOn(a[0] - 0.5, a[1], RG_LACE[1]).dotOn(a[0], a[1] + 0.5, RG_LACE[2]).dotOn(a[0] + 0.5, a[1], RG_LACE[1]);
+      }
+    }
+    // The back of the blouse: the neckline gathered round the back of the neck in a small scalloped frill; the loose cloth falling in a few long drapes from the shoulder blades into the top of
+    // the corset, each a dark trough with a lit ridge on the side toward the light; the cloth turning away into
+    // shadow down each side; and, all round, the blouse tucking into the corset (below).
+    for (let k = 0; k <= 36; k++) {
+      const phi = Math.PI - 1.7 + k / 36 * 3.4, q = V.seam(3.9, 3.7, phi, 41.2);
+      if (q[2] < 0.3) continue;
+      const lobe = Math.abs(Math.sin(k * Math.PI / 4));
+      // (a soft scalloped edge only: pleat ticks below it read as a stitched ladder across the shoulders)
+      P.dotOn(q[0], q[1] - 0.2, RG_SHIRT[4]).dotOn(q[0], q[1] + 0.3 + lobe * 0.5, RG_SHIRT[2]);
+      P.darken(q[0], q[1] + 0.9 + lobe * 0.5, 0.88, 0);
+    }
+    [[Math.PI - 0.75, Math.PI - 0.55], [Math.PI - 0.2, Math.PI - 0.12], [Math.PI + 0.32, Math.PI + 0.42], [Math.PI + 0.85, Math.PI + 0.95]].forEach(([p0, p1], n) => {
+      const pts = []; for (let k = 0; k <= 10; k++) { const t = k / 10; pts.push(onShirt(lerp(p0, p1, t) + 0.05 * Math.sin(t * Math.PI * 2), lerp(39.0, 34.2, t))); }
+      if (pts[5][2] < 1) return;
+      pts.forEach((q, i) => { if (i < 2) return; P.dotOn(q[0], q[1], RG_SHIRT[i > 7 || n === 1 ? 1 : 2]).dotOn(q[0] - 0.5, q[1], RG_SHIRT[3]); });
+    });
+    // Where the blouse tucks into the corset: the cloth just above the binding is pulled in under it, so it falls
+    // into a soft shadow that deepens toward the edge (three rows, no lit stripe: a pale line along it read as a
+    // hard band), and it is drawn in by small tucks, short creases ending at the binding with light beside them.
+    for (let k = 0; k <= 72; k++) {
+      const phi = -Math.PI + k / 72 * Math.PI * 2, h0 = topH(phi) + 0.2;
+      const q0 = onShirt(phi, h0 + 0.3, 0.3);
+      if (q0[2] < 0.3) continue;
+      [[0.3, 0.74], [0.8, 0.84], [1.3, 0.92]].forEach(([d, kk]) => { const q = onShirt(phi, h0 + d, 0.3); P.darken(q[0], q[1], kk, 0); });
+      if (k % 4 === 2 && q0[2] > 1.2) for (let d = 0.3; d <= 1.9; d += 0.4) { const q = onShirt(phi, h0 + d, 0.3); P.dotOn(q[0], q[1], RG_SHIRT[d < 1 ? 0 : 1]).dotOn(q[0] - 0.5, q[1], RG_SHIRT[3]); }
+    }
+  },
+  waist(P, A) {
+    const V = A.V;
+    // A dagger at the front of the left hip, hung from the belt and angled forward: a dark sheath with a
+    // steel chape at its tip, a wrapped grip with a crossguard and a round pommel above the belt.
+    const hw = A.lw(22.4), pa = -(hw - 1.4), pb = A.ld(hw) * 0.7;
+    if (V.d(pa, pb + 1) < 0.4 || V.fz < -0.1) return;
+    const top = V.pt(pa, pb, 24.6), tipP = V.pt(pa - 1.4, pb + 0.6, 16.6);
+    P.t(top[0], top[1], tipP[0], tipP[1], 2.2, 1.4).fill(RG_LEATHER, { round: 0.8 });
+    P.e(tipP[0], tipP[1] - 0.4, 0.9, 0.8).fill(RG_STEEL, { round: 0.5 });
+    // the sheath's lit edge and a stitched seam down it
+    // (lit down the side toward the light and dark down the other, so it stands off the dark leggings)
+    for (let t = 0.05; t <= 0.95; t += 0.06) { const x = lerp(top[0], tipP[0], t), y = lerp(top[1], tipP[1], t), w = lerp(1.1, 0.7, t); P.dotOn(x - w + 0.25, y, RG_LEATHER[4]).dotOn(x + w - 0.25, y, RG_LEATHER[0]); }
+    const guard = V.pt(pa + 0.15, pb - 0.1, 25.6), pom = V.pt(pa + 0.4, pb - 0.2, 28.6);
+    P.l(guard[0] - 1.1, guard[1], guard[0] + 1.1, guard[1], 0.7).fill(RG_STEEL, { round: 0.4 });
+    P.l(guard[0], guard[1] - 0.4, pom[0], pom[1] + 0.6, 1.1).fill(RG_LEATHER, { flat: true, tone: 1 });
+    for (let t = 0.2; t < 1; t += 0.33) P.dotOn(lerp(guard[0], pom[0], t), lerp(guard[1], pom[1], t), RG_LEATHER[3]);
+    P.e(pom[0], pom[1], 0.8, 0.8).fill(RG_STEEL, { round: 0.6 });
+  },
+  // the trousers between the legs (drawn from gear, after the legs, which are drawn over the body)
+  trouserForm(P, A) {
+    const V = A.V;
+    // The trousers between the legs: the seat fills the middle as one flat shape, so its form is painted in on the
+    // trousers' own pixels: a seam down the centre from the corset's point to the crotch, then a dark gap between
+    // the legs all the way down. (Folds running in from the hips joined the two legs into one shape.)
+    const LG = ROGUE.legs, LSET = new Set(LG.map((c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2])));
+    const onLeg = (x, y) => { const X = Math.floor(x * RES), Y = Math.floor(y * RES); if (X < 0 || Y < 0 || X >= PW || Y >= PH) return false; const k = Y * PW + X; return LSET.has((P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2]); };
+    const D = (x, y, i) => { if (onLeg(x, y)) P.dot(x, y, LG[i]); };
+    const fb = A.ld(A.lw(18)) * 0.9, front = V.d(0, 1) > 0.3, back = V.d(0, -1) > 0.3;
+    if (front || back) {
+      const b = front ? fb : -fb, CROTCH = 18.2;
+      for (let h = 20.8; h >= CROTCH; h -= 0.5) { const [x, y] = V.pt(0, b, h); D(x, y, 1); if (front) D(x - 0.5, y, 2); }
+      // The gap between the legs: from the front and the back the thighs are drawn wide enough to overlap, so the
+      // trousers came out as one block down to the knees. Below the crotch the overlap is cut away, opening a gap
+      // that widens toward the boots so the ground shows between the legs, and each leg's inner edge beside it is
+      // shaded as it turns away. (From three-quarters and the side one leg really is behind the other: left alone.)
+      if (Math.abs(V.fx) < 0.45) {
+        const B = A.B, BOOT = 10.6;
+        for (let h = CROTCH - 0.2; h >= BOOT; h -= 0.25) {
+          const [x, y] = V.pt(0, b, h), half = 0.15 + Math.pow((CROTCH - h) / (CROTCH - BOOT), 0.8) * 0.85 * (B.gap / 3.6);
+          const Y = Math.floor(y * RES);
+          for (let X = Math.floor((x - half) * RES); X <= Math.floor((x + half) * RES); X++) {
+            if (onLeg((X + 0.5) / RES, (Y + 0.5) / RES)) P.buf[(Y * PW + X) * 4 + 3] = 0;
+          }
+          [-1, 1].forEach((sd) => { D(x + sd * (half + 0.25), y, 0); D(x + sd * (half + 0.75), y, 1); });
+        }
+        // the crotch itself: a short dark notch where the gap begins
+        for (let h = CROTCH + 0.6; h >= CROTCH - 0.2; h -= 0.5) { const [x, y] = V.pt(0, b, h); D(x, y, 0); }
+      }
+    }
+  },
+  // the blouse's neckline, drawn over the shoulder caps (see gear)
+  neckline(P, A) {
+    const V = A.V;
+    // The neckline: a peasant blouse, scooped in a soft U across the front and drawn in by a drawstring, so the
+    // cloth gathers into it in little pleats; along the edge stands a frill that falls over the gathers in soft
+    // scallops, each lit along its top and dark in the dip beside it, and casts a shadow on the blouse below.
+    // A small bow ties the drawstring at the front. Behind, the blouse rises to sit round the neck.
+    const scoopH = (phi) => 40.2 - 2.9 * Math.pow(Math.max(0, Math.cos(phi)), 1.6);
+    const SPAN = 1.15, N = 40, neck = [], edge = [];
+    for (let k = 0; k <= N; k++) {
+      const phi = -SPAN + k / N * 2 * SPAN;
+      neck.push(V.seam(3.5, 3.3, phi, 42.8)); edge.push(V.seam(4.7 + 0.5 * Math.pow(Math.sin(Math.abs(phi)), 1.5), 4.5, phi, scoopH(phi)));
+    }
+    if (edge.filter((q) => q[2] > 0.3).length > 8 && V.fz > -0.2) {
+      // The skin of the neck and chest, shaded as one continuous form so the neck flows into the shoulders: the
+      // neck is drawn over again here, up under the jaw (the neckline's fill covers the neck behind it), and every
+      // pixel takes its brightness from one smooth function. The neck is a round column lit from the left, turning
+      // into shadow on its right and darkest just under the jaw; below it widens into the chest, which is lit, and
+      // out toward the shoulders the skin dims as it turns away under the blouse. Blending between the two by
+      // height, with a soft dither, leaves no step where the neck meets the chest or the blouse.
+      const SK = (i) => SKIN[i], ncx = V.x(0, 0.4), nwH = V.w(1.95, 2.6), clamp = (v) => Math.max(0, Math.min(1, v));
+      const shade = (X, Y) => {
+        const x = (X + 0.5) / RES, h = V.h((Y + 0.5) / RES), r = (x - ncx) / nwH, dx = x - ncx;
+        const neckB = 0.64 - 0.19 * Math.max(-1, Math.min(1, r)) - 0.14 * clamp((h - 42.9) / 1.3) - 0.1 * clamp((Math.abs(r) - 0.75) / 0.4);
+        // (the chest is round: brightest a little left of centre toward the light, falling off toward both sides
+        // and more on the right, with a soft shade down the breastbone between the collarbones and the skin a
+        // touch darker as it nears the frill below; flat, it read as one even patch of peach)
+        const side = Math.max(-1, Math.min(1, (dx + 1.0) / 4.6));
+        const chestB = 0.86 - 0.26 * Math.pow(Math.abs(side), 1.6) - 0.08 * Math.max(0, side) - 0.06 * clamp((h - 40.9) / 1.6)
+          - 0.07 * Math.exp(-dx * dx / 0.5) * clamp((40.4 - h) / 1.2) - 0.08 * clamp((38.6 - h) / 1.4);
+        const k = clamp((h - 40.5) / 1.8) * clamp((1.5 - Math.abs(r)) / 0.6);
+        return chestB + (neckB - chestB) * k;
+      };
+      const n0 = V.pt(0, 0.5, 45.2), n1 = V.pt(0, 0.2, 41.1);
+      P.t(n0[0], n0[1], n1[0], n1[1], nwH * 2, nwH * 2 + 0.4);
+      // (the skin's top edge is the body's own sloped neckline, from the neck down the slope of the shoulders to
+      // the ends of the frill; a ring round the neck made a flat shelf, wider than the neck, against the hair)
+      // (the neck curve's points out to the ends of the frill, so the skin's edge is the body's own outline)
+      const cx = V.x(0, 0), half = A.neckline.slice(0, -1).filter(([x]) => -x < 5.6 * Math.max(0.6, Math.abs(V.rx))).reverse();
+      const outline = half.concat(half.slice().reverse().map(([x, h]) => [-x, h])).map(([x, h]) => [cx + x, V.y(h)]);
+      const ends = edge.filter((q) => q[2] > -0.5);
+      // (only from the front and three-quarters: from the side that outline runs round to the back of the shoulder,
+      // which the blouse covers, so there the skin's top stays the ring round the neck)
+      if (V.fz > 0.5) P.p(outline.concat(ends.slice().sort((p, q) => q[0] - p[0]).map(([x, y]) => [x, y]))).fill(SKIN, { shade, dither: 0.6 });
+      else P.p(neck.map(([x, y]) => [x, y]).concat(edge.slice().reverse().map(([x, y]) => [x, y]))).fill(SKIN, { shade, dither: 0.6 });
+      if (V.fz > 0.2) {
+        const notch = V.seam(4.2, 4.0, 0, 40.3);
+        P.dotOn(notch[0], notch[1], SK(2));
+        // the collarbones: a short soft shadow under each bone running out from the notch, with a little light
+        // along the top of the near one only (a lit line on both read as stitches across the chest)
+        [-1, 1].forEach((sd) => {
+          for (let k = 2; k <= 6; k++) {
+            const t = k / 8, q = V.seam(lerp(4.4, 5.6, t), lerp(4.1, 4.4, t), sd * lerp(0.12, 0.95, t), lerp(40.1, 40.7, t) - 0.25 * Math.sin(t * Math.PI));
+            if (q[2] < 1.2) continue;
+            P.dotOn(q[0], q[1] + 0.5, SK(2));
+            if (sd < 0 && k >= 3 && k <= 4) P.dotOn(q[0], q[1], SK(4));
+          }
+        });
+      }
+      const C = (i) => RG_SHIRT[i];
+      // the gathers under the frill: short pleats pulled in toward the drawstring
+      edge.forEach((q, k) => { if (q[2] > 1 && k % 3 === 1) for (let d = 1.6; d <= 2.8; d += 0.5) P.dotOn(q[0], q[1] + d, C(1)); });
+      // The frill: a fluted ruffle about one and a half units deep. Each flute is a narrow column, lit on the side
+      // toward the light and shadowed on the other, so the band reads as gathered cloth rather than a flat strip;
+      // its lower edge falls in soft scallops, and it casts a shadow on the blouse below.
+      edge.forEach((q, k) => {
+        if (q[2] < 0.4) return;
+        // (the frill curves round the body: full light at the front left, a tone down on the right, the side away
+        // from the light, and another where it turns away round the shoulders; uniform, it read as a flat band)
+        const lobe = Math.abs(Math.sin(k * Math.PI / 4)), depthF = 1.0 + 0.6 * lobe, flute = k % 2;
+        const sideT = (q[0] - V.x(0, 0)) / Math.max(1, V.w(5.2, 4.5)), adj = -(sideT > 0.35 ? 1 : 0) - (q[2] < 2.2 ? 1 : 0);
+        const F = (i) => C(Math.max(0, Math.min(4, i + adj)));
+        P.dotOn(q[0], q[1] - 0.3, F(4));
+        for (let d = 0.2; d <= depthF; d += 0.5) P.dotOn(q[0], q[1] + d, F(flute ? (d < 0.8 ? 4 : 3) : (d < 0.8 ? 3 : 2)));
+        P.dotOn(q[0], q[1] + depthF + 0.3, F(lobe > 0.5 ? 2 : 1));
+        // its shadow on the blouse below and, above, a little shade on the skin just inside the frill
+        P.darken(q[0], q[1] + depthF + 0.8, 0.8, 0);
+        P.darken(q[0], q[1] + depthF + 1.3, 0.9, 0);
+        P.darken(q[0], q[1] - 0.8, 0.94, 0.2);
+      });
+      // the bow at the front: two small loops and the ends falling over the frill
+      const b = V.seam(5.0, 4.6, 0, scoopH(0) - 0.1);
+      if (b[2] > 2.5) {
+        P.dotOn(b[0] - 1, b[1] - 0.3, RG_LACE[2]).dotOn(b[0] - 0.5, b[1] - 0.7, RG_LACE[3]).dotOn(b[0] + 0.5, b[1] - 0.7, RG_LACE[3]).dotOn(b[0] + 1, b[1] - 0.3, RG_LACE[2]);
+        P.dotOn(b[0], b[1] - 0.2, RG_LACE[1]).dotOn(b[0] - 0.4, b[1] + 0.6, RG_LACE[2]).dotOn(b[0] + 0.4, b[1] + 1.0, RG_LACE[2]).dotOn(b[0] - 0.5, b[1] + 1.4, RG_LACE[1]).dotOn(b[0] + 0.5, b[1] + 1.8, RG_LACE[1]);
+      }
+    }
+  },
+  gear(add, P, A) {
+    const V = A.V, B = A.B;
+    // The blouse over each shoulder: a rounded cap of cloth lying over the top of the full sleeve, so the line
+    // from the neck runs over the shoulder and down the arm in one curve (without it the wide top of the sleeve
+    // stood out past the shoulder in a square corner, like a pad). It is shaded as the round of the shoulder,
+    // lit on top toward the light and turning into shadow on the far side, and the neckline's frill runs on
+    // over its front.
+    // (the cap stays inside the shoulder's width: past B.sh it made a ledge standing out beyond the arm)
+    const SH = new Set(RG_SHIRT.map((c) => (Math.floor(c[0]) << 16) | (Math.floor(c[1]) << 8) | Math.floor(c[2])));
+    const onShirt = (k) => SH.has((P.buf[k * 4] << 16) | (P.buf[k * 4 + 1] << 8) | P.buf[k * 4 + 2]);
+    add(9, () => {
+      [-1, 1].forEach((sd) => {
+        const c = V.seam(B.sh - 1.5, B.depth - 1.8, sd * Math.PI / 2, 37.4);
+        P.e(c[0], c[1], 2.6, 2.5).fill(RG_SHIRT, { round: 0.9, pattern: ROGUE.torsoPattern });
+        // light across the top of the shoulder, brighter on the near side of the light
+        if (c[2] > -1.5) P.e(c[0] - sd * Math.abs(V.fz) * 0.3, c[1] - 1.2, 1.5, 0.7).fill(RG_SHIRT, { flat: true, tone: sd < 0 ? 4 : 3, on: onShirt });
+      });
+      ROGUE.neckline(P, A);
+    });
+    add(8.9, () => ROGUE.trouserForm(P, A));
+    drawFemaleHead(add, P, A, RG_HAIR);
   }
 };
 
@@ -1789,4 +2283,4 @@ function paintSheet(S) {
 }
 // ---------- end sprites ----------
 
-export { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, CLERIC, paintSheet, paintFrame };
+export { PW, PH, RES, FW, FH, COLS, ROWS, WALK, FIGHTER, MAGE, RANGER, CLERIC, ROGUE, paintSheet, paintFrame };

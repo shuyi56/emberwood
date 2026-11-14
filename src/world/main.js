@@ -527,7 +527,18 @@ void main() {
   gl_FragColor = linearToOutputTexel(vec4(col, 1.0));
 }`, { uSheet: { value: sheet }, uGrid: { value: new THREE.Vector2(COLS, ROWS) }, uFrame: { value: new THREE.Vector3(0, 0, 0) }, uSize: { value: new THREE.Vector2(1.76, 2.2) } });
 
-  // soft contact shadow under each sprite
+  // The contact shadow and the rings lie flat on the ground, so grass tufts, the slope of the terrain and the
+  // ground's own surface would cut through them. For the depth test only, pull them along the view ray toward
+  // the camera (the picture stays where it is), so they draw over everything on the ground round the feet.
+  // The pull is less than the sprite's own (0.8, see spriteMat), so the feet still stand on the shadow.
+  const GROUND_PULL = `
+  vec4 pulledG = projectionMatrix * vec4(mv.xyz * (1.0 - 0.6 / max(length(mv.xyz), 1.0)), 1.0);
+  gl_Position.z = pulledG.z / pulledG.w * gl_Position.w;`;
+
+  // Contact shadow under each sprite: a crisp, dark ellipse that is always there, drawn over the grass and the
+  // ground (see GROUND_PULL) so nothing hides it. A dark core inside a slightly lighter band, each with a hard
+  // edge (smoothed over a hair, so it doesn't shimmer), so it still reads on dark grass and at night. The colour
+  // leans cool violet, as the sprites' own shadows do, instead of a grey that sinks into the ground.
   const blobShadowMat = makeMat(false, `
 varying vec2 vDisc;
 void main() {
@@ -535,11 +546,15 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
+` + GROUND_PULL + `
 }`, `
 varying vec2 vDisc;
 void main() {
-  float a = (1.0 - smoothstep(0.15, 0.5, length(vDisc))) * 0.5 * (1.0 - fogAmount());
-  gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+  float r = length(vDisc) / 0.5;
+  float inside = 1.0 - smoothstep(0.96, 1.0, r);
+  float core = 1.0 - smoothstep(0.6, 0.64, r);
+  float a = mix(0.58, 0.8, core) * inside * (1.0 - fogAmount());
+  gl_FragColor = linearToOutputTexel(vec4(mix(lin(vec3(0.08, 0.06, 0.13)), lin(vec3(0.03, 0.02, 0.06)), core), a));
 }`, {}, { transparent: true, depthWrite: false });
 
   // Ground rings for the party and the move target; the target ring has marching dashes.
@@ -550,6 +565,7 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
+` + GROUND_PULL + `
 }`, `
 uniform vec3 uColor;
 uniform float uInner;
@@ -1427,10 +1443,12 @@ void main() {
     const tex = new THREE.Texture();
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
     loadSheet(key, spec.hairStyle || null, spec).then((img) => { tex.image = img; tex.needsUpdate = true; });
-    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 24), blobShadowMat);
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 64), blobShadowMat);
     shadow.rotation.x = -Math.PI / 2;
     shadow.position.y = 0.05;
-    shadow.scale.set(1.15, 0.9, 1);
+    // an ellipse, wider across than deep, just inside the selection ring; drawn after the see-through grass
+    shadow.scale.set(0.9, 0.66, 1);
+    shadow.renderOrder = 2;
     g.add(shadow);
     const material = spriteMat(tex);
     const card = new THREE.Mesh(cardGeo, material);
@@ -1440,6 +1458,7 @@ void main() {
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.62, 48), ringMat(ringColour, 0.44, 0.58, false));
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.07;
+    ring.renderOrder = 2;
     g.add(ring);
     scene.add(g);
     return { g, x: 0, z: 0, moving: false, stride: rand() * 6, breath: Math.floor(rand() * 2), frame: material.uniforms.uFrame.value, facing: 0 };
@@ -1460,6 +1479,7 @@ void main() {
 
   const marker = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.74, 64), ringMat(0xffe08a, 0.46, 0.7, true));
   marker.rotation.x = -Math.PI / 2;
+  marker.renderOrder = 2;
   marker.visible = false;
   scene.add(marker);
 
