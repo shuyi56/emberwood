@@ -277,7 +277,7 @@ def bake_cloth_form(rays=16, dist=2.4):
                 if h[0] is not None:
                     hit += 1.0 - 0.5 * h[3] / dist          # (nearer cover shades more)
             ao = hit / rays
-            c = c * (1.0 - 0.6 * ao) * (1.0 - 0.5 * cr)
+            c = c * (1.0 - 0.6 * ao) * (1.0 - 0.3 * cr)
             cols += [*c, 1.0]
         me.color_attributes.new('form', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', cols)
     sc.frame_set(1)
