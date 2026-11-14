@@ -1104,6 +1104,15 @@ def build():
     MANTLE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.6, 3.1, 0.35), (51.2, 6.0, 3.9, 0.3), (50.2, 7.6, 4.35, 0.3),
                     (49.0, 8.2, 4.6, 0.3), (47.9, 8.35, 4.7, 0.3)]
 
+    MANTLE_BACK = [(53.4, 2.65), (52.4, 3.3), (51.2, 3.25), (50.2, 3.3), (49.0, 3.4), (47.9, 3.55)]
+
+    def back_y(z):     # the inside of the mantle down the middle of her back, just clear of it
+        B = MANTLE_BACK
+        for (z0, y0), (z1, y1) in zip(B, B[1:]):
+            if z1 <= z <= z0:
+                return lerp(y0, y1, (z0 - z) / (z0 - z1))
+        return B[0][1] if z > B[0][0] else B[-1][1]
+
     def mantle_pt(z, phi, off=0.0):
         R = MANTLE_RINGS
         for a_, b_ in zip(R, R[1:]):
@@ -1114,8 +1123,11 @@ def build():
                 break
         else:
             rx, ry, cy = R[-1][1:]
+        # across the back the wool is drawn in close over the shoulder blades, so the hair can hang straight past it
+        w = max(0.0, -math.cos(phi)) ** 1.5
+        ry = lerp(ry, max(0.0, back_y(z) - cy), w)
         f = min(1.0, max(0.0, (51.4 - z) / (51.4 - 47.9))) ** 1.3
-        fold = 0.7 * math.sin(6 * phi + 0.4) + 0.3 * math.sin(10 * phi + 1.3)
+        fold = (0.7 * math.sin(6 * phi + 0.4) + 0.3 * math.sin(10 * phi + 1.3)) * (1 - 0.8 * w)
         k = 1 + 0.085 * f * fold
         hem = (1.4 * math.sin(phi) ** 2 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
         return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.4 * f * math.sin(6 * phi + 0.4)
