@@ -592,8 +592,10 @@ def hand_mesh(s):
 
     # the wrist: rising from inside the cuff and widening into the heel and back of the hand, so the hand grows
     # out of the forearm instead of hanging below it
-    capsule((0.0, 0.08, 1.6), (0.0, 0.04, -0.55), 0.62)
-    blob((0.0, 0.05, -0.35), (0.5, 0.8, 0.45), 0.85)
+    # (flattened like a real wrist, wider across the back of the hand than through it, so the hand does not
+    # flare out of a round stalk)
+    blob((0.0, 0.05, 1.0), (0.42, 0.62, 1.0), 0.75)
+    blob((0.0, 0.05, -0.15), (0.44, 0.8, 0.7), 0.85)
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
@@ -614,9 +616,9 @@ def hand_mesh(s):
     blob((0.12 * inward, 0.55, -1.05), (0.42, 0.42, 0.75), 0.8)
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
-    t0 = Vector((0.25 * inward, -0.85, -0.7))
-    t1 = t0 + Vector((0.35 * inward, -0.45, -1.0))
-    t2 = t1 + Vector((0.3 * inward, -0.05, -0.75))
+    t0 = Vector((0.2 * inward, -0.7, -0.9))
+    t1 = t0 + Vector((0.3 * inward, -0.25, -1.1))
+    t2 = t1 + Vector((0.22 * inward, 0.05, -0.8))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.3)
     capsule(t0, t1, 0.46)
