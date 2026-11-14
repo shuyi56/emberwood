@@ -92,15 +92,15 @@ def mat_def(mid, name, rmp, detail=0.0, flat=None):
 M_SKIN = mat_def(1, 'skin', SKIN, 0.0)
 M_HAIR = mat_def(2, 'hair', ramp(0x7e4c34, 0.1), 0.22)
 M_MANTLE = mat_def(3, 'mantle', ramp(0x56663f, 0.1), 0.14)
-M_JERKIN = mat_def(4, 'jerkin', ramp(0x765a40, 0.1), 0.10)
+M_JERKIN = mat_def(4, 'jerkin', ramp(0x765a40, 0.1), 0.16)
 M_SHIRT = mat_def(5, 'shirt', ramp(0xaca48d, 0.09), 0.04)
 M_SLEEVE = mat_def(6, 'sleeve', ramp(0x63704a, 0.1), 0.07)
 M_LEGS = mat_def(7, 'trousers', ramp(0x5b5547, 0.1), 0.05)
 M_KNEE = mat_def(8, 'knee patch', ramp(0x7a6c52, 0.1), 0.0)
-M_BOOTS = mat_def(9, 'boots', ramp(0x684a32, 0.1), 0.10)
-M_CUFF = mat_def(10, 'boot cuff', ramp(0x7a5b40, 0.1), 0.06)
+M_BOOTS = mat_def(9, 'boots', ramp(0x684a32, 0.1), 0.16)
+M_CUFF = mat_def(10, 'boot cuff', ramp(0x7a5b40, 0.1), 0.14)
 M_SOLE = mat_def(11, 'sole', ramp(0x2f2620, 0.08), 0.0)
-M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.0)
+M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.12)
 M_STEEL = mat_def(13, 'buckle', ramp(0x9a978f, 0.09), 0.0)
 M_GOLD = mat_def(14, 'clasp', ramp(0xa8905c, 0.09), 0.0)
 M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
@@ -110,6 +110,9 @@ M_SCLERA = mat_def(21, 'eye white', [[226, 222, 210]] * 5, 0.0, flat=0)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
+M_STITCH = mat_def(22, 'stitching', ramp(0xb39a74, 0.08), 0.0, flat=2)
+# leather takes a soft sheen (a glossy layer whose highlight lifts the tone) and a grained surface
+LEATHER = {M_JERKIN: 0.55, M_BELT: 0.5, M_BOOTS: 0.6, M_CUFF: 0.5}
 
 
 # ---------------------------------------------------------------- scene and materials
@@ -129,7 +132,16 @@ def make_material(mid):
     mid_rgb = d['ramp'][2] / 255.0
     lin = [((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92 for c in mid_rgb]
     bsdf.inputs['Color'].default_value = (*lin, 1.0)
-    nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+    if mid in LEATHER:
+        gl = nt.nodes.new('ShaderNodeBsdfGlossy')
+        gl.inputs['Roughness'].default_value = 0.45
+        gl.inputs['Color'].default_value = (0.1, 0.1, 0.1, 1.0)
+        add = nt.nodes.new('ShaderNodeAddShader')
+        nt.links.new(bsdf.outputs['BSDF'], add.inputs[0])
+        nt.links.new(gl.outputs['BSDF'], add.inputs[1])
+        nt.links.new(add.outputs['Shader'], out.inputs['Surface'])
+    else:
+        nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -163,6 +175,27 @@ def make_material(mid):
         tex.inputs['Scale'].default_value = 0.22
         tex.inputs['Distortion'].default_value = 0.8
         tex.inputs['Detail'].default_value = 0.0
+    elif mid in LEATHER:
+        # hide: broad soft patches where the tone drifts, a finer pebble grain, and scattered darker pores
+        tex = nt.nodes.new('ShaderNodeTexNoise')
+        tex.inputs['Scale'].default_value = 0.3
+        tex.inputs['Detail'].default_value = 2.0
+        tex.inputs['Roughness'].default_value = 0.55
+        nt.links.new(vec, tex.inputs['Vector'])
+        vor = nt.nodes.new('ShaderNodeTexVoronoi')
+        vor.inputs['Scale'].default_value = 0.9
+        nt.links.new(vec, vor.inputs['Vector'])
+        pore = nt.nodes.new('ShaderNodeMath')
+        pore.operation = 'LESS_THAN'
+        pore.inputs[1].default_value = 0.13
+        nt.links.new(vor.outputs['Distance'], pore.inputs[0])
+        sub = nt.nodes.new('ShaderNodeMath')
+        sub.operation = 'MULTIPLY_ADD'
+        sub.inputs[1].default_value = -0.35
+        nt.links.new(pore.outputs[0], sub.inputs[0])
+        nt.links.new(tex.outputs['Fac'], sub.inputs[2])
+        nt.links.new(sub.outputs[0], adet.inputs['Value'])
+        return m
     elif mid == M_MANTLE:
         # felted wool: soft mottling at two scales
         tex = nt.nodes.new('ShaderNodeTexNoise')
@@ -513,64 +546,82 @@ def finish_rig():
     arm.hide_render = True
 
 
-def _capsule(bm, p0, p1, r0, r1, seg=10):
-    """A tapered rounded segment from p0 to p1 (radii r0, r1), added to bm."""
-    a, b = Vector(p0), Vector(p1)
-    d = b - a
-    L = d.length
-    rot = d.normalized().to_track_quat('Z', 'Y').to_matrix()
-    tmp = bmesh.new()
-    bmesh.ops.create_uvsphere(tmp, u_segments=seg, v_segments=8, radius=1.0)
-    for v in tmp.verts:
-        x, y, z = v.co
-        t = (z + 1) / 2                      # 0 at the p0 end, 1 at p1
-        r = lerp(r0, r1, t)
-        # a sphere stretched along the segment, reaching a radius past each end so neighbours overlap at the joint
-        zz = -r0 + t * (L + r0 + r1)
-        v.co = rot @ Vector((x * r, y * r, zz)) + a
-    me = bpy.data.meshes.new('tmp')
-    tmp.to_mesh(me)
-    tmp.free()
-    bm.from_mesh(me)
-    bpy.data.meshes.remove(me)
-
-
 def hand_mesh(s):
-    """A hand hanging relaxed from the wrist (at the origin, fingers down): a palm, four fingers curled loosely
-    toward the palm in two joints each, longest at the middle, and the thumb lying forward along the index
-    finger. The palm faces the body (s = 1 for the right hand, whose inside faces +X); the front is -Y."""
-    bm = bmesh.new()
+    """A hand hanging relaxed from the wrist (at the origin, fingers down), made as one fused surface: metaball
+    pieces for the palm, the four fingers (two segments each, curled loosely toward the palm, longest at the
+    middle) and the thumb lying forward along the index finger melt into each other, so the fingers grow out of
+    the palm with webbing between them, and the result is converted to a mesh. The palm faces the body (s = 1
+    for the right hand, whose inside faces +X); the front is -Y."""
     inward = s
-    # the palm: a flattened rounded block, broader at the knuckles than at the heel
-    palm = bmesh.new()
-    bmesh.ops.create_uvsphere(palm, u_segments=16, v_segments=12, radius=1.0)
-    for v in palm.verts:
-        x, y, z = v.co
-        w = 1.0 + 0.12 * (-z)                # wider toward the knuckles (z < 0)
-        v.co = Vector((x * 0.68, y * 1.22 * w, z * 1.5 - 1.5))
-    me = bpy.data.meshes.new('tmp')
-    palm.to_mesh(me)
-    palm.free()
-    bm.from_mesh(me)
-    bpy.data.meshes.remove(me)
-    # fingers: index at the front, pinky at the back; each curls a little more at its second joint
-    for y0, L, r in ((-0.93, 1.95, 0.4), (-0.31, 2.1, 0.41), (0.3, 2.0, 0.39), (0.88, 1.6, 0.35)):
-        p = Vector((0.05 * inward, y0, -2.7))
+    mb = bpy.data.metaballs.new('hand')
+    mb.resolution = mb.render_resolution = 0.09
+    mb.threshold = 0.6
+    ob = bpy.data.objects.new('hand-build', mb)
+    link(ob)
+    K = 1.55     # (a metaball's surface sits well inside its radius at this threshold)
+
+    def capsule(p, q, r):
+        p, q = Vector(p), Vector(q)
+        e = mb.elements.new(type='CAPSULE')
+        e.co = (p + q) / 2
+        e.radius = r * K
+        e.size_x = (q - p).length / 2
+        e.rotation = (q - p).normalized().to_track_quat('X', 'Z')
+        e.stiffness = 2.2
+
+    def blob(c, size, r):
+        e = mb.elements.new(type='ELLIPSOID')
+        e.co = c
+        e.radius = r * K
+        e.size_x, e.size_y, e.size_z = size
+        e.stiffness = 2.0
+
+    # the palm: thick at the heel, broad at the knuckles
+    blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
+    blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
+    # fingers, index at the front to pinky at the back
+    for y0, L, r in ((-0.9, 1.95, 0.36), (-0.3, 2.1, 0.37), (0.3, 2.0, 0.35), (0.86, 1.6, 0.32)):
+        p = Vector((0.05 * inward, y0, -2.55))
         ang = 0.3
-        for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.9)):
+        for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.88)):
             ang += extra
             d = Vector((inward * math.sin(ang), 0.0, -math.cos(ang)))
             q = p + d * (L * frac)
-            _capsule(bm, p, q, rr, rr * 0.9)
+            capsule(p, q, rr)
             p = q
-    # the thumb: from the heel of the palm on the inner front edge, angled forward and down, its tip bent in
-    t0 = Vector((0.3 * inward, -1.0, -0.8))
+    # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
+    t0 = Vector((0.25 * inward, -0.85, -0.7))
     t1 = t0 + Vector((0.35 * inward, -0.45, -1.0))
     t2 = t1 + Vector((0.3 * inward, -0.05, -0.75))
-    _capsule(bm, t0, t1, 0.52, 0.42)
-    _capsule(bm, t1, t2, 0.42, 0.34)
+    capsule(t0, t1, 0.46)
+    capsule(t1, t2, 0.37)
+
+    dg = bpy.context.evaluated_depsgraph_get()
+    me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob)
+    bpy.data.metaballs.remove(mb)
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bpy.data.meshes.remove(me)
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
     bmesh.ops.scale(bm, vec=(1.22, 1.22, 1.22), verts=bm.verts)   # about the length of the face, as in life
     return bm
+
+
+def dots(points, size=0.42):
+    """Small blocks at the given points: a row of stitches."""
+    bm = bmesh.new()
+    for p in points:
+        r = bmesh.ops.create_cube(bm, size=size)
+        bmesh.ops.translate(bm, vec=Vector(p), verts=r['verts'])
+    return bm
+
+
+def outward(p, d):
+    """Push a point of a horizontal ring (x, y[, dz]) out from the body's axis by d."""
+    x, y = p[0], p[1]
+    n = math.hypot(x, y) or 1.0
+    return x + x / n * d, y + y / n * d
 
 
 def build():
@@ -604,6 +655,14 @@ def build():
     # a darker leather band binds the jerkin's hem
     mesh_obj('Jerkin hem', loft_fn([30.3, 29.2], lambda z, p: jerkin_pt(z, p),
                                    cap_top=False, cap_bot=False), M_BELT, body, solid=0.5, subdiv=0)
+    # stitching: a running stitch above the hem band (set into the leather, so it shows where the surface faces
+    # the viewer and drops out at the silhouette instead of dotting the outline)
+    st = []
+    for k in range(42):
+        phi = 2 * math.pi * k / 42
+        p = jerkin_pt(30.65, phi)
+        st.append((*outward(p, 0.2), 30.65 + (p[2] if len(p) > 2 else 0.0)))
+    mesh_obj('Jerkin stitching', dots(st), M_STITCH, body, subdiv=0)
     # the shirt shows in a narrow V at the front of the jerkin, crossed by its lacing (laid on the jerkin's surface)
     vee = bmesh.new()
     vv = [vee.verts.new(p) for p in vee_pts]
@@ -728,7 +787,7 @@ def build():
         mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=28), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
         mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.45, 1.5), (-UPPER - FORE - 0.4, 1.52, 1.57)]), M_SHIRT,
                  loc=(x, 0.2, SH_Z), subdiv=0, skin=w)
-        mesh_obj(f'Hand.{side}', hand_mesh(s), M_SKIN, loc=(x, 0.2, SH_Z - UPPER - FORE - 0.1), skin=w)
+        mesh_obj(f'Hand.{side}', hand_mesh(s), M_SKIN, loc=(x, 0.2, SH_Z - UPPER - FORE - 0.1), subdiv=0, skin=w)
 
     # ---- legs: one trouser leg from the hip to the ankle with a rounded kneecap and a patch over it, soft boots
     # with a folded cuff
@@ -754,6 +813,13 @@ def build():
                  M_BOOTS, loc=(x, 0, kz), skin=w)
         mesh_obj(f'Boot cuff.{side}', loft([(-1.6, 2.6, 2.7), (-3.5, 2.5, 2.6, 0, 0, lambda p: 0.5 * math.cos(p))]),
                  M_CUFF, loc=(x, 0, kz), subdiv=1, skin=w)
+        # a seam stitched up the back of the boot, from the heel to the cuff
+        bst = []
+        for z in [-3.9 - 1.0 * i for i in range(int(SHIN - 3.9))]:
+            t = (-2.2 - z) / (SHIN - 2.7)
+            ry = lerp(2.4, 1.85, min(1.0, max(0.0, t)))
+            bst.append((0.0, ry + 0.02, z))
+        mesh_obj(f'Boot stitching.{side}', dots(bst, 0.4), M_STITCH, loc=(x, 0, kz), subdiv=0, skin=w)
         az = kz - SHIN
         mesh_obj(f'Foot.{side}', loft([(-0.8, 1.75, 1.95, 0, -0.3), (-2.2, 1.85, 3.3, 0, -1.6), (-2.85, 1.8, 3.4, 0, -1.7)]),
                  M_BOOTS, loc=(x, 0, az), skin=w)
@@ -800,6 +866,7 @@ def build():
     vl = sc.view_layers[0]
     vl.use_pass_diffuse_direct = True
     vl.use_pass_normal = True
+    vl.use_pass_glossy_direct = True
     for name in ('matid', 'detail'):
         a = vl.aovs.add()
         a.name = name
@@ -935,6 +1002,7 @@ def to_pixels(ch):
     # fill: a soft sky light, brighter on surfaces facing up and toward the camera (normals are in world space)
     nz, ny = find(ch, 'Normal.Z') / cov, find(ch, 'Normal.Y') / cov
     light = sun + 0.30 + 0.12 * nz - 0.08 * ny
+    gloss = sum(find(ch, 'Glossy Direct.' + c) for c in 'RGB') / 3.0 / cov
     h, w = alpha.shape
     out = np.zeros((h, w, 4), dtype=np.float32)
     solid = (alpha > 0.5) & (mid > 0)
@@ -946,6 +1014,8 @@ def to_pixels(ch):
             tone = np.full(sel.sum(), d['flat'])
         else:
             L = light[sel] * (1.0 + (det[sel] - 0.5) * 2 * d['detail'])
+            if m in LEATHER:     # the sheen: highlights lift a tone where the leather turns toward the light
+                L = L + gloss[sel] * LEATHER[m] * 10.0
             tone = np.digitize(L, TONE_EDGES)
         out[sel, :3] = d['ramp'][tone]
         out[sel, 3] = 255
