@@ -1078,34 +1078,32 @@ def tube(pts, radii, flat=0.5, n=10):
     return bm
 
 
-EYE_RX, EYE_RZ = 0.78, 0.36
+EYE_RX, EYE_RZ = 0.84, 0.36
 EYE_TILT = 0.06        # the outer corner sits a touch higher than the inner one
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
-def _skew(u, peak):
-    """u (-1 inner corner .. 1 outer) remapped so the point `peak` sits at 0: -1..0 on the inner side of it,
-    0..1 on the outer."""
+def _lens(u, a, b):
+    """One smooth curve over the eye's width, 0 at both corners and 1 at its peak: (1+u)^a (1-u)^b, a single
+    expression with no joins, so the lid's edge bends continuously from corner to corner. With a and b over 1 it
+    leaves each corner tangent to the eye's centre line and curls away ever faster (a cusp); the larger of the
+    two pushes the peak toward the other corner."""
     u = max(-1.0, min(1.0, u))
-    return (u - peak) / (1 - peak) if u >= peak else (u - peak) / (1 + peak)
+    pk = (a - b) / (a + b)
+    return ((1 + u) ** a * (1 - u) ** b) / ((1 + pk) ** a * (1 - pk) ** b)
 
 
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    an asymmetric lens. From a sharp inner point the lid leaves almost flat and sweeps up ever faster to its
-    highest point a quarter of the way in from the nose, then runs down in a long slope to a sharp point at the
-    outer corner."""
-    v = _skew(u, -0.25)
-    h = (1 - v * v) ** 1.0 if v >= 0 else (1 - (-v) ** 1.6) ** 1.8
-    return 0.97 * EYE_RZ * h
+    the upper edge of an asymmetric lens, one smooth arc highest a little toward the nose, leaving the inner
+    corner as a cusp and running out in a longer sweep to the outer point."""
+    return 1.0 * EYE_RZ * _lens(u, 1.3, 1.6)
 
 
 def lid_bottom(u):
-    """The lower lid's edge below the centre line: a shallow curve, lowest a little toward the nose, rising
-    gently into the outer point."""
-    v = _skew(u, -0.1)
-    h = (1 - v * v) ** 1.1 if v >= 0 else (1 - (-v) ** 1.6) ** 1.6
-    return 0.72 * EYE_RZ * h
+    """The lower lid's edge below the centre line: a shallower arc of the same kind, lowest a little toward the
+    outer corner, so the two edges are not mirror images."""
+    return 0.74 * EYE_RZ * _lens(u, 1.5, 1.25)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
