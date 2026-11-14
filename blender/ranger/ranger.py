@@ -506,19 +506,16 @@ def bvh_of(bm):
 
 
 def curtain_bang(tree, s):
-    """One side of the curtain bangs: a sheet of hair lying on the forehead, from the centre parting out and down
-    to the temple, where it runs on under the side lock. Its lower edge is shortest at the parting and sweeps
-    down toward the temple; its top tucks up under the hair cap, so the hairline shows no rim. Through its depth it
-    is thickest in the middle and rolls thin at the lower edge, so it lies on the skin instead of standing off it.
-    Returns the mesh and each vertex's pattern coordinates (strands running down the sweep)."""
+    """One side of the curtain bangs, as loose strands: each leaves the centre parting from under the cap, arcs
+    out and down across the forehead and ends in a fine point, the ones nearest the parting shortest and those
+    reaching the temple longest, where they run on under the side lock. They lie on whatever is outermost (the
+    forehead or the cap) and drape smoothly down off the cap's edge. Returns the mesh and a lookup for each
+    vertex's pattern coordinates."""
     H = HEAD_H
-    nu, nv = 26, 11
+    head_tree, cap_tree = tree
     C = Vector((0.0, 0.5, 0.0))
 
-    head_tree, cap_tree = tree
-
     def skin(az, z):
-        """The distance out to whatever is outermost there, the forehead or the cap (with its 0.4 thickness)."""
         d = Vector((-s * math.sin(az), -math.cos(az), 0.0))
         o = Vector((C.x, C.y, z))
         r = 2.5
@@ -528,52 +525,51 @@ def curtain_bang(tree, s):
                 r = max(r, (hit[0] - o).length + extra)
         return o, d, r
 
+    rnd = np.random.default_rng(11 if s > 0 else 12)
     bm = bmesh.new()
     rest = {}
-    grids = []
-    for side in (0, 1):        # the outer surface, then the inner one against the skin
-        grid = []
-        for i in range(nu):
-            u = i / (nu - 1)
-            az = math.radians(3 + u * 80)
-            # the lower edge: up at the hairline beside the parting, sweeping down to the temple
-            z_bot = (0.79 - 0.19 * math.sin(u * math.pi / 2) ** 0.6 - 0.025 * math.sin(u * math.pi * 3.5) * u) * H
-            z_top = 0.92 * H
-            row = []
-            r_prev = None
-            for j in range(nv):
-                v = j / (nv - 1)
-                z = lerp(z_top, z_bot, v)
-                o, d, r = skin(az, z)
-                # it drapes: below the cap's edge it eases down onto the forehead instead of stepping
-                if r_prev is not None:
-                    r = max(r, r_prev - 0.45)
-                r_prev = r
-                grow = min(1.0, v / 0.3)
-                grow = grow * grow * (3 - 2 * grow)
-                roll = 1.0 if v < 0.45 else max(0.0, math.cos((v - 0.45) / 0.55 * math.pi / 2)) ** 0.9
-                t = 0.32 * grow * roll * (0.75 + 0.25 * math.sin(math.pi * u))
-                # its top tucks in under the cap's surface, so no edge shows where it starts
-                lift = -0.2 * (1 - grow) + 0.05 + (t if side == 0 else 0.0)
-                q = o + d * (r + lift)
-                vert = bm.verts.new(q)
-                rest[q.freeze()] = (u * 7.0, 0.0, -v * 3.0)    # (strands run down the sweep)
-                row.append(vert)
-            grid.append(row)
-        grids.append(grid)
-    out_, in_ = grids
-    for i in range(nu - 1):
-        for j in range(nv - 1):
-            bm.faces.new((out_[i][j], out_[i + 1][j], out_[i + 1][j + 1], out_[i][j + 1]))
-            bm.faces.new((in_[i][j + 1], in_[i + 1][j + 1], in_[i + 1][j], in_[i][j]))
-    # close the edges: the lower edge, the top, and both ends
-    for i in range(nu - 1):
-        for j in (0, nv - 1):
-            bm.faces.new((out_[i][j], in_[i][j], in_[i + 1][j], out_[i + 1][j]))
-    for i in (0, nu - 1):
-        for j in range(nv - 1):
-            bm.faces.new((out_[i][j], out_[i][j + 1], in_[i][j + 1], in_[i][j]))
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+    N, steps, seg = 22, 18, 8
+    for k in range(N):
+        f = (k + rnd.uniform(0.1, 0.9)) / N               # 0 at the parting, 1 at the temple
+        az0 = math.radians(2.5 + f * 4)
+        az1 = math.radians(12 + f * 80)
+        z0 = (0.95 - 0.04 * rnd.uniform()) * H
+        z1 = (0.80 - 0.17 * math.sin(f * math.pi / 2) ** 0.8 + rnd.uniform(-0.012, 0.012)) * H
+        rad = rnd.uniform(0.16, 0.24) * (1.15 - 0.3 * f)
+        layer = 0.03 + 0.1 * (k % 2)        # alternate strands lie a little over their neighbours
+        rings, r_prev = [], None
+        for i in range(steps):
+            t = i / (steps - 1)
+            az = lerp(az0, az1, t ** 0.75)
+            z = lerp(z0, z1, math.sin(t * math.pi / 2) ** 1.1)
+            o, d, r = skin(az, z)
+            if r_prev is not None:
+                r = max(r, r_prev - 0.35)
+            r_prev = r
+            tuck = min(1.0, t / 0.2)
+            rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.01
+            centre = o + d * (r + 0.04 + rr + layer * tuck - 0.3 * (1 - tuck))
+            # the strand's own frame: along it, out from the head, and across
+            if i == 0:
+                o2, d2, _ = skin(lerp(az0, az1, (1 / (steps - 1)) ** 0.75), lerp(z0, z1, math.sin(1 / (steps - 1) * math.pi / 2) ** 1.1))
+                T = (o2 + d2 * r - centre).normalized()
+            else:
+                T = (centre - prev).normalized()
+            prev = centre
+            Bv = T.cross(d).normalized()
+            Nv = Bv.cross(T).normalized()
+            ring = []
+            for j in range(seg):
+                a_ = 2 * math.pi * j / seg
+                q = centre + Bv * (rr * 1.25 * math.cos(a_)) + Nv * (rr * 0.8 * math.sin(a_))
+                ring.append(bm.verts.new(q))
+                rest[q.freeze()] = (k * 2.3 + math.cos(a_) * 0.25, 0.0, -t * 3.0)
+            rings.append(ring)
+        for ra, rb in zip(rings, rings[1:]):
+            for j in range(seg):
+                bm.faces.new((ra[j], ra[(j + 1) % seg], rb[(j + 1) % seg], rb[j]))
+        bm.faces.new(list(reversed(rings[0])))
+        bm.faces.new(rings[-1])
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     from mathutils.kdtree import KDTree
     keys = list(rest)
