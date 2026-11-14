@@ -7,14 +7,13 @@ import { HAIRSTYLES } from './presets/female-head.js';
 const ROSTER = [
   { key: 'knight', name: 'Knight', note: 'Mail and leather', spec: FIGHTER },
   { key: 'mage', name: 'Mage', note: 'Robe and pointed hat', spec: MAGE },
-  { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle', spec: RANGER },
-  // the ranger modelled in Blender (blender/ranger/): her sheet is the 3D render, copied in rather than painted,
-  // so she has no hairstyle choice (the spec is only the fallback painted if the render is missing)
-  { key: 'ranger3d', name: 'Ranger (3D)', note: 'Modelled and rendered in Blender', spec: { ...RANGER, hairStyle: null }, rendered: 'blender/ranger/ranger-blender.png' },
+  // the ranger is modelled in Blender (blender/ranger/): her sheet is the 3D render, copied in rather than painted,
+  // so she has no hairstyle choice (the painted spec is only the fallback if the render is missing)
+  { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle, modelled in 3D', spec: { ...RANGER, hairStyle: null }, rendered: 'blender/ranger/ranger-blender.png' },
   { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC },
   { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger', spec: ROGUE }
 ];
-const DEFAULT_MEMBERS = ['ranger3d', 'knight', 'mage'];
+const DEFAULT_MEMBERS = ['knight', 'mage', 'ranger'];
 const STORE = 'emberwood.party';
 
 function loadParty() {
