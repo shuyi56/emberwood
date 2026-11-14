@@ -489,6 +489,101 @@ def surface_y(bm, x, z):
     return hit[0].y if hit[0] is not None else 0.0
 
 
+def hair_flow(co):
+    """Pattern coordinates for the cap's hair, parted at the centre and combed down each side: across the
+    strands is front to back, along them the way down from the parting."""
+    return (co.y * 1.2, 0.0, -math.atan2(abs(co.x), co.z - 0.56 * HEAD_H) * 6.0)
+
+
+def bvh_of(bm):
+    from mathutils.bvhtree import BVHTree
+    tri = bm.copy()
+    bmesh.ops.triangulate(tri, faces=tri.faces[:])
+    tri.verts.index_update()
+    tree = BVHTree.FromPolygons([v.co.copy() for v in tri.verts], [[v.index for v in f.verts] for f in tri.faces])
+    tri.free()
+    return tree
+
+
+def curtain_bang(tree, s):
+    """One side of the curtain bangs: a sheet of hair lying on the forehead, from the centre parting out and down
+    to the temple, where it runs on under the side lock. Its lower edge is shortest at the parting and sweeps
+    down toward the temple; its top tucks up under the hair cap, so the hairline shows no rim. Through its depth it
+    is thickest in the middle and rolls thin at the lower edge, so it lies on the skin instead of standing off it.
+    Returns the mesh and each vertex's pattern coordinates (strands running down the sweep)."""
+    H = HEAD_H
+    nu, nv = 26, 11
+    C = Vector((0.0, 0.5, 0.0))
+
+    head_tree, cap_tree = tree
+
+    def skin(az, z):
+        """The distance out to whatever is outermost there, the forehead or the cap (with its 0.4 thickness)."""
+        d = Vector((-s * math.sin(az), -math.cos(az), 0.0))
+        o = Vector((C.x, C.y, z))
+        r = 2.5
+        for t_, extra in ((head_tree, 0.0), (cap_tree, 0.4)):
+            hit = t_.ray_cast(o + d * 20.0, -d, 19.9)     # (only the near side: stop at the middle)
+            if hit[0] is not None:
+                r = max(r, (hit[0] - o).length + extra)
+        return o, d, r
+
+    bm = bmesh.new()
+    rest = {}
+    grids = []
+    for side in (0, 1):        # the outer surface, then the inner one against the skin
+        grid = []
+        for i in range(nu):
+            u = i / (nu - 1)
+            az = math.radians(3 + u * 80)
+            # the lower edge: up at the hairline beside the parting, sweeping down to the temple
+            z_bot = (0.79 - 0.19 * math.sin(u * math.pi / 2) ** 0.6 - 0.025 * math.sin(u * math.pi * 3.5) * u) * H
+            z_top = 0.92 * H
+            row = []
+            r_prev = None
+            for j in range(nv):
+                v = j / (nv - 1)
+                z = lerp(z_top, z_bot, v)
+                o, d, r = skin(az, z)
+                # it drapes: below the cap's edge it eases down onto the forehead instead of stepping
+                if r_prev is not None:
+                    r = max(r, r_prev - 0.45)
+                r_prev = r
+                grow = min(1.0, v / 0.3)
+                grow = grow * grow * (3 - 2 * grow)
+                roll = 1.0 if v < 0.45 else max(0.0, math.cos((v - 0.45) / 0.55 * math.pi / 2)) ** 0.9
+                t = 0.32 * grow * roll * (0.75 + 0.25 * math.sin(math.pi * u))
+                # its top tucks in under the cap's surface, so no edge shows where it starts
+                lift = -0.2 * (1 - grow) + 0.05 + (t if side == 0 else 0.0)
+                q = o + d * (r + lift)
+                vert = bm.verts.new(q)
+                rest[q.freeze()] = (u * 7.0, 0.0, -v * 3.0)    # (strands run down the sweep)
+                row.append(vert)
+            grid.append(row)
+        grids.append(grid)
+    out_, in_ = grids
+    for i in range(nu - 1):
+        for j in range(nv - 1):
+            bm.faces.new((out_[i][j], out_[i + 1][j], out_[i + 1][j + 1], out_[i][j + 1]))
+            bm.faces.new((in_[i][j + 1], in_[i + 1][j + 1], in_[i + 1][j], in_[i][j]))
+    # close the edges: the lower edge, the top, and both ends
+    for i in range(nu - 1):
+        for j in (0, nv - 1):
+            bm.faces.new((out_[i][j], in_[i][j], in_[i + 1][j], out_[i + 1][j]))
+    for i in (0, nu - 1):
+        for j in range(nv - 1):
+            bm.faces.new((out_[i][j], out_[i][j + 1], in_[i][j + 1], in_[i][j]))
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    from mathutils.kdtree import KDTree
+    keys = list(rest)
+    kd = KDTree(len(keys))
+    for k, co in enumerate(keys):
+        kd.insert(co, k)
+    kd.balance()
+    return bm, lambda co: rest[keys[kd.find(co)[1]]]
+
+
 # ---------------------------------------------------------------- the torso's shape
 # Half-width, front depth and back depth of the body at each height (eased smoothly between), for an adult female
 # figure: shoulders, a ribcage that narrows to the waist, the waist itself, and hips that swell out over the seat.
@@ -791,7 +886,7 @@ def build():
         x = s * 0.14 * HEAD_H
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
     mouth_y = surface_y(hb, 0, 0.258 * HEAD_H)
-    fore_y = {s: surface_y(hb, s * 1.4, 0.79 * HEAD_H) for s in (-1, 1)}
+    head_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     for s in (-1, 1):
         x, ey, by = feat[s]
@@ -811,14 +906,30 @@ def build():
     bmesh.ops.translate(cap, vec=(0, 0.06 * HEAD_H, 0.56 * HEAD_H), verts=cap.verts)
     bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.1, 6.4),
                            plane_no=Vector((0, -0.45, -0.89)).normalized(), clear_outer=True)
-    # (the cap's strands run from the centre parting down each side: across them is front to back, along them is
-    # the way down from the parting)
+    # over the brow the cap lies close to the skull, thinning to nothing at the front hairline, so the front of
+    # the head reads as hair growing from the scalp rather than as a cap; the back and the crown keep their volume
+    hl_n = Vector((0, -0.45, -0.89)).normalized()
+    hc = Vector((0, 0.5, 4.8))
+    for v in cap.verts:
+        d = (v.co - hc).normalized()
+        f = min(1.0, max(0.0, (-d.y - 0.25) / 0.45))      # how squarely it faces forward
+        f = f * f * (3 - 2 * f)
+        if f <= 0.0:
+            continue
+        hit = head_tree.ray_cast(hc + d * 20.0, -d, 30.0)
+        if hit[0] is None:
+            continue
+        rs, rc = (hit[0] - hc).length, (v.co - hc).length
+        dh = -(v.co - Vector((0, -2.1, 6.4))).dot(hl_n)
+        close = rs + 0.02 + 0.16 * math.sqrt(min(1.0, max(0.0, dh) / 1.6))
+        v.co = hc + d * lerp(rc, min(rc, close), f)
+    cap_tree = bvh_of(cap)
+    # (strands run from the centre parting down each side; see hair_flow)
     mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.4,
-             rest=lambda co: (co.y * 1.2, 0.0, -math.atan2(abs(co.x), co.z - 0.56 * HEAD_H) * 6.0))
+             rest=hair_flow)
     for s in (-1, 1):
-        b = ellipsoid(1.55, 0.5, 1.15)
-        bmesh.ops.rotate(b, cent=(0, 0, 0), matrix=Euler((0.35, s * 0.55, 0)).to_matrix(), verts=b.verts)
-        mesh_obj(f'Bangs {s}', b, M_HAIR, head, loc=(s * 1.4, fore_y[s] + 0.25, 0.79 * HEAD_H))
+        bm_, rest_ = curtain_bang((head_tree, cap_tree), s)
+        mesh_obj(f'Bangs {s}', bm_, M_HAIR, head, rest=rest_)
         mesh_obj(f'Side lock {s}', loft([(6.6, 0.85, 1.3, s * 3.05, 0.3), (4.5, 0.85, 1.35, s * 3.45, 0.9), (2.0, 0.8, 1.3, s * 3.6, 1.35),
                                          (-1.0, 0.8, 1.25, s * 3.8, 1.5), (-3.2, 0.8, 1.1, s * 4.05, 1.5), (-4.4, 0.35, 0.5, s * 4.15, 1.5)]),
                  M_HAIR, head)
