@@ -89,12 +89,12 @@ def clay(on, saved):
             o.hide_render = hide
 
 
-def render_row(cam, rig, out, tmp, dist=30.0):
+def render_row(cam, rig, out, tmp, dist=30.0, tz=57.6):
     from PIL import Image
     sc = bpy.context.scene
     root = bpy.data.objects['Ranger']
     tiles = []
-    target = Vector((0, 0, 57.6))
+    target = Vector((0, 0, tz))
     for i, (name, yaw, pitch) in enumerate(VIEWS):
         root.rotation_euler = (0, 0, math.radians(yaw))
         d = Vector((0, -math.cos(pitch), math.sin(pitch)))
@@ -129,7 +129,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for look in looks:
             clay(look == 'clay', saved)
-            render_row(cam, rig, os.path.join(out_dir, f'head-{look}.png'), tmp)
+            render_row(cam, rig, os.path.join(out_dir, f'head-{look}.png'), tmp, float(opt('--dist', 30)), float(opt('--z', 57.6)))
             if look == 'clay':
                 clay(False, saved)
 

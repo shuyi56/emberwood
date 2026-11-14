@@ -868,17 +868,25 @@ def gauss(x, z, x0, z0, sx, sz, amp):
     return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
 
 
+def gauss(x, z, x0, z0, sx, sz, amp):
+    return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
+
+
 def face_relief(x, z):
     """How far the face stands forward of the base head at (x across, z up), in head heights. The planes a
     painter would block in: brow ridge over the eye sockets, the nose (bridge, tip and wings), cheekbones with
     the hollow under them, the lips parted by the mouth line, and the ball of the chin. (They are pushed a little
-    past life size, so they still read when the head is 17 pixels tall.)"""
+    past life size, so they still read when the head is 17 pixels tall.)
+    The features below the eyes are laid out on a slightly taller lower face and drawn up into the head's
+    proportions by FACE_WARP (sculpt round 2)."""
+    z = FACE_WARP(z)
     d = 0.0
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
         d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
-        d += gauss(x, z, s * 0.2, 0.31, 0.07, 0.06, -0.025)      # hollow under the cheekbone
+        d += gauss(x, z, s * 0.21, 0.34, 0.06, 0.04, -0.01)      # a shallow hollow under the cheekbone
+        d += gauss(x, z, s * 0.17, 0.23, 0.07, 0.07, 0.016)      # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply
     if z > 0.36:
@@ -888,11 +896,41 @@ def face_relief(x, z):
         h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
     d += h * math.exp(-(x / (0.04 + 0.03 * max(0.0, 1 - abs(z - 0.37) / 0.1))) ** 2)
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
-    d += gauss(x, z, 0, 0.29, 0.07, 0.025, 0.035)    # upper lip
-    d += gauss(x, z, 0, 0.225, 0.055, 0.025, 0.03)   # lower lip
-    d += gauss(x, z, 0, 0.258, 0.08, 0.01, -0.018)   # mouth line
-    d += gauss(x, z, 0, 0.17, 0.06, 0.02, -0.015)    # the crease above the chin
-    d += gauss(x, z, 0, 0.09, 0.075, 0.045, 0.04)    # chin
+    d += mouth_relief(x, z)
+    d += gauss(x, z, 0, 0.1, 0.08, 0.05, 0.055)      # chin: the ball of it stands nearly as far forward as the lower lip
+    return d
+
+
+def mouth_relief(x, z):
+    """The mouth and the forms around it (sculpt round 2), in head heights forward of the face: the upper lip
+    with its cupid's bow and a small tubercle in the middle, a fuller lower lip, the line between them sinking
+    into the corners, the philtrum's two ridges up to the nose, the ball of the nose's tip, the fold from the
+    nose's wing toward the corner of the mouth, and the crease under the lower lip."""
+    ax = abs(x)
+    d = 0.0
+    across_u = math.exp(-(x / 0.085) ** 4)                 # the upper lip runs nearly full height to its corners
+    bow = 0.006 * math.exp(-((ax - 0.022) / 0.012) ** 2)   # the peaks of the cupid's bow
+    top = 0.296 + bow - 0.012 * (ax / 0.1) ** 2
+    t = (z - 0.258) / max(0.01, top - 0.258)
+    if 0.0 < t < 1.25:
+        d += 0.03 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.008)          # the tubercle
+    across_l = math.exp(-(x / 0.072) ** 4)
+    d += 0.032 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
+    # the line between the lips, deepest at the corners where the lips tuck in
+    d -= (0.012 + 0.014 * (ax / 0.1) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.11) ** 6)
+    for sx in (-1, 1):
+        d += gauss(x, z, sx * 0.105, 0.257, 0.014, 0.012, -0.006)    # the corners
+        d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
+        # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
+        # of cheek just outside it)
+        for k in range(6):
+            u = k / 5
+            px, pz = sx * (0.075 + 0.04 * u), 0.355 - 0.1 * u
+            d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
+            d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
+    d += gauss(x, z, 0, 0.385, 0.035, 0.028, 0.012)        # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.19, 0.06, 0.012, -0.014)         # the crease under the lower lip
     return d
 
 
@@ -933,17 +971,24 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(0.0, 0.1), (0.04, 0.13), (0.1, 0.16), (0.18, 0.2), (0.25, 0.245), (0.33, 0.29),
+HEAD_W = smooth_curve([(0.0, 0.1), (0.04, 0.13), (0.1, 0.155), (0.18, 0.19), (0.25, 0.232), (0.33, 0.275),
                        (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
-HEAD_F = smooth_curve([(0.0, 0.27), (0.04, 0.355), (0.1, 0.385), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415),
+HEAD_F = smooth_curve([(0.0, 0.24), (0.03, 0.34), (0.07, 0.38), (0.12, 0.39), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415),
                        (0.42, 0.42), (0.52, 0.42), (0.62, 0.42)])
 HEAD_B = smooth_curve([(0.0, -0.22), (0.03, -0.1), (0.07, 0.0), (0.12, 0.07), (0.16, 0.09), (0.24, 0.1),
                        (0.3, 0.16), (0.36, 0.3), (0.44, 0.39), (0.54, 0.43), (0.64, 0.445)])
-HEAD_MID = smooth_curve([(0.0, -0.245), (0.03, -0.18), (0.07, -0.08), (0.14, 0.0), (0.3, 0.04), (1.0, 0.04)])
+HEAD_MID = smooth_curve([(0.0, -0.245), (0.03, -0.17), (0.07, -0.1), (0.12, -0.04), (0.18, 0.0), (0.3, 0.04), (1.0, 0.04)])
 # how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
 # narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
-HEAD_NF = smooth_curve([(0.0, 2.4), (0.06, 2.3), (0.14, 2.0), (0.3, 2.1), (0.45, 2.35), (0.6, 2.3), (0.8, 2.2)])
+HEAD_NF = smooth_curve([(0.0, 2.1), (0.06, 2.05), (0.14, 2.0), (0.3, 2.1), (0.45, 2.35), (0.6, 2.3), (0.8, 2.2)])
 HEAD_NB = smooth_curve([(0.0, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
+
+
+# the lower face, nose base to chin, as a third of the head rather than the 0.36 the features were first laid out
+# on: the face's relief is read at FACE_WARP(z), which draws the nose up to z 0.335, the mouth to 0.232 and the
+# ball of the chin to 0.09, leaving the eyes and brows where they are
+FACE_WARP = smooth_curve([(0.0, 0.0), (0.09, 0.1), (0.232, 0.258), (0.335, 0.36), (0.45, 0.455), (0.6, 0.6), (1.0, 1.0)])
+MOUTH_Z = 0.232
 
 
 def _dome(f, z, z0, top=1.0):
@@ -974,7 +1019,7 @@ def sculpted_head():
     planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at z 1, the face
     toward -Y."""
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=96, radius=1.0)
+    bmesh.ops.create_uvsphere(bm, u_segments=160, v_segments=224, radius=1.0)
     for v in bm.verts:
         sx, sy, sz = v.co
         z = 0.5 + 0.5 * sz
@@ -2155,7 +2200,7 @@ def build():
     for s in (-1, 1):
         x = s * 0.14 * HEAD_H
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
-    mouth_y = surface_y(hb, 0, 0.258 * HEAD_H)
+    mouth_y = surface_y(hb, 0, MOUTH_Z * HEAD_H)
     head_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     for s in (-1, 1):
@@ -2168,7 +2213,8 @@ def build():
         brow = ellipsoid(0.9, 0.2, 0.15, 12, 6)
         bmesh.ops.rotate(brow, cent=(0, 0, 0), matrix=Euler((0, -s * 0.1, 0)).to_matrix(), verts=brow.verts)
         mesh_obj(f'Brow {s}', brow, M_BROW, head, loc=(x + s * 0.05, by + 0.2, 0.645 * HEAD_H), subdiv=0)
-    mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
+    # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)
+    mesh_obj('Mouth', ellipsoid(0.8, 0.1, 0.06, 12, 6), M_LIPS, head, loc=(0, mouth_y + 0.1, MOUTH_Z * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
     # side locks framing the face, and the long fall down the back
