@@ -507,11 +507,13 @@ function drawFigure(P, S, theta, f) {
   // boots, long from heel to toe, would otherwise overlap and the trousers run together)
   const reach = 1 + 0.32 * V.fx * V.fx, REST_FWD = 4.8 * reach, REST_BACK = -2.4 * reach;
   A.free = -1;
-  if (!walking) {
+  // (only the front view stands in this stance; the other facings keep the original standing pose, OLD below)
+  const OLD = !walking && V.fz < 0.9;
+  if (!walking && !OLD) {
     const sepX = (free) => Math.abs([1, -1].reduce((d, s) => d + s * V.x(s * B.gap * (s === free ? 1.28 : 1.1), s === free ? REST_FWD : REST_BACK), 0));
     if (sepX(1) > sepX(-1) + 1) A.free = 1;
   }
-  A.stride = (s) => (walking ? Math.sin(ph + (s > 0 ? 0 : Math.PI)) * 6.5 : s === A.free ? REST_FWD : REST_BACK);
+  A.stride = (s) => (walking ? Math.sin(ph + (s > 0 ? 0 : Math.PI)) * 6.5 : OLD ? (s > 0 ? -1.2 : 5.8) : s === A.free ? REST_FWD : REST_BACK);
   // Half-width of the body at height h, eased smoothly between control heights (hip, waist, chest,
   // bust, shoulder), so the silhouette curves instead of joining straight segments.
   const shH = 41.5 - B.slope;
@@ -568,7 +570,7 @@ function drawFigure(P, S, theta, f) {
     // The feet stand a little out from the hips (out: the ankle's distance out, as a multiple of the hip's), about
     // hip-wide at rest, so from the front a gap of ground shows between the legs without a straddle; the knee
     // lies on the straight line between hip and ankle.
-    const free = !walking && s === A.free, ease = free ? 1 : 0, out = walking ? 1.15 : free ? 1.28 : 1.1, kneeOut = (1 + out) / 2;
+    const free = !walking && s === A.free, ease = free ? 1 : 0, out = walking ? 1.15 : OLD ? (free ? 1.25 : 1.0) : free ? 1.28 : 1.1, kneeOut = OLD ? 1.05 : (1 + out) / 2;
     const toeUp = walking ? Math.max(0, Math.sin(ps)) * 0.8 - Math.max(0, -Math.sin(ps)) * 0.6 : 0;
     const hipA = s * B.gap, depth = V.d(hipA, fb), dim = depth < -1;
     add(depth * 0.05 - 4, () => {
@@ -577,7 +579,7 @@ function drawFigure(P, S, theta, f) {
       const tip = (a, b, h, k) => { const q = V.pt(a, b, h); q[1] += V.d(a, b) * LEG_TILT * k; return q; };
       // (the hip follows the stride a little and the knee more than half, so seen from the side the thighs part
       // just below the crotch and the shins stand clear of each other)
-      const hip = V.pt(hipA, fb * 0.3, 22), knee = tip(hipA * (kneeOut + ease * 0.06), fb * 0.58 + 0.8 + lift * 1.1 + ease * 0.9, 11.5 + lift * 0.8 - ease * 0.3, 0.5), ankle = tip(hipA * out, fb, 4 + lift, 1);
+      const hip = V.pt(hipA, fb * (OLD ? 0.2 : 0.3), 22), knee = tip(hipA * (kneeOut + ease * 0.06), fb * (OLD ? 0.5 : 0.58) + 0.8 + lift * 1.1 + ease * 0.9, 11.5 + lift * 0.8 - ease * 0.3, 0.5), ankle = tip(hipA * out, fb, 4 + lift, 1);
       if (!S.robe) {
         P.t(hip[0], hip[1], knee[0], knee[1], B.leg, B.shin + 0.4).t(knee[0], knee[1], ankle[0], ankle[1], B.shin + 0.4, B.shin - 0.8).fill(S.legs, { dim, pattern: S.legPattern });
         if (S.knee && V.d(hipA, fb + 3) > 0) P.e(knee[0] + V.fx, knee[1], 2.4, 2.2).fill(S.knee, { dim });
@@ -607,7 +609,7 @@ function drawFigure(P, S, theta, f) {
       // At rest the feet turn out, the free one well out (yaw, in radians): from the front that shoe shows its
       // side and toe at an angle while the weight foot points at us, so the two read as one foot ahead of the
       // other. The slices run along the turned foot, and each is as wide on screen as the foot is across it.
-      const yaw = walking ? 0 : free ? 0.6 : 0.15, ya = s * Math.sin(yaw), yb = Math.cos(yaw);
+      const yaw = walking ? 0 : OLD ? (free ? 0.45 : 0.12) : free ? 0.6 : 0.15, ya = s * Math.sin(yaw), yb = Math.cos(yaw);
       const across = Math.abs(yb * V.rx - ya * V.fx);
       const slices = [];
       for (let k = 0; k <= 20; k++) {
