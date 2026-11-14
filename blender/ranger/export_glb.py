@@ -45,13 +45,12 @@ def plain_materials():
         p.inputs['Base Color'].default_value = (*lin, 1.0)
         p.inputs['Roughness'].default_value = 0.6 if mid == ranger.M_HAIR else 0.9
         if mid in (ranger.M_EYE, ranger.M_SCLERA):
-            # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris keeps its
-            # painted shading as vertex colours
+            # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris and the white
+            # keep their painted shading (and the white its veins) as vertex colours
             p.inputs['Roughness'].default_value = 0.12 if mid == ranger.M_EYE else 0.3
-            if mid == ranger.M_EYE:
-                col = nt.nodes.new('ShaderNodeVertexColor')
-                col.layer_name = 'iris_col'
-                nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            col = nt.nodes.new('ShaderNodeVertexColor')
+            col.layer_name = 'eye_col'
+            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
