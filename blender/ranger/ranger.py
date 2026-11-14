@@ -1082,8 +1082,8 @@ def tube(pts, radii, flat=0.5, n=10):
     return bm
 
 
-EYE_RX, EYE_RZ = 0.84, 0.36
-EYE_TILT = 0.06        # the outer corner sits a touch higher than the inner one
+EYE_RX, EYE_RZ = 0.76, 0.33
+EYE_TILT = 0.0         # the two corners level
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
@@ -1099,15 +1099,15 @@ def _lens(u, a, b):
 
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    the upper edge of an asymmetric lens, one smooth arc highest a little toward the nose, leaving the inner
-    corner as a cusp and running out in a longer sweep to the outer point."""
-    return 1.0 * EYE_RZ * _lens(u, 1.3, 1.6)
+    the upper edge of an asymmetric lens: from a long, sharp point at the inner corner it sweeps up to its
+    highest point out toward the temple, then falls more quickly to the outer corner."""
+    return 1.05 * EYE_RZ * _lens(u, 2.0, 1.15)
 
 
 def lid_bottom(u):
     """The lower lid's edge below the centre line: a shallower arc of the same kind, lowest a little toward the
     outer corner, so the two edges are not mirror images."""
-    return 0.74 * EYE_RZ * _lens(u, 1.5, 1.25)
+    return 0.7 * EYE_RZ * _lens(u, 1.6, 1.15)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1174,7 +1174,7 @@ def iris_colours(me, to_disc, r, s):
         # its roundness, as a painter shades a ball: lit from the upper left (facing the camera), so the tone
         # turns darker toward the far, lower-right edge and a little lighter on the near side
         xn = p.x * s / r
-        t += 0.2 * (-xn * 0.6 + zn * 0.3) * smooth(0.25, 0.95, q)
+        t += 0.12 * zn * smooth(0.25, 0.95, q)
         t -= 0.24 * q * q
         warm = smooth(0.62, 0.4, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
         t = min(1.0, max(0.0, t + 0.22 * warm))
@@ -1237,16 +1237,22 @@ def sclera_image():
     # the ball's roundness: a marble lit from the front, brightest a little above and inside the middle, its
     # tone turning warmer and darker as it curves away toward each corner, where it sinks into the socket
     ru = np.abs(uu)
-    rr = np.clip((uu / 0.78) ** 2 + (0.7 * np.clip(e, 0, 1.2) - 0.15) ** 2, 0, 1)
-    shade = 1 - np.sqrt(1 - rr)                                               # 0 facing the camera, 1 at the rim
-    blend([176, 160, 158], 0.95 * sm(0.0, 0.22, shade))
-    blend([104, 86, 92], 0.95 * sm(0.18, 0.85, shade))
+    # lit as a ball: the white is part of a sphere a little wider than the opening, and its tone follows how
+    # much each point faces a light in front of and above the face (Lambert), so it is brightest just above the
+    # middle, turns gradually darker down toward the lower lid and round into each corner, and never shows a
+    # ring; the shade is a warm, darkened ivory, never grey or blue
+    R = 1.12
+    px_, pz_ = uu / R, (ww * EYE_RZ * EYE_K / EYE_RX) / R
+    ny_ = np.sqrt(np.clip(1 - px_ * px_ - pz_ * pz_, 0, 1))
+    L = np.array([0.0, 0.3, 0.954])                                          # (across, up, toward the viewer)
+    lam = np.clip(px_ * L[0] + pz_ * L[1] + ny_ * L[2], 0, 1)
+    blend([156, 124, 110], 0.75 * (1 - lam) ** 1.1)
     blend([168, 140, 134], 0.5 * sm(0.75, 1.0, ru))
     blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))                         # the caruncle, at the inner corner
     # the skin of the white: faint warm and cool patches and a fine grain, so it never reads as flat paint
     m = field(9, 4, 11) * 0.6 + field(23, 9, 12) * 0.4
     blend([234, 212, 178], 0.35 * np.clip(m, 0, 1))
-    blend([196, 204, 222], 0.3 * np.clip(-m, 0, 1))
+    blend([214, 204, 192], 0.3 * np.clip(-m, 0, 1))
     c[:] = c * (1 + 0.04 * field(90, 30, 13) + 0.02 * field(200, 70, 14))[..., None]
     # where it meets the lids: the upper lid shades the top of the ball in a soft, broad band that deepens
     # into the lid's edge, and the lower lid's wet rim is a thin pink line with a little shade above it, so the
@@ -1420,6 +1426,13 @@ def build_eye(head, head_tree, s, x, ey, ez):
     for kv in tk.data:
         kv.co.y += 0.16 * smooth(0.55, 1.0, abs(kv.co.x - x) / RX) ** 1.5
     tk.value = 1.0
+    # for the sprite sheet only: the white drawn a little larger round its own centre, so a pixel of it still
+    # shows either side of the iris at that size
+    sp = wo.shape_key_add(name='sprite', from_mix=False)
+    for kv in sp.data:
+        kv.co.x = x + (kv.co.x - x) * 1.12
+        kv.co.z = ez + (kv.co.z - ez) * 1.0
+    sp.value = 0.0
 
     def front(px, pz):
         """The nearest surface (the face or the white) in front of (px, pz), seen from the camera."""
@@ -1439,8 +1452,8 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # the iris lies on the curve of the white, turned to face the way it faces there (the white bends with the
     # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
     # centre)
-    IR = 0.27                                       # its top under the upper lid, its foot on the lower one
-    iz = ez + 0.03
+    IR = 0.23                                       # its top under the upper lid, its foot on the lower one
+    iz = ez + 0.05
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
     n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
@@ -1452,9 +1465,17 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # swell of the cornea in the middle, so it never stands out from the eye (or is cut by it) at any angle
     for v in iris.verts:
         t = min(1.0, math.hypot(v.co.x, v.co.z) / IR)
+        # (where the iris runs past the white, under a lid, it is sent back behind the skin, so the lid covers its
+        # edge cleanly instead of the iris climbing the lid as a dark wall)
         h = wtree.ray_cast(Vector((c.x + v.co.x, -50, c.z + v.co.z)), Vector((0, 1, 0)))
         if h[0] is not None:
-            v.co.y = h[0].y - c.y - (0.006 + 0.07 * (1 - t * t))
+            # (half-way between the ball's surface and a flat disc square to its normal: on the ball alone its
+            # lower rim turned down steeply under the lower lid and read as a dark crescent)
+            flat = -(n.x * v.co.x + n.z * v.co.z) / n.y
+            surf = h[0].y - c.y
+            v.co.y = 0.75 * surf + 0.25 * min(flat, surf) - (0.006 + 0.07 * (1 - t * t))
+        else:
+            v.co.y = 0.3
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
     iris_colours(o.data, turn.inverted(), IR, s)
 
@@ -1952,9 +1973,10 @@ def sprite_mode(on):
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
         if o.name.startswith('Iris'):
-            o.scale = (1.2,) * 3 if on else (1.0,) * 3
+            o.scale = (1.35,) * 3 if on else (1.0,) * 3
         if o.name.startswith('Eye white') and o.data.shape_keys:
             o.data.shape_keys.key_blocks['tuck'].value = 0.0 if on else 1.0
+            o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
 
 
 def render_sheet(out_png, tmp):
