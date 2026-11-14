@@ -607,10 +607,18 @@ def hand_mesh(s):
             q = p + d * (L * frac)
             capsule(p, q, rr)
             p = q
+    # the base of the hand where the thumb and the fingers share the wrist: a thenar mound swelling from the
+    # wrist into the root of the thumb and a smaller hypothenar mound on the little-finger side, so the thumb,
+    # the palm and the four fingers all grow out of one fleshy heel instead of meeting in a crease
+    blob((0.18 * inward, -0.5, -0.95), (0.5, 0.6, 0.8), 0.9)
+    blob((0.12 * inward, 0.55, -1.05), (0.42, 0.42, 0.75), 0.8)
+    capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.25 * inward, -0.85, -0.7))
     t1 = t0 + Vector((0.35 * inward, -0.45, -1.0))
     t2 = t1 + Vector((0.3 * inward, -0.05, -0.75))
+    # the web of skin from the thumb's first joint to the root of the index finger
+    capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.3)
     capsule(t0, t1, 0.46)
     capsule(t1, t2, 0.37)
 
