@@ -493,7 +493,12 @@ def hair_flow(co):
     """Pattern coordinates for the head of hair: across the strands is the angle round the head (seen from
     above), along them is height, so the strands fall straight down the sides and back. (Coordinates that followed
     the curve from the parting drew rings round the back of the head, like the ridges of a shell.)"""
-    return (math.atan2(co.x, -(co.y - 0.5)) * 4.0, 0.0, co.z * 0.6)
+    # (measured as a distance round the head rather than an angle, so near the neck the strands do not crowd
+    # into a fan; the angle is taken from the back, so its one break falls at the parting, not down her back)
+    return (math.atan2(co.x, co.y - 0.5) * max(2.5, math.hypot(co.x, co.y - 0.5)), 0.0, co.z * 0.6)
+
+
+HAIR_PARTS = []
 
 
 def fuse_hair(head, names, voxel=0.1):
@@ -535,6 +540,50 @@ def fuse_hair(head, names, voxel=0.1):
     for _ in range(6):
         bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.6, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    # nothing passes through the mantle or the back: the body below the head is found by casting out from the
+    # middle of the figure, and any hair inside it (or too close) is pushed out onto it
+    from mathutils.bvhtree import BVHTree
+    off = Vector((0, 0, HEAD_Z))
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or o.parent is None or o.parent.name != 'Body' or o.name in ('Neck',):
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        base = len(vs)
+        vs += [o.matrix_world @ v.co - off for v in me.vertices]
+        ps += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    body = BVHTree.FromPolygons(vs, ps)
+    bm.normal_update()
+    for v in bm.verts:
+        if v.co.z > 0.5:
+            continue
+        a = Vector((0.0, 0.4, v.co.z))
+        d = Vector((v.co.x, v.co.y - 0.4, 0.0))
+        if d.length < 1e-6:
+            continue
+        d.normalize()
+        if d.y < 0.45:      # (only the hair behind her: at the sides it falls clear of the shoulders)
+            continue
+        hit = body.ray_cast(a + d * 20.0, -d, 19.9)
+        if hit[0] is None:
+            continue
+        need = (hit[0] - a).length + 0.18
+        have = (v.co - a).dot(d)
+        if have < need:
+            v.co += d * (need - have)
+    for _ in range(2):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.4, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    # below the ears the hair breaks into a few broad clumps: soft vertical ridges across the fall and the sides
+    bm.normal_update()
+    for v in bm.verts:
+        fade = min(1.0, max(0.0, (3.0 - v.co.z) / 4.0))
+        if fade <= 0.0:
+            continue
+        arc = math.atan2(v.co.x, v.co.y - 0.5) * max(2.5, math.hypot(v.co.x, v.co.y - 0.5))
+        ridge = 0.3 * math.sin(1.5 * (arc + 0.5 * math.sin(v.co.z * 0.25)) + 0.9) + 0.08 * math.sin(3.7 * arc + 1.3)
+        v.co += v.normal * ridge * fade
     return mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
 
 
@@ -594,10 +643,11 @@ def curtain_bang(tree, s):
             if r_prev is not None:
                 r = max(r, r_prev - 0.35)
             r_prev = r
-            tuck = min(1.0, t / 0.2)
+            tuck = min(1.0, t / 0.35)
+            tuck = tuck * tuck * (3 - 2 * tuck)     # (the roots surface gradually from under the hair)
             rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.012
             # (the tips settle onto the skin; the root starts under the cap)
-            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) - 0.3 * (1 - tuck)))
+            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) - 0.45 * (1 - tuck)))
             ds.append(d)
             rrs.append(rr)
             ts.append(t)
@@ -999,13 +1049,17 @@ def build():
         # (the strands cast no shadow of their own: their dark undersides and the shade they threw on the cap
         # marked the bangs off from the rest of the hair; the cap still shades the forehead)
         bang.visible_shadow = False
-        mesh_obj(f'Side lock {s}', loft([(6.6, 0.85, 1.3, s * 3.05, 0.3), (4.5, 0.85, 1.35, s * 3.45, 0.9), (2.0, 0.8, 1.3, s * 3.6, 1.35),
-                                         (-1.0, 0.8, 1.25, s * 3.8, 1.5), (-3.2, 0.8, 1.1, s * 4.05, 1.5), (-4.4, 0.35, 0.5, s * 4.15, 1.5)]),
+        # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.62, 1.35, s * 3.3, 0.9), (2.0, 0.6, 1.3, s * 3.45, 1.35),
+                                         (-1.0, 0.6, 1.25, s * 3.65, 1.5), (-2.0, 0.5, 1.0, s * 3.75, 1.6), (-2.6, 0.25, 0.45, s * 3.8, 1.7)]),
                  M_HAIR, head)
-    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.3), (0.5, 3.7, 2.1, 0, 3.3), (-1.5, 3.8, 1.6, 0, 4.4),
-                                (-4.5, 4.15, 1.4, 0, 5.45), (-9.0, 4.25, 1.3, 0, 5.4), (-13.0, 3.95, 1.2, 0, 4.6),
-                                (-16.0, 3.55, 1.0, 0, 4.4), (-16.8, 2.4, 0.6, 0, 4.4)]), M_HAIR, head)
-    fuse_hair(head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall'])
+    # (the fall stands far enough back to lie over the mantle, and its end is uneven: a few locks hang lower than
+    # the rest instead of the whole fall stopping in one rounded edge)
+    ragged = lambda phi: -1.8 * max(0.0, math.sin(3 * phi + 0.5)) ** 2 - 0.8 * max(0.0, math.sin(5 * phi + 2.0)) ** 2
+    mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.9, 0, 2.4), (0.5, 3.7, 2.1, 0, 3.6), (-1.5, 3.8, 1.6, 0, 5.0),
+                                (-4.5, 4.15, 1.4, 0, 6.4), (-7.0, 4.25, 1.3, 0, 6.5), (-9.5, 4.2, 1.25, 0, 6.0), (-13.0, 3.95, 1.2, 0, 5.1),
+                                (-16.0, 3.55, 1.0, 0, 4.7, ragged), (-16.8, 2.4, 0.6, 0, 4.7, ragged)]), M_HAIR, head)
+    HAIR_PARTS[:] = [head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall']]
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
     # (eased between a few rings; below the shoulders the wool falls in a few deep, slightly uneven folds that
@@ -1037,6 +1091,9 @@ def build():
     clasp = ellipsoid(0.9, 0.4, 1.3, 12, 8)
     bmesh.ops.rotate(clasp, cent=(0, 0, 0), matrix=Euler((0, 0.6, 0)).to_matrix(), verts=clasp.verts)
     mesh_obj('Leaf clasp', clasp, M_GOLD, body, loc=(-0.7, -4.85, 50.6), subdiv=0)
+
+    # the hair's pieces are fused once the mantle is on, so the fall can be kept clear of it
+    fuse_hair(*HAIR_PARTS)
 
     # ---- the rig: one bone per limb segment, each following its pivot (the pivots carry the pose; see pose()).
     # Each limb is a single mesh weighted across its joints, so elbows and knees bend in one smooth piece.
