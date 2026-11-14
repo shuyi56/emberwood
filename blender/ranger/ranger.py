@@ -680,10 +680,9 @@ HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 11.0, 8.6
 LEG_X, SH_X = 3.3, 6.1
-STRIDE, LIFT = 8.0, 3.2
-# the walk's range of motion: the arms' swing (radians either way), and how far the body drops from its height at
-# the passing pose to where the legs are furthest apart (the world model takes a longer stride: see export_glb.py)
-ARM_SWING, BOB_PASS, BOB_APART = 0.38, -1.1, 1.0
+# the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
+# either way, in radians (the world model takes a longer stride: see export_glb.py)
+GAIT, ARM_SWING = 1.0, 0.4
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -2064,14 +2063,87 @@ def leg_ik(hip_z, fwd, foot_z):
     return alpha + beta, alpha - gamma
 
 
+# ---- the walk cycle
+# Each leg's joints follow the curves of a real walk through one cycle (t from 0 at the heel striking the ground,
+# through the stance to toe-off at about 0.6, then the swing back to the next heel strike), in degrees:
+# the hip, forward of straight down (furthest forward just before the heel strikes, furthest back at push-off);
+# the knee, bent (a little as the heel takes the weight, nearly straight in mid-stance, then folding up to about
+# 60 degrees through the swing, so the foot is lifted clear, and staying bent as the thigh comes up in front, so the
+# knee is raised as the leg comes through before the lower leg reaches out for the heel strike); and the
+# foot's pitch, toes up positive (up at the heel strike, flat through the stance, rolling up onto the toes to push
+# off, and lifted again through the swing so the toes clear the ground).
+GAIT_HIP = [(0.0, 22), (0.15, 17), (0.35, 0), (0.52, -13), (0.62, -8), (0.71, 10), (0.81, 25), (0.9, 27)]
+GAIT_KNEE = [(0.0, 3), (0.12, 15), (0.3, 5), (0.45, 7), (0.6, 30), (0.7, 56), (0.8, 55), (0.9, 22), (0.97, 4)]
+GAIT_FOOT = [(0.0, 14), (0.08, 0), (0.42, 0), (0.52, -14), (0.61, -32), (0.7, -12), (0.82, 6), (0.94, 12)]
+# The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
+# back, and the elbow folds as the arm swings forward and opens as it swings back, lagging behind the shoulder, so
+# the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum
+ARM_LAG, ELBOW_LAG = 0.05, 0.08
+STANCE = 0.62
+
+
+def cyclic(keys, t):
+    """A smooth closed curve through keys [(t, value)] over t in [0, 1)."""
+    t %= 1.0
+    n = len(keys)
+    for i in range(n):
+        t0, v1 = keys[i]
+        t1, v2 = keys[(i + 1) % n]
+        if i == n - 1:
+            t1 += 1.0
+        tt = t + 1.0 if t < t0 else t
+        if t0 <= tt <= t1:
+            u = (tt - t0) / (t1 - t0)
+            v0, v3 = keys[(i - 1) % n][1], keys[(i + 2) % n][1]
+            return 0.5 * (2 * v1 + (v2 - v0) * u + (2 * v0 - 5 * v1 + 4 * v2 - v3) * u * u + (3 * v1 - v0 - 3 * v2 + v3) * u ** 3)
+    return keys[0][1]
+
+
+def gait_leg(t):
+    """(thigh angle forward, knee bend, foot pitch toes-up) in radians, at point t of a leg's cycle. (The hip's
+    swing is scaled about its middle by GAIT; the knee and foot follow the same shape.)"""
+    hip = 6.5 + (cyclic(GAIT_HIP, t) - 6.5) * GAIT
+    return math.radians(hip), math.radians(cyclic(GAIT_KNEE, t)), math.radians(cyclic(GAIT_FOOT, t))
+
+
+def leg_fk(th, kb):
+    """(forward, down) of the ankle from the hip for a thigh angle and knee bend."""
+    sh = th - kb
+    return THIGH * math.sin(th) + SHIN * math.sin(sh), THIGH * math.cos(th) + SHIN * math.cos(sh)
+
+
+def foot_lift(pitch):
+    """How far the ankle stands above its flat height when the foot is tipped onto its toes (pitch < 0) or its
+    heel (pitch > 0)."""
+    return 3.0 * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
+
+
+def walk_drop(t):
+    """How far the hips sit below their standing height at walk phase t (t of the right leg): whichever foot bears
+    the weight stays on the ground, so the body rises over the straight leg in mid-stance and dips as the legs
+    spread. The swing leg's foot is wherever its joints put it, lifted clear of the ground."""
+    best = None
+    for tl in (t, t + 0.5):
+        tl %= 1.0
+        if tl >= STANCE:
+            continue
+        th, kb, pitch = gait_leg(tl)
+        down = leg_fk(th, kb)[1]
+        need = HIP_Z - ANKLE_Z - foot_lift(pitch)
+        d = need - down
+        best = d if best is None else min(best, d)     # (the higher: no foot sinks into the ground)
+    return best if best is not None else 0.0
+
+
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
-    swing = math.sin(ph)
+    # (the right leg's point in its cycle: its heel strikes when its foot is furthest forward)
+    tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
     if walking:
-        bob = lerp(BOB_PASS, BOB_APART, abs(swing))
+        bob = walk_drop(tr)
     else:
         bob = 1.0 if col == 1 else 0.0
     bob = round(bob * RES) / RES          # whole sheet pixels, so the face never shifts by a fraction
@@ -2082,36 +2154,36 @@ def pose(col):
     for side, s in (('R', 1), ('L', -1)):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
+        out, turn = 0.0, 0.0
         if walking:
-            p = ph + (0 if s > 0 else math.pi)
-            fwd = math.sin(p) * STRIDE
-            lift = LIFT * max(0.0, math.cos(p)) ** 1.5     # the foot travelling forward is off the ground
-            out = 0.0
-            turn = 0.0
-            toe = -0.25 * max(0.0, -math.cos(p)) * max(0.0, -math.sin(p))   # heel peels up behind
+            t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
+            th, kb, pitch = gait_leg(t)
         else:
             # hip-width stance: weight on the right leg, under the body; the left foot eased forward, out, and turned out
             fwd = -1.0 if s > 0 else 4.6
-            lift = 0.0
             out = 0.0 if s > 0 else 0.6
             turn = 0.0 if s > 0 else 0.35
-            toe = 0.0
+            th, shn = leg_ik(hip_z, fwd, ANKLE_Z)
+            kb, pitch = th - shn, 0.0
         hip.location = (-s * (LEG_X + out), 0, HIP_Z)
-        th, shn = leg_ik(hip_z, fwd, ANKLE_Z + lift)
         hip.rotation_euler = (-th, 0, 0)
-        kn.rotation_euler = (-(shn - th), 0, 0)
-        an.rotation_euler = (shn + toe, 0, -s * turn)
+        kn.rotation_euler = (kb, 0, 0)
+        # (the foot is held at its pitch from level: the ankle takes out the shin's lean)
+        an.rotation_euler = (th - kb + pitch, 0, -s * turn)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = -math.sin(ph + (0 if s > 0 else math.pi)) * ARM_SWING
-            bend = 0.25 + 0.3 * max(0.0, a)
+            a = ARM_SWING * (0.12 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
+            fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
+            bend = 0.22 + 0.62 * fold ** 1.4
+            flick = 0.06 + 0.16 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
+            flick = 0.1
         sh.rotation_euler = (-a, s * 0.17, 0)   # held a little off the body, so the waist shows
         el.rotation_euler = (-bend, 0, 0)
-        wr.rotation_euler = (0.1, 0, 0)
+        wr.rotation_euler = (flick, 0, 0)
 
 
 # ---------------------------------------------------------------- render and pixel-art conversion
