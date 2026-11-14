@@ -92,15 +92,15 @@ def mat_def(mid, name, rmp, detail=0.0, flat=None):
 M_SKIN = mat_def(1, 'skin', SKIN, 0.0)
 M_HAIR = mat_def(2, 'hair', ramp(0x7e4c34, 0.1), 0.22)
 M_MANTLE = mat_def(3, 'mantle', ramp(0x56663f, 0.1), 0.14)
-M_JERKIN = mat_def(4, 'jerkin', ramp(0x765a40, 0.1), 0.16)
+M_JERKIN = mat_def(4, 'jerkin', ramp(0x765a40, 0.1), 0.24)
 M_SHIRT = mat_def(5, 'shirt', ramp(0xaca48d, 0.09), 0.04)
 M_SLEEVE = mat_def(6, 'sleeve', ramp(0x63704a, 0.1), 0.07)
 M_LEGS = mat_def(7, 'trousers', ramp(0x5b5547, 0.1), 0.05)
 M_KNEE = mat_def(8, 'knee patch', ramp(0x7a6c52, 0.1), 0.0)
-M_BOOTS = mat_def(9, 'boots', ramp(0x684a32, 0.1), 0.16)
-M_CUFF = mat_def(10, 'boot cuff', ramp(0x7a5b40, 0.1), 0.14)
+M_BOOTS = mat_def(9, 'boots', ramp(0x684a32, 0.1), 0.24)
+M_CUFF = mat_def(10, 'boot cuff', ramp(0x7a5b40, 0.1), 0.2)
 M_SOLE = mat_def(11, 'sole', ramp(0x2f2620, 0.08), 0.0)
-M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.12)
+M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.18)
 M_STEEL = mat_def(13, 'buckle', ramp(0x9a978f, 0.09), 0.0)
 M_GOLD = mat_def(14, 'clasp', ramp(0xa8905c, 0.09), 0.0)
 M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
@@ -111,8 +111,8 @@ M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
 M_STITCH = mat_def(22, 'stitching', ramp(0xb39a74, 0.08), 0.0, flat=2)
-# leather takes a soft sheen (a glossy layer whose highlight lifts the tone) and a grained surface
-LEATHER = {M_JERKIN: 0.55, M_BELT: 0.5, M_BOOTS: 0.6, M_CUFF: 0.5}
+# leather is matte, with a pebbled grain pressed into its surface
+LEATHER = {M_JERKIN, M_BELT, M_BOOTS, M_CUFF}
 
 
 # ---------------------------------------------------------------- scene and materials
@@ -132,16 +132,30 @@ def make_material(mid):
     mid_rgb = d['ramp'][2] / 255.0
     lin = [((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92 for c in mid_rgb]
     bsdf.inputs['Color'].default_value = (*lin, 1.0)
+    nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
     if mid in LEATHER:
-        gl = nt.nodes.new('ShaderNodeBsdfGlossy')
-        gl.inputs['Roughness'].default_value = 0.45
-        gl.inputs['Color'].default_value = (0.1, 0.1, 0.1, 1.0)
-        add = nt.nodes.new('ShaderNodeAddShader')
-        nt.links.new(bsdf.outputs['BSDF'], add.inputs[0])
-        nt.links.new(gl.outputs['BSDF'], add.inputs[1])
-        nt.links.new(add.outputs['Shader'], out.inputs['Surface'])
-    else:
-        nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+        # the grain: fine pebbling and scattered pores pressed into the surface, so it catches the light in the
+        # render itself (and reads as grain at sprite size, not only as a painted pattern)
+        rest = nt.nodes.new('ShaderNodeAttribute')
+        rest.attribute_name = 'rest'
+        peb = nt.nodes.new('ShaderNodeTexVoronoi')
+        peb.feature = 'SMOOTH_F1'
+        peb.inputs['Scale'].default_value = 2.4
+        nt.links.new(rest.outputs['Vector'], peb.inputs['Vector'])
+        fine = nt.nodes.new('ShaderNodeTexNoise')
+        fine.inputs['Scale'].default_value = 3.0
+        fine.inputs['Detail'].default_value = 4.0
+        nt.links.new(rest.outputs['Vector'], fine.inputs['Vector'])
+        mix = nt.nodes.new('ShaderNodeMath')
+        mix.operation = 'MULTIPLY_ADD'
+        mix.inputs[1].default_value = 0.6
+        nt.links.new(peb.outputs['Distance'], mix.inputs[0])
+        nt.links.new(fine.outputs['Fac'], mix.inputs[2])
+        bump = nt.nodes.new('ShaderNodeBump')
+        bump.inputs['Strength'].default_value = 0.55
+        bump.inputs['Distance'].default_value = 0.15
+        nt.links.new(mix.outputs[0], bump.inputs['Height'])
+        nt.links.new(bump.outputs['Normal'], bsdf.inputs['Normal'])
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -191,7 +205,7 @@ def make_material(mid):
         nt.links.new(vor.outputs['Distance'], pore.inputs[0])
         sub = nt.nodes.new('ShaderNodeMath')
         sub.operation = 'MULTIPLY_ADD'
-        sub.inputs[1].default_value = -0.35
+        sub.inputs[1].default_value = -0.45
         nt.links.new(pore.outputs[0], sub.inputs[0])
         nt.links.new(tex.outputs['Fac'], sub.inputs[2])
         nt.links.new(sub.outputs[0], adet.inputs['Value'])
@@ -576,6 +590,10 @@ def hand_mesh(s):
         e.size_x, e.size_y, e.size_z = size
         e.stiffness = 2.0
 
+    # the wrist: rising from inside the cuff and widening into the heel and back of the hand, so the hand grows
+    # out of the forearm instead of hanging below it
+    capsule((0.0, 0.08, 1.6), (0.0, 0.04, -0.55), 0.62)
+    blob((0.0, 0.05, -0.35), (0.5, 0.8, 0.45), 0.85)
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
@@ -866,7 +884,6 @@ def build():
     vl = sc.view_layers[0]
     vl.use_pass_diffuse_direct = True
     vl.use_pass_normal = True
-    vl.use_pass_glossy_direct = True
     for name in ('matid', 'detail'):
         a = vl.aovs.add()
         a.name = name
@@ -1002,7 +1019,6 @@ def to_pixels(ch):
     # fill: a soft sky light, brighter on surfaces facing up and toward the camera (normals are in world space)
     nz, ny = find(ch, 'Normal.Z') / cov, find(ch, 'Normal.Y') / cov
     light = sun + 0.30 + 0.12 * nz - 0.08 * ny
-    gloss = sum(find(ch, 'Glossy Direct.' + c) for c in 'RGB') / 3.0 / cov
     h, w = alpha.shape
     out = np.zeros((h, w, 4), dtype=np.float32)
     solid = (alpha > 0.5) & (mid > 0)
@@ -1014,8 +1030,6 @@ def to_pixels(ch):
             tone = np.full(sel.sum(), d['flat'])
         else:
             L = light[sel] * (1.0 + (det[sel] - 0.5) * 2 * d['detail'])
-            if m in LEATHER:     # the sheen: highlights lift a tone where the leather turns toward the light
-                L = L + gloss[sel] * LEATHER[m] * 10.0
             tone = np.digitize(L, TONE_EDGES)
         out[sel, :3] = d['ramp'][tone]
         out[sel, 3] = 255
