@@ -823,55 +823,127 @@ def skin_surface(nt, bsdf, out):
     colour is the baked 'skin' tone (see skin_tones): rosier at the cheeks, nose, chin, knuckles and fingertips,
     cooler and a little darker under the eyes and the jaw, warmer where it is shut in. Light passes into it and
     comes out reddened (subsurface scattering, red reaching furthest), which softens the turn from light to shade
-    and warms the edge of every shadow. A faint mottling breaks up the colour, and it is a little glossier down
-    the nose and on the chin than on the cheeks."""
+    and warms the edge of every shadow.
+
+    Its texture, all laid out in the rest position so it stays fixed to the skin as she moves (and drawn a little
+    larger than life, so it shows in a close-up of the head rather than only under a lens):
+    - the fine net of creases that covers all skin, small plateaus between shallow grooves, at two sizes;
+    - pores, small pits, densest on the nose, the chin and the cheeks beside the nose;
+    - creases across the knuckles and faint rings round the neck;
+    - colour that is not even: blotches a little redder or sallower, a fine speckle, the grooves and pores a
+      shade darker, and a light scatter of freckles over the nose and cheeks and the backs of the hands;
+    - a sheen that breaks up over the relief: rougher in the grooves, glossier on the nose, chin and brow.
+    The 'skin tex' colour says where (red: freckles, green: creases, blue: pores)."""
+    L = nt.links.new
+
+    def node(kind, **props):
+        n = nt.nodes.new(kind)
+        for k, v in props.items():
+            setattr(n, k, v)
+        return n
+
+    def math_(op, a, b=None, c=None):
+        n = node('ShaderNodeMath', operation=op)
+        for i, v in enumerate((a, b, c)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                n.inputs[i].default_value = v
+            else:
+                L(v, n.inputs[i])
+        return n.outputs[0]
+
+    def ramp_(v, lo, hi, to_lo=0.0, to_hi=1.0, smooth=True):
+        n = node('ShaderNodeMapRange', interpolation_type='SMOOTHSTEP' if smooth else 'LINEAR')
+        L(v, n.inputs['Value'])
+        for k, x in (('From Min', lo), ('From Max', hi), ('To Min', to_lo), ('To Max', to_hi)):
+            n.inputs[k].default_value = x
+        return n.outputs['Result']
+
+    def tex(kind, scale, **props):
+        n = node(kind, **props)
+        n.inputs['Scale'].default_value = scale
+        L(rest.outputs['Vector'], n.inputs['Vector'])
+        return n
+
+    def tint(colour, target, fac):
+        n = node('ShaderNodeMix', data_type='RGBA')
+        L(fac, n.inputs['Factor'])
+        L(colour, n.inputs['A'])
+        n.inputs['B'].default_value = (*_srgb_lin(target), 1.0)
+        return n.outputs['Result']
+
     bsdf.name = 'sprite bsdf'
-    col = nt.nodes.new('ShaderNodeVertexColor')
-    col.layer_name = 'skin'
-    rest = nt.nodes.new('ShaderNodeAttribute')
-    rest.attribute_name = 'rest'
-    mot = nt.nodes.new('ShaderNodeTexNoise')
-    mot.inputs['Scale'].default_value = 1.6
-    mot.inputs['Detail'].default_value = 3.0
-    nt.links.new(rest.outputs['Vector'], mot.inputs['Vector'])
-    mk = nt.nodes.new('ShaderNodeMapRange')
-    mk.inputs['To Min'].default_value = 0.93
-    mk.inputs['To Max'].default_value = 1.05
-    nt.links.new(mot.outputs['Fac'], mk.inputs['Value'])
-    tone = nt.nodes.new('ShaderNodeVectorMath')
-    tone.operation = 'SCALE'
-    nt.links.new(col.outputs['Color'], tone.inputs[0])
-    nt.links.new(mk.outputs['Result'], tone.inputs['Scale'])
-    sb = nt.nodes.new('ShaderNodeBsdfPrincipled')
-    sb.name = 'skin bsdf'
-    nt.links.new(tone.outputs['Vector'], sb.inputs['Base Color'])
+    col = node('ShaderNodeVertexColor', layer_name='skin')
+    rest = node('ShaderNodeAttribute', attribute_name='rest')
+    fx = node('ShaderNodeSeparateColor')
+    L(node('ShaderNodeVertexColor', layer_name='skin fx').outputs['Color'], fx.inputs['Color'])
+    where = node('ShaderNodeSeparateColor')
+    L(node('ShaderNodeVertexColor', layer_name='skin tex').outputs['Color'], where.inputs['Color'])
+    freckly, creased, pored = where.outputs['Red'], where.outputs['Green'], where.outputs['Blue']
+
+    # ---- relief
+    # the net of fine creases: 1 on the plateaus, falling to 0 in the grooves between them
+    net = ramp_(tex('ShaderNodeTexVoronoi', 12.0, feature='DISTANCE_TO_EDGE').outputs['Distance'], 0.0, 0.2)
+    net2 = ramp_(tex('ShaderNodeTexVoronoi', 27.0, feature='DISTANCE_TO_EDGE').outputs['Distance'], 0.0, 0.25)
+    # pores: a pit at the middle of each cell of a finer pattern, only where the skin is pored
+    pv = tex('ShaderNodeTexVoronoi', 13.0, feature='F1')
+    pit = math_('MULTIPLY', ramp_(pv.outputs['Distance'], 0.05, 0.3, 1.0, 0.0), pored)
+    # creases across the knuckles (and the neck): bands running round the finger, wavering, deepest mid-joint
+    wave = tex('ShaderNodeTexWave', 1.7, wave_type='BANDS', bands_direction='Z', wave_profile='SIN')
+    wave.inputs['Distortion'].default_value = 2.2
+    wave.inputs['Detail'].default_value = 1.5
+    wave.inputs['Detail Scale'].default_value = 1.4
+    fold = math_('MULTIPLY', ramp_(wave.outputs['Fac'], 0.25, 0.75, 1.0, 0.0), creased)
+    height = math_('MULTIPLY_ADD', net, 0.3, math_('MULTIPLY', net2, 0.2))
+    height = math_('SUBTRACT', height, math_('MULTIPLY_ADD', pit, 1.6, math_('MULTIPLY', fold, 2.0)))
+    bump = node('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.2
+    bump.inputs['Distance'].default_value = 0.03
+    L(height, bump.inputs['Height'])
+
+    # ---- colour
+    # blotches (redder or sallower), then a fine speckle of lighter and darker
+    blotch = tex('ShaderNodeTexNoise', 1.3)
+    blotch.inputs['Detail'].default_value = 2.0
+    c = tint(col.outputs['Color'], [206, 124, 110], ramp_(blotch.outputs['Fac'], 0.52, 0.8, 0.0, 0.22))
+    c = tint(c, [212, 176, 128], ramp_(blotch.outputs['Fac'], 0.48, 0.2, 0.0, 0.2))
+    fine = tex('ShaderNodeTexNoise', 9.0)
+    fine.inputs['Detail'].default_value = 3.0
+    fine.inputs['Roughness'].default_value = 0.65
+    # (and the grooves and pores hold a little shade)
+    k = math_('MULTIPLY', ramp_(fine.outputs['Fac'], 0.25, 0.75, 0.92, 1.06, smooth=False),
+              math_('SUBTRACT', math_('MULTIPLY_ADD', net, 0.025, 0.975), math_('MULTIPLY_ADD', pit, 0.1, math_('MULTIPLY', fold, 0.12))))
+    sc_ = node('ShaderNodeVectorMath', operation='SCALE')
+    L(c, sc_.inputs[0])
+    L(k, sc_.inputs['Scale'])
+    # freckles: some cells of a scatter carry a soft brown fleck, each its own size and strength
+    fv = tex('ShaderNodeTexVoronoi', 5.5, feature='F1')
+    fv.inputs['Randomness'].default_value = 1.0
+    rnd = node('ShaderNodeSeparateColor')
+    L(fv.outputs['Color'], rnd.inputs['Color'])
+    size = math_('MULTIPLY_ADD', rnd.outputs['Green'], 0.1, 0.07)
+    fleck = ramp_(math_('DIVIDE', fv.outputs['Distance'], size), 0.55, 1.0, 1.0, 0.0)
+    some = math_('MULTIPLY', ramp_(rnd.outputs['Red'], 0.3, 0.4), math_('MULTIPLY_ADD', rnd.outputs['Blue'], 0.6, 0.4))
+    freckle = math_('MULTIPLY', math_('MULTIPLY', fleck, some), freckly)
+    c = tint(sc_.outputs['Vector'], [150, 96, 66], freckle)
+
+    sb = node('ShaderNodeBsdfPrincipled', name='skin bsdf')
+    L(c, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
     sb.inputs['Subsurface Weight'].default_value = 1.0
     sb.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.18)
     sb.inputs['Subsurface Scale'].default_value = 0.12      # (one unit is about 2.7 cm on her)
     sb.inputs['Specular IOR Level'].default_value = 0.38
     sb.inputs['IOR'].default_value = 1.4
-    # gloss: the baked 'skin fx' blue channel is how oily the skin is there (nose, chin, brow)
-    fx = nt.nodes.new('ShaderNodeVertexColor')
-    fx.layer_name = 'skin fx'
-    sp = nt.nodes.new('ShaderNodeSeparateColor')
-    nt.links.new(fx.outputs['Color'], sp.inputs['Color'])
-    rough = nt.nodes.new('ShaderNodeMapRange')
-    rough.inputs['To Min'].default_value = 0.58
-    rough.inputs['To Max'].default_value = 0.4
-    nt.links.new(sp.outputs['Blue'], rough.inputs['Value'])
-    nt.links.new(rough.outputs['Result'], sb.inputs['Roughness'])
-    # pores and fine unevenness: only a breath of relief, so the surface is not a smooth moulded shell
-    pore = nt.nodes.new('ShaderNodeTexNoise')
-    pore.inputs['Scale'].default_value = 14.0
-    pore.inputs['Detail'].default_value = 2.0
-    nt.links.new(rest.outputs['Vector'], pore.inputs['Vector'])
-    bump = nt.nodes.new('ShaderNodeBump')
-    bump.inputs['Strength'].default_value = 0.06
-    bump.inputs['Distance'].default_value = 0.02
-    nt.links.new(pore.outputs['Fac'], bump.inputs['Height'])
-    nt.links.new(bump.outputs['Normal'], sb.inputs['Normal'])
-    nt.links.new(sb.outputs['BSDF'], out.inputs['Surface'])
+    # gloss: the 'skin fx' blue channel is how oily the skin is there (nose, chin, brow); the grooves, pores and
+    # creases are duller than the plateaus between them, which breaks the highlight up into a skin-like sparkle
+    rough = ramp_(fx.outputs['Blue'], 0.0, 1.0, 0.56, 0.38, smooth=False)
+    rough = math_('ADD', rough, math_('MULTIPLY_ADD', math_('SUBTRACT', 1.0, net), 0.06,
+                                      math_('MULTIPLY_ADD', pit, 0.14, math_('MULTIPLY', fine.outputs['Fac'], 0.08))))
+    L(rough, sb.inputs['Roughness'])
+    L(bump.outputs['Normal'], sb.inputs['Normal'])
+    L(sb.outputs['BSDF'], out.inputs['Surface'])
 
 
 def _srgb_lin(c):
@@ -905,8 +977,8 @@ def _occlusion(co, nrm, tree, rays=12, dist=1.4, seed=5):
 
 def skin_tones():
     """Bake the skin's colour into each skin mesh, as two point colours: 'skin', the linear albedo the close-ups
-    and the world model show, and 'skin fx' (red: flush, green: shade, blue: gloss) for the sprite passes and
-    the roughness. Painted from where each point lies on the part: blush across the cheeks and on the nose, the
+    and the world model show, 'skin fx' (red: flush, green: shade, blue: gloss) for the sprite passes and the
+    roughness, and 'skin tex' (red: freckles, green: creases, blue: pores), where the close-up texture goes. Painted from where each point lies on the part: blush across the cheeks and on the nose, the
     chin a little warm, cool and darker under the eyes and on the underside of the jaw, the knuckles and
     fingertips rosy and the thin skin at the wrist cooler; and everywhere the skin is shut in (the eye sockets, under
     the jaw, between the fingers) it goes darker and warmer, the way light that has passed through skin comes
@@ -930,6 +1002,11 @@ def skin_tones():
             o.evaluated_get(dg).to_mesh_clear()
         return BVHTree.FromPolygons(vs, ps)
 
+    def rest_of(o, co):       # the pattern coordinates of a mesh's points (see mesh_obj)
+        a = np.zeros(len(co) * 3, dtype=np.float32)
+        o.data.attributes['rest'].data.foreach_get('vector', a)
+        return a.reshape(-1, 3)
+
     head_parts = [o.name for o in bpy.data.objects if o.parent and o.parent.name == 'Head' and o.type == 'MESH']
     for o in [o for o in bpy.data.objects if o.type == 'MESH' and o.data.materials
               and o.data.materials[0].name == 'skin']:
@@ -938,6 +1015,7 @@ def skin_tones():
         nr = np.array([tuple(v.normal) for v in me.vertices])
         n = len(co)
         flush, shade, gloss, cold = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
+        freck, crease, pores = np.zeros(n), np.zeros(n), np.full(n, 0.3)
         if o.name == 'Head shape':
             u, w = co[:, 0] / HEAD_H, co[:, 2] / HEAD_H
             front = np.clip(-nr[:, 1] * 1.5, 0, 1)
@@ -948,12 +1026,17 @@ def skin_tones():
             cold += np.clip(-nr[:, 2] - 0.25, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * 1.1   # under the jaw
             gloss = front * (_g(u, w, 0, 0.45, 0.04, 0.15) + 0.7 * _g(u, w, 0, 0.1, 0.06, 0.05)
                              + 0.5 * _g(u, w, 0, 0.66, 0.15, 0.06))
+            # texture: freckles in a band over the nose and the tops of the cheeks, a few on the brow; pores on
+            # the nose, the cheeks beside it, the chin and the brow
+            freck = front * np.clip(_g(u, w, 0, 0.44, 0.3, 0.075) + 0.3 * _g(u, w, 0, 0.68, 0.2, 0.06), 0, 1)
+            pores = np.clip(0.3 + front * (gloss + 0.7 * (_g(u, w, -0.1, 0.41, 0.09, 0.07) + _g(u, w, 0.1, 0.41, 0.09, 0.07))), 0, 1)
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(head_parts))
         elif o.name == 'Neck':
             t = np.clip((co[:, 2] - 51.0) / 6.0, 0, 1)        # 0 at the collar, 1 under the jaw
             cold = 0.35 + 0.5 * t ** 2       # the neck sits in the head's shade: cooler than the face throughout
+            crease = np.full(n, 0.22)        # the faint rings round a neck
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(['Neck', 'Head shape', 'Hair']), dist=2.0)
@@ -969,6 +1052,11 @@ def skin_tones():
             flush += 0.35 * np.clip(s * nr[:, 0], 0, 1) * np.clip((-z - 0.5) / 2, 0, 1)   # the palm is pinker
             cold = 0.45 * np.clip(1 - np.abs(z + 0.2) / 1.2, 0, 1) * back                  # the thin skin at the wrist
             gloss = 0.3 * np.clip((-z - 5.3) / 0.8, 0, 1)
+            # texture: creases over each knuckle (on the back) and fainter all round the fingers' joints, a few
+            # freckles on the back of the hand
+            joints = np.exp(-((z + 3.15) / 0.4) ** 2) + np.exp(-((z + 4.5) / 0.34) ** 2)
+            crease = np.clip(joints * (0.12 + 0.88 * back * rows), 0, 1)
+            freck = 0.5 * back * np.clip((-z - 0.3) / 1.0, 0, 1) * np.clip((z + 3.4) / 0.8, 0, 1)
             local = BVHTree.FromPolygons([v.co for v in me.vertices], [list(p.vertices) for p in me.polygons])
             occ = _occlusion(co, nr, local, dist=0.9)
         flush, cold, gloss = np.clip(flush, 0, 1), np.clip(cold, 0, 1), np.clip(gloss, 0, 1)
@@ -981,7 +1069,14 @@ def skin_tones():
         if o.name == 'Neck':
             c *= 0.9      # (and a shade darker than the face, which it sits under)
         shade = np.clip(0.9 * occ + 0.6 * cold, 0, 1)
-        for name, rgb in (('skin', c), ('skin fx', np.stack([flush, shade, gloss], 1))):
+        # (the colour also drifts a little from place to place, redder or sallower: broad enough to show in the
+        # world model, whose skin is only this colour)
+        from mathutils import noise
+        drift = np.array([noise.noise(Vector(q) * 0.75 + Vector((3.1, 7.7, 1.3))) for q in rest_of(o, co)])
+        c = c + (_srgb_lin([206, 124, 110]) - c) * np.clip(drift, 0, 1)[:, None] * 0.3
+        c = c + (_srgb_lin([212, 176, 128]) - c) * np.clip(-drift, 0, 1)[:, None] * 0.3
+        for name, rgb in (('skin', c), ('skin fx', np.stack([flush, shade, gloss], 1)),
+                          ('skin tex', np.stack([freck, crease, pores], 1))):
             a = me.color_attributes.new(name, 'FLOAT_COLOR', 'POINT')
             a.data.foreach_set('color', np.concatenate([rgb, np.ones((n, 1))], 1).astype(np.float32).ravel())
         me.color_attributes.active_color = me.color_attributes['skin']

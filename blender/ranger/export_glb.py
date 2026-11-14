@@ -497,10 +497,12 @@ def main():
     bake_cloth_form()
     bake_hands()
     bake_gold()
-    # the sprite's passes ('skin fx') mean nothing to the world: only the skin's colour goes into the model
+    # the sprite's passes ('skin fx') and the close-up texture's masks ('skin tex') mean nothing to the world: only
+    # the skin's colour goes into the model
     for o in sc.objects:
-        if o.type == 'MESH' and 'skin fx' in o.data.color_attributes:
-            o.data.color_attributes.remove(o.data.color_attributes['skin fx'])
+        for name in ('skin fx', 'skin tex'):
+            if o.type == 'MESH' and name in o.data.color_attributes:
+                o.data.color_attributes.remove(o.data.color_attributes[name])
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
     # and the head is cut very fine round the eyes for the sprites' sculpted lids: the model needs far less
     for name, ratio in (('Hair', 0.11), ('Head shape', 0.4)):
