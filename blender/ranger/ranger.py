@@ -1171,6 +1171,11 @@ def iris_colours(me, to_disc, r, s):
         zn = p.z / r
         t -= 0.3 * smooth(0.05, 0.7, zn)                    # the shadow of the upper lid
         t += 0.22 * smooth(-0.1, -0.65, zn) * (1 - smooth(0.7, 0.92, q))   # light gathered low in the iris
+        # its roundness, as a painter shades a ball: lit from the upper left (facing the camera), so the tone
+        # turns darker toward the far, lower-right edge and a little lighter on the near side
+        xn = p.x * s / r
+        t += 0.2 * (-xn * 0.6 + zn * 0.3) * smooth(0.25, 0.95, q)
+        t -= 0.24 * q * q
         warm = smooth(0.62, 0.4, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
         t = min(1.0, max(0.0, t + 0.22 * warm))
         k = t * 4
@@ -1291,14 +1296,13 @@ def eye_relief(x, z, s, ex, ez):
     inside = smooth(1.08, 0.8, abs(u))                # 1 within the opening, 0 just past its corners
     d = 0.0
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
-    d += 0.085 * g(dz - (T - 0.035), 0.075) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    d += 0.065 * g(dz - (T - 0.035), 0.075) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     # the crease of the upper lid: a clear, narrow fold a lid's breadth above the edge, following its curve and
     # fading out toward either corner, with the soft fullness under the brow rolling over it from above (the
     # upper lid is the one that moves, so it carries the eye's one strong fold)
     cz = T + 0.13 + 0.035 * (1 - uc * uc)
     cf = smooth(1.05, 0.55, abs(u + 0.05))
-    d -= 0.03 * g(dz - cz, 0.042) * cf
-    d += 0.007 * g(dz - (cz + 0.12), 0.09) * cf
+    d -= 0.016 * g(dz - cz, 0.03) * cf
     # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
     d += 0.045 * g(dz + (B - 0.01), 0.06) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     lz = -(B + 0.17 + 0.03 * uc)
@@ -1413,7 +1417,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
         t = min(1.0, math.hypot(v.co.x, v.co.z) / IR)
         h = wtree.ray_cast(Vector((c.x + v.co.x, -50, c.z + v.co.z)), Vector((0, 1, 0)))
         if h[0] is not None:
-            v.co.y = h[0].y - c.y - (0.006 + 0.045 * (1 - t * t))
+            v.co.y = h[0].y - c.y - (0.006 + 0.07 * (1 - t * t))
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
     iris_colours(o.data, turn.inverted(), IR, s)
 
