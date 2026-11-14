@@ -43,11 +43,66 @@ def plain_materials():
         rgb = d['ramp'][2] / 255.0
         lin = [((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92 for c in rgb]
         p.inputs['Base Color'].default_value = (*lin, 1.0)
-        p.inputs['Roughness'].default_value = 0.6 if mid == ranger.M_HAIR else 0.9
+        p.inputs['Roughness'].default_value = 0.9
+        if mid == ranger.M_HAIR:
+            # hair: each strand its own tone (the 'strands' colour, exported as the vertex colour, with the shade
+            # where the hair is shut in baked into it), a soft warm sheen instead of a white highlight, and only a
+            # little gloss, so it reads as hair and not as a moulded, glossy shell
+            col = nt.nodes.new('ShaderNodeVertexColor')
+            col.layer_name = 'strands'
+            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            p.inputs['Roughness'].default_value = 0.72
+            p.inputs['Specular IOR Level'].default_value = 0.25
+            p.inputs['Sheen Weight'].default_value = 1.0
+            p.inputs['Sheen Roughness'].default_value = 0.5
+            p.inputs['Sheen Tint'].default_value = (0.42, 0.22, 0.13, 1.0)
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
         nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+
+
+def bake_hair_shade(rays=10, dist=1.6):
+    """The world's renderer has no ambient occlusion of its own, so the shade where the hair is shut in (between
+    locks, under the fall, where it meets her back and the mantle) is baked into its strand colours: from each
+    point, how many rays out over its surface meet hair or body within a short distance."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    import numpy as np
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in bpy.context.scene.objects:
+        if o.type != 'MESH':
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        base = len(vs)
+        vs += [o.matrix_world @ v.co for v in me.vertices]
+        ps += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    tree = BVHTree.FromPolygons(vs, ps)
+    hair = bpy.data.objects['Hair']
+    mw = hair.matrix_world
+    nm = mw.to_3x3().inverted().transposed()
+    rng = np.random.default_rng(3)
+    dirs = rng.normal(size=(rays, 3))
+    dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+    attr = hair.data.color_attributes['strands']
+    cols = np.zeros(len(attr.data) * 4, dtype=np.float32)
+    attr.data.foreach_get('color', cols)
+    cols = cols.reshape(-1, 4)
+    for i, v in enumerate(hair.data.vertices):
+        p = mw @ v.co
+        n = (nm @ v.normal).normalized()
+        hit = 0
+        for d in dirs:
+            d = Vector(d)
+            if d.dot(n) < 0:
+                d = -d
+            d = (d + n).normalized()       # (cosine-leaning: rays nearer the normal count most)
+            if tree.ray_cast(p + n * 0.05, d, dist)[0] is not None:
+                hit += 1
+        cols[i, :3] *= 1.0 - 0.55 * hit / rays
+    attr.data.foreach_set('color', cols.ravel())
 
 
 def main():
@@ -72,8 +127,9 @@ def main():
     sc.render.fps = FPS
     sc.frame_set(1)
     plain_materials()
+    bake_hair_shade()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
-    for name, ratio in (('Hair', 0.25),):
+    for name, ratio in (('Hair', 0.11),):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')
         d.ratio = ratio
     # the rig's armature is hidden for the sprite renders; the exporter needs it in the scene to write the skin

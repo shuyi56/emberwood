@@ -203,6 +203,60 @@ def make_material(mid):
         nt.links.new(tip.outputs['Result'], tip_k.inputs[0])
         nt.links.new(tip_k.outputs[0], tint.inputs['Factor'])
         nt.links.new(tint.outputs['Result'], bsdf.inputs['Color'])
+        # what the hair looks like up close (the sprite renders keep the plain diffuse surface above; see
+        # sprite_mode). Not one even colour: each strand has its own tone, baked into the 'strands' colour (see
+        # strand_colours), lighter at the ends; darker where the hair is shut in (between locks, under the fall),
+        # which also lets the parts of the hair shade into one another rather than meet at an edge. Its sheen is
+        # soft and warm, drawn out across the strands, and a fine fuzz at the edges: not a hard white highlight
+        bsdf.name = 'sprite bsdf'
+        col = nt.nodes.new('ShaderNodeVertexColor')
+        col.layer_name = 'strands'
+        ao = nt.nodes.new('ShaderNodeAmbientOcclusion')
+        ao.inputs['Distance'].default_value = 1.6
+        ao.samples = 8
+        aok = nt.nodes.new('ShaderNodeMapRange')
+        aok.inputs['To Min'].default_value = 0.45
+        nt.links.new(ao.outputs['AO'], aok.inputs['Value'])
+        tipc = nt.nodes.new('ShaderNodeMix')
+        tipc.data_type = 'RGBA'
+        tipc.blend_type = 'SCREEN'
+        nt.links.new(tip_k.outputs[0], tipc.inputs['Factor'])
+        nt.links.new(col.outputs['Color'], tipc.inputs['A'])
+        tipc.inputs['B'].default_value = (0.32, 0.17, 0.10, 1.0)
+        shade = nt.nodes.new('ShaderNodeVectorMath')
+        shade.operation = 'SCALE'
+        nt.links.new(tipc.outputs['Result'], shade.inputs[0])
+        nt.links.new(aok.outputs['Result'], shade.inputs['Scale'])
+        hb = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        hb.name = 'hair bsdf'
+        nt.links.new(shade.outputs['Vector'], hb.inputs['Base Color'])
+        hb.inputs['Roughness'].default_value = 0.62
+        hb.inputs['Specular IOR Level'].default_value = 0.22
+        hb.inputs['Specular Tint'].default_value = (0.95, 0.62, 0.42, 1.0)
+        hb.inputs['Anisotropic'].default_value = 0.85
+        hb.inputs['Sheen Weight'].default_value = 0.35
+        hb.inputs['Sheen Roughness'].default_value = 0.45
+        hb.inputs['Sheen Tint'].default_value = (0.95, 0.68, 0.5, 1.0)
+        nt.links.new(bump.outputs['Normal'], hb.inputs['Normal'])
+        # the sheen runs across the strands: the tangent is the direction down the hair, Z flattened onto the surface
+        geo_ = nt.nodes.new('ShaderNodeNewGeometry')
+        dn = nt.nodes.new('ShaderNodeVectorMath')
+        dn.operation = 'DOT_PRODUCT'
+        dn.inputs[1].default_value = (0, 0, 1)
+        nt.links.new(geo_.outputs['Normal'], dn.inputs[0])
+        sc_ = nt.nodes.new('ShaderNodeVectorMath')
+        sc_.operation = 'SCALE'
+        nt.links.new(geo_.outputs['Normal'], sc_.inputs[0])
+        nt.links.new(dn.outputs['Value'], sc_.inputs['Scale'])
+        tg = nt.nodes.new('ShaderNodeVectorMath')
+        tg.operation = 'SUBTRACT'
+        tg.inputs[0].default_value = (0, 0, 1)
+        nt.links.new(sc_.outputs['Vector'], tg.inputs[1])
+        tn = nt.nodes.new('ShaderNodeVectorMath')
+        tn.operation = 'NORMALIZE'
+        nt.links.new(tg.outputs['Vector'], tn.inputs[0])
+        nt.links.new(tn.outputs['Vector'], hb.inputs['Tangent'])
+        nt.links.new(hb.outputs['BSDF'], out.inputs['Surface'])
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -546,7 +600,7 @@ def drape_fall(dg):
         hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
         return hit[0].y if hit[0] is not None else 0.0
 
-    W = [(4.5, 3.6), (1.5, 3.7), (-1.5, 4.1), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+    W = [(7.2, 2.0), (6.0, 3.0), (4.5, 3.6), (1.5, 3.7), (-1.5, 4.1), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
 
     def width(z):
         for (z0, w0), (z1, w1) in zip(W, W[1:]):
@@ -554,45 +608,111 @@ def drape_fall(dg):
                 return lerp(w0, w1, (z0 - z) / (z0 - z1))
         return W[0][1] if z > W[0][0] else W[-1][1]
 
-    NX, NZ = 41, 70
-    z_top = 4.5      # it starts inside the hair over the back of the head and grows out of it, so there is no seam
+    NX, NZ = 241, 120
+    # it starts high on the crown, flush with the hair over the head, and leaves it only where it hangs clear of
+    # the skull (see the hull below), so the head of hair and the fall are one surface with no edge or fold
+    z_top = 7.2
+    # at the ends it parts into eight locks, each tapering to its own fine point and gathering in toward its own
+    # middle, so the hair runs as one mass down to the last hand's breadth and only there comes apart
+    PARTINGS = [-0.74, -0.5, -0.27, -0.04, 0.2, 0.43, 0.66]     # (u of each parting between locks)
+    EDGES = [-1.0] + PARTINGS + [1.0]
+
+    def lock_of(u):
+        """Which lock u lies in, and how far across it (0 at one parting, 1 at the next)."""
+        for k_ in range(len(EDGES) - 1):
+            if u <= EDGES[k_ + 1] or k_ == len(EDGES) - 2:
+                return k_, (u - EDGES[k_]) / (EDGES[k_ + 1] - EDGES[k_])
+
     def end_z(u):     # u from -1 (her right) to 1: an uneven end, the middle longest
-        # a few rounded locks, each ending in a soft point (a smooth curve, so the remesh leaves no tatters)
-        lock = 0.5 + 0.5 * math.cos(2 * math.pi * (1.6 * u + 0.1))
-        return -16.2 - 1.0 * (1 - u * u) - 0.45 * lock
+        # the outer corners curve up into the sides, so the fall ends in a rounded edge, not a square corner;
+        # each lock ends in its own fine point (some a little longer than others), the partings between them highest
+        k_, f_ = lock_of(u)
+        e = -16.2 - 1.0 * (1 - u * u) + 1.5 * abs(u) ** 4 - (0.8 + 0.3 * (k_ % 2) + 0.15 * (k_ % 3 == 1)) * (1.0 - abs(2 * f_ - 1)) ** 1.15
+        return e
+
     inner, outer = [], []
     for i in range(NX):
         u = -1 + 2 * i / (NX - 1)
         zs = [lerp(z_top, end_z(u), j / (NZ - 1)) for j in range(NZ)]
-        col_in, col_out, y_prev, z_prev = [], [], None, None
+        # (how far down the fall a point is, measured against one smooth end line rather than each column's own
+        # end: the shaping toward the ends then runs smoothly across the locks instead of stepping at each parting)
+        z_end = -16.2 - 1.0 * (1 - u * u) + 1.5 * abs(u) ** 4 - 0.6
+        pts = []
         for j, z in enumerate(zs):
-            x = u * width(z)
             v = j / (NZ - 1)
+            # the last stretch draws in a little at the sides, so the outline turns into the end in a curve
+            # toward the ends each lock gathers in toward its own middle, so the partings open as long narrow Vs
+            # that run together higher up, the way strands converge into a tip (not as parallel slots)
+            k_, _ = lock_of(u)
+            uc = 0.5 * (EDGES[k_] + EDGES[k_ + 1])
+            g_ = min(1.0, max(0.0, (v - 0.88) / 0.12))
+            ue = lerp(u, uc, 0.3 * g_ * g_ * (3 - 2 * g_))
+            vs = min(1.0, (z_top - z) / (z_top - z_end))
+            x = ue * width(z) * (1.0 - 0.12 * max(0.0, (vs - 0.75) / 0.25) ** 2 * abs(u))
             # thick down the middle, thin to soft edges; thinner toward the end, and rounded off at the tip
             # (never thinner than a few voxels: a sheet thinner than the remesh breaks up into rods and tatters)
             grow = min(1.0, (z_top - z) / 3.0)
             grow = grow * grow * (3 - 2 * grow)
-            t = (0.95 - 0.3 * v) * max(0.0, 1 - u * u) ** 0.5 * (1.0 if v < 0.92 else math.cos((v - 0.92) / 0.08 * math.pi / 2) ** 0.5)
-            t = max(t, 0.4)
-            sup = back_y(x, z)
-            # the outside of the hair: it starts flush with the hair over the head and hangs from the back of the
-            # skull, easing in only gradually under its weight; below the nape it always lies over what is under it
-            y = sup + t * grow
-            if y_prev is not None:
-                y = min(max(y, y_prev - 0.45 * (z_prev - z)), y_prev + 0.2 * (z_prev - z))
-            if z < -0.5:
-                y = max(y, sup + 0.52)
-            if v > 0.8:          # the ends turn in a little toward her back rather than flicking out
-                y = lerp(y, sup + 0.52, ((v - 0.8) / 0.2) ** 2 * 0.7)
-            y_prev, z_prev = y, z
+            t_ = (0.95 - 0.3 * vs) * max(0.0, 1 - u * u) ** (0.5 if z < -0.5 else 1.4) * (1.0 if v < 0.92 else math.cos((v - 0.92) / 0.08 * math.pi / 2) ** 0.5)
+            # (the tips are the thinnest part: a lock ends in a wisp, not a rounded slab)
+            t = max(t_, lerp(0.4, 0.28, min(1.0, max(0.0, (v - 0.75) / 0.25))))
+            # (what it rests on, blurred across: the hair bridges the folds of the mantle instead of carrying
+            # each fold down its whole length as a groove)
+            # (only below the nape: over the round of the head a blurred support would sink into the hair beneath)
+            sup = back_y(x, z) if z > -0.5 else sum(back_y(x + dx_, z) * w_ for dx_, w_ in
+                                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1)))
+            # the least it can be: flush with the hair over the head at the top, then lying over what is under it.
+            # Over the head its edges lie flush with the hair beneath (the extra thickness goes inward, out of
+            # sight), so they leave no rim along the sides of the head
+            y = sup + t_ * grow if z > -0.5 else max(sup + t * grow, sup + 0.52)
+            pts.append([x, y, z, t, sup])
+        # hair hangs: pulled down by its weight it spans straight from one thing that holds it out to the next (the
+        # back of the skull, then the mantle) and never sinks into the hollow between them. So its outside is the
+        # hull of those lowest-allowed points, seen from behind: no groove at the nape, no ledge where it meets the
+        # mantle, the head of hair and the fall one surface
+        # (the hull is taken down to a common height above the ends: taken to each column's own end, the uneven
+        # lock tips tilted whole columns and carried every parting up the fall as a groove; below it the last
+        # stretch of the hull carries straight on)
+        top_ = [k for k, q in enumerate(pts) if q[2] >= -12.5]
+        hull = []
+        for k in top_:
+            q = pts[k]
+            while len(hull) >= 2:
+                a, b = pts[hull[-2]], pts[hull[-1]]
+                # drop b if it lies on or inside the line from a to q
+                if (b[1] - a[1]) * (q[2] - a[2]) - (q[1] - a[1]) * (b[2] - a[2]) >= 0:
+                    hull.pop()
+                else:
+                    break
+            hull.append(k)
+        for h0, h1 in zip(hull, hull[1:]):
+            a, b = pts[h0], pts[h1]
+            for k in range(h0 + 1, h1):
+                f_ = (a[2] - pts[k][2]) / (a[2] - b[2])
+                lift = max(0.0, lerp(a[1], b[1], f_) - pts[k][1])
+                # (high on the round of the skull the edges keep to the hair under them, or the straightened
+                # edge would stand off it as a rim; from below the crown down the whole width hangs)
+                g_ = min(1.0, max(0.0, (pts[k][2] - 3.0) / 2.5))
+                side = 1.0 - abs(u) ** 2 * g_ * g_ * (3 - 2 * g_)
+                pts[k][1] += lift * side
+        if len(hull) >= 2:
+            a, b = pts[hull[-2]], pts[hull[-1]]
+            slope = (b[1] - a[1]) / (a[2] - b[2]) if a[2] > b[2] else 0.0
+            for k in range(hull[-1] + 1, len(pts)):
+                pts[k][1] = max(pts[k][1], b[1] + slope * (b[2] - pts[k][2]))
+        col_out, col_in = [], []
+        for j, (x, y, z, t, sup) in enumerate(pts):
+            v = j / (NZ - 1)
+            vs = min(1.0, (z_top - z) / (z_top - z_end))
+            if vs > 0.8:          # the ends turn in a little toward her back rather than flicking out
+                y = lerp(y, max(sup + 0.52, y - 0.6), ((vs - 0.8) / 0.2) ** 2 * 0.7)
+            y = max(sup + 0.42 if z < -0.5 else y - 1.0, y)
             col_out.append([x, y, z, t, sup])
-        # and where something lower down holds it out (the mantle), it is already leaning out above it: no ledges
-        dz = (z_top - end_z(u)) / (NZ - 1)
-        for j in range(NZ - 2, -1, -1):
-            col_out[j][1] = max(col_out[j][1], col_out[j + 1][1] - 0.35 * dz)
-        for x, y, z, t, sup in col_out:
-            # where it lies on the mantle the hair is pressed thinner rather than pushed out
-            col_in.append(Vector((x, max(y - t, sup + 0.12) if z < -0.5 else y - t, z)))
+            # where it spans a hollow it is the full mass of hair down to what is under it (a thin sheet bridging
+            # the nape would show its underside from the side); where it lies on the mantle it is pressed thinner
+            gap = y - sup
+            th = t if gap < t + 0.3 else max(t, gap - 0.15)
+            col_in.append(Vector((x, max(y - th, sup + 0.12) if z < -0.5 else y - th, z)))
         col_out = [Vector((x, y, z)) for x, y, z, t, sup in col_out]
         inner.append(col_in)
         outer.append(col_out)
@@ -616,7 +736,7 @@ def drape_fall(dg):
 HAIR_PARTS = []
 
 
-def fuse_hair(head, names, voxel=0.1):
+def fuse_hair(head, names, voxel=0.065):
     """Melt the hair's pieces (the cap over the skull, the side locks and the long fall) into one surface: their
     shapes are joined, remeshed as a single volume, and relaxed so each join becomes a soft fillet instead of a
     seam where one piece sits on another."""
@@ -662,14 +782,59 @@ def fuse_hair(head, names, voxel=0.1):
     # below the ears the hair breaks into a few broad clumps: soft vertical ridges across the fall and the sides
     bm.normal_update()
     for v in bm.verts:
-        fade = min(1.0, max(0.0, (3.0 - v.co.z) / 4.0))
+        # (and fading out again toward the ends, where the locks gather on their own: ridges there read as pleats)
+        fade = min(1.0, max(0.0, (3.0 - v.co.z) / 4.0), max(0.0, (v.co.z + 13.0) / 5.0))
         if fade <= 0.0:
             continue
         arc = math.atan2(v.co.x, v.co.y - 0.5) * max(2.5, math.hypot(v.co.x, v.co.y - 0.5))
-        ridge = 0.16 * math.sin(1.5 * (arc + 0.5 * math.sin(v.co.z * 0.25)) + 0.9) + 0.04 * math.sin(3.7 * arc + 1.3)
+        # (shallow, and uneven in spacing: deep regular ridges read as a row of moulded tubes)
+        ridge = 0.045 * math.sin(1.5 * (arc + 0.5 * math.sin(v.co.z * 0.25)) + 0.9 + 0.8 * math.sin(0.55 * arc)) \
+            + 0.02 * math.sin(3.7 * arc + 1.3)
         n_ = Vector((v.normal.x, v.normal.y, 0.0))      # across the hair only: the ends must not be scalloped
         v.co += n_ * ridge * fade
-    return mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
+    # and the band where the hair over the head runs into the fall is relaxed once more, so the two read as one
+    # sweep with no trace of where they were joined
+    # (and the ends, so the locks run together into one soft mass and only part at the very tips)
+    ends = [v for v in bm.verts if v.co.z < -6.0]
+    for _ in range(14):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=ends, lambda_factor=0.8, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=False, preserve_volume=True)
+    band = [v for v in bm.verts if -4.0 < v.co.z < 7.5 and v.co.y > 1.0]
+    for _ in range(4):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=band, lambda_factor=0.5, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    hair = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
+    strand_colours(hair)
+    return hair
+
+
+def strand_colours(o):
+    """Each strand its own tone: the hair's colour attribute 'strands' (linear RGB), a mix of the darker, middle
+    and lighter tones of its palette ramp, streaked along the fall of the hair at three widths (single strands,
+    small locks, broad bands), a little darker on the underside of the fall, where it faces her back."""
+    from mathutils import noise
+    rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
+    lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
+    dark, mid, light = lin[1], lin[2], lin[3]
+    me = o.data
+    rest = me.attributes['rest']
+    attr = me.color_attributes.new('strands', 'FLOAT_COLOR', 'POINT')
+    cols = []
+    for v, r in zip(me.vertices, rest.data):
+        a, z = r.vector.x, v.co.z
+        t = (0.55 * noise.noise(Vector((a * 2.6, z * 0.05, 0.3)))
+             + 0.35 * noise.noise(Vector((a * 0.9 + 11.0, z * 0.03, 2.7)))
+             + 0.25 * noise.noise(Vector((a * 0.3 + 5.0, z * 0.02, 6.1))))
+        t = min(1.0, max(-1.0, 1.6 * t))
+        c = mid + (light - mid) * t if t > 0 else mid + (mid - dark) * t
+        # a few single strands that catch the light
+        if noise.noise(Vector((a * 7.0, z * 0.04, 9.0))) > 0.42:
+            c = c + (light - c) * 0.5
+        # the side of the fall that lies against her back is in its own shade
+        if v.normal.y < -0.3 and z < 0.0:
+            c = c * (1.0 - 0.35 * min(1.0, (-v.normal.y - 0.3) / 0.4))
+        cols += [*c, 1.0]
+    attr.data.foreach_set('color', cols)
 
 
 def bvh_of(bm):
@@ -1134,6 +1299,7 @@ def build():
         # (the strands cast no shadow of their own: their dark undersides and the shade they threw on the cap
         # marked the bangs off from the rest of the hair; the cap still shades the forehead)
         bang.visible_shadow = False
+        strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
         mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.62, 1.35, s * 3.3, 0.9), (2.0, 0.6, 1.3, s * 3.45, 1.35),
                                          (-1.0, 0.6, 1.25, s * 3.65, 1.5), (-2.0, 0.5, 1.0, s * 3.75, 1.6), (-2.6, 0.25, 0.45, s * 3.8, 1.7)]),
@@ -1474,9 +1640,13 @@ def sprite_mode(on):
     """At sprite size the hair's strand relief is finer than a pixel and only adds speckle; the painted strands
     (the detail pass) carry it there instead, so the relief is turned down for the sheet."""
     m = bpy.data.materials.get('hair')
-    for n in m.node_tree.nodes:
+    nt = m.node_tree
+    for n in nt.nodes:
         if n.type == 'BUMP':
             n.inputs['Strength'].default_value = 0.1 if on else 0.6
+    # (and the sheet is lit from the plain diffuse surface, its tones picked from the palette ramp)
+    out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+    nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
 
 
 def render_sheet(out_png, tmp):
