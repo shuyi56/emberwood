@@ -1622,14 +1622,12 @@ def hand_mesh(s):
     # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
     # size, slim fingers any longer read as spidery)
     for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.75, 0.98, 0.22)):
-        p = Vector((0.05 * inward, y0, -2.55))
+        # (each finger one straight piece, curled afterwards (see below): two pieces meeting at the middle joint add
+        # their fields there and swell into a knob, as do pieces that start too high in the palm)
+        p = Vector((0.05 * inward, y0, -2.7))
         ang = 0.3
-        for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.85)):
-            ang += extra
-            d = Vector((inward * math.sin(ang), 0.0, -math.cos(ang)))
-            q = p + d * (L * frac)
-            capsule(p, q, rr)
-            p = q
+        d = Vector((inward * math.sin(ang), 0.0, -math.cos(ang)))
+        capsule(p, p + d * L, r * 0.95)
     # the base of the hand where the thumb and the fingers share the wrist: a thenar mound swelling from the
     # wrist into the root of the thumb and a smaller hypothenar mound on the little-finger side, so the thumb,
     # the palm and the four fingers all grow out of one fleshy heel instead of meeting in a crease
@@ -1656,6 +1654,18 @@ def hand_mesh(s):
     bm.from_mesh(me)
     bpy.data.meshes.remove(me)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+    # the fingers curl toward the palm in one smooth bend from the knuckles to the tips, rather than kinking at
+    # the joints
+    z0, k = -2.7, 0.5
+    R = 1.0 / k
+    for v in bm.verts:
+        t = z0 - v.co.z
+        if t <= 0.0:
+            continue
+        th = k * t
+        rr = R - v.co.x * inward
+        v.co.x = inward * (R - rr * math.cos(th))
+        v.co.z = z0 - rr * math.sin(th)
     # the metaball pieces leave small bulges where they overlap (a lump on the back of the hand by the index finger,
     # another on the little-finger edge by the wrist): relax the surface so it reads as one smooth skin, holding its
     # volume, without melting the fingers together
