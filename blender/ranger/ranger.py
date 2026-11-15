@@ -1087,27 +1087,36 @@ EYE_TILT = 0.0         # the two corners level
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
-def _lens(u, a, b):
-    """One smooth curve over the eye's width, 0 at both corners and 1 at its peak: (1+u)^a (1-u)^b, a single
-    expression with no joins, so the lid's edge bends continuously from corner to corner. With a and b over 1 it
-    leaves each corner tangent to the eye's centre line and curls away ever faster (a cusp); the larger of the
-    two pushes the peak toward the other corner."""
+def _lid(u, peak, inner, outer):
+    """A lid's edge over the eye's width (u -1 inner corner .. 1 outer), 0 at both corners and 1 at `peak`, drawn
+    the way a painter draws an eye: from each corner the edge leaves as a straight line, so the two lids meet
+    there in a clear point, then bends into a smooth arc over the eyeball. `inner` and `outer` are how far along
+    each side (as a fraction of the way from that corner to the peak) the straight part runs; it rises to 45%
+    of the height there, then a curve carries on from it without a kink (same slope) and levels off at the peak."""
     u = max(-1.0, min(1.0, u))
-    pk = (a - b) / (a + b)
-    return ((1 + u) ** a * (1 - u) ** b) / ((1 + pk) ** a * (1 - pk) ** b)
+    if u <= peak:
+        d, span, f = u + 1.0, peak + 1.0, inner
+    else:
+        d, span, f = 1.0 - u, 1.0 - peak, outer
+    L, y0 = f * span, 0.45
+    m = y0 / L
+    if d <= L:
+        return m * d
+    t = (d - L) / (span - L)
+    h00, h10, h01 = 2 * t ** 3 - 3 * t * t + 1, t ** 3 - 2 * t * t + t, -2 * t ** 3 + 3 * t * t
+    return h00 * y0 + h10 * m * (span - L) + h01 * 1.0
 
 
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    the upper edge of an asymmetric lens: from a long, sharp point at the inner corner it sweeps up to its
-    highest point out toward the temple, then falls more quickly to the outer corner."""
-    return 1.05 * EYE_RZ * _lens(u, 2.0, 1.15)
+    straight out of each corner point, then a smooth arc, highest a little toward the temple."""
+    return 1.05 * EYE_RZ * _lid(u, 0.15, 0.35, 0.3)
 
 
 def lid_bottom(u):
-    """The lower lid's edge below the centre line: a shallower arc of the same kind, lowest a little toward the
-    outer corner, so the two edges are not mirror images."""
-    return 0.7 * EYE_RZ * _lens(u, 1.6, 1.15)
+    """The lower lid's edge below the centre line: the same kind of line, shallower, lowest a little toward the
+    temple."""
+    return 0.7 * EYE_RZ * _lid(u, 0.1, 0.35, 0.3)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1120,6 +1129,9 @@ def almond(rx, ry, rz, s, seg=96, rings=64):
         half = rz * math.sqrt(max(1e-6, 1 - u * u))
         zn = max(-1.0, min(1.0, v.co.z / half))
         v.co.z = zn * (lid_top(u) if zn > 0 else lid_bottom(u)) * EYE_K
+        # its front stays full almost to the corners (an ellipsoid falls away there, so the skin closed over the
+        # tips and rounded them off), so the opening's own straight edges meet in a clear point
+        v.co.y *= max(1e-3, 1 - u * u) ** -0.3 if abs(u) < 0.999 else 1.0
     return bm
 
 
@@ -1424,7 +1436,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     wo.shape_key_add(name='Basis')
     tk = wo.shape_key_add(name='tuck', from_mix=False)
     for kv in tk.data:
-        kv.co.y += 0.16 * smooth(0.55, 1.0, abs(kv.co.x - x) / RX) ** 1.5
+        kv.co.y += 0.05 * smooth(0.8, 1.0, abs(kv.co.x - x) / RX) ** 1.5
     tk.value = 1.0
     # for the sprite sheet only: the white drawn a little larger round its own centre, so a pixel of it still
     # shows either side of the iris at that size
@@ -1973,7 +1985,7 @@ def sprite_mode(on):
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
         if o.name.startswith('Iris'):
-            o.scale = (1.35,) * 3 if on else (1.0,) * 3
+            o.scale = (1.5,) * 3 if on else (1.0,) * 3
         if o.name.startswith('Eye white') and o.data.shape_keys:
             o.data.shape_keys.key_blocks['tuck'].value = 0.0 if on else 1.0
             o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
