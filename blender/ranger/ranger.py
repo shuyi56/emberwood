@@ -150,9 +150,10 @@ def make_material(mid):
         bsdf.inputs['Coat IOR'].default_value = 1.38
         nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
         if mid == M_EYE:
-            col = nt.nodes.new('ShaderNodeAttribute')     # its painting (iris_colours)
-            col.attribute_name = 'eye_col'
-            nt.links.new(col.outputs['Color'], bsdf.inputs['Base Color'])
+            tex = nt.nodes.new('ShaderNodeTexImage')      # its painting (iris_image)
+            tex.image = iris_image()
+            tex.interpolation = 'Cubic'
+            nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
         else:
             tex = nt.nodes.new('ShaderNodeTexImage')      # its painting (sclera_image)
             tex.image = sclera_image()
@@ -1096,7 +1097,7 @@ EYE_K = 1.3            # the ball reaches this much past the lids' opening, up a
 # turns up quickly into the outer corner. The two meet in a point at each corner.
 LID_TOP = [0, 0.1106, 0.2062, 0.2839, 0.3501, 0.41, 0.4623, 0.5013, 0.5282, 0.5511, 0.5727, 0.589, 0.5986, 0.6055, 0.6122, 0.6167, 0.6177, 0.6171, 0.6165, 0.6147, 0.6105, 0.605, 0.5994, 0.5928, 0.5841, 0.5738, 0.5632, 0.5513, 0.5359, 0.5173, 0.4976, 0.4764, 0.4494, 0.4143, 0.3714, 0.3211, 0.2644, 0.2021, 0.1363, 0.0686, 0]
 LID_BOTTOM = [0, 0.0301, 0.0576, 0.079, 0.0957, 0.1113, 0.1268, 0.1419, 0.1566, 0.1713, 0.1858, 0.2, 0.2138, 0.2274, 0.2409, 0.2535, 0.2648, 0.2754, 0.286, 0.2958, 0.3039, 0.311, 0.3181, 0.3243, 0.3283, 0.3307, 0.3328, 0.334, 0.3326, 0.3289, 0.3246, 0.3187, 0.3072, 0.2893, 0.269, 0.2475, 0.2195, 0.181, 0.1309, 0.0684, 0]
-EYE_OPEN = 0.82        # the photograph's eye is held wide open; hers is relaxed, a little narrower
+EYE_OPEN = 0.85        # the photograph's eye is held wide open; hers is relaxed, a little narrower
 
 
 def _traced(table, u):
@@ -1122,7 +1123,7 @@ def lid_bottom(u):
     return EYE_RX * EYE_OPEN * _traced(LID_BOTTOM, u)
 
 
-def almond(rx, ry, rz, s, seg=96, rings=64):
+def almond(rx, ry, rz, s, seg=192, rings=128):
     """The eyeball: an ellipsoid reshaped to the lids' opening (lid_top over lid_bottom, tapering to a point at
     each corner rather than a rounded oval), a little larger than it, so its edge turns in under the skin of the
     lids all round (see eye_relief) and the lids close over it with no seam."""
@@ -1138,7 +1139,7 @@ def almond(rx, ry, rz, s, seg=96, rings=64):
     return bm
 
 
-def iris_dome(r, depth, rings=20, seg=64):
+def iris_dome(r, depth, rings=48, seg=96):
     """The iris (and the cornea over it) as one shallow dome facing -Y: rings round its centre, so the painted
     pupil and the rings of the iris follow the mesh, and a smooth curve for the highlight to slide over."""
     bm = bmesh.new()
@@ -1166,50 +1167,129 @@ def _srgb_lin(c):
     return [((v + 0.055) / 1.055) ** 2.4 if v > 0.04045 else v / 12.92 for v in c]
 
 
-def iris_colours(me, to_disc, r, s):
-    """Paint the iris, the way a painter shades one: a dark ring at its rim, fine radial fibres in the green, a
-    warm amber collar round the pupil, the pupil itself, the top third in the shadow of the upper lid, and a
-    little light gathered in the lower part where the cornea focuses it. Stored as a colour attribute
-    ('eye_col', for the close-ups and the world model) and as a tone along the iris ramp ('iris_shade', which
-    the sprite renderer reads through the detail pass)."""
-    rmp = MATERIALS[M_EYE]['ramp']
-    pupil = np.array([20, 18, 18], dtype=np.float32)
+IRIS_TEX = {}
+
+
+def _vnoise(x, y, px, seed):
+    """Value noise on a lattice, smoothly eased, wrapping every px cells in x (so it closes round the iris)."""
+    g = np.random.default_rng(seed).uniform(-1, 1, (int(np.ceil(y.max())) + 2, px))
+    ix, iy = np.floor(x).astype(int), np.floor(y).astype(int)
+    tx, ty = x - ix, y - iy
+    tx, ty = tx * tx * (3 - 2 * tx), ty * ty * (3 - 2 * ty)
+    x0, x1 = ix % px, (ix + 1) % px
+    a = g[iy, x0] + (g[iy, x1] - g[iy, x0]) * tx
+    b = g[iy + 1, x0] + (g[iy + 1, x1] - g[iy + 1, x0]) * tx
+    return a + (b - a) * ty
+
+
+def _polar_fbm(th, q, cells, rows, octaves, seed, gain=0.55):
+    """Fractal noise in polar coordinates: round the iris (th, 0..1) it has `cells` lattice cells, out along the
+    radius (q, 0..1) only `rows`, so each feature is drawn out along the radius into a fibre. Each octave doubles
+    both, and wraps exactly round the circle."""
+    tot, amp, norm = 0.0, 1.0, 0.0
+    for o in range(octaves):
+        c = cells * 2 ** o
+        tot = tot + amp * _vnoise(th * c, q * rows * 2 ** o, c, seed + o)
+        norm += amp
+        amp *= gain
+    return tot / norm
+
+
+def iris_image():
+    """The iris, painted in polar coordinates the way the real one is built. The stroma is fractal noise
+    stretched out along the radius into fibres, its angle warped by a second, coarser noise so the fibres wave
+    rather than run ruler-straight. Crypts are dark lozenges from cellular (Worley) noise, packed round the
+    collarette. The collarette itself is a ragged ring a little out from the pupil, its radius wandering with a
+    low-frequency noise; inside it the pupillary zone is warmer and smoother. Faint contraction furrows ring the
+    outer zone, broken up by noise. Then the light: the dark limbal ring at the rim, the upper lid's shadow over
+    the top, and light gathered low on the far side where the cornea focuses it. One painting serves both eyes
+    (u mirrored for the left one); the disc fills the square."""
+    if 'img' in IRIS_TEX:
+        return IRIS_TEX['img']
+    N = 512
+    rmp = np.array(MATERIALS[M_EYE]['ramp'], dtype=np.float32)
+    X, Z = np.meshgrid((np.arange(N) + 0.5) / N * 2 - 1, 1 - (np.arange(N) + 0.5) / N * 2)
+    q = np.minimum(np.hypot(X, Z), 1.0)
+    th = (np.arctan2(Z, X) / (2 * np.pi)) % 1.0
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    # the fibres: warped angle, then anisotropic fBm (many cells round, few out)
+    warp = 0.012 * _polar_fbm(th, q, 6, 3, 3, 11)
+    thw = th + warp * (0.4 + q)
+    fib = _polar_fbm(thw, q, 64, 2, 4, 21)                 # fine, long fibres
+    band = _polar_fbm(thw, q, 14, 1.5, 2, 31)              # broad, lighter and darker wedges
+    # the crypts: Worley F1 on points scattered round the collarette ring
+    rng = np.random.default_rng(41)
+    n_c = 38
+    ct = rng.uniform(0, 1, n_c)
+    cq = np.clip(rng.normal(0.56, 0.07, n_c), 0.42, 0.78)
+    cx, cz = cq * np.cos(ct * 2 * np.pi), cq * np.sin(ct * 2 * np.pi)
+    f1 = np.full(X.shape, 9.0)
+    for i in range(n_c):
+        # lozenges drawn out along the radius: distance squashed across the radius
+        rx, rz = cx[i] / cq[i], cz[i] / cq[i]
+        dx, dz = X - cx[i], Z - cz[i]
+        along = dx * rx + dz * rz
+        across = -dx * rz + dz * rx
+        f1 = np.minimum(f1, np.hypot(along * 0.55, across * 1.3) / rng.uniform(0.035, 0.06))
+    crypt = sm(1.0, 0.45, f1)
+    # the collarette: a ragged ring, its radius wandering
+    rag = 0.5 + 0.035 * _polar_fbm(th, q, 9, 1, 2, 51)
+    coll = np.exp(-((q - rag) / 0.035) ** 2)
+    pupillary = sm(rag + 0.02, rag - 0.04, q)               # inside the collarette
+    furrow = (0.5 + 0.5 * np.cos(q * 46)) * sm(0.66, 0.78, q) * sm(0.96, 0.86, q) * (0.5 + 0.5 * band)
+    t = 0.5 + 0.30 * fib + 0.10 * band
+    t -= 0.16 * crypt
+    t -= 0.06 * furrow
+    t += 0.14 * coll
+    t -= 0.10 * pupillary * (0.6 - 0.4 * fib)                # smoother, darker-toned zone round the pupil
+    # the light
+    t -= 0.5 * sm(0.8, 1.0, q)                                  # the limbal ring
+    t -= 0.42 * sm(0.0, 0.8, Z + 0.15 * X * X)                  # the upper lid's shadow
+    glow = np.exp(-((X + 0.2) ** 2 + (Z + 0.5) ** 2) / 0.22)
+    t += 0.26 * glow * sm(0.36, 0.5, q) * sm(0.95, 0.8, q)      # light gathered by the cornea
+    warm = sm(rag + 0.06, rag - 0.08, q) * (0.75 + 0.25 * fib)
+    t = np.clip(t + 0.16 * warm, 0, 1)
+    k = t * 4
+    i0 = np.minimum(3, k.astype(int))
+    c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)[..., None]
     amber = np.array([156, 134, 70], dtype=np.float32)
-    cols, shades = [], []
+    c = c + (amber - c) * (0.45 * warm)[..., None]
+    pupil = sm(0.35, 0.31, q)
+    c = c + (np.array([20, 18, 18], dtype=np.float32) - c) * pupil[..., None]
+    img = bpy.data.images.new('iris', N, N, alpha=False)
+    px = np.concatenate([c / 255, np.ones((N, N, 1), dtype=np.float32)], axis=2)[::-1]
+    img.pixels.foreach_set(px.ravel().astype(np.float32))
+    img.pack()
+    IRIS_TEX['img'] = img
+    IRIS_TEX['t'] = t
+    return img
+
+
+def iris_colours(me, to_disc, r, s):
+    """Lay the painted iris (iris_image) onto the iris mesh through texture coordinates across the disc, and store
+    its tone at each point along the iris ramp ('iris_shade'), which the sprite renderer reads through the detail
+    pass."""
+    iris_image()
+    tt = IRIS_TEX['t']
+    N = tt.shape[0]
+    uvl = me.uv_layers.new(name='UVMap')
+    pos = {}
     for v in me.vertices:
         p = to_disc @ v.co
-        q = math.hypot(p.x, p.z) / r
-        a = math.atan2(p.z, p.x * s)
-        # the stroma: fine radial fibres, a few darker crypts between them, and faint rings in the outer part
-        fib = 0.5 + 0.25 * math.sin(a * 23 + 2.0 * math.sin(a * 5)) + 0.25 * math.sin(a * 41 + 1.3)
-        crypt = max(0.0, math.sin(a * 9 + 1.7 * math.sin(a * 3)) * math.sin(q * 19 + 0.8)) ** 3
-        t = 0.52 + 0.22 * (fib - 0.5) - 0.12 * crypt * smooth(0.45, 0.6, q) * smooth(0.95, 0.8, q)
-        t -= 0.05 * (0.5 + 0.5 * math.cos(q * 40)) * smooth(0.7, 0.8, q)
-        # the collarette: a lighter, ragged ring a little out from the pupil, warm inside it
-        rag = 0.5 + 0.03 * math.sin(a * 13 + 1.1) + 0.02 * math.sin(a * 29)
-        t += 0.12 * math.exp(-((q - rag) / 0.05) ** 2)
-        # the limbal ring: a dark, crisp band at the very rim
-        t -= 0.5 * smooth(0.8, 1.0, q)
-        zn = p.z / r
-        xn = p.x * s / r
-        # the shadow of the upper lid, soft and following its curve, over the top third
-        t -= 0.45 * smooth(0.0, 0.8, zn + 0.15 * xn * xn)
-        # light through the cornea: the iris is a flat disc behind a clear dome, so light from above gathers
-        # as a glow in the lower part, on the side away from it, and the near (upper) side stays darker
-        glow = math.exp(-((xn + 0.2) ** 2 + (zn + 0.5) ** 2) / 0.22)
-        t += 0.28 * glow * smooth(0.36, 0.5, q) * smooth(0.95, 0.8, q)
-        warm = smooth(0.6, 0.4, q) * (0.75 + 0.25 * fib)   # the amber collar round the pupil
-        t = min(1.0, max(0.0, t + 0.18 * warm))
-        k = t * 4
-        i0 = min(3, int(k))
-        c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)
-        c = c + (amber - c) * 0.45 * warm
-        dark = smooth(0.36, 0.31, q)                        # the pupil, a third of the iris across, soft-edged
-        c = c + (pupil - c) * dark
-        cols.append(_srgb_lin(c / 255.0) + [1.0])
-        shades.append(t * (1 - dark) + 0.25 * dark)
-    ca = me.color_attributes.new('eye_col', 'FLOAT_COLOR', 'POINT')
-    ca.data.foreach_set('color', [x for c in cols for x in c])
+        pos[v.index] = ((p.x * s / r + 1) / 2, (p.z / r + 1) / 2)
+    for lp in me.loops:
+        uvl.data[lp.index].uv = pos[lp.vertex_index]
+    shades = []
+    for v in me.vertices:
+        u, w = pos[v.index]
+        i = min(N - 1, max(0, int((1 - w) * N)))
+        j = min(N - 1, max(0, int(u * N)))
+        q = math.hypot(u * 2 - 1, w * 2 - 1)
+        dark = smooth(0.35, 0.31, q)
+        shades.append(float(tt[i, j]) * (1 - dark) + 0.25 * dark)
     sa = me.attributes.new('iris_shade', 'FLOAT', 'POINT')
     sa.data.foreach_set('value', shades)
 
@@ -1350,7 +1430,7 @@ def eye_relief(x, z, s, ex, ez):
     uc = max(-1.0, min(1.0, u))
     dz = z - ez - u * EYE_RX * EYE_TILT
     T, B = lid_top(uc), lid_bottom(uc)
-    inside = smooth(1.3, 0.85, abs(u))                # 1 within the opening, easing out past its corners
+    inside = smooth(1.08, 0.85, abs(u))                # 1 within the opening, easing out past its corners
     d = 0.0
     # the opening itself: inside the lids' edges the skin is drawn well back behind the ball, so exactly the
     # traced shape of white shows, its edge where the lids meet the ball
@@ -1359,9 +1439,9 @@ def eye_relief(x, z, s, ex, ez):
     # the lid margins: one rounded lip running round the whole opening, the upper and lower lids joining in it at
     # each corner, standing a little proud of the ball and rolling onto it, so the ball fills the opening from
     # behind the lids rather than sitting in a hole with a gap round it
-    cornr = smooth(1.22, 1.0, abs(u))
-    lip_t = 0.085 * g(dz - (T - 0.012), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
-    lip_b = 0.07 * g(dz + (B - 0.012), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
+    cornr = smooth(1.06, 0.96, abs(u))
+    lip_t = 0.095 * g(dz - (T - 0.025), 0.05) * (0.6 + 0.4 * (1 - uc * uc))
+    lip_b = 0.075 * g(dz + (B - 0.02), 0.05) * (0.6 + 0.4 * (1 - uc * uc))
     d += max(lip_t, lip_b) * cornr
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
     d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
@@ -1379,7 +1459,7 @@ def eye_relief(x, z, s, ex, ez):
     if u > 0.9:
         k = max(0.0, u - 1.0)
         taper = smooth(0.9, 1.0, u) * max(0.0, 1 - k / 0.5) ** 1.6
-        d -= 0.05 * g(dz + 0.04 * k, 0.06 * (1 - 0.6 * k)) * taper * smooth(1.0, 1.12, u)
+        d -= 0.03 * g(dz + 0.04 * k, 0.07 * (1 - 0.5 * k)) * taper * smooth(1.0, 1.15, u)
         d -= 0.035 * g(dz + 0.02 * k, 0.14) * smooth(0.85, 1.0, u) * smooth(1.5, 1.05, u)
     lz = -(B + 0.17 + 0.03 * uc)
     d -= 0.007 * g(dz - lz, 0.08) * smooth(0.9, 0.4, abs(u - 0.1))
@@ -1458,8 +1538,8 @@ def build_eye(head, head_tree, s, x, ey, ez):
         over = abs(dz_) / max(lim, 1e-3)
         # (toward the lids the ball is kept full, so its edge meets the lids' margins rather than falling away
         # from them into a dark gap, and then turns back under them)
-        v.co.y -= 0.09 * smooth(0.45, 0.97, over)
-        v.co.y += 1.1 * smooth(0.97, 1.04, over)
+        v.co.y -= 0.09 * smooth(0.45, 0.93, over)
+        v.co.y += 1.1 * smooth(0.93, 0.98, over)
     wtree = bvh_of(white)
     # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
     # and up from the centre line, so one painting serves both eyes
