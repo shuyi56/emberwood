@@ -889,16 +889,16 @@ def face_relief(x, z):
         d += gauss(x, z, s * 0.14, 0.41, 0.065, 0.055, 0.035)    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.21, 0.34, 0.07, 0.05, -0.005)      # a shallow hollow under the cheekbone
         d += gauss(x, z, s * 0.16, 0.23, 0.06, 0.06, 0.01)       # the soft fullness of the lower cheek
-        d += gauss(x, z, s * 0.062, 0.37, 0.026, 0.024, 0.033)   # wing of the nose
+        d += gauss(x, z, s * 0.058, 0.37, 0.025, 0.024, 0.024)   # wing of the nose
         d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
         d += gauss(x, z, s * 0.235, 0.555, 0.035, 0.07, 0.018)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     if z > 0.36:
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
-        h = (0.015 + 0.085 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
+        h = (0.013 + 0.052 * t ** 1.5) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
+        h = 0.065 * math.exp(-((0.36 - z) / 0.035) ** 2)
     w = 0.03 + 0.012 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.02 * max(0.0, 1 - abs(z - 0.37) / 0.06)
     d += h * 0.5 * (math.exp(-(x / w) ** 2) + math.exp(-(x / w) ** 4))
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
@@ -938,7 +938,7 @@ def mouth_relief(x, z):
             px, pz = sx * (0.075 + 0.04 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
-    d += gauss(x, z, 0, 0.385, 0.035, 0.028, 0.012)        # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.375, 0.036, 0.032, 0.014)        # the ball of the nose's tip
     d += gauss(x, z, 0, 0.19, 0.06, 0.012, -0.014)         # the crease under the lower lip
     return d
 
