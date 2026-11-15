@@ -975,14 +975,14 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(NECK_Z, 0.21), (-0.07, 0.185), (-0.02, 0.16), (0.04, 0.155), (0.1, 0.168), (0.17, 0.198),
+HEAD_W = smooth_curve([(NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.04, 0.148), (0.1, 0.165), (0.17, 0.198),
                        (0.24, 0.228), (0.3, 0.265), (0.36, 0.3), (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
 # (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
 # level, then the chin and the face)
 HEAD_F = smooth_curve([(NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.01, 0.135), (0.012, 0.21), (0.035, 0.3),
                        (0.06, 0.355), (0.1, 0.38), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415), (0.42, 0.42),
                        (0.52, 0.42), (0.62, 0.42)])
-HEAD_B = smooth_curve([(NECK_Z, 0.255), (-0.07, 0.26), (0.05, 0.28), (0.2, 0.315), (0.3, 0.35), (0.38, 0.385),
+HEAD_B = smooth_curve([(NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31), (0.3, 0.35), (0.38, 0.385),
                        (0.46, 0.415), (0.54, 0.435), (0.64, 0.445)])
 HEAD_MID = smooth_curve([(NECK_Z, 0.045), (0.3, 0.04), (1.0, 0.04)])
 # how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
@@ -2242,7 +2242,7 @@ def build():
     # ---- neck and head
     # (the neck above the collar is part of the head's sculpt, see head_section; this is only its lower part,
     # under the collar and the mantle, running on down into the shirt)
-    mesh_obj('Neck', loft([(53.5, 1.75, 1.8, 0, 0.5), (53.0, 1.85, 1.95, 0, 0.3), (51.0, 2.3, 2.15, 0, 0.2)]),
+    mesh_obj('Neck', loft([(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (51.0, 2.3, 2.15, 0, 0.2)]),
              M_SKIN, body)
     head = empty('Head', (0, 0, HEAD_Z), body)
     hb = sculpted_head()
