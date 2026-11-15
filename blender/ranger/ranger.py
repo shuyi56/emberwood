@@ -2163,8 +2163,8 @@ GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -34), (0.7, -14),
 # The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
 # back. The upper arm swings only a little either way and the elbow does most of the work: it is never straight,
 # opening to a soft bend as the arm swings back and folding to about 75 degrees as it swings forward, just behind the
-# shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum; and in
-# front the forearm comes across toward the middle of the body.
+# shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum. The arm
+# swings and folds in the plane of the walk, so it reads from the side camera: nothing swings in toward the body.
 ARM_LAG, ELBOW_LAG = 0.05, 0.03
 STANCE = 0.62
 # The trunk (in radians, and design pixels for the sway): the pelvis turns about its vertical axis with the legs, the
@@ -2293,13 +2293,11 @@ def pose(col):
             fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
             bend = 0.35 + 0.95 * fold
             flick = 0.06 + 0.1 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
-            across = 0.12 * max(0.0, a)
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
             flick = 0.1
-            across = 0.0
-        sh.rotation_euler = (-a, s * 0.17, s * across)   # held a little off the body, so the waist shows
+        sh.rotation_euler = (-a, s * 0.17, 0)   # held a little off the body, so the waist shows
         el.rotation_euler = (-bend, 0, 0)
         wr.rotation_euler = (flick, 0, 0)
 
