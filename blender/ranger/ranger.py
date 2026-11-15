@@ -910,7 +910,7 @@ def face_relief(x, z):
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
         d += gauss(x, z, s * 0.235, 0.46, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
         d += gauss(x, z, s * 0.14, 0.41, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
-        d += gauss(x, z, s * 0.21, 0.34, 0.07, 0.05, -0.005)      # a shallow hollow under the cheekbone
+        d += gauss(x, z, s * 0.19, 0.32, 0.1, 0.085, 0.038)      # the cheek filled out under the cheekbone, no hollow
         d += gauss(x, z, s * 0.17, 0.25, 0.075, 0.07, 0.022)       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
         d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
