@@ -9,6 +9,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bpy  # noqa: E402
+from mathutils import Vector  # noqa: E402
 import ranger  # noqa: E402
 from PIL import Image  # noqa: E402
 
@@ -50,6 +51,15 @@ def shoot(name, scale, z, rx, ry):
     tiles = []
     for a in angles:
         root.rotation_euler = (0, 0, a * math.pi / 4)
+        cx = 0.0
+        if name == 'face' and a % 8:
+            # turned, the face is centred on the eye nearer the camera, wherever the head's shape puts it
+            bpy.context.view_layer.update()
+            def centre(o):
+                return o.matrix_world @ (sum((Vector(c) for c in o.bound_box), Vector()) / 8)
+            near = min((centre(o) for o in bpy.data.objects if o.name.startswith('Eye white')), key=lambda c: c.y)
+            cx = near.x
+        cam.location = (cx, cam.location.y, z)
         sc.render.filepath = os.path.join(args.out, f'_{name}_{a:g}.png')
         bpy.ops.render.render(write_still=True)
         tiles.append(Image.open(sc.render.filepath).convert('RGB'))

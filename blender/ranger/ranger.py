@@ -968,7 +968,11 @@ def sculpted_head():
 
 def head_front_y(x, z):
     """The front of the sculpted head (see sculpted_head) at (x across, z up), in head heights, worked out
-    exactly from its formula rather than from the mesh, or None off the head."""
+    exactly from its formula rather than from the mesh, or None off the head. (The eyes' sculpt puts the finer
+    mesh it cuts round the eyes back onto this smooth surface: put onto the coarse mesh's flat faces, each one
+    showed as a flat facet, a staircase down the bridge of the nose.)"""
+    if 'head_section' in globals():
+        return _head_front_y_sections(x, z)
     sz = (z - 0.52) / 0.5
     sx = x / (0.36 * _jaw_width(z))
     r = 1 - sx * sx - sz * sz
@@ -979,6 +983,55 @@ def head_front_y(x, z):
     y = sy * 0.44 * (0.92 - 0.15 * t)
     y -= face_relief(x, z) * max(0.0, -sy) ** 1.4
     return y + 0.04
+
+
+def _head_point(z, th):
+    """A point of the head built from sections (head_section, face_relief, jaw_relief) at height parameter z and
+    angle th round it (0 straight forward): the same displacement sculpted_head applies to each vertex."""
+    c, s = math.cos(th), math.sin(th)
+    x, y = head_section(z, c, s)
+    e = 1e-3
+    za, zb = min(1.0, z + e), max(HEAD_NECK_Z, z - e)
+    xa, ya = head_section(z, math.cos(th + e), math.sin(th + e))
+    xz, yz = head_section(za, c, s)
+    xb, yb = head_section(zb, c, s)
+    n = Vector((xa - x, ya - y, 0.0)).cross(Vector((xz - xb, yz - yb, za - zb)))
+    if n.length < 1e-12:
+        return x, y, z
+    n.normalize()
+    if n.x * x + n.y * (y - 0.04) < 0:
+        n = -n
+    f = max(0.0, -n.y)
+    u = min(1.0, max(0.0, (z - 0.005) / 0.04))
+    d = face_relief(x, z) * f * u * u * (3 - 2 * u) + jaw_relief(y, z)
+    return x + n.x * d, y + n.y * d, z + n.z * d
+
+
+def _head_front_y_sections(x, z):
+    """head_front_y for the head built from sections: the surface is a function of (height, angle), not of
+    (x, z), so solve for the parameters whose point lands on (x, z) (Newton's method, a few steps from the
+    undisplaced guess) and return that point's depth."""
+    zp, th = z, math.asin(max(-0.95, min(0.95, x / 0.36)))
+    for _ in range(12):
+        px, py, pz = _head_point(zp, th)
+        fx, fz = px - x, pz - z
+        if abs(fx) < 1e-6 and abs(fz) < 1e-6:
+            break
+        h = 1e-4
+        ax, _, az = _head_point(zp, th + h)
+        bx, _, bz = _head_point(zp + h, th)
+        j11, j12 = (ax - px) / h, (bx - px) / h      # d x / d th, d x / d z
+        j21, j22 = (az - pz) / h, (bz - pz) / h
+        det = j11 * j22 - j12 * j21
+        if abs(det) < 1e-12:
+            return None
+        th -= (fx * j22 - fz * j12) / det
+        zp -= (fz * j11 - fx * j21) / det
+        if abs(th) > 1.5:
+            return None
+    else:
+        return None
+    return py
 
 
 def surface_y(bm, x, z):
@@ -2554,7 +2607,11 @@ def sculpt_eyes(hb, eyes):
     # the patch's edge: new points along it stay on the straight edges the coarser faces beyond still share
     rim = [(e.verts[0].co.copy(), e.verts[1].co.copy()) for e in edges if any(lf not in inside for lf in e.link_faces)]
     ra = np.array([a for a, b in rim]); rb = np.array([b for a, b in rim])
-    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=10, use_grid_fill=True, smooth=0.0)
+    # cut to points about 0.014 apart, whatever the head's own mesh: ten cuts on the first head's edges (a
+    # finer head needs fewer, or the eyes' patch alone runs to half a million points)
+    mean_edge = float(np.mean([e.calc_length() for e in edges]))
+    cuts = max(2, int(round(mean_edge / 0.0141)) - 1)
+    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=cuts, use_grid_fill=True, smooth=0.0)
     new = [v for v in res['geom'] if isinstance(v, bmesh.types.BMVert) and v.co.y < 0]
     P = np.array([v.co for v in new])
     rim_d = np.full(len(new), 1e9)
