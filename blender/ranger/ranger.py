@@ -892,10 +892,6 @@ def gauss(x, z, x0, z0, sx, sz, amp):
     return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
 
 
-def gauss(x, z, x0, z0, sx, sz, amp):
-    return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
-
-
 def face_relief(x, z):
     """How far the face stands forward of the base head at (x across, z up), in head heights. The planes a
     painter would block in: brow ridge over the eye sockets, the nose (bridge, tip and wings), cheekbones with
