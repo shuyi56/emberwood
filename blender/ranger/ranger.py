@@ -299,14 +299,15 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
         c1.inputs['B'].default_value = (*[lerp(a, b, 0.4) for a, b in zip(light, lighter)], 1)
         # mud and wet: the foot darkened, fading up the shaft along a wavering tide line
         tide = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=1.1, Detail=2.0)
-        tz = _math(nt, 'MULTIPLY_ADD', tide.outputs['Fac'], 1.6, zc)
-        mud = _node(nt, 'ShaderNodeMapRange', Value=tz, **{'From Min': 5.0, 'From Max': 3.6}).outputs['Result']
+        # (kept low, on the foot below the welt's top and up over the toe, with a clean edge, not a smeared fade)
+        tz = _math(nt, 'MULTIPLY_ADD', tide.outputs['Fac'], 0.5, zc)
+        mud = _node(nt, 'ShaderNodeMapRange', Value=tz, **{'From Min': 1.75, 'From Max': 1.55}).outputs['Result']
         # (and the mud itself, a dull grey-brown caked in specks over the wet leather nearest the sole)
         speck = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=3.5, Detail=4.0, Roughness=0.65)
         caked = _math(nt, 'MULTIPLY', _node(nt, 'ShaderNodeMapRange', Value=speck.outputs['Fac'], **{'From Min': 0.58, 'From Max': 0.66}).outputs['Result'],
-                      _node(nt, 'ShaderNodeMapRange', Value=tz, **{'From Min': 3.6, 'From Max': 2.4}).outputs['Result'])
-        cw_ = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', mud, 0.7), A=c1.outputs['Result'])
-        cw_.inputs['B'].default_value = (*[c * 0.5 for c in deep], 1)
+                      _node(nt, 'ShaderNodeMapRange', Value=tz, **{'From Min': 1.55, 'From Max': 1.25}).outputs['Result'])
+        cw_ = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', mud, 0.45), A=c1.outputs['Result'])
+        cw_.inputs['B'].default_value = (*[c * 0.6 for c in deep], 1)
         col = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', caked, 0.8), A=cw_.outputs['Result'])
         col.inputs['B'].default_value = (0.11, 0.09, 0.07, 1)
         mud = _math(nt, 'MAXIMUM', mud, caked)
@@ -2322,7 +2323,8 @@ def build():
         kn = empty(f'Knee.{side}', (0, 0, -THIGH), hip)
         an = empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
         w = leg_weights(side)
-        zs = [2.0 - 0.2 * i for i in range(int((2.0 + THIGH + SHIN) / 0.2) + 1)]
+        # (the leg ends inside the boot, well above the ankle, so it never shows through the heel as the foot bends)
+        zs = [2.0 - 0.2 * i for i in range(int((2.0 + THIGH + SHIN - 3.5) / 0.2) + 1)]
 
         def leg_pt(z, phi, folds=False, s=s):
             r = profile(LEG, z) + (leg_folds(z, phi, s)[0] if folds else 0.0)
@@ -2385,8 +2387,19 @@ def build():
             bst.append((0.0, ry + 0.1, z))
         mesh_obj(f'Boot stitching.{side}', dashes(bst, (0.24, 0.14, 0.55)), M_STITCH, loc=(x, 0, kz), subdiv=0, skin=w)
         az = kz - SHIN
-        mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, loc=(x, 0, az),
-                 subdiv=1, skin=w)
+        # the welt: a strip of darker leather sewn round where the upper meets the sole, standing just proud of
+        # both, so the foot ends in a clean, defined edge; then the sole under it (held by enough rings that the
+        # smoothing keeps its flat, square-edged shape instead of rounding it into a puck)
+        mesh_obj(f'Welt.{side}', loft([(-2.25, 1.86, 3.36, 0, -1.65), (-2.4, 1.97, 3.5, 0, -1.7), (-2.8, 2.0, 3.53, 0, -1.7),
+                                       (-2.86, 1.92, 3.45, 0, -1.7)], n=40, cap_top=False, cap_bot=False),
+                 M_BELT, loc=(x, 0, az), subdiv=1, skin=w, solid=0.06)
+        welt = []
+        for k in range(44):
+            ph = 2 * math.pi * k / 44
+            welt.append((-2.0 * math.sin(ph), -1.7 - 3.52 * math.cos(ph), -2.6))
+        mesh_obj(f'Welt stitching.{side}', dots(welt, 0.08), M_STITCH, loc=(x, 0, az), subdiv=0, skin=w)
+        mesh_obj(f'Sole.{side}', loft([(-2.8, 1.93, 3.47, 0, -1.7), (-2.86, 1.95, 3.5, 0, -1.7), (-3.3, 1.93, 3.47, 0, -1.7),
+                                       (-ANKLE_Z, 1.85, 3.38, 0, -1.7)], n=40), M_SOLE, loc=(x, 0, az), subdiv=1, skin=w)
     skin_trunk(body)
     mantle_on_arms(['Mantle', 'Mail trim'])
     finish_rig()

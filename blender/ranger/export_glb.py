@@ -343,9 +343,9 @@ def bake_cloth_form(rays=16, dist=2.4):
             ao = hit / rays
             c = c * (1.0 - 0.6 * ao) * (1.0 - 0.3 * cr)
             if mid == ranger.M_BOOTS:
-                # the foot darkened by mud and wet, fading up the shaft along a wavering tide line
-                tide = q.z + 1.6 * (0.5 + 0.5 * noise.noise(q * 1.1))
-                c = c * (1.0 - 0.45 * min(1.0, max(0.0, (5.0 - tide) / 1.4)))
+                # the foot darkened by mud, low on it above the welt, with a clean edge
+                tide = q.z + 0.5 * (0.5 + 0.5 * noise.noise(q * 1.1))
+                c = c * (1.0 - 0.3 * min(1.0, max(0.0, (1.75 - tide) / 0.2)))
             cols += [*c, 1.0]
         me.color_attributes.new('form', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', cols)
     sc.frame_set(1)
