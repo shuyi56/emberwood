@@ -1180,24 +1180,31 @@ def iris_colours(me, to_disc, r, s):
         p = to_disc @ v.co
         q = math.hypot(p.x, p.z) / r
         a = math.atan2(p.z, p.x * s)
+        # the stroma: fine radial fibres, a few darker crypts between them, and faint rings in the outer part
         fib = 0.5 + 0.25 * math.sin(a * 23 + 2.0 * math.sin(a * 5)) + 0.25 * math.sin(a * 41 + 1.3)
-        t = 0.48 + 0.16 * (fib - 0.5)                       # the green, in fibres
-        t -= 0.46 * smooth(0.66, 1.0, q)                    # the dark ring at the rim
+        crypt = max(0.0, math.sin(a * 9 + 1.7 * math.sin(a * 3)) * math.sin(q * 19 + 0.8)) ** 3
+        t = 0.52 + 0.22 * (fib - 0.5) - 0.12 * crypt * smooth(0.45, 0.6, q) * smooth(0.95, 0.8, q)
+        t -= 0.05 * (0.5 + 0.5 * math.cos(q * 40)) * smooth(0.7, 0.8, q)
+        # the collarette: a lighter, ragged ring a little out from the pupil, warm inside it
+        rag = 0.5 + 0.03 * math.sin(a * 13 + 1.1) + 0.02 * math.sin(a * 29)
+        t += 0.12 * math.exp(-((q - rag) / 0.05) ** 2)
+        # the limbal ring: a dark, crisp band at the very rim
+        t -= 0.5 * smooth(0.8, 1.0, q)
         zn = p.z / r
-        t -= 0.3 * smooth(0.05, 0.7, zn)                    # the shadow of the upper lid
-        t += 0.22 * smooth(-0.1, -0.65, zn) * (1 - smooth(0.7, 0.92, q))   # light gathered low in the iris
-        # its roundness, as a painter shades a ball: lit from the upper left (facing the camera), so the tone
-        # turns darker toward the far, lower-right edge and a little lighter on the near side
         xn = p.x * s / r
-        t += 0.12 * zn * smooth(0.25, 0.95, q)
-        t -= 0.24 * q * q
-        warm = smooth(0.62, 0.4, q) * (0.75 + 0.25 * fib)  # the amber collar round the pupil
-        t = min(1.0, max(0.0, t + 0.22 * warm))
+        # the shadow of the upper lid, soft and following its curve, over the top third
+        t -= 0.45 * smooth(0.0, 0.8, zn + 0.15 * xn * xn)
+        # light through the cornea: the iris is a flat disc behind a clear dome, so light from above gathers
+        # as a glow in the lower part, on the side away from it, and the near (upper) side stays darker
+        glow = math.exp(-((xn + 0.2) ** 2 + (zn + 0.5) ** 2) / 0.22)
+        t += 0.28 * glow * smooth(0.36, 0.5, q) * smooth(0.95, 0.8, q)
+        warm = smooth(0.6, 0.4, q) * (0.75 + 0.25 * fib)   # the amber collar round the pupil
+        t = min(1.0, max(0.0, t + 0.18 * warm))
         k = t * 4
         i0 = min(3, int(k))
         c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)
         c = c + (amber - c) * 0.45 * warm
-        dark = smooth(0.39, 0.33, q)                        # the pupil, with a soft edge
+        dark = smooth(0.36, 0.31, q)                        # the pupil, a third of the iris across, soft-edged
         c = c + (pupil - c) * dark
         cols.append(_srgb_lin(c / 255.0) + [1.0])
         shades.append(t * (1 - dark) + 0.25 * dark)
@@ -1488,8 +1495,8 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # the iris lies on the curve of the white, turned to face the way it faces there (the white bends with the
     # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
     # centre)
-    IR = 0.23                                       # its top under the upper lid, its foot on the lower one
-    iz = ez - EYE_LIFT + 0.05
+    IR = 0.31                                       # its top under the upper lid, its foot on the lower one
+    iz = ez - EYE_LIFT + 0.06
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
     n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
@@ -1510,6 +1517,12 @@ def build_eye(head, head_tree, s, x, ey, ez):
             flat = -(n.x * v.co.x + n.z * v.co.z) / n.y
             surf = h[0].y - c.y
             v.co.y = 0.75 * surf + 0.25 * min(flat, surf) - (0.006 + 0.07 * (1 - t * t))
+            # past the lids' edges it goes back faster than the white, so no rim of it shows under the lids
+            px_, pz_ = c.x + v.co.x, c.z + v.co.z
+            uu_ = (px_ - x) * s / RX
+            dz_ = pz_ - ez - uu_ * RX * TILT
+            lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
+            v.co.y += 0.6 * (smooth(0.99, 1.06, dz_ / max(lim, 1e-3)) + smooth(0.88, 0.97, -dz_ / max(lim, 1e-3)))
         else:
             v.co.y = 0.3
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
@@ -2010,7 +2023,7 @@ def sprite_mode(on):
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
         if o.name.startswith('Iris'):
-            o.scale = (1.5,) * 3 if on else (1.0,) * 3
+            o.scale = (1.11,) * 3 if on else (1.0,) * 3
         if o.name.startswith('Eye white') and o.data.shape_keys:
             o.data.shape_keys.key_blocks['tuck'].value = 0.0 if on else 1.0
             o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
