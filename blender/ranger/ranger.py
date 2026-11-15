@@ -909,9 +909,9 @@ def face_relief(x, z):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
         d += gauss(x, z, s * 0.235, 0.46, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
-        d += gauss(x, z, s * 0.14, 0.41, 0.065, 0.055, 0.035)    # the apple of the cheek, under the eye by the nose
+        d += gauss(x, z, s * 0.14, 0.41, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.21, 0.34, 0.07, 0.05, -0.005)      # a shallow hollow under the cheekbone
-        d += gauss(x, z, s * 0.16, 0.23, 0.06, 0.06, 0.01)       # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.17, 0.25, 0.075, 0.07, 0.022)       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
         d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
         d += gauss(x, z, s * 0.235, 0.555, 0.035, 0.07, 0.018)   # the outer rim of the eye socket, brow to cheekbone
@@ -927,9 +927,9 @@ def face_relief(x, z):
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
     d += mouth_relief(x, z)
-    d += gauss(x, z, 0, 0.095, 0.066, 0.048, 0.044)    # chin: the ball of it stands nearly as far forward as the lower lip
+    d += gauss(x, z, 0, 0.088, 0.048, 0.046, 0.05)    # chin: the ball of it stands nearly as far forward as the lower lip
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.1, 0.11, 0.035, 0.05, -0.004)    # a soft dip either side, setting the chin off the jaw
+        d += gauss(x, z, s * 0.09, 0.11, 0.035, 0.05, -0.006)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
@@ -1003,8 +1003,8 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.127), (0.07, 0.152), (0.12, 0.187),
-                       (0.18, 0.219), (0.25, 0.249), (0.32, 0.277), (0.41, 0.31), (0.52, 0.335), (0.62, 0.352), (0.7, 0.36)])
+HEAD_W = smooth_curve([(NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.122), (0.07, 0.156), (0.12, 0.197),
+                       (0.18, 0.236), (0.25, 0.268), (0.32, 0.296), (0.41, 0.323), (0.52, 0.342), (0.62, 0.353), (0.7, 0.36)])
 # (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
 # level, then the chin and the face)
 HEAD_F = smooth_curve([(NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
