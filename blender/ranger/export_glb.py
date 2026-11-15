@@ -19,6 +19,7 @@ import ranger  # noqa: E402
 WALK_FRAMES = 24
 IDLE_FRAME = 40
 FPS = 24
+MODEL_EYE_OPEN = 0.72   # lid opening for the model (the sprite sheet keeps ranger.EYE_OPEN)
 
 
 def key_pose(sc, frame):
@@ -69,6 +70,7 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ranger.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
+    ranger.EYE_OPEN = MODEL_EYE_OPEN   # the model's eyes a little narrower than the sprites' (those need the wider opening to keep their white pixels)
     ranger.build()
     sc = bpy.context.scene
     for o in sc.objects:
