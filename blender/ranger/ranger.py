@@ -1360,6 +1360,14 @@ def eye_relief(x, z, s, ex, ez):
     d -= 0.014 * g(dz - cz, 0.045) * cf
     # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
     d += 0.04 * g(dz + (B - 0.02), 0.085) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    # past the outer corner: the upper lid laps over the lower and its fold runs on a little way beyond the
+    # cusp, a tapering groove whose upper wall faces down into shadow, with a soft hollow round it (as in a real
+    # eye, the corner is the deepest, darkest point and the shade fades out along the line of the lid)
+    if u > 0.9:
+        k = max(0.0, u - 1.0)
+        taper = smooth(0.9, 1.0, u) * max(0.0, 1 - k / 0.5) ** 1.6
+        d -= 0.07 * g(dz + 0.04 * k, 0.06 * (1 - 0.6 * k)) * taper
+        d -= 0.035 * g(dz + 0.02 * k, 0.14) * smooth(0.85, 1.0, u) * smooth(1.5, 1.05, u)
     lz = -(B + 0.17 + 0.03 * uc)
     d -= 0.007 * g(dz - lz, 0.08) * smooth(0.9, 0.4, abs(u - 0.1))
     return d
