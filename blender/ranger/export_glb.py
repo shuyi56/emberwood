@@ -68,7 +68,7 @@ def plain_materials():
             p.inputs['Sheen Weight'].default_value = 1.0
             p.inputs['Sheen Roughness'].default_value = 0.6
             p.inputs['Sheen Tint'].default_value = (0.2, 0.25, 0.13, 1.0)
-        if mid == ranger.M_SLEEVE:
+        if mid in (ranger.M_SLEEVE, ranger.M_LEGS):
             # the wool's weave: a twill normal map (see twill_image), laid round each sleeve by its 'UVMap'
             img = nt.nodes.new('ShaderNodeTexImage')
             img.image = twill_image()
@@ -80,15 +80,16 @@ def plain_materials():
             nm_.inputs['Strength'].default_value = 0.8
             nt.links.new(img.outputs['Color'], nm_.inputs['Color'])
             nt.links.new(nm_.outputs['Normal'], p.inputs['Normal'])
-        if mid in ranger.FORM_SHADED:
+        if mid in ranger.FORM_SHADED or mid == ranger.M_BOOTS:
             # the sleeves and the jerkin: their folds, the shade where they are shut in and the leather's mottling,
             # baked into the 'form' colour (see bake_cloth_form)
             col = nt.nodes.new('ShaderNodeVertexColor')
             col.layer_name = 'form'
             nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
-            p.inputs['Roughness'].default_value = 0.95 if mid == ranger.M_SLEEVE else 0.7
-            p.inputs['Specular IOR Level'].default_value = 0.15 if mid == ranger.M_SLEEVE else 0.35
-            if mid == ranger.M_SLEEVE:
+            cloth = mid in (ranger.M_SLEEVE, ranger.M_LEGS)
+            p.inputs['Roughness'].default_value = 0.95 if cloth else (0.6 if mid == ranger.M_BOOTS else 0.7)
+            p.inputs['Specular IOR Level'].default_value = 0.15 if cloth else 0.35
+            if cloth:
                 p.inputs['Sheen Weight'].default_value = 0.6
                 p.inputs['Sheen Roughness'].default_value = 0.5
                 p.inputs['Sheen Tint'].default_value = (0.2, 0.24, 0.15, 1.0)
@@ -138,12 +139,12 @@ def twill_image(size=256):
 def sleeve_uvs():
     """Lay a 'UVMap' round each sleeve from its rest position: u runs round the arm (six tiles round, with the
     seam on the inside of the arm, against the body), v down it."""
-    for side, s in (('R', 1), ('L', -1)):
-        o = bpy.data.objects.get(f'Sleeve.{side}')
+    for name, side, s in [(n, sd, s_) for n in ('Sleeve', 'Leg') for sd, s_ in (('R', 1), ('L', -1))]:
+        o = bpy.data.objects.get(f'{name}.{side}')
         if o is None:
             continue
         me = o.data
-        cx, cy = -s * ranger.SH_X, 0.2
+        cx, cy = (-s * ranger.SH_X, 0.2) if name == 'Sleeve' else (-s * ranger.LEG_X, 0.0)
         rest = me.attributes['rest'].data
         uvl = me.uv_layers.new(name='UVMap')
         for loop in me.loops:
@@ -295,7 +296,7 @@ def bake_cloth_form(rays=16, dist=2.4):
     rng = np.random.default_rng(7)
     dirs = rng.normal(size=(rays, 3))
     dirs /= np.linalg.norm(dirs, axis=1)[:, None]
-    targets = [o for o in sc.objects if o.type == 'MESH' and o.name == 'Jerkin' or o.name.startswith('Sleeve.')]
+    targets = [o for o in sc.objects if o.type == 'MESH' and (o.name == 'Jerkin' or o.name.split('.')[0] in ('Sleeve', 'Leg', 'Boot'))]
     for o in targets:
         # each point where it stands in the pose: the mesh deformed by the rig alone, so its points still match
         # the mesh's own (the smoothing and thickness modifiers are held off while it is read)
@@ -310,19 +311,20 @@ def bake_cloth_form(rays=16, dist=2.4):
         for m in held:
             m.show_viewport = True
         me = o.data
-        mid = ranger.M_JERKIN if o.name == 'Jerkin' else ranger.M_SLEEVE
+        mid = {'Jerkin': ranger.M_JERKIN, 'Leg': ranger.M_LEGS, 'Boot': ranger.M_BOOTS}.get(o.name.split('.')[0], ranger.M_SLEEVE)
         rmp = ranger.MATERIALS[mid]['ramp'] / 255.0
         lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
         dark, midc, light = lin[1], lin[2], lin[3]
         crease = np.zeros(len(me.vertices), dtype=np.float32)
-        me.attributes['crease'].data.foreach_get('value', crease)
+        if 'crease' in me.attributes:
+            me.attributes['crease'].data.foreach_get('value', crease)
         rest = me.attributes['rest'].data
         solid = o.modifiers.get('thickness')
         lift = solid.thickness if solid else 0.0
         cols = []
         for (p, n), r, cr in zip(posed, rest, crease):
             q = r.vector
-            if mid == ranger.M_JERKIN:
+            if mid in (ranger.M_JERKIN, ranger.M_BOOTS):
                 t = 0.65 * noise.noise(q * 0.32) + 0.35 * noise.noise(q * 1.1 + Vector((2.3, 5.1, 0.7)))
                 t = min(1.0, max(-1.0, 1.6 * t))
                 c = midc + (light - midc) * t * 0.5 if t > 0 else midc + (midc - dark) * t * 0.5
@@ -342,6 +344,10 @@ def bake_cloth_form(rays=16, dist=2.4):
                     hit += 1.0 - 0.5 * h[3] / dist          # (nearer cover shades more)
             ao = hit / rays
             c = c * (1.0 - 0.6 * ao) * (1.0 - 0.3 * cr)
+            if mid == ranger.M_BOOTS:
+                # the foot darkened by mud, low on it above the welt, with a clean edge
+                tide = q.z + 0.5 * (0.5 + 0.5 * noise.noise(q * 1.1))
+                c = c * (1.0 - 0.3 * min(1.0, max(0.0, (1.75 - tide) / 0.2)))
             cols += [*c, 1.0]
         me.color_attributes.new('form', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', cols)
     sc.frame_set(1)
