@@ -944,22 +944,22 @@ def face_relief(x, z):
         d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032)      # the cheek filled out under the cheekbone, no hollow
         d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016)       # the soft fullness of the lower cheek
-        d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
-        d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
+        d += gauss(x, z, s * 0.05, 0.37, 0.021, 0.02, 0.018)    # wing of the nose (smaller: it read big from the game's camera)
+        d += gauss(x, z, s * 0.037, 0.378, 0.008, 0.02, -0.004)  # the groove between the wing and the tip
         d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     if z > 0.36:
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
-        h = (0.014 + 0.056 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
+        h = (0.012 + 0.04 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.07 * math.exp(-((0.36 - z) / 0.022) ** 2)
-    w = 0.03 + 0.012 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.02 * max(0.0, 1 - abs(z - 0.37) / 0.06)
+        h = 0.05 * math.exp(-((0.36 - z) / 0.02) ** 2)
+    w = 0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - 0.37) / 0.06)
     d += h * 0.5 * (math.exp(-(x / w) ** 2) + math.exp(-(x / w) ** 4))
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
-    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
+    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.018)      # the muzzle: the teeth and jaw carry the mouth forward
     d += mouth_relief(x, z)
-    d += gauss(x, z, 0, 0.088, 0.048, 0.046, 0.05)    # chin: the ball of it stands nearly as far forward as the lower lip
+    d += gauss(x, z, 0, 0.088, 0.046, 0.044, 0.028)   # chin: the ball of it, set back behind the lower lip
     for s in (-1, 1):
         d += gauss(x, z, s * 0.09, 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
     return d
@@ -977,12 +977,12 @@ def mouth_relief(x, z):
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     t = (z - 0.258) / max(0.01, top - 0.258)
     if 0.0 < t < 1.25:
-        d += 0.03 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
-    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.008)          # the tubercle
+        d += 0.022 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
     across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.032 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
+    d += 0.024 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
     # the line between the lips, deepest at the corners where the lips tuck in
-    d -= (0.012 + 0.014 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    d -= (0.008 + 0.008 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
         d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.004)    # the corners
         d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
@@ -993,8 +993,8 @@ def mouth_relief(x, z):
             px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
-    d += gauss(x, z, 0, 0.385, 0.032, 0.026, 0.01)         # the ball of the nose's tip
-    d += gauss(x, z, 0, 0.19, 0.05, 0.012, -0.014)         # the crease under the lower lip
+    d += gauss(x, z, 0, 0.385, 0.028, 0.024, 0.006)        # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.19, 0.05, 0.014, -0.008)         # the crease under the lower lip
     return d
 
 
@@ -1040,7 +1040,7 @@ HEAD_W = smooth_curve([(HEAD_NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03,
 # (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
 # level, then the chin and the face)
 HEAD_F = smooth_curve([(HEAD_NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
-                       (0.05, 0.33), (0.08, 0.365), (0.12, 0.385), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415), (0.42, 0.42),
+                       (0.05, 0.315), (0.08, 0.352), (0.12, 0.376), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415), (0.42, 0.42),
                        (0.52, 0.42), (0.62, 0.42)])
 HEAD_B = smooth_curve([(HEAD_NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31), (0.3, 0.35), (0.38, 0.385),
                        (0.46, 0.415), (0.54, 0.435), (0.64, 0.445)])
@@ -3249,14 +3249,16 @@ def brow_line(ub):
     """The brow's centre height above the eye's centre and its half-height, at ub (in the brow's own units: the
     face's x from the eye's centre over 1.1). Both are single smooth closed forms, with no table to interpolate
     (a piecewise-linear one showed its corners as kinks along the brow's edges): the centre is a skewed sine arch,
-    s^1.45 pushing its peak about 60% of the way out, so it rises gently from the nose and falls more steeply
-    into the tail; the half-height is full at the head, swells a little just past it and thins smoothly to a fine
-    tail."""
+    s^1.6 pushing its peak about two thirds of the way out, so it starts level at the nose and falls more
+    steeply into the tail, and a low arch: an inner end set low and slanting up (with upright hairs) read as a
+    scowl from the game's high camera; the half-height is lighter at the head, swells a little just past it and
+    thins smoothly to a fine tail.
+    """
     u = min(max(ub, BROW_US[0]), BROW_US[-1])
     t = (u - BROW_US[0]) / (BROW_US[-1] - BROW_US[0])
-    zc = 0.93 + 0.35 * math.sin(math.pi * t ** 1.45) - 0.05 * t
+    zc = 1.0 + 0.24 * math.sin(math.pi * t ** 1.6) - 0.08 * t
     rise = math.sin(0.5 * math.pi * min(1.0, t / 0.28))
-    r = 0.016 + 0.17 * (1 - t) ** 0.65 * (0.72 + 0.28 * rise)
+    r = 0.016 + 0.17 * (1 - t) ** 0.65 * (0.62 + 0.38 * rise)
     return zc, r
 
 
@@ -3307,7 +3309,7 @@ def brow_image():
         tang = math.atan(slope(u))
         side = (dz - (zc + 0.15 * r)) / max(r, 1e-3)              # -1 at the lower edge, +1 at the upper
         body = tang + math.radians(24) * smooth(0.2, -0.9, side) - math.radians(16) * smooth(-0.1, 0.9, side)
-        head = math.radians(82 - 10 * smooth(-0.7, -0.35, ub))
+        head = math.radians(62 - 12 * smooth(-0.7, -0.35, ub))
         w = smooth(-0.3, -0.55, ub)
         tail = smooth(0.7, 1.0, ub)
         a = body * (1 - w) + head * w
