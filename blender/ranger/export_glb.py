@@ -68,6 +68,18 @@ def plain_materials():
             p.inputs['Sheen Weight'].default_value = 1.0
             p.inputs['Sheen Roughness'].default_value = 0.6
             p.inputs['Sheen Tint'].default_value = (0.2, 0.25, 0.13, 1.0)
+        if mid == ranger.M_SLEEVE:
+            # the wool's weave: a twill normal map (see twill_image), laid round each sleeve by its 'UVMap'
+            img = nt.nodes.new('ShaderNodeTexImage')
+            img.image = twill_image()
+            img.image.colorspace_settings.name = 'Non-Color'
+            uv = nt.nodes.new('ShaderNodeUVMap')
+            uv.uv_map = 'UVMap'
+            nt.links.new(uv.outputs['UV'], img.inputs['Vector'])
+            nm_ = nt.nodes.new('ShaderNodeNormalMap')
+            nm_.inputs['Strength'].default_value = 0.8
+            nt.links.new(img.outputs['Color'], nm_.inputs['Color'])
+            nt.links.new(nm_.outputs['Normal'], p.inputs['Normal'])
         if mid in ranger.FORM_SHADED:
             # the sleeves and the jerkin: their folds, the shade where they are shut in and the leather's mottling,
             # baked into the 'form' colour (see bake_cloth_form)
@@ -89,6 +101,55 @@ def plain_materials():
             col.layer_name = 'gold'
             nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
         nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+
+
+def twill_image(size=256):
+    """A tiling normal map of a soft wool twill: diagonal ribs (four across the tile, so at the world's distance
+    each is a pixel or two wide rather than a shimmer), each rib broken into slightly uneven threads, over a gentle
+    waviness of the cloth. Packed into the model."""
+    import numpy as np
+    im = bpy.data.images.get('twill')
+    if im is not None:
+        return im
+    rng = np.random.default_rng(11)
+    y, x = np.mgrid[0:size, 0:size] / size
+    t = 4 * (x + y)
+    rib = np.abs(np.sin(np.pi * t)) ** 0.7
+    # threads: each rib cut into short lumps along its length, and every lump a little different in height
+    lump = 0.5 + 0.5 * np.cos(2 * np.pi * 12 * (x - y))
+    jitter = rng.random((48, 48))
+    jitter = np.kron(jitter, np.ones((size // 48 + 1, size // 48 + 1)))[:size, :size]
+    h = rib * (0.75 + 0.25 * lump) * (0.85 + 0.3 * jitter)
+    # the cloth's waviness: two broad tiling swells
+    h += 0.35 * np.sin(2 * np.pi * (x + 2 * y)) * np.sin(2 * np.pi * (2 * x - y))
+    k = 1.6
+    gx = (np.roll(h, -1, 1) - np.roll(h, 1, 1)) * k
+    gy = (np.roll(h, -1, 0) - np.roll(h, 1, 0)) * k
+    n = np.dstack([-gx, gy, np.ones_like(h)])
+    n /= np.linalg.norm(n, axis=2, keepdims=True)
+    rgba = np.concatenate([n * 0.5 + 0.5, np.ones((size, size, 1))], axis=2).astype(np.float32)
+    im = bpy.data.images.new('twill', size, size, alpha=False)
+    im.pixels.foreach_set(rgba[::-1].ravel())
+    im.file_format = 'PNG'
+    im.pack()
+    return im
+
+
+def sleeve_uvs():
+    """Lay a 'UVMap' round each sleeve from its rest position: u runs round the arm (six tiles round, with the
+    seam on the inside of the arm, against the body), v down it."""
+    for side, s in (('R', 1), ('L', -1)):
+        o = bpy.data.objects.get(f'Sleeve.{side}')
+        if o is None:
+            continue
+        me = o.data
+        cx, cy = -s * ranger.SH_X, 0.2
+        rest = me.attributes['rest'].data
+        uvl = me.uv_layers.new(name='UVMap')
+        for loop in me.loops:
+            q = rest[loop.vertex_index].vector
+            a = math.atan2(q.y - cy, -(q.x - cx) * s)
+            uvl.data[loop.index].uv = ((a / (2 * math.pi) + 0.5) * 6.0, q.z / 2.0)
 
 
 def bake_hair_shade(rays=10, dist=1.6):
@@ -264,8 +325,9 @@ def bake_cloth_form(rays=16, dist=2.4):
                 t = min(1.0, max(-1.0, 1.6 * t))
                 c = midc + (light - midc) * t * 0.5 if t > 0 else midc + (midc - dark) * t * 0.5
             else:
-                t = noise.noise(q * 0.4)
-                c = midc + (light - midc) * 0.25 * t
+                t = 0.7 * noise.noise(q * 0.45) + 0.3 * noise.noise(q * 1.3 + Vector((4.1, 0.3, 2.2)))
+                t = min(1.0, max(-1.0, 1.5 * t))
+                c = midc + (light - midc) * 0.4 * t if t > 0 else midc + (midc - dark) * 0.4 * t
             p = p + n * (lift + 0.02)
             hit = 0.0
             for d in dirs:
@@ -290,11 +352,9 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ranger.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
-    # in the world she covers ground at a good pace, so the walk takes a longer stride than the sprite sheet's,
-    # lifts the knee higher, swings the arms further, and drops the body lower where the legs are furthest apart
-    # (so the planted foot stays on the ground). WORLD_CYCLE in src/world/main.js is the ground one cycle covers.
-    ranger.STRIDE, ranger.LIFT = 10.5, 4.4
-    ranger.ARM_SWING, ranger.BOB_PASS, ranger.BOB_APART = 0.55, -0.2, 1.9
+    # in the world she covers ground at a good pace, so the walk takes a longer stride than the sprite sheet's and
+    # swings the arms further. WORLD_CYCLE in src/world/main.js is the ground one cycle covers (see stride_length).
+    ranger.GAIT, ranger.ARM_SWING = 1.3, 0.5
     ranger.build()
     sc = bpy.context.scene
     for o in sc.objects:
@@ -312,6 +372,7 @@ def main():
     # the loose fibres standing off the wool are see-through shells for the close-up renders: not for the world
     for o in [o for o in sc.objects if o.name.startswith('Wool fuzz')]:
         bpy.data.objects.remove(o)
+    sleeve_uvs()
     plain_materials()
     bake_hair_shade()
     bake_wool()
@@ -328,7 +389,7 @@ def main():
         filepath=out, export_format='GLB', export_apply=True, export_yup=True,
         export_animations=True, export_force_sampling=True, export_frame_range=True,
         export_animation_mode='SCENE', export_skins=True, export_attributes=False,
-        export_texcoords=False, export_materials='EXPORT', export_cameras=False, export_lights=False)
+        export_texcoords=True, export_materials='EXPORT', export_cameras=False, export_lights=False)
     print('wrote', out, os.path.getsize(out) // 1024, 'KB')
 
 

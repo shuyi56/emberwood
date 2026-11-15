@@ -680,10 +680,9 @@ HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 11.0, 8.6
 LEG_X, SH_X = 3.3, 6.1
-STRIDE, LIFT = 8.0, 3.2
-# the walk's range of motion: the arms' swing (radians either way), and how far the body drops from its height at
-# the passing pose to where the legs are furthest apart (the world model takes a longer stride: see export_glb.py)
-ARM_SWING, BOB_PASS, BOB_APART = 0.38, -1.1, 1.0
+# the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
+# either way, in radians (the world model takes a longer stride: see export_glb.py)
+GAIT, ARM_SWING = 1.0, 0.4
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -1243,6 +1242,15 @@ SLEEVE_CREASES = [
 ]
 
 
+# A few long folds down the outside and back of the arm, where the cloth hangs from the shoulder and from the elbow:
+# (angle round the arm, as above, top, bottom, half-width as an angle, depth, drift of the line round the arm per
+# unit down). Each fades in and out along its length and wanders off true, so they read as hanging cloth, not ribs.
+SLEEVE_DRAPE = [
+    (1.15, -0.8, -7.5, 0.28, 0.1, 0.035), (2.05, -2.0, -9.5, 0.25, 0.08, -0.03), (1.6, EZ - 1.0, EZ - FORE + 1.0, 0.26, 0.08, 0.05),
+    (2.6, EZ - 2.0, EZ - FORE + 1.6, 0.22, 0.06, -0.04), (0.55, EZ - 2.5, EZ - FORE + 2.0, 0.22, 0.05, 0.03),
+]
+
+
 def sleeve_folds(z, phi, s):
     """(radial offset, crease) of the sleeve at local height z, angle phi (phi 0 faces front)."""
     pm = s * phi                                    # (mirrored: +pi/2 is out from the body on either arm)
@@ -1257,6 +1265,19 @@ def sleeve_folds(z, phi, s):
         ridge = math.exp(-((d - 0.42) / 0.38) ** 2) + 0.6 * math.exp(-((d + 0.45) / 0.38) ** 2)
         off += depth * win * (0.55 * ridge - groove)
         cr += win * groove * min(1.0, depth / 0.11)
+    for p0, zt, zb, wd, depth, drift in SLEEVE_DRAPE:
+        if not (zb - 1.0 < z < zt + 1.0):
+            continue
+        along = min(1.0, max(0.0, (zt - z) / (zt - zb)))
+        env = math.sin(math.pi * along) ** 0.8 if zb <= z <= zt else 0.0
+        if env <= 0.0:
+            continue
+        pc = p0 + drift * (zt - z) + 0.06 * math.sin(1.3 * z + 3 * p0)
+        dp = math.atan2(math.sin(pm - pc), math.cos(pm - pc))
+        # (a rounded ridge with a shallow valley either side)
+        g = math.exp(-(dp / wd) ** 2) - 0.45 * math.exp(-((abs(dp) - 1.3 * wd) / (0.6 * wd)) ** 2)
+        off += depth * env * g
+        cr += 0.6 * env * max(0.0, -g)
     # a long soft fold down each part of the arm, where the cloth hangs from the shoulder and twists down the
     # forearm, faint
     v = fold_ridge(2.0 * pm + 0.55 * z + 0.6)
@@ -1303,7 +1324,9 @@ def jerkin_form(z, phi):
 
 # the sleeve's radius down the arm (local height from the shoulder joint, radius), before the deltoid and folds
 ARM_PROFILE = [(1.6, 0.3), (1.35, 1.3), (0.85, 1.95), (0.0, 2.15), (-2.0, 2.1), (-5.5, 1.88), (-UPPER, 1.65), (-UPPER - 2.2, 1.78),
-               (-UPPER - 5.0, 1.55), (-UPPER - FORE + 0.6, 1.3)]
+               (-UPPER - 5.0, 1.55), (-UPPER - FORE + 1.2, 1.36), (-UPPER - FORE - 0.3, 1.42), (-UPPER - FORE - 1.1, 1.5)]
+# (the sleeve runs on past the wrist and opens a little, so it falls over the root of the hand: the hand shows from
+# under a cuff wider than its wrist instead of hanging below a sleeve as wide as it is)
 
 
 def _profile(table, z):
@@ -1596,8 +1619,9 @@ def hand_mesh(s):
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
-    # fingers, index at the front to pinky at the back
-    for y0, L, r in ((-0.9, 1.95, 0.36), (-0.3, 2.1, 0.37), (0.3, 2.0, 0.35), (0.78, 1.6, 0.32)):
+    # fingers, index at the front to pinky at the back (the middle finger a little shorter than the palm, as in life:
+    # longer and the hand reads as all fingers)
+    for y0, L, r in ((-0.9, 1.5, 0.35), (-0.3, 1.62, 0.36), (0.3, 1.54, 0.34), (0.78, 1.22, 0.31)):
         p = Vector((0.05 * inward, y0, -2.55))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.88)):
@@ -1617,8 +1641,8 @@ def hand_mesh(s):
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
-    t1 = t0 + Vector((0.3 * inward, -0.25, -1.1))
-    t2 = t1 + Vector((0.22 * inward, 0.05, -0.8))
+    t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
+    t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.3)
     capsule(t0, t1, 0.46)
@@ -1632,7 +1656,9 @@ def hand_mesh(s):
     bm.from_mesh(me)
     bpy.data.meshes.remove(me)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
-    bmesh.ops.scale(bm, vec=(1.22, 1.22, 1.22), verts=bm.verts)   # about the length of the face, as in life
+    # (a little smaller than life, about two thirds of the face's length: at this size, held out on a swinging arm
+    # toward the viewer, a life-size hand reads as far too big against the slim forearm and the sleeve)
+    bmesh.ops.scale(bm, vec=(0.98, 0.98, 1.0), verts=bm.verts)
     return bm
 
 
@@ -1917,17 +1943,24 @@ def build():
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
         w = arm_weights(side)
-        zs = [1.55 - 0.22 * i for i in range(int((1.55 + UPPER + FORE - 0.6) / 0.22) + 1)]
+        zs = [1.55 - 0.22 * i for i in range(int((1.55 + UPPER + FORE + 1.1) / 0.22) + 1)]
+
+        def sleeve_w(co, w=w):
+            # (the sleeve hangs from the forearm: its end does not tip with the hand)
+            d = w(co)
+            d[f'Forearm.{side}'] = d.get(f'Forearm.{side}', 0.0) + d.pop(f'Hand.{side}', 0.0)
+            return d
 
         def arm_pt(z, phi, s=s):
             r = profile(ARM, z) + deltoid(z, phi, s) + sleeve_folds(z, phi, s)[0]
             # the elbow: a little point at the back of the joint
             back = 0.25 * math.exp(-((z + UPPER) / 0.9) ** 2) * max(0.0, -math.cos(phi))
             return -r * math.sin(phi), -(r * 1.03 + back * 0) * math.cos(phi) + back
-        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
+        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=sleeve_w, solid=0.12)
         crease_attr(so, lambda co, s=s: sleeve_folds(co.z, math.atan2(-co.x, -co.y), s)[1])
-        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.45, 1.5), (-UPPER - FORE - 0.4, 1.52, 1.57)]), M_SHIRT,
-                 loc=(x, 0.2, SH_Z), subdiv=0, skin=w)
+        # the shirt's cuff, a narrow band showing just below the end of the sleeve
+        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE - 0.7, 1.42, 1.46), (-UPPER - FORE - 1.5, 1.42, 1.46)], cap_top=False, cap_bot=False),
+                 M_SHIRT, loc=(x, 0.2, SH_Z), subdiv=0, skin=sleeve_w, solid=0.1)
         mesh_obj(f'Hand.{side}', hand_mesh(s), M_SKIN, loc=(x, 0.2, SH_Z - UPPER - FORE - 0.1), subdiv=0, skin=w)
 
     # ---- legs: one trouser leg from the hip to the ankle with a rounded kneecap and a patch over it, soft boots
@@ -2064,14 +2097,87 @@ def leg_ik(hip_z, fwd, foot_z):
     return alpha + beta, alpha - gamma
 
 
+# ---- the walk cycle
+# Each leg's joints follow the curves of a real walk through one cycle (t from 0 at the heel striking the ground,
+# through the stance to toe-off at about 0.6, then the swing back to the next heel strike), in degrees:
+# the hip, forward of straight down (furthest forward just before the heel strikes, furthest back at push-off);
+# the knee, bent (a little as the heel takes the weight, nearly straight in mid-stance, then folding up to about
+# 60 degrees through the swing, so the foot is lifted clear, and staying bent as the thigh comes up in front, so the
+# knee is raised as the leg comes through before the lower leg reaches out for the heel strike); and the
+# foot's pitch, toes up positive (up at the heel strike, flat through the stance, rolling up onto the toes to push
+# off, and lifted again through the swing so the toes clear the ground).
+GAIT_HIP = [(0.0, 22), (0.15, 17), (0.35, 0), (0.52, -13), (0.62, -8), (0.71, 10), (0.81, 25), (0.9, 27)]
+GAIT_KNEE = [(0.0, 3), (0.12, 15), (0.3, 5), (0.45, 7), (0.6, 30), (0.7, 56), (0.8, 55), (0.9, 22), (0.97, 4)]
+GAIT_FOOT = [(0.0, 14), (0.08, 0), (0.42, 0), (0.52, -14), (0.61, -32), (0.7, -12), (0.82, 6), (0.94, 12)]
+# The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
+# back, and the elbow folds as the arm swings forward and opens as it swings back, lagging behind the shoulder, so
+# the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum
+ARM_LAG, ELBOW_LAG = 0.05, 0.08
+STANCE = 0.62
+
+
+def cyclic(keys, t):
+    """A smooth closed curve through keys [(t, value)] over t in [0, 1)."""
+    t %= 1.0
+    n = len(keys)
+    for i in range(n):
+        t0, v1 = keys[i]
+        t1, v2 = keys[(i + 1) % n]
+        if i == n - 1:
+            t1 += 1.0
+        tt = t + 1.0 if t < t0 else t
+        if t0 <= tt <= t1:
+            u = (tt - t0) / (t1 - t0)
+            v0, v3 = keys[(i - 1) % n][1], keys[(i + 2) % n][1]
+            return 0.5 * (2 * v1 + (v2 - v0) * u + (2 * v0 - 5 * v1 + 4 * v2 - v3) * u * u + (3 * v1 - v0 - 3 * v2 + v3) * u ** 3)
+    return keys[0][1]
+
+
+def gait_leg(t):
+    """(thigh angle forward, knee bend, foot pitch toes-up) in radians, at point t of a leg's cycle. (The hip's
+    swing is scaled about its middle by GAIT; the knee and foot follow the same shape.)"""
+    hip = 6.5 + (cyclic(GAIT_HIP, t) - 6.5) * GAIT
+    return math.radians(hip), math.radians(cyclic(GAIT_KNEE, t)), math.radians(cyclic(GAIT_FOOT, t))
+
+
+def leg_fk(th, kb):
+    """(forward, down) of the ankle from the hip for a thigh angle and knee bend."""
+    sh = th - kb
+    return THIGH * math.sin(th) + SHIN * math.sin(sh), THIGH * math.cos(th) + SHIN * math.cos(sh)
+
+
+def foot_lift(pitch):
+    """How far the ankle stands above its flat height when the foot is tipped onto its toes (pitch < 0) or its
+    heel (pitch > 0)."""
+    return 3.0 * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
+
+
+def walk_drop(t):
+    """How far the hips sit below their standing height at walk phase t (t of the right leg): whichever foot bears
+    the weight stays on the ground, so the body rises over the straight leg in mid-stance and dips as the legs
+    spread. The swing leg's foot is wherever its joints put it, lifted clear of the ground."""
+    best = None
+    for tl in (t, t + 0.5):
+        tl %= 1.0
+        if tl >= STANCE:
+            continue
+        th, kb, pitch = gait_leg(tl)
+        down = leg_fk(th, kb)[1]
+        need = HIP_Z - ANKLE_Z - foot_lift(pitch)
+        d = need - down
+        best = d if best is None else min(best, d)     # (the higher: no foot sinks into the ground)
+    return best if best is not None else 0.0
+
+
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
-    swing = math.sin(ph)
+    # (the right leg's point in its cycle: its heel strikes when its foot is furthest forward)
+    tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
     if walking:
-        bob = lerp(BOB_PASS, BOB_APART, abs(swing))
+        bob = walk_drop(tr)
     else:
         bob = 1.0 if col == 1 else 0.0
     bob = round(bob * RES) / RES          # whole sheet pixels, so the face never shifts by a fraction
@@ -2082,36 +2188,36 @@ def pose(col):
     for side, s in (('R', 1), ('L', -1)):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
+        out, turn = 0.0, 0.0
         if walking:
-            p = ph + (0 if s > 0 else math.pi)
-            fwd = math.sin(p) * STRIDE
-            lift = LIFT * max(0.0, math.cos(p)) ** 1.5     # the foot travelling forward is off the ground
-            out = 0.0
-            turn = 0.0
-            toe = -0.25 * max(0.0, -math.cos(p)) * max(0.0, -math.sin(p))   # heel peels up behind
+            t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
+            th, kb, pitch = gait_leg(t)
         else:
             # hip-width stance: weight on the right leg, under the body; the left foot eased forward, out, and turned out
             fwd = -1.0 if s > 0 else 4.6
-            lift = 0.0
             out = 0.0 if s > 0 else 0.6
             turn = 0.0 if s > 0 else 0.35
-            toe = 0.0
+            th, shn = leg_ik(hip_z, fwd, ANKLE_Z)
+            kb, pitch = th - shn, 0.0
         hip.location = (-s * (LEG_X + out), 0, HIP_Z)
-        th, shn = leg_ik(hip_z, fwd, ANKLE_Z + lift)
         hip.rotation_euler = (-th, 0, 0)
-        kn.rotation_euler = (-(shn - th), 0, 0)
-        an.rotation_euler = (shn + toe, 0, -s * turn)
+        kn.rotation_euler = (kb, 0, 0)
+        # (the foot is held at its pitch from level: the ankle takes out the shin's lean)
+        an.rotation_euler = (th - kb + pitch, 0, -s * turn)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = -math.sin(ph + (0 if s > 0 else math.pi)) * ARM_SWING
-            bend = 0.25 + 0.3 * max(0.0, a)
+            a = ARM_SWING * (0.12 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
+            fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
+            bend = 0.22 + 0.62 * fold ** 1.4
+            flick = 0.06 + 0.08 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
+            flick = 0.1
         sh.rotation_euler = (-a, s * 0.17, 0)   # held a little off the body, so the waist shows
         el.rotation_euler = (-bend, 0, 0)
-        wr.rotation_euler = (0.1, 0, 0)
+        wr.rotation_euler = (flick, 0, 0)
 
 
 # ---------------------------------------------------------------- render and pixel-art conversion
