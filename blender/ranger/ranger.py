@@ -1753,7 +1753,8 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # two thirds of the way out and falling away to a fine tail past the outer corner
     # (for the sprites only: in the 3-D model the brow is painted hair by hair, see brow_image; the solid tube
     # reads better than the painting at a pixel or two)
-    brow, br = on_face(BROW_US, BROW_R, lambda u: ez - EYE_LIFT + brow_line(u)[0], 0.03, span=1.1)
+    bus = list(np.linspace(BROW_US[0], BROW_US[-1], 36))
+    brow, br = on_face(bus, [brow_line(u)[1] for u in bus], lambda u: ez - EYE_LIFT + brow_line(u)[0], 0.03, span=1.1)
     bo = mesh_obj(f'Brow tube {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
     bo.hide_render = True
     bo.hide_viewport = True
@@ -1988,18 +1989,22 @@ def lash_image():
 
 BROW_TEX = {}
 BR_U0, BR_U1, BR_V0, BR_V1 = -1.28, 2.25, 0.62, 1.92     # the brow patch's extent, in the eye patch's units (u, dz)
-BROW_US = [-0.7, -0.5, -0.25, 0.0, 0.25, 0.5, 0.7, 0.9, 1.08]
-BROW_R = [0.12, 0.17, 0.18, 0.17, 0.15, 0.12, 0.09, 0.06, 0.02]
+BROW_US = [-0.7, 1.08]          # the brow's inner and outer ends (brow units)
 
 
 def brow_line(ub):
     """The brow's centre height above the eye's centre and its half-height, at ub (in the brow's own units: the
-    face's x from the eye's centre over 1.1): on the brow ridge, starting just outside the bridge of the nose,
-    rising in a soft arch to its peak two thirds of the way out and falling away to a fine tail past the outer
-    corner."""
+    face's x from the eye's centre over 1.1). Both are single smooth closed forms, with no table to interpolate
+    (a piecewise-linear one showed its corners as kinks along the brow's edges): the centre is a skewed sine arch,
+    s^1.45 pushing its peak about 60% of the way out, so it rises gently from the nose and falls more steeply
+    into the tail; the half-height is full at the head, swells a little just past it and thins smoothly to a fine
+    tail."""
     u = min(max(ub, BROW_US[0]), BROW_US[-1])
-    zc = 0.92 + 0.36 * math.sin(math.pi * (u + 0.72) / 2.24) - 0.24 * smooth(0.6, 1.08, u)
-    return zc, float(np.interp(u, BROW_US, BROW_R))
+    t = (u - BROW_US[0]) / (BROW_US[-1] - BROW_US[0])
+    zc = 0.93 + 0.35 * math.sin(math.pi * t ** 1.45) - 0.05 * t
+    rise = math.sin(0.5 * math.pi * min(1.0, t / 0.28))
+    r = 0.016 + 0.17 * (1 - t) ** 0.65 * (0.72 + 0.28 * rise)
+    return zc, r
 
 
 def brow_image():
