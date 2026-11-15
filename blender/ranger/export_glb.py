@@ -88,6 +88,9 @@ def main():
     for name, ratio in (('Hair', 0.25),):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')
         d.ratio = ratio
+    # the solid brows are for the sprites only: the model has the painted ones
+    for o in [o for o in bpy.data.objects if o.name.startswith('Brow tube')]:
+        bpy.data.objects.remove(o, do_unlink=True)
     # the rig's armature is hidden for the sprite renders; the exporter needs it in the scene to write the skin
     bpy.data.objects['Rig'].hide_render = False
 

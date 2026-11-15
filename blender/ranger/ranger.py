@@ -1751,11 +1751,12 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # (the lids, their creases and the folds under the eye are sculpted into the skin itself: see eye_relief)
     # the brow: on the brow ridge, starting just outside the bridge of the nose, rising in a soft arch to its peak
     # two thirds of the way out and falling away to a fine tail past the outer corner
-    bus = [-0.78, -0.55, -0.25, 0.05, 0.35, 0.6, 0.85, 1.1, 1.3]
-    brow, br = on_face(bus, [0.12, 0.17, 0.18, 0.17, 0.15, 0.12, 0.09, 0.06, 0.02],
-                       lambda u: ez - EYE_LIFT + 1.08 + 0.28 * math.sin(math.pi * (u + 0.8) / 2.5) ** 1.2 - 0.12 * smooth(0.95, 1.3, u),
-                       0.03, span=1.1)
-    mesh_obj(f'Brow {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
+    # (for the sprites only: in the 3-D model the brow is painted hair by hair, see brow_image; the solid tube
+    # reads better than the painting at a pixel or two)
+    brow, br = on_face(BROW_US, BROW_R, lambda u: ez - EYE_LIFT + brow_line(u)[0], 0.03, span=1.1)
+    bo = mesh_obj(f'Brow tube {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
+    bo.hide_render = True
+    bo.hide_viewport = True
 
 
 def _perlin2(x, y, seed=0):
@@ -1985,6 +1986,176 @@ def lash_image():
     return img
 
 
+BROW_TEX = {}
+BR_U0, BR_U1, BR_V0, BR_V1 = -1.28, 2.25, 0.62, 1.92     # the brow patch's extent, in the eye patch's units (u, dz)
+BROW_US = [-0.78, -0.55, -0.25, 0.05, 0.35, 0.6, 0.85, 1.1, 1.3]
+BROW_R = [0.12, 0.17, 0.18, 0.17, 0.15, 0.12, 0.09, 0.06, 0.02]
+
+
+def brow_line(ub):
+    """The brow's centre height above the eye's centre and its half-height, at ub (in the brow's own units: the
+    face's x from the eye's centre over 1.1): on the brow ridge, starting just outside the bridge of the nose,
+    rising in a soft arch to its peak two thirds of the way out and falling away to a fine tail past the outer
+    corner."""
+    u = min(max(ub, BROW_US[0]), BROW_US[-1])
+    zc = 1.08 + 0.28 * math.sin(math.pi * (u + 0.8) / 2.5) ** 1.2 - 0.12 * smooth(0.95, 1.3, u)
+    return zc, float(np.interp(u, BROW_US, BROW_R))
+
+
+def brow_image():
+    """The brow, painted hair by hair into a texture over its patch (u across in eye widths, dz up from the line
+    between the eye's corners). How a brow grows (as brow artists draw it): at the head, by the nose, the hairs
+    stand up and fan a little outward; through the body the lower hairs angle up and out and the upper ones down
+    and out, meeting in a soft ridge just above the middle (the herringbone that gives a brow its shape); the tail
+    lies flat along the arch. The head is feathered and sparse, the lower edge of the body dense and crisp, the
+    top soft. The noise, as for the lashes: hair roots scattered with 2-D Poisson-disk sampling (Bridson's dart
+    throwing, so the hairs are evenly irregular), gradient-noise fBm for each hair's length, angle and tone, curl
+    noise bending neighbouring hairs together, and each hair shaded dark at the root to a lighter, warmer tip
+    with a sheen part-way along. Under the hairs, a sparse powder of skin-toned brown smoked with domain-warped
+    fBm, so the skin between hairs doesn't read as gaps."""
+    if 'img' in BROW_TEX:
+        return BROW_TEX['img']
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H, SS = 1200, 420, 2
+    rng = np.random.default_rng(17)
+    K = EYE_RX / 1.1                    # eye-patch u to brow ub
+
+    def centre(u):
+        zc, r = brow_line(u * K)
+        return zc - EYE_LIFT - u * EYE_RX * EYE_TILT, r
+
+    def px(u, dz):
+        return ((u - BR_U0) / (BR_U1 - BR_U0) * W * SS, (BR_V1 - dz) / (BR_V1 - BR_V0) * H * SS)
+
+    U_IN, U_OUT = BROW_US[0] / K, BROW_US[-1] / K
+    cover = Image.new('L', (W * SS, H * SS), 0)
+    dc = ImageDraw.Draw(cover)
+    alpha = Image.new('L', (W * SS, H * SS), 0)
+    da = ImageDraw.Draw(alpha)
+    paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))
+    dp = ImageDraw.Draw(paint)
+    ROOT = np.array([40, 24, 17], dtype=np.float32)
+    TIP = np.array([116, 66, 36], dtype=np.float32)
+    SHEEN = np.array([156, 104, 68], dtype=np.float32)
+
+    def slope(u):
+        e = 0.02
+        return (centre(u + e)[0] - centre(u - e)[0]) / (2 * e)
+
+    def flow(u, dz):
+        """The direction a hair grows at (u, dz), as an angle from straight outward (positive: up)."""
+        zc, r = centre(u)
+        ub = u * K
+        tang = math.atan(slope(u))
+        side = (dz - (zc + 0.15 * r)) / max(r, 1e-3)              # -1 at the lower edge, +1 at the upper
+        body = tang + math.radians(24) * smooth(0.2, -0.9, side) - math.radians(16) * smooth(-0.1, 0.9, side)
+        head = math.radians(82 - 10 * smooth(-0.78, -0.4, ub))
+        w = smooth(-0.35, -0.62, ub)
+        tail = smooth(0.85, 1.15, ub)
+        a = body * (1 - w) + head * w
+        return a * (1 - tail) + tang * tail
+
+    # roots: 2-D Poisson-disk sampling over the brow's shape (dart throwing on a cell grid)
+    dmin = 0.022
+    cell = dmin / math.sqrt(2)
+    grid = {}
+    roots = []
+    tries = 0
+    while tries < 60000 and len(roots) < 1400:
+        tries += 1
+        u = rng.uniform(U_IN - 0.05, U_OUT)
+        zc, r = centre(u)
+        dz = zc + rng.uniform(-1.0, 1.0) * r * 1.05
+        # the head is sparse (feathered), the tail thins out
+        ub = u * K
+        side0 = (dz - zc) / max(r, 1e-3)
+        # a rounded, feathered head: the top of the head starts further out than its lower edge
+        keep = (0.3 + 0.7 * smooth(-0.8, -0.35, ub)) * smooth(-0.82, -0.62, ub - 0.12 * max(0.0, side0) ** 2)
+        keep *= 1 - 0.5 * smooth(0.9, 1.3, ub)
+        if rng.random() > keep:
+            continue
+        gi, gj = int(u / cell), int(dz / cell)
+        ok = True
+        for di in (-2, -1, 0, 1, 2):
+            for dj in (-2, -1, 0, 1, 2):
+                q = grid.get((gi + di, gj + dj))
+                if q is not None and (q[0] - u) ** 2 + (q[1] - dz) ** 2 < dmin * dmin:
+                    ok = False
+        if ok:
+            grid[(gi, gj)] = (u, dz)
+            roots.append((u, dz))
+    # draw from the top of the brow down, so the dense lower hairs lie over the upper ones
+    roots.sort(key=lambda p: -p[1])
+    for u0, z0 in roots:
+        zc, r = centre(u0)
+        ub = u0 * K
+        side = (z0 - zc) / max(r, 1e-3)
+        len_n = float(_fbm2(u0 * 4.0, z0 * 4.0, 71, 4))
+        ang_n = float(_fbm2(u0 * 3.0, z0 * 3.0 + 7.0, 81, 4))
+        tone = 0.5 + 0.5 * float(_perlin2(u0 * 11.0, z0 * 11.0, 91))
+        length = (0.11 + 0.05 * smooth(-0.6, 0.3, ub) - 0.05 * smooth(0.8, 1.3, ub)) * (1 + 0.3 * len_n) * (0.85 + 0.3 * rng.random())
+        if ub < -0.35:
+            length *= 0.8
+        wid = 0.0078 * (1 - 0.35 * smooth(0.8, 1.3, ub))
+        # opacity: crisp and full at the lower edge of the body, softer at the top, feathered at the head
+        val = 255 * (0.7 + 0.3 * smooth(0.8, -0.4, side)) * (0.55 + 0.45 * smooth(-0.75, -0.35, ub))
+        steps = 12
+        u, z = u0, z0
+        p = px(u, z)
+        jitter = 0.18 * ang_n + 0.08 * (rng.random() - 0.5)
+        for k in range(steps):
+            t = (k + 1) / steps
+            a = flow(u, z) + jitter
+            e = 0.01
+            pu = (_perlin2(u * 6, (z + e) * 6, 101) - _perlin2(u * 6, (z - e) * 6, 101)) / (2 * e)
+            pz = -(_perlin2((u + e) * 6, z * 6, 101) - _perlin2((u - e) * 6, z * 6, 101)) / (2 * e)
+            du = math.cos(a) + 0.01 * float(pu) * t
+            dz_ = math.sin(a) + 0.01 * float(pz) * t
+            n_ = math.hypot(du, dz_) or 1.0
+            u += du / n_ * length / steps
+            z += dz_ / n_ * length / steps
+            q = px(u, z)
+            w = max(1, int(wid / (BR_U1 - BR_U0) * W * SS * (1 - 0.75 * t)))
+            c = ROOT + (TIP - ROOT) * min(1.0, t ** 1.5 * (0.65 + 0.6 * tone))
+            # the sheen: where the hair turns toward the light, along the upper middle of the brow
+            lit = 0.35 * math.exp(-((t - 0.5) / 0.18) ** 2) * (0.4 + 0.6 * smooth(-0.6, 0.6, side)) * (0.5 + 0.5 * tone)
+            c = c + (SHEEN - c) * lit
+            # the lower hairs and the head sit in the shadow of the brow bone's turn: a touch darker
+            c = c * (0.86 + 0.14 * smooth(-1.0, 0.2, side))
+            dc.line([p, q], fill=255, width=w)
+            da.line([p, q], fill=int(val * (1 - 0.45 * t)), width=w)
+            dp.line([p, q], fill=tuple(int(v) for v in c), width=w)
+            p = q
+    a_h = np.asarray(alpha.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32) / 255
+    cov = np.asarray(cover.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32) / 255
+    pnt = np.asarray(paint.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32)
+    strand = np.clip(pnt / np.maximum(cov, 1e-3)[..., None], 0, 255)
+    # the powder under the hairs: the brow's shape, soft at the top and the head, smoked with warped fBm
+    uu, dd = np.meshgrid(BR_U0 + (np.arange(W) + 0.5) / W * (BR_U1 - BR_U0), BR_V1 - (np.arange(H) + 0.5) / H * (BR_V1 - BR_V0))
+    zc_row = np.array([centre(u)[0] for u in uu[0]])[None, :]
+    r_row = np.array([centre(u)[1] for u in uu[0]])[None, :]
+    sd = (dd - zc_row) / np.maximum(r_row, 1e-3)
+    ubb = uu * K
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    shape = sm(-1.15, -0.8, sd) * sm(1.2, 0.6, sd) * sm(BROW_US[0] - 0.08, BROW_US[0] + 0.25, ubb) * sm(BROW_US[-1] + 0.05, BROW_US[-1] - 0.25, ubb)
+    smoke = _warped_fbm(uu * 3.0, dd * 3.0, seed=111, k=2.0)
+    powder = shape * (0.5 + 0.15 * smoke) * sm(-0.85, -0.55, ubb - 0.12 * np.clip(sd, 0, None) ** 2) * (0.6 + 0.4 * sm(-0.75, -0.3, ubb))
+    grain = 0.85 + 0.15 * _fbm2(np.arange(W)[None, :] / 5.0 + 0 * dd, np.arange(H)[:, None] / 5.0 + 0 * uu, 121, 3)
+    a = np.clip(1 - (1 - np.clip(a_h * 1.6 * grain, 0, 1)) * (1 - powder), 0, 1)
+    POWDER = np.array([104, 62, 38], dtype=np.float32)
+    w_ = np.clip(cov * 2.2, 0, 1)[..., None]
+    col = (POWDER + (strand - POWDER) * w_) / 255
+    img = bpy.data.images.new('brows', W, H, alpha=True)
+    pxl = np.concatenate([col, a[..., None]], axis=2)[::-1]
+    img.pixels.foreach_set(pxl.ravel().astype(np.float32))
+    img.pack()
+    BROW_TEX['img'] = img
+    return img
+
+
 def eye_makeup(head, tree, eyes):
     """Eyeshadow and lashes for both eyes, on the finished head (tree: its surface after the lids are sculpted).
     Each is a thin skin of the face itself (a grid of the lid's area, each point cast onto the head and lifted a
@@ -2005,26 +2176,30 @@ def eye_makeup(head, tree, eyes):
         nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
         nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
         p.inputs['Roughness'].default_value = 0.55 if name == 'eyeshadow' else 0.8
+        if name == 'brow paint':
+            p.inputs['Specular IOR Level'].default_value = 0.2     # hair is matte here: a full sheen turned it grey
         nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
         m.surface_render_method = 'BLENDED'
         return m
 
     shadow_m = material('eyeshadow', eyeshadow_image())
     lash_m = material('lash paint', lash_image())
+    brow_m = material('brow paint', brow_image())
 
     def surf(px, pz):
         h = tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
         return h[0].y if h[0] is not None else None
 
-    def patch(name, ex, ez, s, off, m, NU=150, NV=84):
+    def patch(name, ex, ez, s, off, m, NU=150, NV=84, ext=None):
+        U0, U1, V0, V1 = ext or (SH_U0, SH_U1, SH_V0, SH_V1)
         bm = bmesh.new()
         uvl = bm.loops.layers.uv.new('UVMap')
         grid = []
         for j in range(NV + 1):
             row = []
             for i in range(NU + 1):
-                u = SH_U0 + (SH_U1 - SH_U0) * i / NU
-                dz = SH_V0 + (SH_V1 - SH_V0) * j / NV
+                u = U0 + (U1 - U0) * i / NU
+                dz = V0 + (V1 - V0) * j / NV
                 px, pz = ex + s * u * EYE_RX, ez + u * EYE_RX * EYE_TILT + dz
                 y = surf(px, pz)
                 row.append(bm.verts.new((px, (y if y is not None else 0.0) - off, pz)))
@@ -2050,6 +2225,7 @@ def eye_makeup(head, tree, eyes):
     for ex, ez, s in eyes:
         patch('Eyeshadow', ex, ez, s, 0.022, shadow_m)
         patch('Lashes', ex, ez, s, 0.034, lash_m, NU=200, NV=110)
+        patch('Brow paint', ex, ez, s, 0.02, brow_m, NU=200, NV=80, ext=(BR_U0, BR_U1, BR_V0, BR_V1))
 
 
 def build():
@@ -2545,9 +2721,12 @@ def sprite_mode(on):
     # the iris is life-size, a pixel and a bit across in the sheet, and in the 3/4 views it fell between pixel
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
-        if o.name.startswith(('Eyeshadow', 'Lashes')):
+        if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint')):
             o.hide_render = on         # (finer than a sprite pixel: nothing to draw there)
             o.hide_viewport = on
+        if o.name.startswith('Brow tube'):
+            o.hide_render = not on
+            o.hide_viewport = not on
         if o.name.startswith('Iris'):
             o.scale = (1.11,) * 3 if on else (1.0,) * 3
             o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
