@@ -1,6 +1,6 @@
 """Close-ups of the ranger's face and the whole figure in the 3-D look (sprite_mode off), for checking eye, brow
 and face work. Run as python3 face_views.py --out DIR [--angles 0,1] [--zoom 3.4] [--hz 0.6]
-[--full]. Angles are in eighths of a turn (0 faces the camera, 1 is the 3/4 view)."""
+[--full] [--hide Eyeshadow,Lashes]. Angles are in eighths of a turn (0 faces the camera, 1 is the 3/4 view)."""
 import argparse
 import math
 import os
@@ -19,6 +19,7 @@ ap.add_argument('--angles', default='0,1')
 ap.add_argument('--zoom', type=float, default=3.4)
 ap.add_argument('--hz', type=float, default=0.6)
 ap.add_argument('--full', action='store_true')
+ap.add_argument('--hide', default='', help='comma-separated object name prefixes to leave out, e.g. Eyeshadow,Lashes')
 args = ap.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:])
 os.makedirs(args.out, exist_ok=True)
 
@@ -26,6 +27,9 @@ ranger.build()
 sc = bpy.context.scene
 sc.frame_set(1)
 ranger.sprite_mode(False)
+for o in bpy.data.objects:
+    if args.hide and o.name.startswith(tuple(h for h in args.hide.split(',') if h)):
+        o.hide_render = True
 sc.render.engine = 'CYCLES'
 sc.cycles.samples = 48
 sc.cycles.max_bounces = 3
