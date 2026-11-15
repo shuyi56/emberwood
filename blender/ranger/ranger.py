@@ -212,6 +212,25 @@ def wool_closeup(nt, bsdf, out, rmp):
     nt.links.new(wb.outputs['BSDF'], out.inputs['Surface'])
 
 
+def skin_closeup(nt, bsdf, out, lin):
+    """The skin up close: a soft contact shadow where the hair lies against it or hangs just off it (and in the
+    other shut-in places: under the jaw, round the nose), deepening toward a warmer, redder tone the way skin does
+    in shade, so the hair sits on the face instead of being cut out against it."""
+    bsdf.name = 'sprite bsdf'
+    ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.9)
+    ao.samples = 16
+    k = _node(nt, 'ShaderNodeMapRange', Value=ao.outputs['AO'], **{'From Min': 0.25, 'From Max': 1.0})
+    col = _node(nt, 'ShaderNodeMix', Factor=k.outputs['Result'])
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (lin[0] * 0.42, lin[1] * 0.26, lin[2] * 0.22, 1)
+    col.inputs['B'].default_value = (*lin, 1)
+    sb = _node(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': col.outputs['Result']})
+    sb.name = 'close bsdf'
+    sb.inputs['Roughness'].default_value = 0.6
+    sb.inputs['Specular IOR Level'].default_value = 0.25
+    nt.links.new(sb.outputs['BSDF'], out.inputs['Surface'])
+
+
 def gold_closeup(nt, bsdf, out):
     """The brooch up close: worn gold, brighter on its raised midrib and rim than down in the hollows, where the
     tarnish and the shadow of the wool collect."""
@@ -590,6 +609,8 @@ def make_material(mid):
         ao = nt.nodes.new('ShaderNodeAmbientOcclusion')
         ao.inputs['Distance'].default_value = 1.6
         ao.samples = 8
+        # (each piece shades only itself: the fringe darkened the side hair under its edge into a crease)
+        ao.only_local = True
         aok = nt.nodes.new('ShaderNodeMapRange')
         aok.inputs['To Min'].default_value = 0.45
         nt.links.new(ao.outputs['AO'], aok.inputs['Value'])
@@ -641,6 +662,8 @@ def make_material(mid):
         leather_closeup(nt, bsdf, out, d['ramp'], suede=mid == M_CUFF)
     if mid in (M_LEGS, M_KNEE):
         cloth_closeup(nt, bsdf, out, d['ramp'], canvas=mid == M_KNEE)
+    if mid == M_SKIN:
+        skin_closeup(nt, bsdf, out, lin)
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -889,6 +912,7 @@ def box(sx, sy, sz):
 # Realistic adult proportions, about 7.3 heads tall: the top of the head at 63 (the painted sprites' height),
 # a head 8.6 tall, shoulders at 1.5 heads down, the waist at 3, the hip joint at 3.7 and the knee at 2 heads up.
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
+HEAD_NECK_Z = -0.13                      # the head's sculpt runs down the neck to here (inside the collar), in head heights
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
@@ -908,60 +932,216 @@ def face_relief(x, z):
     """How far the face stands forward of the base head at (x across, z up), in head heights. The planes a
     painter would block in: brow ridge over the eye sockets, the nose (bridge, tip and wings), cheekbones with
     the hollow under them, the lips parted by the mouth line, and the ball of the chin. (They are pushed a little
-    past life size, so they still read when the head is 17 pixels tall.)"""
+    past life size, so they still read when the head is 17 pixels tall.)
+    The features below the eyes are laid out on a slightly taller lower face and drawn up into the head's
+    proportions by FACE_WARP (sculpt round 2)."""
+    z = FACE_WARP(z)
     d = 0.0
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.02)     # eye socket
-        d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
-        d += gauss(x, z, s * 0.2, 0.31, 0.07, 0.06, -0.025)      # hollow under the cheekbone
-        d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
-    # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply
+        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
+        d += gauss(x, z, s * 0.23, 0.415, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
+        d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
+        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032)      # the cheek filled out under the cheekbone, no hollow
+        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016)       # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
+        d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
+        d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
+    # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
+    # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     if z > 0.36:
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
-        h = (0.015 + 0.085 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
+        h = (0.014 + 0.056 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
-    # (the ridge widens smoothly toward the tip: a width that eased in by a straight ramp drew a line across it)
-    d += h * math.exp(-(x / (0.04 + 0.03 * math.exp(-((z - 0.37) / 0.065) ** 2))) ** 2)
-    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.05)       # the muzzle: the teeth and jaw carry the mouth forward
-    d += gauss(x, z, 0, 0.29, 0.07, 0.025, 0.035)    # upper lip
-    d += gauss(x, z, 0, 0.225, 0.055, 0.025, 0.03)   # lower lip
-    d += gauss(x, z, 0, 0.258, 0.08, 0.01, -0.018)   # mouth line
-    d += gauss(x, z, 0, 0.17, 0.06, 0.02, -0.015)    # the crease above the chin
-    d += gauss(x, z, 0, 0.09, 0.075, 0.045, 0.04)    # chin
+        h = 0.07 * math.exp(-((0.36 - z) / 0.022) ** 2)
+    w = 0.03 + 0.012 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.02 * max(0.0, 1 - abs(z - 0.37) / 0.06)
+    d += h * 0.5 * (math.exp(-(x / w) ** 2) + math.exp(-(x / w) ** 4))
+    d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
+    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
+    d += mouth_relief(x, z)
+    d += gauss(x, z, 0, 0.088, 0.048, 0.046, 0.05)    # chin: the ball of it stands nearly as far forward as the lower lip
+    for s in (-1, 1):
+        d += gauss(x, z, s * 0.09, 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
-def _jaw_width(z):
-    # full through the cheeks, then the jaw: a clear angle at z 0.2, narrowing to a rounded chin
-    if z >= 0.42:
-        return 1.0
-    if z >= 0.2:
-        t = (0.42 - z) / 0.22
-        return 1.0 - 0.2 * t ** 1.3
-    t = (0.2 - z) / 0.2
-    return 0.8 - 0.42 * t ** 1.4
+def mouth_relief(x, z):
+    """The mouth and the forms around it (sculpt round 2), in head heights forward of the face: the upper lip
+    with its cupid's bow and a small tubercle in the middle, a fuller lower lip, the line between them sinking
+    into the corners, the philtrum's two ridges up to the nose, the ball of the nose's tip, the fold from the
+    nose's wing toward the corner of the mouth, and the crease under the lower lip."""
+    ax = abs(x)
+    d = 0.0
+    across_u = math.exp(-(x / 0.07) ** 4)                 # the upper lip runs nearly full height to its corners
+    bow = 0.006 * math.exp(-((ax - 0.019) / 0.011) ** 2)   # the peaks of the cupid's bow
+    top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
+    t = (z - 0.258) / max(0.01, top - 0.258)
+    if 0.0 < t < 1.25:
+        d += 0.03 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.008)          # the tubercle
+    across_l = math.exp(-(x / 0.06) ** 4)
+    d += 0.032 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
+    # the line between the lips, deepest at the corners where the lips tuck in
+    d -= (0.012 + 0.014 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    for sx in (-1, 1):
+        d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.004)    # the corners
+        d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
+        # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
+        # of cheek just outside it)
+        for k in range(6):
+            u = k / 5
+            px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
+            d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
+            d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
+    d += gauss(x, z, 0, 0.385, 0.032, 0.026, 0.01)         # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.19, 0.05, 0.012, -0.014)         # the crease under the lower lip
+    return d
+
+
+def smooth_curve(knots):
+    """A smooth curve through (z, value) knots: monotone cubic (Fritsch-Carlson), so it never overshoots between
+    them and leaves no kink at a knot the way straight segments would."""
+    zs = [k[0] for k in knots]
+    vs = [k[1] for k in knots]
+    n = len(zs)
+    d = [(vs[i + 1] - vs[i]) / (zs[i + 1] - zs[i]) for i in range(n - 1)]
+    m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else (d[i - 1] + d[i]) / 2 for i in range(1, n - 1)] + [d[-1]]
+    for i in range(n - 1):
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+            continue
+        a, b = m[i] / d[i], m[i + 1] / d[i]
+        if a * a + b * b > 9:
+            t = 3 / math.sqrt(a * a + b * b)
+            m[i], m[i + 1] = t * a * d[i], t * b * d[i]
+
+    def f(z):
+        if z <= zs[0]:
+            return vs[0]
+        if z >= zs[-1]:
+            return vs[-1]
+        i = max(k for k in range(n - 1) if zs[k] <= z)
+        h = zs[i + 1] - zs[i]
+        t = (z - zs[i]) / h
+        h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+        return h00 * vs[i] + h10 * h * m[i] + h01 * vs[i + 1] + h11 * h * m[i + 1]
+    return f
+
+
+# ---- the head's construction (sculpt rounds): the skull and jaw as a stack of horizontal sections, each a
+# rounded box (a superellipse) with its own half-width, front, back and widest point, read off smooth curves of
+# height. In head heights: chin at z 0, crown at z 1, the face toward -y.
+#   below z 0.2 the sections are the jaw: each ends at the front in the chin and at the back in the underside of
+#   the jaw, which rises from the chin to the angle of the jaw under the ear;
+#   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
+#   back from the brow; over the top the sections round off along ellipses into the crown.
+HEAD_W = smooth_curve([(HEAD_NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.122), (0.07, 0.156), (0.12, 0.197),
+                       (0.18, 0.236), (0.25, 0.268), (0.32, 0.296), (0.41, 0.323), (0.52, 0.342), (0.62, 0.353), (0.7, 0.36)])
+# (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
+# level, then the chin and the face)
+HEAD_F = smooth_curve([(HEAD_NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
+                       (0.05, 0.33), (0.08, 0.365), (0.12, 0.385), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415), (0.42, 0.42),
+                       (0.52, 0.42), (0.62, 0.42)])
+HEAD_B = smooth_curve([(HEAD_NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31), (0.3, 0.35), (0.38, 0.385),
+                       (0.46, 0.415), (0.54, 0.435), (0.64, 0.445)])
+HEAD_MID = smooth_curve([(HEAD_NECK_Z, 0.045), (0.3, 0.04), (1.0, 0.04)])
+# how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
+# narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
+HEAD_NF = smooth_curve([(HEAD_NECK_Z, 2.0), (-0.02, 2.0), (0.06, 2.1), (0.14, 2.02), (0.3, 1.98), (0.45, 2.12), (0.6, 2.25), (0.8, 2.2)])
+HEAD_NB = smooth_curve([(HEAD_NECK_Z, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
+
+
+# the lower face, nose base to chin, as a third of the head rather than the 0.36 the features were first laid out
+# on: the face's relief is read at FACE_WARP(z), which draws the nose up to z 0.335, the mouth to 0.232 and the
+# ball of the chin to 0.09, leaving the eyes and brows where they are
+FACE_WARP = smooth_curve([(0.0, 0.0), (0.09, 0.1), (0.232, 0.258), (0.335, 0.36), (0.45, 0.455), (0.6, 0.6), (1.0, 1.0)])
+MOUTH_Z = 0.232
+
+
+def _dome(f, z, z0, top=1.0):
+    """f below z0; above it the value rounds off along a quarter ellipse to nothing at the crown."""
+    if z <= z0:
+        return f(z)
+    t = min(1.0, (z - z0) / (top - z0))
+    return f(z0) * math.sqrt(max(0.0, 1 - t * t))
+
+
+def head_section(z, c, s):
+    """The point of the base head (no face relief) at height z and direction (c forward, s across) round it.
+    Below the chin the sections are the neck (down to HEAD_NECK_Z, inside the collar), so the throat, the floor under
+    the chin and the jaw's underside are one surface with the face: the jaw's edge is a soft step pressed into it
+    (see jaw_relief), not a separate shape set on top of a neck. At HEAD_NECK_Z the sections close off in a quarter
+    ellipse, out of sight inside the neck's lower part and the collar."""
+    if z < HEAD_NECK_Z + 0.02:
+        k = math.sqrt(max(0.0, 1 - ((HEAD_NECK_Z + 0.02 - z) / 0.02) ** 2))
+        x, y = _section(max(HEAD_NECK_Z, z), c, s)
+        yw = HEAD_MID(z)
+        return x * k, yw + (y - yw) * k
+    return _section(z, c, s)
+
+
+def jaw_relief(y, z):
+    """How far the jaw stands out of the neck (head heights, along the surface normal): 1 over the jaw, fading to
+    0 across its lower edge (from the bottom of the chin back and up to the angle under the ear) and its back edge
+    (the ramus), and fading out above into the cheek, which the sections already shape."""
+    # the lower edge in profile: one curve, level under the chin and bending up smoothly to the angle (round 9)
+    zl = 0.17 * min(1.0, max(0.0, (y + 0.34) / 0.4)) ** 1.7
+    def ss(t):
+        t = min(1.0, max(0.0, t))
+        return t * t * (3 - 2 * t)
+    below = ss((z - zl + 0.03) / 0.1)        # above the lower edge of the jaw
+    behind = ss((0.11 - y) / 0.11)             # in front of the back edge of the ramus
+    up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
+    return 0.02 * below * behind * up
+
+
+def _section(z, c, s):
+    w = _dome(HEAD_W, z, 0.7)
+    yw = HEAD_MID(z)
+    front = _dome(HEAD_F, z, 0.62) + yw
+    back = _dome(HEAD_B, z, 0.66) - yw
+    n = HEAD_NF(z) if c >= 0 else HEAD_NB(z)
+
+    def sp(t):
+        return math.copysign(abs(t) ** (2 / n), t)
+    x = w * sp(s)
+    y = yw - front * sp(c) if c >= 0 else yw + back * sp(-c)
+    return x, y
 
 
 def sculpted_head():
-    """The head as a sculpted mesh: a rounded skull, cheeks over a jaw with a defined angle, a rounded chin, and
-    the face's planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at
-    z 1, the face toward -Y."""
+    """The head as a sculpted mesh: the skull and jaw built up from sections (see head_section), then the face's
+    planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at z 1, the face
+    toward -Y."""
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=96, radius=1.0)
+    bmesh.ops.create_uvsphere(bm, u_segments=160, v_segments=256, radius=1.0)
     for v in bm.verts:
         sx, sy, sz = v.co
-        z = 0.52 + 0.5 * sz
-        front = sy < 0
-        t = max(0.0, (0.5 - z) / 0.5)
-        # the face is flatter than an egg across the front; the back of the jaw tucks in under the ear
-        dep = (0.92 - 0.15 * t) if front else (0.98 - 0.6 * t ** 1.3)
-        x = sx * 0.36 * _jaw_width(z)
-        y = sy * 0.44 * dep
-        f = max(0.0, -sy) ** 1.4          # only the parts facing forward carry the face
-        y -= face_relief(x, z) * f
-        v.co = (x, y + 0.04, max(0.0, z))
+        z = HEAD_NECK_Z + (1.0 - HEAD_NECK_Z) * (0.5 + 0.5 * sz)
+        r = math.hypot(sx, sy)
+        c, s = (-sy / r, sx / r) if r > 1e-9 else (1.0, 0.0)
+        x, y = head_section(z, c, s)
+        # the face is pushed out along the base surface's normal, and only as far as that normal faces forward:
+        # where the surface turns under (the chin, the jaw's underside) the relief turns with it and fades, so the
+        # jawline stays a rounded turn instead of a ledge sheared forward of the underside
+        th, e = math.atan2(s, c), 1e-3
+        za, zb = min(1.0, z + e), max(HEAD_NECK_Z, z - e)
+        xa, ya = head_section(z, math.cos(th + e), math.sin(th + e))
+        xz, yz = head_section(za, c, s)
+        xb, yb = head_section(zb, c, s)
+        t1 = Vector((xa - x, ya - y, 0.0))
+        t2 = Vector((xz - xb, yz - yb, za - zb))
+        n = t1.cross(t2)
+        if n.length < 1e-12:
+            v.co = (x, y, z)
+            continue
+        n.normalize()
+        if n.x * x + n.y * (y - 0.04) < 0:
+            n = -n
+        f = max(0.0, -n.y) ** 1.0       # only the parts facing forward carry the face
+        u = min(1.0, max(0.0, (z - 0.005) / 0.04))
+        d = face_relief(x, z) * f * u * u * (3 - 2 * u) + jaw_relief(y, z)
+        v.co = (x + n.x * d, y + n.y * d, z + n.z * d)
     bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
     return bm
 
@@ -1052,7 +1232,9 @@ def hair_flow(co):
     the curve from the parting drew rings round the back of the head, like the ridges of a shell.)"""
     # (measured as a distance round the head rather than an angle, so near the neck the strands do not crowd
     # into a fan; the angle is taken from the back, so its one break falls at the parting, not down her back)
-    return (math.atan2(co.x, co.y - 0.5) * max(2.5, math.hypot(co.x, co.y - 0.5)), 0.0, co.z * 0.6)
+    # (the distance round is taken at one fixed radius: scaled by each point's own distance from the axis, the
+    # streaks bent into arcs wherever the hair swells out, as over the side locks)
+    return (math.atan2(co.x, co.y - 0.5) * 3.6, 0.0, co.z * 0.6)
 
 
 def drape_fall(dg):
@@ -1075,10 +1257,15 @@ def drape_fall(dg):
     body = BVHTree.FromPolygons(vs, ps)
 
     def back_y(x, z):
-        hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
-        return hit[0].y if hit[0] is not None else 0.0
+        # (a ray that misses at the very edge, past the side of the head or the mantle, takes what lies a little
+        # further in: taking 0 there pulled the edges of the fall forward beside her face as thin flaps)
+        for k_ in range(8):
+            hit = body.ray_cast(Vector((x * 0.94 ** k_, 30.0, z)), Vector((0, -1, 0)), 40.0)
+            if hit[0] is not None:
+                return hit[0].y
+        return 0.0
 
-    W = [(7.2, 2.0), (6.0, 3.0), (4.5, 3.6), (1.5, 3.7), (-1.5, 4.1), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+    W = [(7.2, 2.0), (6.0, 2.9), (4.5, 3.2), (1.5, 3.3), (-1.5, 3.65), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
 
     def width(z):
         for (z0, w0), (z1, w1) in zip(W, W[1:]):
@@ -1129,7 +1316,7 @@ def drape_fall(dg):
             x = ue * width(z) * (1.0 - 0.12 * max(0.0, (vs - 0.75) / 0.25) ** 2 * abs(u))
             # thick down the middle, thin to soft edges; thinner toward the end, and rounded off at the tip
             # (never thinner than a few voxels: a sheet thinner than the remesh breaks up into rods and tatters)
-            grow = min(1.0, (z_top - z) / 3.0)
+            grow = min(1.0, (z_top - z) / 5.0)
             grow = grow * grow * (3 - 2 * grow)
             t_ = (0.95 - 0.3 * vs) * max(0.0, 1 - u * u) ** (0.5 if z < -0.5 else 1.4) * (1.0 if v < 0.92 else math.cos((v - 0.92) / 0.08 * math.pi / 2) ** 0.5)
             # (the tips are the thinnest part: a lock ends in a wisp, not a rounded slab)
@@ -1137,12 +1324,18 @@ def drape_fall(dg):
             # (what it rests on, blurred across: the hair bridges the folds of the mantle instead of carrying
             # each fold down its whole length as a groove)
             # (only below the nape: over the round of the head a blurred support would sink into the hair beneath)
-            sup = back_y(x, z) if z > -0.5 else sum(back_y(x + dx_, z) * w_ for dx_, w_ in
-                                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1)))
+            # (the change from lying over the head to hanging over the mantle is eased over a hand's breadth
+            # either side of the nape: switched at one height it left a notch across the fall)
+            wb = min(1.0, max(0.0, (0.5 - z) / 2.0))
+            wb = wb * wb * (3 - 2 * wb)
+            sup = back_y(x, z)
+            if wb > 0.0:
+                sup = lerp(sup, sum(back_y(x + dx_, z) * w_ for dx_, w_ in
+                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1))), wb)
             # the least it can be: flush with the hair over the head at the top, then lying over what is under it.
             # Over the head its edges lie flush with the hair beneath (the extra thickness goes inward, out of
             # sight), so they leave no rim along the sides of the head
-            y = sup + t_ * grow if z > -0.5 else max(sup + t * grow, sup + 0.52)
+            y = lerp(sup + t_ * grow, max(sup + t * grow, sup + 0.52), wb)
             pts.append([x, y, z, t, sup])
         # hair hangs: pulled down by its weight it spans straight from one thing that holds it out to the next (the
         # back of the skull, then the mantle) and never sinks into the hollow between them. So its outside is the
@@ -1178,19 +1371,38 @@ def drape_fall(dg):
             slope = (b[1] - a[1]) / (a[2] - b[2]) if a[2] > b[2] else 0.0
             for k in range(hull[-1] + 1, len(pts)):
                 pts[k][1] = max(pts[k][1], b[1] + slope * (b[2] - pts[k][2]))
+        # where the hanging line leaves the round of the head it turned a corner (a bump in profile, high on the
+        # back of the head): the outline there is eased round in a curve, a hand's breadth either way
+        for _ in range(3):
+            ys = [q[1] for q in pts]
+            for k, q in enumerate(pts):
+                fe = min(1.0, max(0.0, (q[2] - 0.5) / 1.5), max(0.0, (7.4 - q[2]) / 2.4))
+                if fe > 0.0 and k >= 8:
+                    w_ = ys[k - 8:k + 9]
+                    q[1] = lerp(q[1], max(q[4] + 0.15, sum(w_) / len(w_)), fe)
         col_out, col_in = [], []
         for j, (x, y, z, t, sup) in enumerate(pts):
             v = j / (NZ - 1)
             vs = min(1.0, (z_top - z) / (z_top - z_end))
             if vs > 0.8:          # the ends turn in a little toward her back rather than flicking out
                 y = lerp(y, max(sup + 0.52, y - 0.6), ((vs - 0.8) / 0.2) ** 2 * 0.7)
-            y = max(sup + 0.42 if z < -0.5 else y - 1.0, y)
+            wb = min(1.0, max(0.0, (0.5 - z) / 2.0))
+            wb = wb * wb * (3 - 2 * wb)
+            y = max(lerp(y - 1.0, sup + 0.42, wb), y)
             col_out.append([x, y, z, t, sup])
             # where it spans a hollow it is the full mass of hair down to what is under it (a thin sheet bridging
             # the nape would show its underside from the side); where it lies on the mantle it is pressed thinner
             gap = y - sup
             th = t if gap < t + 0.3 else max(t, gap - 0.15)
-            col_in.append(Vector((x, max(y - th, sup + 0.12) if z < -0.5 else y - th, z)))
+            yi = lerp(y - th, max(y - th, sup + 0.12), wb)
+            # its sides are rounded over down onto what it lies on, rather than cut off square: a square side is a
+            # flat wall as deep as the hair, seen as a hard corner down the back (and an edge rounded about its
+            # middle instead stands proud of the hair beneath as a ridge)
+            if abs(u) > 0.45 and y - yi > 0.3:
+                f_ = min(1.0, (abs(u) - 0.45) / 0.55)
+                y = yi + max(0.15, (y - yi) * math.sqrt(max(0.0, 1.0 - f_ * f_)))
+                col_out[-1][1] = y
+            col_in.append(Vector((x, yi, z)))
         col_out = [Vector((x, y, z)) for x, y, z, t, sup in col_out]
         inner.append(col_in)
         outer.append(col_out)
@@ -1277,8 +1489,14 @@ def fuse_hair(head, names, voxel=0.065):
     for _ in range(14):
         bmesh.ops.smooth_laplacian_vert(bm, verts=ends, lambda_factor=0.8, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=False, preserve_volume=True)
-    band = [v for v in bm.verts if -4.0 < v.co.z < 7.5 and v.co.y > 1.0]
-    for _ in range(4):
+    # the side locks run into the hair beside them: the hollow where they meet is relaxed out, so they read as
+    # the front of the side hair rather than a separate piece laid on it
+    sides = [v for v in bm.verts if -3.5 < v.co.z < 8.2 and abs(v.co.x) > 1.6 and v.co.y < 5.0]
+    for k_ in range(30):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=sides, lambda_factor=0.7, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=k_ % 3 == 2, preserve_volume=True)
+    band = [v for v in bm.verts if -4.0 < v.co.z < 9.0 and v.co.y > 1.0]
+    for _ in range(8):
         bmesh.ops.smooth_laplacian_vert(bm, verts=band, lambda_factor=0.5, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
     hair = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
@@ -1374,8 +1592,13 @@ def curtain_bang(tree, s):
             tuck = min(1.0, t / 0.35)
             tuck = tuck * tuck * (3 - 2 * tuck)     # (the roots surface gradually from under the hair)
             rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.012
+            # (the strands that sweep round onto the side thin out and sink into the side hair as they go, so the
+            # fringe runs on into it rather than lying on it as a layer with a step along its edge)
+            sink = min(1.0, max(0.0, (f - 0.4) / 0.5)) * max(0.0, (t - 0.2) / 0.8) ** 1.1
+            rr *= 1.0 - 0.6 * sink
             # (the tips settle onto the skin; the root starts under the cap)
-            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) - 0.45 * (1 - tuck)))
+            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) * (1 - sink)
+                               - 0.45 * (1 - tuck) - 0.4 * sink))
             ds.append(d)
             rrs.append(rr)
             ts.append(t)
@@ -3400,7 +3623,10 @@ def build():
     mesh_obj('Belt keeper', belt_strip(1.35, 1.75, 0.82, 0.52, nseg=2), M_BELT, body, subdiv=0, solid=0.16)
 
     # ---- neck and head
-    mesh_obj('Neck', loft([(57.0, 1.45, 1.55, 0, 0.55), (51.0, 1.7, 1.75, 0, 0.45)]), M_SKIN, body)
+    # (the neck above the collar is part of the head's sculpt, see head_section; this is only its lower part,
+    # under the collar and the mantle, running on down into the shirt)
+    mesh_obj('Neck', loft([(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (51.0, 2.3, 2.15, 0, 0.2)]),
+             M_SKIN, body)
     head = empty('Head', (0, 0, HEAD_Z), body)
     hb = sculpted_head()
     # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
@@ -3408,7 +3634,7 @@ def build():
     for s in (-1, 1):
         x = s * 0.14 * HEAD_H
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
-    mouth_y = surface_y(hb, 0, 0.258 * HEAD_H)
+    mouth_y = surface_y(hb, 0, MOUTH_Z * HEAD_H)
     head_tree = bvh_of(hb)
     # (the eyes are set against the head before its lids are sculpted, so the balls follow the plain socket and
     # the lids then close over their edges)
@@ -3420,7 +3646,8 @@ def build():
     final_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     eye_makeup(head, final_tree, eyes)
-    mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
+    # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)
+    mesh_obj('Mouth', ellipsoid(0.66, 0.1, 0.06, 12, 6), M_LIPS, head, loc=(0, mouth_y + 0.1, MOUTH_Z * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
     # side locks framing the face, and the long fall down the back
@@ -3428,6 +3655,9 @@ def build():
     bmesh.ops.translate(cap, vec=(0, 0.06 * HEAD_H, 0.56 * HEAD_H), verts=cap.verts)
     bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.1, 6.4),
                            plane_no=Vector((0, -0.45, -0.89)).normalized(), clear_outer=True)
+    # (and stopped above the jaw: lower down, beside the face, its edges stood out from behind the side locks)
+    bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, 0, 2.2),
+                           plane_no=Vector((0, 0, -1)), clear_outer=True)
     # over the brow the cap lies close to the skull, thinning to nothing at the front hairline, so the front of
     # the head reads as hair growing from the scalp rather than as a cap; the back and the crown keep their volume
     hl_n = Vector((0, -0.45, -0.89)).normalized()
@@ -3468,13 +3698,14 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.62, 1.35, s * 3.3, 0.9), (2.0, 0.6, 1.3, s * 3.45, 1.35),
-                                         (-1.0, 0.6, 1.25, s * 3.65, 1.5), (-2.0, 0.5, 1.0, s * 3.75, 1.6), (-2.6, 0.25, 0.45, s * 3.8, 1.7)]),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.62, 1.5, s * 2.9, 0.35), (4.5, 0.7, 2.05, s * 3.22, 1.35), (2.0, 0.8, 1.75, s * 2.85, 2.45),
+                                         (-1.0, 0.75, 1.7, s * 3.0, 2.55), (-2.0, 0.6, 1.4, s * 3.1, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
     mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.6, 0, 2.1), (0.5, 3.6, 1.8, 0, 2.8),
-                                (-0.4, 3.2, 1.3, 0, 3.0)]), M_HAIR, head)
+                                (-0.4, 3.1, 1.2, 0, 2.95),
+                                (-1.4, 2.3, 0.7, 0, 2.75)]), M_HAIR, head)
     HAIR_PARTS[:] = [head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall']]
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
@@ -4112,7 +4343,7 @@ def sprite_mode(on):
     out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
     nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
     # the mantle's wool and the brooch's gold, likewise: their close-up surfaces are for the 3D view only
-    for name in ('mantle', 'clasp', 'boots', 'boot cuff', 'trousers', 'knee patch'):
+    for name in ('mantle', 'clasp', 'boots', 'boot cuff', 'trousers', 'knee patch', 'skin'):
         nt = bpy.data.materials[name].node_tree
         out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
         nt.links.new(nt.nodes['sprite bsdf' if on else 'close bsdf'].outputs['BSDF'], out.inputs['Surface'])
