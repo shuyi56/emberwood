@@ -980,8 +980,8 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.137), (0.07, 0.156), (0.12, 0.18),
-                       (0.18, 0.206), (0.24, 0.232), (0.3, 0.265), (0.36, 0.3), (0.42, 0.325), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
+HEAD_W = smooth_curve([(NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.14), (0.07, 0.163), (0.12, 0.196),
+                       (0.18, 0.228), (0.25, 0.26), (0.32, 0.29), (0.41, 0.32), (0.52, 0.34), (0.62, 0.352), (0.7, 0.36)])
 # (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
 # level, then the chin and the face)
 HEAD_F = smooth_curve([(NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
