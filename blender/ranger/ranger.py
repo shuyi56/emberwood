@@ -1289,6 +1289,9 @@ def sleeve_folds(z, phi, s):
     return off, min(1.0, cr)
 
 
+J_EDGE = 0.12      # where the jerkin's front closure runs (phi round from the front, just to her right)
+
+
 def jerkin_form(z, phi):
     """(radial offset, crease) of the jerkin's leather at height z, angle phi round from the front."""
     off, cr = 0.0, 0.0
@@ -1314,6 +1317,15 @@ def jerkin_form(z, phi):
         v = fold_ridge(2.6 * (z - 46.0) + 3.0 * (phi - p0))
         off += 0.1 * band * v
         cr += 0.7 * band * max(0.0, -v)
+    # the front closure: from the foot of the shirt's V down to the hem the jerkin's left front laps over the
+    # right, a little to her right of the middle (under the brooch). The upper panel stands proud of the one under
+    # it by the leather's thickness, ending in a clean edge with a line of shade beneath it
+    zf = min(1.0, max(0.0, (42.6 - z) / 0.8))
+    if zf > 0.0 and c > 0.0:
+        d = math.atan2(math.sin(phi - J_EDGE), math.cos(phi - J_EDGE))
+        lap = min(1.0, max(0.0, (d + 1.0) / 0.7)) / (1.0 + math.exp(min(60.0, d / 0.012)))
+        off += 0.17 * zf * lap
+        cr += 0.7 * zf * math.exp(-((d - 0.035) / 0.03) ** 2)
     # the skirt: below the hips the leather falls in a few broad folds that deepen toward the hem
     k = min(1.0, max(0.0, (33.0 - z) / 3.5)) ** 1.2
     v = fold_ridge(5.0 * phi + 0.8 + 0.4 * math.sin(3 * phi))
@@ -1775,7 +1787,7 @@ def build():
 
     # (its top runs up under the mantle, so the leather shows where the mantle parts below the brooch)
     jz = [49.6 - 0.4 * i for i in range(52)]          # 49.6 down to 29.2
-    jb = loft_fn(jz, jerkin_pt, n=96, cap_bot=False)
+    jb = loft_fn(jz, jerkin_pt, n=192, cap_bot=False)     # (fine enough round to hold the closure's edge)
     vee_pts = []
     for zz, w in ((47.0, 1.25), (45.5, 0.85), (44.0, 0.45), (42.6, 0.0)):
         for xx in ((-w, w) if w else (0.0,)):
@@ -1794,6 +1806,20 @@ def build():
         p = jerkin_pt(30.65, phi)
         st.append((*outward(p, 0.2), 30.65 + (p[2] if len(p) > 2 else 0.0)))
     mesh_obj('Jerkin stitching', dots(st), M_STITCH, body, subdiv=0)
+    # a running stitch down the closure's edge, and three horn toggles fastening it (above the belt, and two on
+    # the skirt)
+    cst = []
+    for i in range(16):
+        z = 42.0 - 0.72 * i
+        if abs(z - 39.4) < 0.9:
+            continue
+        p = jerkin_pt(z, J_EDGE - 0.07)
+        cst.append((*outward(p, 0.16), z + (p[2] if len(p) > 2 else 0.0)))
+    mesh_obj('Closure stitching', dots(cst, 0.3), M_STITCH, body, subdiv=0)
+    for i, z in enumerate((41.7, 36.9, 34.4)):
+        p = jerkin_pt(z, J_EDGE - 0.16)
+        tg = ellipsoid(0.55, 0.25, 0.22, 10, 6)
+        mesh_obj(f'Toggle {i}', tg, M_LACE, body, loc=(*outward(p, 0.2), z), subdiv=0)
     # the shirt shows in a narrow V at the front of the jerkin, crossed by its lacing (laid on the jerkin's surface)
     vee = bmesh.new()
     vv = [vee.verts.new(p) for p in vee_pts]
@@ -1808,8 +1834,34 @@ def build():
     belt = loft_fn([40.1, 39.4, 38.7], lambda z, p: torso_point(z, p, J + 0.3, bust=0.0), cap_top=False, cap_bot=False)
     mesh_obj('Belt', belt, M_BELT, body, solid=0.3, subdiv=0)
     by_ = torso_point(39.4, 0.0, J + 0.3, bust=0.0)[1]
-    mesh_obj('Buckle', box(1.6, 0.6, 1.6), M_STEEL, body, loc=(0, by_ - 0.45, 39.4), subdiv=0)
-    mesh_obj('Buckle hole', box(0.75, 0.3, 0.75), M_BELT, body, loc=(0, by_ - 0.7, 39.4), subdiv=0)
+    # the buckle: an open iron frame with its prong, the belt's tail drawn through it and lying along the belt
+    # to her left, its end cut round; and a keeper, a narrow leather loop, holding the tail down
+    fr = bmesh.new()
+    for (cx, cz, sx_, sz_) in ((0, 0.68, 1.7, 0.32), (0, -0.68, 1.7, 0.32), (-0.7, 0, 0.32, 1.68), (0.7, 0, 0.32, 1.68)):
+        r_ = bmesh.ops.create_cube(fr, size=1.0)
+        bmesh.ops.scale(fr, vec=(sx_, 0.34, sz_), verts=r_['verts'])
+        bmesh.ops.translate(fr, vec=(cx, 0, cz), verts=r_['verts'])
+    mesh_obj('Buckle', fr, M_STEEL, body, loc=(0, by_ - 0.3, 39.4), subdiv=0)
+    mesh_obj('Buckle prong', box(0.95, 0.16, 0.16), M_STEEL, body, loc=(0.25, by_ - 0.42, 39.4), subdiv=0)
+
+    def belt_strip(x0, x1, half, lift, nseg=12, round_end=False):
+        bm_ = bmesh.new()
+        rows_ = []
+        for i in range(nseg + 1):
+            xx = lerp(x0, x1, i / nseg)
+            hh = half
+            if round_end:
+                e = max(0.0, (i / nseg - 0.75) / 0.25)
+                hh = half * math.sqrt(max(0.05, 1 - e * e))
+            ph = -math.asin(max(-1.0, min(1.0, xx / (_torso_dims(39.4)[0] + J + 0.3))))
+            yy = torso_point(39.4, ph, J + 0.3 + lift, bust=0.0)[1]
+            rows_.append([bm_.verts.new((xx, yy, 39.4 + hh)), bm_.verts.new((xx, yy, 39.4 - hh))])
+        for a_, b_ in zip(rows_, rows_[1:]):
+            bm_.faces.new((a_[0], b_[0], b_[1], a_[1]))
+        bmesh.ops.recalc_face_normals(bm_, faces=bm_.faces)
+        return bm_
+    mesh_obj('Belt tail', belt_strip(0.5, 3.4, 0.62, 0.32, round_end=True), M_BELT, body, subdiv=0, solid=0.18)
+    mesh_obj('Belt keeper', belt_strip(1.35, 1.75, 0.82, 0.52, nseg=2), M_BELT, body, subdiv=0, solid=0.16)
 
     # ---- neck and head
     mesh_obj('Neck', loft([(57.0, 1.45, 1.55, 0, 0.55), (51.0, 1.7, 1.75, 0, 0.45)]), M_SKIN, body)
@@ -2059,22 +2111,60 @@ def build():
             return -r * math.sin(phi), -(r * 1.04 + cap) * math.cos(phi)
         kz = HIP_Z - THIGH
         mesh_obj(f'Leg.{side}', loft_fn(zs, leg_pt, n=28), M_LEGS, loc=(x, 0, HIP_Z), skin=w)
-        mesh_obj(f'Knee patch.{side}', ellipsoid(1.25, 0.45, 1.45, 12, 8), M_KNEE, loc=(x, -2.4, kz - 0.3), subdiv=0, skin=w)
-        # the boot shaft from just under the knee; its top folds down into a cuff
-        mesh_obj(f'Boot shaft.{side}', loft([(-2.2, 2.3, 2.4), (-6.0, 2.15, 2.25), (-SHIN + 0.5, 1.75, 1.85), (-SHIN - 1.2, 1.8, 1.9)]),
-                 M_BOOTS, loc=(x, 0, kz), skin=w)
-        mesh_obj(f'Boot cuff.{side}', loft([(-1.6, 2.6, 2.7), (-3.5, 2.5, 2.6, 0, 0, lambda p: 0.5 * math.cos(p))]),
-                 M_CUFF, loc=(x, 0, kz), subdiv=1, skin=w)
+        # the knee patch: a piece of heavier cloth sewn onto the trouser leg over the knee, cut to a rounded
+        # square and laid on the leg's own surface (so it bends with the knee instead of standing off it as a
+        # plate), with its edge turned under and a running stitch round it
+        def patch_pt(u, v):
+            zc, hz = -THIGH + 0.1, 1.5
+            hw = 0.78 * (1 - abs(v) ** 4) ** 0.25
+            z, phi = zc + v * hz, u * hw
+            px, py = leg_pt(z, phi)
+            r = math.hypot(px, py)
+            return px / r * (r + 0.08), py / r * (r + 0.08), z
+        pb, P = bmesh.new(), []
+        NU, NV = 14, 12
+        for j in range(NV + 1):
+            P.append([pb.verts.new(patch_pt(-1 + 2 * i / NU, -1 + 2 * j / NV)) for i in range(NU + 1)])
+        for j in range(NV):
+            for i in range(NU):
+                pb.faces.new((P[j][i], P[j][i + 1], P[j + 1][i + 1], P[j + 1][i]))
+        bmesh.ops.recalc_face_normals(pb, faces=pb.faces)
+        mesh_obj(f'Knee patch.{side}', pb, M_KNEE, loc=(x, 0, HIP_Z), subdiv=1, skin=w, solid=0.07)
+        kst = []
+        for k in range(26):
+            a_ = 2 * math.pi * k / 26
+            u, v = 0.8 * math.cos(a_), 0.8 * math.sin(a_)
+            v = math.copysign(abs(v) ** 0.7 * 0.8 ** 0.3, v)
+            px, py, pz = patch_pt(u, v)
+            r = math.hypot(px, py)
+            kst.append((px / r * (r + 0.1), py / r * (r + 0.1), pz))
+        mesh_obj(f'Knee stitching.{side}', dots(kst, 0.22), M_STITCH, loc=(x, 0, HIP_Z), subdiv=0, skin=w)
+        # the boot: one piece of soft leather from under the knee down over the ankle and into the foot, so the
+        # foot grows out of the shaft (it bends at the ankle with the foot's bone, rather than being a separate
+        # shoe set under a tube); the shaft is a little slack, with a few soft wrinkles where it bunches over the
+        # instep and above the ankle
+        S = SHIN
+
+        def wrinkle(z):
+            return 0.06 * math.sin(4.2 * z) * math.exp(-((z + S - 1.6) / 1.6) ** 2)
+        boot = loft([(-2.0, 2.2, 2.3), (-3.5, 2.2, 2.32), (-6.5, 2.08, 2.18), (-S + 2.6, 1.72 + wrinkle(-S + 2.6), 1.84),
+                     (-S + 1.6, 1.62 + wrinkle(-S + 1.6), 1.76), (-S + 0.6, 1.66, 1.84, 0, -0.05),
+                     (-S - 0.5, 1.78, 2.0, 0, -0.3), (-S - 1.4, 1.84, 2.8, 0, -1.0), (-S - 2.2, 1.86, 3.3, 0, -1.6),
+                     (-S - 2.85, 1.8, 3.4, 0, -1.7)], n=32, cap_top=False)
+        mesh_obj(f'Boot.{side}', boot, M_BOOTS, loc=(x, 0, kz), skin=w, solid=0.12)
+        # its top folded down into a cuff: the leather turns over at the rim (a rolled edge, not a cut one) and
+        # hangs down over the shaft, dipping at the back
+        cuff = loft([(-1.9, 2.25, 2.35), (-1.7, 2.5, 2.6), (-1.95, 2.66, 2.76), (-2.9, 2.64, 2.74),
+                     (-3.9, 2.58, 2.68, 0, 0, lambda p: 0.45 * math.cos(p))], n=32, cap_top=False, cap_bot=False)
+        mesh_obj(f'Boot cuff.{side}', cuff, M_CUFF, loc=(x, 0, kz), subdiv=1, skin=w, solid=0.15)
         # a seam stitched up the back of the boot, from the heel to the cuff
         bst = []
-        for z in [-3.9 - 1.0 * i for i in range(int(SHIN - 3.9))]:
+        for z in [-4.4 - 1.0 * i for i in range(int(SHIN - 4.4))]:
             t = (-2.2 - z) / (SHIN - 2.7)
-            ry = lerp(2.4, 1.85, min(1.0, max(0.0, t)))
-            bst.append((0.0, ry + 0.02, z))
+            ry = lerp(2.32, 1.88, min(1.0, max(0.0, t)))
+            bst.append((0.0, ry + 0.1, z))
         mesh_obj(f'Boot stitching.{side}', dots(bst, 0.4), M_STITCH, loc=(x, 0, kz), subdiv=0, skin=w)
         az = kz - SHIN
-        mesh_obj(f'Foot.{side}', loft([(-0.8, 1.75, 1.95, 0, -0.3), (-2.2, 1.85, 3.3, 0, -1.6), (-2.85, 1.8, 3.4, 0, -1.7)]),
-                 M_BOOTS, loc=(x, 0, az), skin=w)
         mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, loc=(x, 0, az),
                  subdiv=1, skin=w)
     skin_trunk(body)
