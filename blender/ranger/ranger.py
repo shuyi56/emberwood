@@ -2136,7 +2136,7 @@ def lid_bottom(u):
     return EYE_RX * float(np.interp(max(-1.0, min(1.0, u)), us, hs))
 
 
-def almond(rx, ry, rz, s, seg=192, rings=128):
+def almond(rx, ry, rz, s, seg=128, rings=80):
     """The eyeball: an ellipsoid reshaped to the lids' opening (lid_top over lid_bottom, tapering to a point at
     each corner rather than a rounded oval), a little larger than it, so its edge turns in under the skin of the
     lids all round (see eye_relief) and the lids close over it with no seam."""
@@ -3198,9 +3198,9 @@ def eye_makeup(head, tree, eyes):
         o.visible_shadow = False
 
     for ex, ez, s in eyes:
-        patch('Eyeshadow', ex, ez, s, 0.022, shadow_m)
-        patch('Lashes', ex, ez, s, 0.034, lash_m, NU=200, NV=110)
-        patch('Brow paint', ex, ez, s, 0.02, brow_m, NU=200, NV=80, ext=(BR_U0, BR_U1, BR_V0, BR_V1))
+        patch('Eyeshadow', ex, ez, s, 0.022, shadow_m, NU=90, NV=44)
+        patch('Lashes', ex, ez, s, 0.034, lash_m, NU=110, NV=56)
+        patch('Brow paint', ex, ez, s, 0.02, brow_m, NU=90, NV=32, ext=(BR_U0, BR_U1, BR_V0, BR_V1))
 
 
 def build():
