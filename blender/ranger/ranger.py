@@ -1242,6 +1242,15 @@ SLEEVE_CREASES = [
 ]
 
 
+# A few long folds down the outside and back of the arm, where the cloth hangs from the shoulder and from the elbow:
+# (angle round the arm, as above, top, bottom, half-width as an angle, depth, drift of the line round the arm per
+# unit down). Each fades in and out along its length and wanders off true, so they read as hanging cloth, not ribs.
+SLEEVE_DRAPE = [
+    (1.15, -0.8, -7.5, 0.28, 0.1, 0.035), (2.05, -2.0, -9.5, 0.25, 0.08, -0.03), (1.6, EZ - 1.0, EZ - FORE + 1.0, 0.26, 0.08, 0.05),
+    (2.6, EZ - 2.0, EZ - FORE + 1.6, 0.22, 0.06, -0.04), (0.55, EZ - 2.5, EZ - FORE + 2.0, 0.22, 0.05, 0.03),
+]
+
+
 def sleeve_folds(z, phi, s):
     """(radial offset, crease) of the sleeve at local height z, angle phi (phi 0 faces front)."""
     pm = s * phi                                    # (mirrored: +pi/2 is out from the body on either arm)
@@ -1256,6 +1265,19 @@ def sleeve_folds(z, phi, s):
         ridge = math.exp(-((d - 0.42) / 0.38) ** 2) + 0.6 * math.exp(-((d + 0.45) / 0.38) ** 2)
         off += depth * win * (0.55 * ridge - groove)
         cr += win * groove * min(1.0, depth / 0.11)
+    for p0, zt, zb, wd, depth, drift in SLEEVE_DRAPE:
+        if not (zb - 1.0 < z < zt + 1.0):
+            continue
+        along = min(1.0, max(0.0, (zt - z) / (zt - zb)))
+        env = math.sin(math.pi * along) ** 0.8 if zb <= z <= zt else 0.0
+        if env <= 0.0:
+            continue
+        pc = p0 + drift * (zt - z) + 0.06 * math.sin(1.3 * z + 3 * p0)
+        dp = math.atan2(math.sin(pm - pc), math.cos(pm - pc))
+        # (a rounded ridge with a shallow valley either side)
+        g = math.exp(-(dp / wd) ** 2) - 0.45 * math.exp(-((abs(dp) - 1.3 * wd) / (0.6 * wd)) ** 2)
+        off += depth * env * g
+        cr += 0.6 * env * max(0.0, -g)
     # a long soft fold down each part of the arm, where the cloth hangs from the shoulder and twists down the
     # forearm, faint
     v = fold_ridge(2.0 * pm + 0.55 * z + 0.6)
@@ -1597,8 +1619,9 @@ def hand_mesh(s):
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
-    # fingers, index at the front to pinky at the back
-    for y0, L, r in ((-0.9, 1.95, 0.36), (-0.3, 2.1, 0.37), (0.3, 2.0, 0.35), (0.78, 1.6, 0.32)):
+    # fingers, index at the front to pinky at the back (the middle finger a little shorter than the palm, as in life:
+    # longer and the hand reads as all fingers)
+    for y0, L, r in ((-0.9, 1.5, 0.35), (-0.3, 1.62, 0.36), (0.3, 1.54, 0.34), (0.78, 1.22, 0.31)):
         p = Vector((0.05 * inward, y0, -2.55))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.88)):
@@ -1618,8 +1641,8 @@ def hand_mesh(s):
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
-    t1 = t0 + Vector((0.3 * inward, -0.25, -1.1))
-    t2 = t1 + Vector((0.22 * inward, 0.05, -0.8))
+    t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
+    t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.3)
     capsule(t0, t1, 0.46)
