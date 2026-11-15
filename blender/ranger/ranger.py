@@ -684,7 +684,7 @@ LEG_X, SH_X = 3.3, 6.1
 CHEST_Z, NECK_Z = 41.0, 51.0
 # the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
 # either way, in radians (the world model takes a longer stride: see export_glb.py)
-GAIT, ARM_SWING = 1.0, 0.4
+GAIT, ARM_SWING = 1.0, 0.3
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -2150,10 +2150,11 @@ GAIT_HIP = [(0.0, 22), (0.15, 17), (0.35, 0), (0.52, -13), (0.62, -8), (0.71, 10
 GAIT_KNEE = [(0.0, 4), (0.12, 19), (0.3, 6), (0.45, 9), (0.6, 38), (0.7, 63), (0.8, 58), (0.9, 25), (0.97, 5)]
 GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -34), (0.7, -14), (0.82, 5), (0.94, 13)]
 # The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
-# back. The elbow is never straight: it opens to a soft bend as the arm swings back and folds to about 60 degrees as
-# it swings forward, lagging behind the shoulder, so the forearm follows through instead of the arm swinging stiff
-# from the shoulder like a pendulum; and in front the forearm comes across toward the middle of the body.
-ARM_LAG, ELBOW_LAG = 0.05, 0.08
+# back. The upper arm swings only a little either way and the elbow does most of the work: it is never straight,
+# opening to a soft bend as the arm swings back and folding to about 75 degrees as it swings forward, just behind the
+# shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum; and in
+# front the forearm comes across toward the middle of the body.
+ARM_LAG, ELBOW_LAG = 0.05, 0.03
 STANCE = 0.62
 # The trunk (in radians, and design pixels for the sway): the pelvis turns about its vertical axis with the legs, the
 # hip of the leg swinging through carried forward with it; it lists, the hip over the standing leg high and the
@@ -2277,9 +2278,9 @@ def pose(col):
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = ARM_SWING * (0.15 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
+            a = ARM_SWING * (0.05 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
             fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
-            bend = 0.3 + 0.85 * fold
+            bend = 0.35 + 0.95 * fold
             flick = 0.06 + 0.1 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
             across = 0.12 * max(0.0, a)
         else:
