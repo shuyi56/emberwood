@@ -1746,7 +1746,9 @@ def leg_weights(side):
 
     def w(co):
         lower = _smooth(kz + 1.4, kz - 1.4, co.z)      # thigh -> shin across the knee
-        foot = _smooth(az + 0.5, az - 0.5, co.z)       # shin -> foot across the ankle
+        # shin -> foot across the ankle: the boot is one piece from the shaft into the foot, so the bend is spread over
+        # the instep and the heel (a band 2.6 deep) instead of pinching in a single ring where the foot folds up
+        foot = _smooth(az + 1.6, az - 1.0, co.z)
         return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot}
     return w
 
@@ -2511,7 +2513,7 @@ def leg_ik(hip_z, fwd, foot_z):
 # off, and lifted again through the swing so the toes clear the ground).
 GAIT_HIP = [(0.0, 22), (0.15, 17), (0.35, 0), (0.52, -13), (0.62, -8), (0.71, 10), (0.81, 25), (0.9, 27)]
 GAIT_KNEE = [(0.0, 4), (0.12, 19), (0.3, 6), (0.45, 9), (0.6, 38), (0.7, 63), (0.8, 58), (0.9, 25), (0.97, 5)]
-GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -34), (0.7, -14), (0.82, 5), (0.94, 13)]
+GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -30), (0.7, -4), (0.82, 6), (0.94, 13)]
 # The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
 # back. The swing is full and a little exaggerated, so it reads from the side: the upper arm swings about 35 degrees
 # forward and as far back, past the hip. The elbow is never straight, opening to a soft bend as the arm swings back and
