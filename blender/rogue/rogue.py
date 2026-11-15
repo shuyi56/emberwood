@@ -275,9 +275,9 @@ def cowl_form(z, phi, f):
     front = max(0.0, math.cos(phi - 0.06)) ** 2
     # the swags: U-shaped folds across the front, rising toward the shoulders, deepest toward the hem
     u = z + 2.1 * (phi - 0.06) ** 2
-    v = pinch(2 * math.pi * (u - 48.4) / 1.5 + 0.3 * math.sin(1.7 * phi))
-    k = front * smoothstep(0.15, 0.6, f) * (1.0 - smoothstep(52.6, 53.4, z))
-    off += 0.34 * k * v
+    v = fold_ridge(2 * math.pi * (u - 48.6) / 2.5 + 0.25 * math.sin(1.7 * phi))
+    k = front * smoothstep(0.3, 0.75, f) * (1.0 - smoothstep(51.6, 52.6, z))
+    off += 0.38 * k * v
     cr += 0.8 * k * max(0.0, -v)
     lift += 0.3 * k * v
     # over the shoulders and down the back, a few soft folds running down from the neck
@@ -323,8 +323,8 @@ TIE = {}
 
 # the hairline: its height round the head, as an elevation seen from HC (|angle| from the front: the forehead,
 # a little higher at the temples, down in front of the ears, behind them, and across the nape)
-HAIRLINE = smooth_curve([(0.0, 0.55), (0.38, 0.5), (0.75, 0.33), (1.1, 0.12), (1.45, -0.12), (1.75, -0.3),
-                         (2.05, -0.3), (2.5, -0.52), (math.pi, -0.6)])
+HAIRLINE = smooth_curve([(0.0, 0.55), (0.38, 0.5), (0.75, 0.3), (1.1, 0.0), (1.45, -0.36), (1.75, -0.56),
+                         (2.05, -0.62), (2.5, -0.7), (math.pi, -0.72)])
 
 
 def _dir(th, el):
@@ -401,7 +401,7 @@ def hair_cap(head_tree):
             combed = 0.04 * math.sin(5.0 * cap_flow(HC + d)[0] / 3.6 + 0.6) * edge * (1.0 - mound)
             r = rs + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed
             row.append(bm.verts.new(HC + d * r))
-            wr.append(0.55 + 0.45 * edge)
+            wr.append(0.25 + 0.75 * edge)
         rows.append(row)
         weights.append(wr)
     pole = bm.verts.new(HC + Vector((0, 0, 1)) * (skull(Vector((0, 0, 1))) + 0.26))
@@ -455,13 +455,13 @@ def ponytail_path(tree):
     return path, lens
 
 
-TAIL_R = [(0.0, 0.72), (0.05, 0.66), (0.08, 0.64), (0.13, 1.05), (0.22, 1.36), (0.5, 1.32), (0.75, 1.08), (0.9, 0.7),
-          (0.97, 0.32), (1.0, 0.06)]
+TAIL_R = [(0.0, 0.72), (0.05, 0.66), (0.08, 0.66), (0.14, 1.3), (0.24, 1.75), (0.5, 1.7), (0.75, 1.4), (0.9, 0.9),
+          (0.97, 0.4), (1.0, 0.08)]
 
 
 def tail_radius(s):
     r = _profile([(-a, b) for a, b in TAIL_R], -s)
-    return r, 0.78 * r
+    return r, 0.62 * r
 
 
 def build_hair(head, head_tree):
@@ -473,7 +473,7 @@ def build_hair(head, head_tree):
     for i_, w_ in enumerate(w):
         vg.add([i_], w_, 'REPLACE')
     cap_o.modifiers['thickness'].vertex_group = 'thick'
-    cap_o.modifiers['thickness'].thickness_vertex_group = 0.55
+    cap_o.modifiers['thickness'].thickness_vertex_group = 0.3
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     tree = body_tree(dg, ('Head shape', 'Hair cap'), Vector((0, 0, HEAD_Z)))
@@ -904,11 +904,11 @@ def build():
             p = 2 * math.pi * k / 36
             z = r0[0] - 0.75 + top(p)
             rx, ry, cy = ring_r(rings, r0[0] - 0.75)
-            bst.append((-(rx + 0.14) * math.sin(p), cy - (ry + 0.14) * math.cos(p), z))
+            bst.append((-(rx + 0.06) * math.sin(p), cy - (ry + 0.06) * math.cos(p), z))
         # and a seam up the back of the boot, from the heel to the top
         for z in [-SHIN + 1.0 + 0.95 * i for i in range(int((SHIN + BOOT_TOP - 2.2) / 0.95))]:
             rx, ry, cy = ring_r(rings, z)
-            bst.append((0.0, cy + ry + 0.12, z))
+            bst.append((0.0, cy + ry + 0.06, z))
         mesh_obj(f'Boot stitching.{side}', dots(bst, 0.15), M_STITCH, loc=(x, 0, kz), subdiv=0, skin=w)
         # two buckled straps: round the top of the calf, and round the ankle; each buckle on the outside of the leg
         for j, zs_ in enumerate((-3.6, -SHIN + 1.25)):
