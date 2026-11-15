@@ -897,7 +897,7 @@ LEG_X, SH_X = 3.3, 5.75
 CHEST_Z, NECK_Z = 41.0, 51.0
 # the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
 # either way, in radians (the world model takes a longer stride: see export_glb.py)
-GAIT, ARM_SWING = 1.0, 0.3
+GAIT, ARM_SWING = 1.0, 0.62
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -1851,7 +1851,9 @@ def leg_weights(side):
 
     def w(co):
         lower = _smooth(kz + 1.4, kz - 1.4, co.z)      # thigh -> shin across the knee
-        foot = _smooth(az + 0.5, az - 0.5, co.z)       # shin -> foot across the ankle
+        # shin -> foot across the ankle: the boot is one piece from the shaft into the foot, so the bend is spread over
+        # the instep and the heel (a band 2.6 deep) instead of pinching in a single ring where the foot folds up
+        foot = _smooth(az + 1.6, az - 1.0, co.z)
         return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot}
     return w
 
@@ -3764,6 +3766,9 @@ def build():
     # exactly one surface (no blended edges), and passes for the sun's light and the surface normal
     sc.render.engine = 'CYCLES'
     sc.cycles.device = 'CPU'
+    # keep the scene loaded in Cycles between renders: only what changed (the pose, the turn) is synced again,
+    # so after the first frame a cell takes about half a second instead of twenty (the samples cost nothing)
+    sc.render.use_persistent_data = True
     sc.cycles.samples = 1
     sc.cycles.use_adaptive_sampling = False
     sc.cycles.use_denoising = False
@@ -3843,11 +3848,11 @@ def leg_ik(hip_z, fwd, foot_z):
 # off, and lifted again through the swing so the toes clear the ground).
 GAIT_HIP = [(0.0, 22), (0.15, 17), (0.35, 0), (0.52, -13), (0.62, -8), (0.71, 10), (0.81, 25), (0.9, 27)]
 GAIT_KNEE = [(0.0, 4), (0.12, 19), (0.3, 6), (0.45, 9), (0.6, 38), (0.7, 63), (0.8, 58), (0.9, 25), (0.97, 5)]
-GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -34), (0.7, -14), (0.82, 5), (0.94, 13)]
+GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -30), (0.7, -4), (0.82, 6), (0.94, 13)]
 # The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
-# back. The upper arm swings only a little either way and the elbow does most of the work: it is never straight,
-# opening to a soft bend as the arm swings back and folding to about 75 degrees as it swings forward, just behind the
-# shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum. The arm
+# back. The swing is full and a little exaggerated, so it reads from the side: the upper arm swings about 35 degrees
+# forward and as far back, past the hip. The elbow is never straight, opening to a soft bend as the arm swings back and
+# folding to about 60 degrees as it swings forward, just behind the shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum. The arm
 # swings and folds in the plane of the walk, so it reads from the side camera: nothing swings in toward the body.
 ARM_LAG, ELBOW_LAG = 0.05, 0.03
 STANCE = 0.62
@@ -3973,15 +3978,16 @@ def pose(col):
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = ARM_SWING * (0.05 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
+            a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG))
             fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
-            bend = 0.35 + 0.95 * fold
+            bend = 0.25 + 0.8 * fold
             flick = 0.06 + 0.1 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
             flick = 0.1
-        sh.rotation_euler = (-a, s * 0.17, 0)   # held a little off the body, so the waist shows
+        # (held a little off the body, so the waist shows, and a little further out as it swings back, past the hip)
+        sh.rotation_euler = (-a, s * (0.17 + 0.1 * max(0.0, -a)), 0)
         el.rotation_euler = (-bend, 0, 0)
         wr.rotation_euler = (flick, 0, 0)
 
