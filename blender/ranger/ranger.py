@@ -2319,8 +2319,8 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.62, 1.35, s * 3.3, 0.9), (2.0, 0.6, 1.3, s * 3.45, 1.35),
-                                         (-1.0, 0.6, 1.25, s * 3.65, 1.5), (-2.0, 0.5, 1.0, s * 3.75, 1.6), (-2.6, 0.25, 0.45, s * 3.8, 1.7)]),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.66, 1.35, s * 3.26, 0.9), (2.0, 1.0, 1.3, s * 3.05, 1.35),
+                                         (-1.0, 0.95, 1.25, s * 3.3, 1.5), (-2.0, 0.75, 1.0, s * 3.5, 1.6), (-2.6, 0.35, 0.45, s * 3.7, 1.7)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
