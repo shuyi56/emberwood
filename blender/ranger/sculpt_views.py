@@ -18,7 +18,7 @@ from mathutils import Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ranger as R  # noqa: E402
 
-VIEWS = [('front', 0, 0.0), ('3/4', 45, 0.0), ('profile', 90, 0.0), ('back 3/4', 135, 0.0), ('low 3/4', 35, -0.35), ('under', 20, -1.1)]
+VIEWS = [('front', 0, 0.0), ('3/4', 45, 0.0), ('profile', 90, 0.0), ('back 3/4', 135, 0.0), ('low 3/4', 35, -0.35), ('under', 20, -1.1), ('high 3/4', 40, 0.4)]
 
 
 def setup(size, samples):

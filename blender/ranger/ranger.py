@@ -910,8 +910,8 @@ def face_relief(x, z):
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
         d += gauss(x, z, s * 0.23, 0.415, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
         d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
-        d += gauss(x, z, s * 0.19, 0.3, 0.1, 0.08, 0.034)      # the cheek filled out under the cheekbone, no hollow
-        d += gauss(x, z, s * 0.17, 0.25, 0.075, 0.07, 0.022)       # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032)      # the cheek filled out under the cheekbone, no hollow
+        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016)       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
         d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
         d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
@@ -929,7 +929,7 @@ def face_relief(x, z):
     d += mouth_relief(x, z)
     d += gauss(x, z, 0, 0.088, 0.048, 0.046, 0.05)    # chin: the ball of it stands nearly as far forward as the lower lip
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.09, 0.11, 0.035, 0.05, -0.006)    # a soft dip either side, setting the chin off the jaw
+        d += gauss(x, z, s * 0.09, 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
@@ -952,7 +952,7 @@ def mouth_relief(x, z):
     # the line between the lips, deepest at the corners where the lips tuck in
     d -= (0.012 + 0.014 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
-        d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.006)    # the corners
+        d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.004)    # the corners
         d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
@@ -1015,7 +1015,7 @@ HEAD_B = smooth_curve([(NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31)
 HEAD_MID = smooth_curve([(NECK_Z, 0.045), (0.3, 0.04), (1.0, 0.04)])
 # how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
 # narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
-HEAD_NF = smooth_curve([(NECK_Z, 2.0), (-0.02, 2.0), (0.06, 2.15), (0.14, 2.1), (0.3, 2.05), (0.45, 2.15), (0.6, 2.25), (0.8, 2.2)])
+HEAD_NF = smooth_curve([(NECK_Z, 2.0), (-0.02, 2.0), (0.06, 2.1), (0.14, 2.02), (0.3, 1.98), (0.45, 2.12), (0.6, 2.25), (0.8, 2.2)])
 HEAD_NB = smooth_curve([(NECK_Z, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
 
 
@@ -1059,7 +1059,7 @@ def jaw_relief(y, z):
         return t * t * (3 - 2 * t)
     below = ss((z - zl + 0.03) / 0.1)        # above the lower edge of the jaw
     behind = ss((0.11 - y) / 0.11)             # in front of the back edge of the ramus
-    up = ss((zl + 0.22 - z) / 0.16)                 # under the cheek
+    up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
     return 0.02 * below * behind * up
 
 
@@ -1106,7 +1106,7 @@ def sculpted_head():
         n.normalize()
         if n.x * x + n.y * (y - 0.04) < 0:
             n = -n
-        f = max(0.0, -n.y) ** 1.3       # only the parts facing forward carry the face
+        f = max(0.0, -n.y) ** 1.0       # only the parts facing forward carry the face
         u = min(1.0, max(0.0, (z - 0.005) / 0.04))
         d = face_relief(x, z) * f * u * u * (3 - 2 * u) + jaw_relief(y, z)
         v.co = (x + n.x * d, y + n.y * d, z + n.z * d)
