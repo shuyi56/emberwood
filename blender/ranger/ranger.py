@@ -876,7 +876,7 @@ def box(sx, sy, sz):
 # Realistic adult proportions, about 7.3 heads tall: the top of the head at 63 (the painted sprites' height),
 # a head 8.6 tall, shoulders at 1.5 heads down, the waist at 3, the hip joint at 3.7 and the knee at 2 heads up.
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
-NECK_Z = -0.13                      # the head's sculpt runs down the neck to here (inside the collar), in head heights
+HEAD_NECK_Z = -0.13                      # the head's sculpt runs down the neck to here (inside the collar), in head heights
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
@@ -1003,20 +1003,20 @@ def smooth_curve(knots):
 #   the jaw, which rises from the chin to the angle of the jaw under the ear;
 #   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
 #   back from the brow; over the top the sections round off along ellipses into the crown.
-HEAD_W = smooth_curve([(NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.122), (0.07, 0.156), (0.12, 0.197),
+HEAD_W = smooth_curve([(HEAD_NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.122), (0.07, 0.156), (0.12, 0.197),
                        (0.18, 0.236), (0.25, 0.268), (0.32, 0.296), (0.41, 0.323), (0.52, 0.342), (0.62, 0.353), (0.7, 0.36)])
 # (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
 # level, then the chin and the face)
-HEAD_F = smooth_curve([(NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
+HEAD_F = smooth_curve([(HEAD_NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
                        (0.05, 0.33), (0.08, 0.365), (0.12, 0.385), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415), (0.42, 0.42),
                        (0.52, 0.42), (0.62, 0.42)])
-HEAD_B = smooth_curve([(NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31), (0.3, 0.35), (0.38, 0.385),
+HEAD_B = smooth_curve([(HEAD_NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31), (0.3, 0.35), (0.38, 0.385),
                        (0.46, 0.415), (0.54, 0.435), (0.64, 0.445)])
-HEAD_MID = smooth_curve([(NECK_Z, 0.045), (0.3, 0.04), (1.0, 0.04)])
+HEAD_MID = smooth_curve([(HEAD_NECK_Z, 0.045), (0.3, 0.04), (1.0, 0.04)])
 # how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
 # narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
-HEAD_NF = smooth_curve([(NECK_Z, 2.0), (-0.02, 2.0), (0.06, 2.1), (0.14, 2.02), (0.3, 1.98), (0.45, 2.12), (0.6, 2.25), (0.8, 2.2)])
-HEAD_NB = smooth_curve([(NECK_Z, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
+HEAD_NF = smooth_curve([(HEAD_NECK_Z, 2.0), (-0.02, 2.0), (0.06, 2.1), (0.14, 2.02), (0.3, 1.98), (0.45, 2.12), (0.6, 2.25), (0.8, 2.2)])
+HEAD_NB = smooth_curve([(HEAD_NECK_Z, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
 
 
 # the lower face, nose base to chin, as a third of the head rather than the 0.36 the features were first laid out
@@ -1036,13 +1036,13 @@ def _dome(f, z, z0, top=1.0):
 
 def head_section(z, c, s):
     """The point of the base head (no face relief) at height z and direction (c forward, s across) round it.
-    Below the chin the sections are the neck (down to NECK_Z, inside the collar), so the throat, the floor under
+    Below the chin the sections are the neck (down to HEAD_NECK_Z, inside the collar), so the throat, the floor under
     the chin and the jaw's underside are one surface with the face: the jaw's edge is a soft step pressed into it
-    (see jaw_relief), not a separate shape set on top of a neck. At NECK_Z the sections close off in a quarter
+    (see jaw_relief), not a separate shape set on top of a neck. At HEAD_NECK_Z the sections close off in a quarter
     ellipse, out of sight inside the neck's lower part and the collar."""
-    if z < NECK_Z + 0.02:
-        k = math.sqrt(max(0.0, 1 - ((NECK_Z + 0.02 - z) / 0.02) ** 2))
-        x, y = _section(max(NECK_Z, z), c, s)
+    if z < HEAD_NECK_Z + 0.02:
+        k = math.sqrt(max(0.0, 1 - ((HEAD_NECK_Z + 0.02 - z) / 0.02) ** 2))
+        x, y = _section(max(HEAD_NECK_Z, z), c, s)
         yw = HEAD_MID(z)
         return x * k, yw + (y - yw) * k
     return _section(z, c, s)
@@ -1085,7 +1085,7 @@ def sculpted_head():
     bmesh.ops.create_uvsphere(bm, u_segments=160, v_segments=256, radius=1.0)
     for v in bm.verts:
         sx, sy, sz = v.co
-        z = NECK_Z + (1.0 - NECK_Z) * (0.5 + 0.5 * sz)
+        z = HEAD_NECK_Z + (1.0 - HEAD_NECK_Z) * (0.5 + 0.5 * sz)
         r = math.hypot(sx, sy)
         c, s = (-sy / r, sx / r) if r > 1e-9 else (1.0, 0.0)
         x, y = head_section(z, c, s)
@@ -1093,7 +1093,7 @@ def sculpted_head():
         # where the surface turns under (the chin, the jaw's underside) the relief turns with it and fades, so the
         # jawline stays a rounded turn instead of a ledge sheared forward of the underside
         th, e = math.atan2(s, c), 1e-3
-        za, zb = min(1.0, z + e), max(NECK_Z, z - e)
+        za, zb = min(1.0, z + e), max(HEAD_NECK_Z, z - e)
         xa, ya = head_section(z, math.cos(th + e), math.sin(th + e))
         xz, yz = head_section(za, c, s)
         xb, yb = head_section(zb, c, s)
