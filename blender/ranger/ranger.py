@@ -1082,41 +1082,52 @@ def tube(pts, radii, flat=0.5, n=10):
     return bm
 
 
-EYE_RX, EYE_RZ = 0.76, 0.33
-EYE_TILT = 0.0         # the two corners level
+EYE_RX, EYE_RZ = 0.76, 0.36
+EYE_TILT = 0.082       # the outer corner sits higher than the inner point (as traced)
+EYE_LIFT = 0.07         # the opening sits this much above the iris's line (traced), so white shows over it
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
-def _lid(u, peak, inner, outer, y_in=0.45, y_out=0.45):
-    """A lid's edge over the eye's width (u -1 inner corner .. 1 outer), 0 at both corners and 1 at `peak`, drawn
-    the way a painter draws an eye: from each corner the edge leaves as a straight line, so the two lids meet
-    there in a clear point, then bends into a smooth arc over the eyeball. `inner` and `outer` are how far along
-    each side (as a fraction of the way from that corner to the peak) the straight part runs, and y_in and y_out
-    how high it has risen there (a lower rise over a longer run is a narrower, sharper point); then a curve carries on from it without a kink (same slope) and levels off at the peak."""
+# The opening of the eye, traced from a reference outline (John's drawing over the render): the upper and lower
+# lids' heights above and below the line joining the two corners, at 41 even steps from the inner corner (u -1)
+# to the outer (u 1), in units of the eye's half-width. From the sharp inner point the upper lid climbs in a long,
+# nearly straight line, levels off over the outer half and turns down in a round sweep to the outer corner; the
+# lower lid falls away quickly from the inner point into a deep, even curve, lowest just inside the middle.
+LID_TOP = [0, 0.0199, 0.0402, 0.0601, 0.08, 0.1003, 0.1205, 0.139, 0.1534, 0.167, 0.1829, 0.1981, 0.2115, 0.2235, 0.2356, 0.2476, 0.2583, 0.2685, 0.2785, 0.2887, 0.2987, 0.3082, 0.315, 0.32, 0.3262, 0.3331, 0.3367, 0.3372, 0.337, 0.3361, 0.3352, 0.3343, 0.3322, 0.3294, 0.3233, 0.307, 0.2771, 0.2394, 0.1973, 0.1243, 0]
+LID_BOTTOM = [0, 0.072, 0.1257, 0.1672, 0.2042, 0.2379, 0.2678, 0.2939, 0.3186, 0.3427, 0.3649, 0.3851, 0.4041, 0.4217, 0.4374, 0.4492, 0.4566, 0.4613, 0.4653, 0.4688, 0.4703, 0.4699, 0.4682, 0.4652, 0.4615, 0.4572, 0.4516, 0.4454, 0.4392, 0.433, 0.4261, 0.4173, 0.4059, 0.3906, 0.3702, 0.3452, 0.3145, 0.2728, 0.2169, 0.1305, 0]
+
+
+def _traced(table, u):
+    """The traced profile at u, eased between its samples (Catmull-Rom), so the edge bends smoothly."""
     u = max(-1.0, min(1.0, u))
-    if u <= peak:
-        d, span, f, y0 = u + 1.0, peak + 1.0, inner, y_in
-    else:
-        d, span, f, y0 = 1.0 - u, 1.0 - peak, outer, y_out
-    L = f * span
-    m = y0 / L
-    if d <= L:
-        return m * d
-    t = (d - L) / (span - L)
-    h00, h10, h01 = 2 * t ** 3 - 3 * t * t + 1, t ** 3 - 2 * t * t + t, -2 * t ** 3 + 3 * t * t
-    return h00 * y0 + h10 * m * (span - L) + h01 * 1.0
+    n = len(table) - 1
+    f = (u + 1) / 2 * n
+    i = min(n - 1, int(f))
+    t = f - i
+    p0, p1, p2, p3 = table[max(0, i - 1)], table[i], table[i + 1], table[min(n, i + 2)]
+    v = 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3)
+    return max(0.0, v)
+
+
+def _with_point(table, u, slope):
+    """The traced profile, with the inner corner drawn as a sharp point: the edge leaves the corner as a straight
+    line (rising `slope` per unit of u), then eases into the traced curve between u -0.75 and -0.45."""
+    line = slope * (u + 1)
+    if u <= -0.75:
+        return line
+    k = smooth(-0.75, -0.45, u)
+    return line + (_traced(table, u) - line) * k
 
 
 def lid_top(u):
-    """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
-    straight out of each corner point, then a smooth arc, highest a little toward the temple."""
-    return 1.05 * EYE_RZ * _lid(u, 0.2, 0.55, 0.35, 0.32, 0.4)
+    """How far the upper lid's edge stands above the line between the corners at u (-1 inner corner .. 1 outer
+    corner): the traced LID_TOP, out of a sharp inner point."""
+    return EYE_RX * _with_point(LID_TOP, u, 0.36)
 
 
 def lid_bottom(u):
-    """The lower lid's edge below the centre line: the same kind of line, shallower, lowest a little toward the
-    temple."""
-    return 0.7 * EYE_RZ * _lid(u, 0.1, 0.6, 0.4, 0.38, 0.45)
+    """The lower lid's edge below the line between the corners: the traced LID_BOTTOM, out of the same point."""
+    return EYE_RX * _with_point(LID_BOTTOM, u, 0.42)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1465,7 +1476,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
     # centre)
     IR = 0.23                                       # its top under the upper lid, its foot on the lower one
-    iz = ez + 0.05
+    iz = ez - EYE_LIFT + 0.05
     hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
             for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
     n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
@@ -1507,7 +1518,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
     # two thirds of the way out and falling away to a fine tail past the outer corner
     bus = [-0.78, -0.55, -0.25, 0.05, 0.35, 0.6, 0.85, 1.1, 1.3]
     brow, br = on_face(bus, [0.12, 0.17, 0.18, 0.17, 0.15, 0.12, 0.09, 0.06, 0.02],
-                       lambda u: ez + 1.08 + 0.28 * math.sin(math.pi * (u + 0.8) / 2.5) ** 1.2 - 0.12 * smooth(0.95, 1.3, u),
+                       lambda u: ez - EYE_LIFT + 1.08 + 0.28 * math.sin(math.pi * (u + 0.8) / 2.5) ** 1.2 - 0.12 * smooth(0.95, 1.3, u),
                        0.03, span=1.1)
     mesh_obj(f'Brow {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
 
@@ -1581,10 +1592,10 @@ def build():
     head_tree = bvh_of(hb)
     # (the eyes are set against the head before its lids are sculpted, so the balls follow the plain socket and
     # the lids then close over their edges)
-    eyes = [(feat[s][0], 0.525 * HEAD_H, s) for s in (-1, 1)]
+    eyes = [(feat[s][0], 0.525 * HEAD_H + EYE_LIFT, s) for s in (-1, 1)]
     for s in (-1, 1):
         x, ey, by = feat[s]
-        build_eye(head, head_tree, s, x, ey, 0.525 * HEAD_H)
+        build_eye(head, head_tree, s, x, ey, 0.525 * HEAD_H + EYE_LIFT)
     sculpt_eyes(hb, eyes)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
