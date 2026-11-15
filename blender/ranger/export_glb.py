@@ -93,6 +93,18 @@ def plain_materials():
                 p.inputs['Sheen Weight'].default_value = 0.6
                 p.inputs['Sheen Roughness'].default_value = 0.5
                 p.inputs['Sheen Tint'].default_value = (0.2, 0.24, 0.15, 1.0)
+        if mid in (ranger.M_EYE, ranger.M_SCLERA):
+            # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris and the
+            # white keep their paintings (iris_image, sclera_image) as textures
+            p.inputs['Roughness'].default_value = 0.06 if mid == ranger.M_EYE else 0.32
+            if mid == ranger.M_EYE:
+                tex = nt.nodes.new('ShaderNodeTexImage')
+                tex.image = ranger.iris_image()
+                nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+            else:
+                tex = nt.nodes.new('ShaderNodeTexImage')
+                tex.image = ranger.sclera_image()
+                nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
@@ -477,9 +489,13 @@ def main():
     bake_hands()
     bake_gold()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
-    for name, ratio in (('Hair', 0.11),):
+    # and the head is cut very fine round the eyes for the sprites' sculpted lids: the model needs far less
+    for name, ratio in (('Hair', 0.11), ('Head shape', 0.4)):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')
         d.ratio = ratio
+    # the solid brows are for the sprites only: the model has the painted ones
+    for o in [o for o in bpy.data.objects if o.name.startswith('Brow tube')]:
+        bpy.data.objects.remove(o, do_unlink=True)
     # the rig's armature is hidden for the sprite renders; the exporter needs it in the scene to write the skin
     bpy.data.objects['Rig'].hide_render = False
 

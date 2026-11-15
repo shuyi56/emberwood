@@ -104,9 +104,12 @@ M_BELT = mat_def(12, 'belt', ramp(0x3d342b, 0.09), 0.18)
 M_STEEL = mat_def(13, 'buckle', ramp(0x9a978f, 0.09), 0.0)
 M_GOLD = mat_def(14, 'clasp', ramp(0xa8905c, 0.09), 0.0)
 M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
-M_EYE = mat_def(16, 'iris', [[46, 40, 38], [58, 66, 46], [88, 108, 70], [120, 140, 100], [226, 222, 210]], 0.0, flat=1)
-M_LASH = mat_def(20, 'lashes', [[46, 40, 38]] * 5, 0.0, flat=0)
-M_SCLERA = mat_def(21, 'eye white', [[226, 222, 210]] * 5, 0.0, flat=0)
+# the eyes: a moss-green iris dark enough to hold against the white and the skin at sprite size; the lids are
+# skin. (No lash line and no painted catchlight: the eye's highlight is the sun's reflection in its glossy surface.)
+# The iris ramp runs from the dark ring at its rim, through the green, to the warm amber round the pupil; it is
+# painted onto the iris as vertex colours (see iris_colours), and the sprite picks its tone from that painting
+M_EYE = mat_def(16, 'iris', [[30, 42, 30], [50, 76, 44], [72, 104, 58], [104, 134, 74], [148, 146, 86]], 0.0, flat='painted')
+M_SCLERA = mat_def(21, 'eye white', [[206, 198, 186], [226, 220, 208], [224, 217, 205], [234, 229, 218], [242, 238, 230]], 0.0, flat=1)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
@@ -207,6 +210,25 @@ def wool_closeup(nt, bsdf, out, rmp):
     wb.inputs['Sheen Roughness'].default_value = 0.6
     wb.inputs['Sheen Tint'].default_value = (*[min(1.0, 1.6 * c) for c in lighter], 1)
     nt.links.new(wb.outputs['BSDF'], out.inputs['Surface'])
+
+
+def skin_closeup(nt, bsdf, out, lin):
+    """The skin up close: a soft contact shadow where the hair lies against it or hangs just off it (and in the
+    other shut-in places: under the jaw, round the nose), deepening toward a warmer, redder tone the way skin does
+    in shade, so the hair sits on the face instead of being cut out against it."""
+    bsdf.name = 'sprite bsdf'
+    ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.9)
+    ao.samples = 16
+    k = _node(nt, 'ShaderNodeMapRange', Value=ao.outputs['AO'], **{'From Min': 0.25, 'From Max': 1.0})
+    col = _node(nt, 'ShaderNodeMix', Factor=k.outputs['Result'])
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (lin[0] * 0.42, lin[1] * 0.26, lin[2] * 0.22, 1)
+    col.inputs['B'].default_value = (*lin, 1)
+    sb = _node(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': col.outputs['Result']})
+    sb.name = 'close bsdf'
+    sb.inputs['Roughness'].default_value = 0.6
+    sb.inputs['Specular IOR Level'].default_value = 0.25
+    nt.links.new(sb.outputs['BSDF'], out.inputs['Surface'])
 
 
 def gold_closeup(nt, bsdf, out):
@@ -479,6 +501,33 @@ def make_material(mid):
     lin = [((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92 for c in mid_rgb]
     bsdf.inputs['Color'].default_value = (*lin, 1.0)
     nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+    if mid in (M_EYE, M_SCLERA):
+        # the eye is wet: a glossy coat over the colour, so the sun leaves a real highlight that moves with the eye
+        # and the light (the sprites read only the diffuse light, so they are unaffected)
+        nt.nodes.remove(bsdf)
+        bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        bsdf.inputs['Base Color'].default_value = (*lin, 1.0)
+        bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.35
+        bsdf.inputs['IOR'].default_value = 1.38
+        # the film of tears: a clear, mirror-smooth coat over the whole ball, as on a glass marble
+        bsdf.inputs['Coat Weight'].default_value = 1.0
+        # (the white's coat a little less mirror-like than the cornea's: its surface is far flatter than a real
+        # ball's, so a mirror coat threw the sun back as a large hard-edged patch on the lower white)
+        bsdf.inputs['Coat Roughness'].default_value = 0.03 if mid == M_EYE else 0.16
+        if mid == M_SCLERA:
+            bsdf.inputs['Coat Weight'].default_value = 0.6
+        bsdf.inputs['Coat IOR'].default_value = 1.38
+        nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+        if mid == M_EYE:
+            tex = nt.nodes.new('ShaderNodeTexImage')      # its painting (iris_image)
+            tex.image = iris_image()
+            tex.interpolation = 'Cubic'
+            nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+        else:
+            tex = nt.nodes.new('ShaderNodeTexImage')      # its painting (sclera_image)
+            tex.image = sclera_image()
+            tex.interpolation = 'Cubic'
+            nt.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
     if mid in LEATHER:
         # the grain: fine pebbling and scattered pores pressed into the surface, so it catches the light in the
         # render itself (and reads as grain at sprite size, not only as a painted pattern)
@@ -560,6 +609,8 @@ def make_material(mid):
         ao = nt.nodes.new('ShaderNodeAmbientOcclusion')
         ao.inputs['Distance'].default_value = 1.6
         ao.samples = 8
+        # (each piece shades only itself: the fringe darkened the side hair under its edge into a crease)
+        ao.only_local = True
         aok = nt.nodes.new('ShaderNodeMapRange')
         aok.inputs['To Min'].default_value = 0.45
         nt.links.new(ao.outputs['AO'], aok.inputs['Value'])
@@ -611,6 +662,8 @@ def make_material(mid):
         leather_closeup(nt, bsdf, out, d['ramp'], suede=mid == M_CUFF)
     if mid in (M_LEGS, M_KNEE):
         cloth_closeup(nt, bsdf, out, d['ramp'], canvas=mid == M_KNEE)
+    if mid == M_SKIN:
+        skin_closeup(nt, bsdf, out, lin)
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -684,6 +737,12 @@ def make_material(mid):
         nt.links.new(nt.nodes['hair tips'].outputs['Result'], tadd.inputs[0])
         nt.links.new(add.outputs[0], tadd.inputs[2])
         nt.links.new(tadd.outputs[0], adet.inputs['Value'])
+        return m
+    elif mid == M_EYE:
+        # the iris's painted tone, for the sprite renderer
+        sh = nt.nodes.new('ShaderNodeAttribute')
+        sh.attribute_name = 'iris_shade'
+        nt.links.new(sh.outputs['Fac'], adet.inputs['Value'])
         return m
     elif mid == M_MAIL:
         tex = nt.nodes.new('ShaderNodeTexChecker')
@@ -853,6 +912,7 @@ def box(sx, sy, sz):
 # Realistic adult proportions, about 7.3 heads tall: the top of the head at 63 (the painted sprites' height),
 # a head 8.6 tall, shoulders at 1.5 heads down, the waist at 3, the hip joint at 3.7 and the knee at 2 heads up.
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
+HEAD_NECK_Z = -0.13                      # the head's sculpt runs down the neck to here (inside the collar), in head heights
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
@@ -872,61 +932,286 @@ def face_relief(x, z):
     """How far the face stands forward of the base head at (x across, z up), in head heights. The planes a
     painter would block in: brow ridge over the eye sockets, the nose (bridge, tip and wings), cheekbones with
     the hollow under them, the lips parted by the mouth line, and the ball of the chin. (They are pushed a little
-    past life size, so they still read when the head is 17 pixels tall.)"""
+    past life size, so they still read when the head is 17 pixels tall.)
+    The features below the eyes are laid out on a slightly taller lower face and drawn up into the head's
+    proportions by FACE_WARP (sculpt round 2)."""
+    z = FACE_WARP(z)
     d = 0.0
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
-        d += gauss(x, z, s * 0.215, 0.45, 0.08, 0.06, 0.035)     # cheekbone
-        d += gauss(x, z, s * 0.2, 0.31, 0.07, 0.06, -0.025)      # hollow under the cheekbone
-        d += gauss(x, z, s * 0.05, 0.37, 0.03, 0.025, 0.035)     # wing of the nose
-    # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply
+        d += gauss(x, z, s * 0.23, 0.415, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
+        d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
+        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032)      # the cheek filled out under the cheekbone, no hollow
+        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016)       # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
+        d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
+        d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
+    # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
+    # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     if z > 0.36:
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
-        h = (0.015 + 0.085 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
+        h = (0.014 + 0.056 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.1 * math.exp(-((0.36 - z) / 0.025) ** 2)
-    d += h * math.exp(-(x / (0.04 + 0.03 * max(0.0, 1 - abs(z - 0.37) / 0.1))) ** 2)
-    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.05)       # the muzzle: the teeth and jaw carry the mouth forward
-    d += gauss(x, z, 0, 0.29, 0.07, 0.025, 0.035)    # upper lip
-    d += gauss(x, z, 0, 0.225, 0.055, 0.025, 0.03)   # lower lip
-    d += gauss(x, z, 0, 0.258, 0.08, 0.01, -0.018)   # mouth line
-    d += gauss(x, z, 0, 0.17, 0.06, 0.02, -0.015)    # the crease above the chin
-    d += gauss(x, z, 0, 0.09, 0.075, 0.045, 0.04)    # chin
+        h = 0.07 * math.exp(-((0.36 - z) / 0.022) ** 2)
+    w = 0.03 + 0.012 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.02 * max(0.0, 1 - abs(z - 0.37) / 0.06)
+    d += h * 0.5 * (math.exp(-(x / w) ** 2) + math.exp(-(x / w) ** 4))
+    d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
+    d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.03)       # the muzzle: the teeth and jaw carry the mouth forward
+    d += mouth_relief(x, z)
+    d += gauss(x, z, 0, 0.088, 0.048, 0.046, 0.05)    # chin: the ball of it stands nearly as far forward as the lower lip
+    for s in (-1, 1):
+        d += gauss(x, z, s * 0.09, 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
-def _jaw_width(z):
-    # full through the cheeks, then the jaw: a clear angle at z 0.2, narrowing to a rounded chin
-    if z >= 0.42:
-        return 1.0
-    if z >= 0.2:
-        t = (0.42 - z) / 0.22
-        return 1.0 - 0.2 * t ** 1.3
-    t = (0.2 - z) / 0.2
-    return 0.8 - 0.42 * t ** 1.4
+def mouth_relief(x, z):
+    """The mouth and the forms around it (sculpt round 2), in head heights forward of the face: the upper lip
+    with its cupid's bow and a small tubercle in the middle, a fuller lower lip, the line between them sinking
+    into the corners, the philtrum's two ridges up to the nose, the ball of the nose's tip, the fold from the
+    nose's wing toward the corner of the mouth, and the crease under the lower lip."""
+    ax = abs(x)
+    d = 0.0
+    across_u = math.exp(-(x / 0.07) ** 4)                 # the upper lip runs nearly full height to its corners
+    bow = 0.006 * math.exp(-((ax - 0.019) / 0.011) ** 2)   # the peaks of the cupid's bow
+    top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
+    t = (z - 0.258) / max(0.01, top - 0.258)
+    if 0.0 < t < 1.25:
+        d += 0.03 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.008)          # the tubercle
+    across_l = math.exp(-(x / 0.06) ** 4)
+    d += 0.032 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
+    # the line between the lips, deepest at the corners where the lips tuck in
+    d -= (0.012 + 0.014 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    for sx in (-1, 1):
+        d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.004)    # the corners
+        d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
+        # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
+        # of cheek just outside it)
+        for k in range(6):
+            u = k / 5
+            px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
+            d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
+            d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
+    d += gauss(x, z, 0, 0.385, 0.032, 0.026, 0.01)         # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.19, 0.05, 0.012, -0.014)         # the crease under the lower lip
+    return d
+
+
+def smooth_curve(knots):
+    """A smooth curve through (z, value) knots: monotone cubic (Fritsch-Carlson), so it never overshoots between
+    them and leaves no kink at a knot the way straight segments would."""
+    zs = [k[0] for k in knots]
+    vs = [k[1] for k in knots]
+    n = len(zs)
+    d = [(vs[i + 1] - vs[i]) / (zs[i + 1] - zs[i]) for i in range(n - 1)]
+    m = [d[0]] + [0.0 if d[i - 1] * d[i] <= 0 else (d[i - 1] + d[i]) / 2 for i in range(1, n - 1)] + [d[-1]]
+    for i in range(n - 1):
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+            continue
+        a, b = m[i] / d[i], m[i + 1] / d[i]
+        if a * a + b * b > 9:
+            t = 3 / math.sqrt(a * a + b * b)
+            m[i], m[i + 1] = t * a * d[i], t * b * d[i]
+
+    def f(z):
+        if z <= zs[0]:
+            return vs[0]
+        if z >= zs[-1]:
+            return vs[-1]
+        i = max(k for k in range(n - 1) if zs[k] <= z)
+        h = zs[i + 1] - zs[i]
+        t = (z - zs[i]) / h
+        h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+        return h00 * vs[i] + h10 * h * m[i] + h01 * vs[i + 1] + h11 * h * m[i + 1]
+    return f
+
+
+# ---- the head's construction (sculpt rounds): the skull and jaw as a stack of horizontal sections, each a
+# rounded box (a superellipse) with its own half-width, front, back and widest point, read off smooth curves of
+# height. In head heights: chin at z 0, crown at z 1, the face toward -y.
+#   below z 0.2 the sections are the jaw: each ends at the front in the chin and at the back in the underside of
+#   the jaw, which rises from the chin to the angle of the jaw under the ear;
+#   above, the cranium: widest across the parietals at z 0.7, deepest at the occiput behind, the forehead sloping
+#   back from the brow; over the top the sections round off along ellipses into the crown.
+HEAD_W = smooth_curve([(HEAD_NECK_Z, 0.2), (-0.07, 0.172), (-0.02, 0.15), (0.03, 0.122), (0.07, 0.156), (0.12, 0.197),
+                       (0.18, 0.236), (0.25, 0.268), (0.32, 0.296), (0.41, 0.323), (0.52, 0.342), (0.62, 0.353), (0.7, 0.36)])
+# (the front: the throat rising to the soft turn under the chin, the floor under the chin running forward nearly
+# level, then the chin and the face)
+HEAD_F = smooth_curve([(HEAD_NECK_Z, 0.165), (-0.07, 0.14), (-0.035, 0.12), (-0.012, 0.15), (0.005, 0.2), (0.025, 0.268),
+                       (0.05, 0.33), (0.08, 0.365), (0.12, 0.385), (0.18, 0.4), (0.25, 0.41), (0.33, 0.415), (0.42, 0.42),
+                       (0.52, 0.42), (0.62, 0.42)])
+HEAD_B = smooth_curve([(HEAD_NECK_Z, 0.24), (-0.07, 0.245), (0.05, 0.27), (0.2, 0.31), (0.3, 0.35), (0.38, 0.385),
+                       (0.46, 0.415), (0.54, 0.435), (0.64, 0.445)])
+HEAD_MID = smooth_curve([(HEAD_NECK_Z, 0.045), (0.3, 0.04), (1.0, 0.04)])
+# how square each section is (2 is an ellipse): the face is a broad, fairly flat front turning at the cheekbones,
+# narrowing to a rounder chin; the cranium a little squarer than an egg through the temples
+HEAD_NF = smooth_curve([(HEAD_NECK_Z, 2.0), (-0.02, 2.0), (0.06, 2.1), (0.14, 2.02), (0.3, 1.98), (0.45, 2.12), (0.6, 2.25), (0.8, 2.2)])
+HEAD_NB = smooth_curve([(HEAD_NECK_Z, 2.0), (0.3, 2.1), (0.6, 2.3), (0.85, 2.1)])
+
+
+# the lower face, nose base to chin, as a third of the head rather than the 0.36 the features were first laid out
+# on: the face's relief is read at FACE_WARP(z), which draws the nose up to z 0.335, the mouth to 0.232 and the
+# ball of the chin to 0.09, leaving the eyes and brows where they are
+FACE_WARP = smooth_curve([(0.0, 0.0), (0.09, 0.1), (0.232, 0.258), (0.335, 0.36), (0.45, 0.455), (0.6, 0.6), (1.0, 1.0)])
+MOUTH_Z = 0.232
+
+
+def _dome(f, z, z0, top=1.0):
+    """f below z0; above it the value rounds off along a quarter ellipse to nothing at the crown."""
+    if z <= z0:
+        return f(z)
+    t = min(1.0, (z - z0) / (top - z0))
+    return f(z0) * math.sqrt(max(0.0, 1 - t * t))
+
+
+def head_section(z, c, s):
+    """The point of the base head (no face relief) at height z and direction (c forward, s across) round it.
+    Below the chin the sections are the neck (down to HEAD_NECK_Z, inside the collar), so the throat, the floor under
+    the chin and the jaw's underside are one surface with the face: the jaw's edge is a soft step pressed into it
+    (see jaw_relief), not a separate shape set on top of a neck. At HEAD_NECK_Z the sections close off in a quarter
+    ellipse, out of sight inside the neck's lower part and the collar."""
+    if z < HEAD_NECK_Z + 0.02:
+        k = math.sqrt(max(0.0, 1 - ((HEAD_NECK_Z + 0.02 - z) / 0.02) ** 2))
+        x, y = _section(max(HEAD_NECK_Z, z), c, s)
+        yw = HEAD_MID(z)
+        return x * k, yw + (y - yw) * k
+    return _section(z, c, s)
+
+
+def jaw_relief(y, z):
+    """How far the jaw stands out of the neck (head heights, along the surface normal): 1 over the jaw, fading to
+    0 across its lower edge (from the bottom of the chin back and up to the angle under the ear) and its back edge
+    (the ramus), and fading out above into the cheek, which the sections already shape."""
+    # the lower edge in profile: one curve, level under the chin and bending up smoothly to the angle (round 9)
+    zl = 0.17 * min(1.0, max(0.0, (y + 0.34) / 0.4)) ** 1.7
+    def ss(t):
+        t = min(1.0, max(0.0, t))
+        return t * t * (3 - 2 * t)
+    below = ss((z - zl + 0.03) / 0.1)        # above the lower edge of the jaw
+    behind = ss((0.11 - y) / 0.11)             # in front of the back edge of the ramus
+    up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
+    return 0.02 * below * behind * up
+
+
+def _section(z, c, s):
+    w = _dome(HEAD_W, z, 0.7)
+    yw = HEAD_MID(z)
+    front = _dome(HEAD_F, z, 0.62) + yw
+    back = _dome(HEAD_B, z, 0.66) - yw
+    n = HEAD_NF(z) if c >= 0 else HEAD_NB(z)
+
+    def sp(t):
+        return math.copysign(abs(t) ** (2 / n), t)
+    x = w * sp(s)
+    y = yw - front * sp(c) if c >= 0 else yw + back * sp(-c)
+    return x, y
 
 
 def sculpted_head():
-    """The head as a sculpted mesh: a rounded skull, cheeks over a jaw with a defined angle, a rounded chin, and
-    the face's planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at
-    z 1, the face toward -Y."""
+    """The head as a sculpted mesh: the skull and jaw built up from sections (see head_section), then the face's
+    planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at z 1, the face
+    toward -Y."""
     bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=128, v_segments=96, radius=1.0)
+    bmesh.ops.create_uvsphere(bm, u_segments=160, v_segments=256, radius=1.0)
     for v in bm.verts:
         sx, sy, sz = v.co
-        z = 0.52 + 0.5 * sz
-        front = sy < 0
-        t = max(0.0, (0.5 - z) / 0.5)
-        # the face is flatter than an egg across the front; the back of the jaw tucks in under the ear
-        dep = (0.92 - 0.15 * t) if front else (0.98 - 0.6 * t ** 1.3)
-        x = sx * 0.36 * _jaw_width(z)
-        y = sy * 0.44 * dep
-        f = max(0.0, -sy) ** 1.4          # only the parts facing forward carry the face
-        y -= face_relief(x, z) * f
-        v.co = (x, y + 0.04, max(0.0, z))
+        z = HEAD_NECK_Z + (1.0 - HEAD_NECK_Z) * (0.5 + 0.5 * sz)
+        r = math.hypot(sx, sy)
+        c, s = (-sy / r, sx / r) if r > 1e-9 else (1.0, 0.0)
+        x, y = head_section(z, c, s)
+        # the face is pushed out along the base surface's normal, and only as far as that normal faces forward:
+        # where the surface turns under (the chin, the jaw's underside) the relief turns with it and fades, so the
+        # jawline stays a rounded turn instead of a ledge sheared forward of the underside
+        th, e = math.atan2(s, c), 1e-3
+        za, zb = min(1.0, z + e), max(HEAD_NECK_Z, z - e)
+        xa, ya = head_section(z, math.cos(th + e), math.sin(th + e))
+        xz, yz = head_section(za, c, s)
+        xb, yb = head_section(zb, c, s)
+        t1 = Vector((xa - x, ya - y, 0.0))
+        t2 = Vector((xz - xb, yz - yb, za - zb))
+        n = t1.cross(t2)
+        if n.length < 1e-12:
+            v.co = (x, y, z)
+            continue
+        n.normalize()
+        if n.x * x + n.y * (y - 0.04) < 0:
+            n = -n
+        f = max(0.0, -n.y) ** 1.0       # only the parts facing forward carry the face
+        u = min(1.0, max(0.0, (z - 0.005) / 0.04))
+        d = face_relief(x, z) * f * u * u * (3 - 2 * u) + jaw_relief(y, z)
+        v.co = (x + n.x * d, y + n.y * d, z + n.z * d)
     bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
     return bm
+
+
+def head_front_y(x, z):
+    """The front of the sculpted head (see sculpted_head) at (x across, z up), in head heights, worked out
+    exactly from its formula rather than from the mesh, or None off the head. (The eyes' sculpt puts the finer
+    mesh it cuts round the eyes back onto this smooth surface: put onto the coarse mesh's flat faces, each one
+    showed as a flat facet, a staircase down the bridge of the nose.)"""
+    if 'head_section' in globals():
+        return _head_front_y_sections(x, z)
+    sz = (z - 0.52) / 0.5
+    sx = x / (0.36 * _jaw_width(z))
+    r = 1 - sx * sx - sz * sz
+    if r <= 0:
+        return None
+    sy = -math.sqrt(r)
+    t = max(0.0, (0.5 - z) / 0.5)
+    y = sy * 0.44 * (0.92 - 0.15 * t)
+    y -= face_relief(x, z) * max(0.0, -sy) ** 1.4
+    return y + 0.04
+
+
+def _head_point(z, th):
+    """A point of the head built from sections (head_section, face_relief, jaw_relief) at height parameter z and
+    angle th round it (0 straight forward): the same displacement sculpted_head applies to each vertex."""
+    c, s = math.cos(th), math.sin(th)
+    x, y = head_section(z, c, s)
+    e = 1e-3
+    za, zb = min(1.0, z + e), max(HEAD_NECK_Z, z - e)
+    xa, ya = head_section(z, math.cos(th + e), math.sin(th + e))
+    xz, yz = head_section(za, c, s)
+    xb, yb = head_section(zb, c, s)
+    n = Vector((xa - x, ya - y, 0.0)).cross(Vector((xz - xb, yz - yb, za - zb)))
+    if n.length < 1e-12:
+        return x, y, z
+    n.normalize()
+    if n.x * x + n.y * (y - 0.04) < 0:
+        n = -n
+    f = max(0.0, -n.y)
+    u = min(1.0, max(0.0, (z - 0.005) / 0.04))
+    d = face_relief(x, z) * f * u * u * (3 - 2 * u) + jaw_relief(y, z)
+    return x + n.x * d, y + n.y * d, z + n.z * d
+
+
+def _head_front_y_sections(x, z):
+    """head_front_y for the head built from sections: the surface is a function of (height, angle), not of
+    (x, z), so solve for the parameters whose point lands on (x, z) (Newton's method, a few steps from the
+    undisplaced guess) and return that point's depth."""
+    zp, th = z, math.asin(max(-0.95, min(0.95, x / 0.36)))
+    for _ in range(12):
+        px, py, pz = _head_point(zp, th)
+        fx, fz = px - x, pz - z
+        if abs(fx) < 1e-6 and abs(fz) < 1e-6:
+            break
+        h = 1e-4
+        ax, _, az = _head_point(zp, th + h)
+        bx, _, bz = _head_point(zp + h, th)
+        j11, j12 = (ax - px) / h, (bx - px) / h      # d x / d th, d x / d z
+        j21, j22 = (az - pz) / h, (bz - pz) / h
+        det = j11 * j22 - j12 * j21
+        if abs(det) < 1e-12:
+            return None
+        th -= (fx * j22 - fz * j12) / det
+        zp -= (fz * j11 - fx * j21) / det
+        if abs(th) > 1.5:
+            return None
+    else:
+        return None
+    return py
 
 
 def surface_y(bm, x, z):
@@ -947,7 +1232,9 @@ def hair_flow(co):
     the curve from the parting drew rings round the back of the head, like the ridges of a shell.)"""
     # (measured as a distance round the head rather than an angle, so near the neck the strands do not crowd
     # into a fan; the angle is taken from the back, so its one break falls at the parting, not down her back)
-    return (math.atan2(co.x, co.y - 0.5) * max(2.5, math.hypot(co.x, co.y - 0.5)), 0.0, co.z * 0.6)
+    # (the distance round is taken at one fixed radius: scaled by each point's own distance from the axis, the
+    # streaks bent into arcs wherever the hair swells out, as over the side locks)
+    return (math.atan2(co.x, co.y - 0.5) * 3.6, 0.0, co.z * 0.6)
 
 
 def drape_fall(dg):
@@ -970,10 +1257,15 @@ def drape_fall(dg):
     body = BVHTree.FromPolygons(vs, ps)
 
     def back_y(x, z):
-        hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
-        return hit[0].y if hit[0] is not None else 0.0
+        # (a ray that misses at the very edge, past the side of the head or the mantle, takes what lies a little
+        # further in: taking 0 there pulled the edges of the fall forward beside her face as thin flaps)
+        for k_ in range(8):
+            hit = body.ray_cast(Vector((x * 0.94 ** k_, 30.0, z)), Vector((0, -1, 0)), 40.0)
+            if hit[0] is not None:
+                return hit[0].y
+        return 0.0
 
-    W = [(7.2, 2.0), (6.0, 3.0), (4.5, 3.6), (1.5, 3.7), (-1.5, 4.1), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+    W = [(7.2, 2.0), (6.0, 2.9), (4.5, 3.2), (1.5, 3.3), (-1.5, 3.65), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
 
     def width(z):
         for (z0, w0), (z1, w1) in zip(W, W[1:]):
@@ -1024,7 +1316,7 @@ def drape_fall(dg):
             x = ue * width(z) * (1.0 - 0.12 * max(0.0, (vs - 0.75) / 0.25) ** 2 * abs(u))
             # thick down the middle, thin to soft edges; thinner toward the end, and rounded off at the tip
             # (never thinner than a few voxels: a sheet thinner than the remesh breaks up into rods and tatters)
-            grow = min(1.0, (z_top - z) / 3.0)
+            grow = min(1.0, (z_top - z) / 5.0)
             grow = grow * grow * (3 - 2 * grow)
             t_ = (0.95 - 0.3 * vs) * max(0.0, 1 - u * u) ** (0.5 if z < -0.5 else 1.4) * (1.0 if v < 0.92 else math.cos((v - 0.92) / 0.08 * math.pi / 2) ** 0.5)
             # (the tips are the thinnest part: a lock ends in a wisp, not a rounded slab)
@@ -1032,12 +1324,18 @@ def drape_fall(dg):
             # (what it rests on, blurred across: the hair bridges the folds of the mantle instead of carrying
             # each fold down its whole length as a groove)
             # (only below the nape: over the round of the head a blurred support would sink into the hair beneath)
-            sup = back_y(x, z) if z > -0.5 else sum(back_y(x + dx_, z) * w_ for dx_, w_ in
-                                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1)))
+            # (the change from lying over the head to hanging over the mantle is eased over a hand's breadth
+            # either side of the nape: switched at one height it left a notch across the fall)
+            wb = min(1.0, max(0.0, (0.5 - z) / 2.0))
+            wb = wb * wb * (3 - 2 * wb)
+            sup = back_y(x, z)
+            if wb > 0.0:
+                sup = lerp(sup, sum(back_y(x + dx_, z) * w_ for dx_, w_ in
+                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1))), wb)
             # the least it can be: flush with the hair over the head at the top, then lying over what is under it.
             # Over the head its edges lie flush with the hair beneath (the extra thickness goes inward, out of
             # sight), so they leave no rim along the sides of the head
-            y = sup + t_ * grow if z > -0.5 else max(sup + t * grow, sup + 0.52)
+            y = lerp(sup + t_ * grow, max(sup + t * grow, sup + 0.52), wb)
             pts.append([x, y, z, t, sup])
         # hair hangs: pulled down by its weight it spans straight from one thing that holds it out to the next (the
         # back of the skull, then the mantle) and never sinks into the hollow between them. So its outside is the
@@ -1073,19 +1371,38 @@ def drape_fall(dg):
             slope = (b[1] - a[1]) / (a[2] - b[2]) if a[2] > b[2] else 0.0
             for k in range(hull[-1] + 1, len(pts)):
                 pts[k][1] = max(pts[k][1], b[1] + slope * (b[2] - pts[k][2]))
+        # where the hanging line leaves the round of the head it turned a corner (a bump in profile, high on the
+        # back of the head): the outline there is eased round in a curve, a hand's breadth either way
+        for _ in range(3):
+            ys = [q[1] for q in pts]
+            for k, q in enumerate(pts):
+                fe = min(1.0, max(0.0, (q[2] - 0.5) / 1.5), max(0.0, (7.4 - q[2]) / 2.4))
+                if fe > 0.0 and k >= 8:
+                    w_ = ys[k - 8:k + 9]
+                    q[1] = lerp(q[1], max(q[4] + 0.15, sum(w_) / len(w_)), fe)
         col_out, col_in = [], []
         for j, (x, y, z, t, sup) in enumerate(pts):
             v = j / (NZ - 1)
             vs = min(1.0, (z_top - z) / (z_top - z_end))
             if vs > 0.8:          # the ends turn in a little toward her back rather than flicking out
                 y = lerp(y, max(sup + 0.52, y - 0.6), ((vs - 0.8) / 0.2) ** 2 * 0.7)
-            y = max(sup + 0.42 if z < -0.5 else y - 1.0, y)
+            wb = min(1.0, max(0.0, (0.5 - z) / 2.0))
+            wb = wb * wb * (3 - 2 * wb)
+            y = max(lerp(y - 1.0, sup + 0.42, wb), y)
             col_out.append([x, y, z, t, sup])
             # where it spans a hollow it is the full mass of hair down to what is under it (a thin sheet bridging
             # the nape would show its underside from the side); where it lies on the mantle it is pressed thinner
             gap = y - sup
             th = t if gap < t + 0.3 else max(t, gap - 0.15)
-            col_in.append(Vector((x, max(y - th, sup + 0.12) if z < -0.5 else y - th, z)))
+            yi = lerp(y - th, max(y - th, sup + 0.12), wb)
+            # its sides are rounded over down onto what it lies on, rather than cut off square: a square side is a
+            # flat wall as deep as the hair, seen as a hard corner down the back (and an edge rounded about its
+            # middle instead stands proud of the hair beneath as a ridge)
+            if abs(u) > 0.45 and y - yi > 0.3:
+                f_ = min(1.0, (abs(u) - 0.45) / 0.55)
+                y = yi + max(0.15, (y - yi) * math.sqrt(max(0.0, 1.0 - f_ * f_)))
+                col_out[-1][1] = y
+            col_in.append(Vector((x, yi, z)))
         col_out = [Vector((x, y, z)) for x, y, z, t, sup in col_out]
         inner.append(col_in)
         outer.append(col_out)
@@ -1172,8 +1489,14 @@ def fuse_hair(head, names, voxel=0.065):
     for _ in range(14):
         bmesh.ops.smooth_laplacian_vert(bm, verts=ends, lambda_factor=0.8, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=False, preserve_volume=True)
-    band = [v for v in bm.verts if -4.0 < v.co.z < 7.5 and v.co.y > 1.0]
-    for _ in range(4):
+    # the side locks run into the hair beside them: the hollow where they meet is relaxed out, so they read as
+    # the front of the side hair rather than a separate piece laid on it
+    sides = [v for v in bm.verts if -3.5 < v.co.z < 8.2 and abs(v.co.x) > 1.6 and v.co.y < 5.0]
+    for k_ in range(30):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=sides, lambda_factor=0.7, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=k_ % 3 == 2, preserve_volume=True)
+    band = [v for v in bm.verts if -4.0 < v.co.z < 9.0 and v.co.y > 1.0]
+    for _ in range(8):
         bmesh.ops.smooth_laplacian_vert(bm, verts=band, lambda_factor=0.5, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
     hair = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
@@ -1269,8 +1592,13 @@ def curtain_bang(tree, s):
             tuck = min(1.0, t / 0.35)
             tuck = tuck * tuck * (3 - 2 * tuck)     # (the roots surface gradually from under the hair)
             rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.012
+            # (the strands that sweep round onto the side thin out and sink into the side hair as they go, so the
+            # fringe runs on into it rather than lying on it as a layer with a step along its edge)
+            sink = min(1.0, max(0.0, (f - 0.4) / 0.5)) * max(0.0, (t - 0.2) / 0.8) ** 1.1
+            rr *= 1.0 - 0.6 * sink
             # (the tips settle onto the skin; the root starts under the cap)
-            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) - 0.45 * (1 - tuck)))
+            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) * (1 - sink)
+                               - 0.45 * (1 - tuck) - 0.4 * sink))
             ds.append(d)
             rrs.append(rr)
             ts.append(t)
@@ -1982,6 +2310,1215 @@ def outward(p, d):
     return x + x / n * d, y + y / n * d
 
 
+def tube(pts, radii, flat=0.5, n=10):
+    """A tapered tube along a polyline (lash lines, lids, brows): radii[i] across the face at pts[i], flat times
+    that through it (along Y, toward the camera), with rounded ends so it never stops in a cut-off disc."""
+    bm = bmesh.new()
+    pts = [Vector(p) for p in pts]
+    rings = []
+    for i, p in enumerate(pts):
+        t = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+        a = t.cross(Vector((0, 1, 0)))
+        a = a.normalized() if a.length > 1e-6 else Vector((0, 0, 1))
+        b = a.cross(t).normalized()
+        r = radii[i]
+        rings.append([bm.verts.new(p + a * (r * math.cos(2 * math.pi * k / n)) + b * (r * flat * math.sin(2 * math.pi * k / n)))
+                      for k in range(n)])
+    for ra, rb in zip(rings, rings[1:]):
+        for k in range(n):
+            bm.faces.new((ra[k], ra[(k + 1) % n], rb[(k + 1) % n], rb[k]))
+    for ring, p in ((rings[0], pts[0]), (rings[-1], pts[-1])):
+        c = bm.verts.new(p)
+        for k in range(n):
+            bm.faces.new((ring[k], ring[(k + 1) % n], c))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
+EYE_RX, EYE_RZ = 0.76, 0.36
+EYE_TILT = 0.092       # the outer corner sits higher than the inner one (as in the photograph)
+EYE_LIFT = -0.05        # the line between the corners sits this much below the iris's centre (as in the photograph)
+EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
+
+
+# The opening of the eye, constructed from the eyelid's anatomy rather than traced. Measured adult proportions
+# (oculoplastic references): the fissure is about 30 mm wide and 10 mm high; the upper lid is highest a little to
+# the nose side of the pupil and the lower lid lowest a little to the temple side of it, so the two peaks sit on a
+# diagonal; the lids meet at roughly 60 degrees at each corner; and the outer corner sits 2-3 mm above the inner one
+# (EYE_TILT). At the inner corner the lids pull away from the ball round the caruncle and meet in a short
+# straight wedge before they turn into the arch; at the outer corner they lie on the ball and close more steeply. Artists build the same shape from planes: the upper lid as two side planes and
+# a top, the lower lid as two, joined by curves.
+#
+# Each lid is a short straight run out of the inner corner (the wedge round the caruncle) followed by two cubic
+# Hermite segments, run end -> peak -> outer corner, with a level tangent at the peak. The run is short and its
+# tangent carries straight on into the first segment, so the lid leaves the corner straight for a moment and then
+# bends continuously into the arch (no long straight ramp). At the outer corner the lids close more steeply.
+# Heights are in units of the eye's half-width (EYE_RX), above or below the line joining the corners
+# (u -1 inner .. 1 outer).
+EYE_OPEN = 0.72               # the opening's height, as a fraction of the reference (a relaxed, slightly narrowed eye)
+EYE_TOP_PEAK = (-0.18, 0.62)   # where the upper lid is highest (u) and how high (before EYE_OPEN): nasal of centre
+EYE_BOT_LOW = (0.30, 0.32)     # where the lower lid is lowest and how low: temporal of centre
+EYE_INNER_ANGLES = (50.0, 13.0)    # degrees the upper and lower lids leave the inner corner at (about 63 between them)
+EYE_OUTER_ANGLES = (44.0, 30.0)    # degrees they close into the outer corner at
+EYE_INNER_RUN = 0.05          # how far the lids run straight out of the inner corner, in units of EYE_RX
+EYE_INNER_TANGENT = 0.8       # how far that straight direction carries into the curve (fraction of the chord to the peak)
+EYE_PEAK_FULL = (1.25, 1.2)   # peak tangent length (fraction of the chord), upper and lower: how full each arch is
+EYE_OUTER_TANGENT = 0.5       # tangent length at the outer corner (fraction of the chord)
+
+_LID_CACHE = {}
+
+
+def _lid_curve(top):
+    """The sampled curve of one lid (u, height in units of EYE_RX), built as above; cached per setting."""
+    i = 0 if top else 1
+    peak = EYE_TOP_PEAK if top else EYE_BOT_LOW
+    key = (top, peak, EYE_OPEN, EYE_INNER_ANGLES, EYE_OUTER_ANGLES, EYE_INNER_RUN, EYE_INNER_TANGENT, EYE_PEAK_FULL, EYE_OUTER_TANGENT)
+    if key in _LID_CACHE:
+        return _LID_CACHE[key]
+    pu, ph = peak[0], peak[1] * EYE_OPEN
+    ai, ao = math.radians(EYE_INNER_ANGLES[i]), math.radians(EYE_OUTER_ANGLES[i])
+    dx, dy = math.cos(ai), math.sin(ai)
+
+    def hermite(p0, t0, p1, t1, n=240):
+        out = []
+        for k in range(n):
+            s = k / n
+            h00, h10, h01, h11 = 2 * s ** 3 - 3 * s * s + 1, s ** 3 - 2 * s * s + s, -2 * s ** 3 + 3 * s * s, s ** 3 - s * s
+            out.append((h00 * p0[0] + h10 * t0[0] + h01 * p1[0] + h11 * t1[0], h00 * p0[1] + h10 * t0[1] + h01 * p1[1] + h11 * t1[1]))
+        return out
+    q = (-1.0 + EYE_INNER_RUN * dx, EYE_INNER_RUN * dy)
+    pts = [(-1.0 + EYE_INNER_RUN * dx * k / 20, EYE_INNER_RUN * dy * k / 20) for k in range(20)]
+    c0 = math.hypot(pu - q[0], ph - q[1])
+    c1 = math.hypot(1 - pu, ph)
+    pf = EYE_PEAK_FULL[i]
+    pts += hermite(q, (EYE_INNER_TANGENT * c0 * dx, EYE_INNER_TANGENT * c0 * dy), (pu, ph), (pf * c0, 0.0))
+    pts += hermite((pu, ph), (pf * c1, 0.0), (1.0, 0.0), (EYE_OUTER_TANGENT * c1 * math.cos(ao), -EYE_OUTER_TANGENT * c1 * math.sin(ao)))
+    pts.append((1.0, 0.0))
+    pts.sort()
+    us = np.array([p[0] for p in pts])
+    hs = np.maximum(0.0, np.array([p[1] for p in pts]))
+    _LID_CACHE[key] = (us, hs)
+    return us, hs
+
+
+def lid_top(u):
+    """How far the upper lid's edge stands above the line between the corners at u (-1 inner corner .. 1 outer
+    corner)."""
+    us, hs = _lid_curve(True)
+    return EYE_RX * float(np.interp(max(-1.0, min(1.0, u)), us, hs))
+
+
+def lid_bottom(u):
+    """The lower lid's edge below the line between the corners."""
+    us, hs = _lid_curve(False)
+    return EYE_RX * float(np.interp(max(-1.0, min(1.0, u)), us, hs))
+
+
+def almond(rx, ry, rz, s, seg=128, rings=80):
+    """The eyeball: an ellipsoid reshaped to the lids' opening (lid_top over lid_bottom, tapering to a point at
+    each corner rather than a rounded oval), a little larger than it, so its edge turns in under the skin of the
+    lids all round (see eye_relief) and the lids close over it with no seam."""
+    bm = ellipsoid(rx, ry, rz, seg, rings)
+    for v in bm.verts:
+        u = max(-1.0, min(1.0, v.co.x / rx)) * s          # + toward the outer corner
+        half = rz * math.sqrt(max(1e-6, 1 - u * u))
+        zn = max(-1.0, min(1.0, v.co.z / half))
+        v.co.z = zn * (lid_top(u) if zn > 0 else lid_bottom(u)) * EYE_K
+        # its front stays full almost to the corners (an ellipsoid falls away there, so the skin closed over the
+        # tips and rounded them off), so the opening's own straight edges meet in a clear point
+        v.co.y *= max(1e-3, 1 - u * u) ** -0.3 if abs(u) < 0.999 else 1.0
+    return bm
+
+
+def iris_dome(r, depth, rings=48, seg=96):
+    """The iris (and the cornea over it) as one shallow dome facing -Y: rings round its centre, so the painted
+    pupil and the rings of the iris follow the mesh, and a smooth curve for the highlight to slide over."""
+    bm = bmesh.new()
+    tip = bm.verts.new((0, -depth, 0))
+    prev = None
+    for i in range(1, rings + 1):
+        t = i / rings
+        ring = [bm.verts.new((r * t * math.cos(2 * math.pi * k / seg), -depth * math.sqrt(max(0.0, 1 - t * t)),
+                              r * t * math.sin(2 * math.pi * k / seg))) for k in range(seg)]
+        if prev is None:
+            for k in range(seg):
+                bm.faces.new((tip, ring[(k + 1) % seg], ring[k]))
+        else:
+            for k in range(seg):
+                bm.faces.new((prev[k], prev[(k + 1) % seg], ring[(k + 1) % seg], ring[k]))
+        prev = ring
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    for f in bm.faces:            # facing the camera
+        if f.calc_center_median().y < 0 and f.normal.y > 0:
+            f.normal_flip()
+    return bm
+
+
+def _srgb_lin01(c):
+    return [((v + 0.055) / 1.055) ** 2.4 if v > 0.04045 else v / 12.92 for v in c]
+
+
+IRIS_TEX = {}
+
+
+def _vnoise(x, y, px, seed):
+    """Value noise on a lattice, smoothly eased, wrapping every px cells in x (so it closes round the iris)."""
+    g = np.random.default_rng(seed).uniform(-1, 1, (int(np.ceil(y.max())) + 2, px))
+    ix, iy = np.floor(x).astype(int), np.floor(y).astype(int)
+    tx, ty = x - ix, y - iy
+    tx, ty = tx * tx * (3 - 2 * tx), ty * ty * (3 - 2 * ty)
+    x0, x1 = ix % px, (ix + 1) % px
+    a = g[iy, x0] + (g[iy, x1] - g[iy, x0]) * tx
+    b = g[iy + 1, x0] + (g[iy + 1, x1] - g[iy + 1, x0]) * tx
+    return a + (b - a) * ty
+
+
+def _polar_fbm(th, q, cells, rows, octaves, seed, gain=0.55):
+    """Fractal noise in polar coordinates: round the iris (th, 0..1) it has `cells` lattice cells, out along the
+    radius (q, 0..1) only `rows`, so each feature is drawn out along the radius into a fibre. Each octave doubles
+    both, and wraps exactly round the circle."""
+    tot, amp, norm = 0.0, 1.0, 0.0
+    for o in range(octaves):
+        c = cells * 2 ** o
+        tot = tot + amp * _vnoise(th * c, q * rows * 2 ** o, c, seed + o)
+        norm += amp
+        amp *= gain
+    return tot / norm
+
+
+def iris_image():
+    """The iris, painted in polar coordinates the way the real one is built. The stroma is fractal noise
+    stretched out along the radius into fibres, its angle warped by a second, coarser noise so the fibres wave
+    rather than run ruler-straight. Crypts are dark lozenges from cellular (Worley) noise, packed round the
+    collarette. The collarette itself is a ragged ring a little out from the pupil, its radius wandering with a
+    low-frequency noise; inside it the pupillary zone is warmer and smoother. Faint contraction furrows ring the
+    outer zone, broken up by noise. Then the light: the dark limbal ring at the rim, the upper lid's shadow over
+    the top, and light gathered low on the far side where the cornea focuses it. One painting serves both eyes
+    (u mirrored for the left one); the disc fills the square."""
+    if 'img' in IRIS_TEX:
+        return IRIS_TEX['img']
+    N = 512
+    rmp = np.array(MATERIALS[M_EYE]['ramp'], dtype=np.float32)
+    X, Z = np.meshgrid((np.arange(N) + 0.5) / N * 2 - 1, 1 - (np.arange(N) + 0.5) / N * 2)
+    q = np.minimum(np.hypot(X, Z), 1.0)
+    th = (np.arctan2(Z, X) / (2 * np.pi)) % 1.0
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    # the fibres: warped angle, then anisotropic fBm (many cells round, few out)
+    warp = 0.012 * _polar_fbm(th, q, 6, 3, 3, 11)
+    thw = th + warp * (0.4 + q)
+    fib = _polar_fbm(thw, q, 64, 2, 4, 21)                 # fine, long fibres
+    band = _polar_fbm(thw, q, 14, 1.5, 2, 31)              # broad, lighter and darker wedges
+    # the crypts: Worley F1 on points scattered round the collarette ring
+    rng = np.random.default_rng(41)
+    n_c = 38
+    ct = rng.uniform(0, 1, n_c)
+    cq = np.clip(rng.normal(0.56, 0.07, n_c), 0.42, 0.78)
+    cx, cz = cq * np.cos(ct * 2 * np.pi), cq * np.sin(ct * 2 * np.pi)
+    f1 = np.full(X.shape, 9.0)
+    for i in range(n_c):
+        # lozenges drawn out along the radius: distance squashed across the radius
+        rx, rz = cx[i] / cq[i], cz[i] / cq[i]
+        dx, dz = X - cx[i], Z - cz[i]
+        along = dx * rx + dz * rz
+        across = -dx * rz + dz * rx
+        f1 = np.minimum(f1, np.hypot(along * 0.55, across * 1.3) / rng.uniform(0.035, 0.06))
+    crypt = sm(1.0, 0.45, f1)
+    # the collarette: a ragged ring, its radius wandering
+    rag = 0.5 + 0.035 * _polar_fbm(th, q, 9, 1, 2, 51)
+    coll = np.exp(-((q - rag) / 0.035) ** 2)
+    pupillary = sm(rag + 0.02, rag - 0.04, q)               # inside the collarette
+    furrow = (0.5 + 0.5 * np.cos(q * 46)) * sm(0.66, 0.78, q) * sm(0.96, 0.86, q) * (0.5 + 0.5 * band)
+    t = 0.5 + 0.30 * fib + 0.10 * band
+    t -= 0.16 * crypt
+    t -= 0.06 * furrow
+    t += 0.14 * coll
+    t -= 0.10 * pupillary * (0.6 - 0.4 * fib)                # smoother, darker-toned zone round the pupil
+    # the light
+    t -= 0.5 * sm(0.8, 1.0, q)                                  # the limbal ring
+    t -= 0.42 * sm(0.0, 0.8, Z + 0.15 * X * X)                  # the upper lid's shadow
+    glow = np.exp(-((X + 0.2) ** 2 + (Z + 0.5) ** 2) / 0.22)
+    t += 0.26 * glow * sm(0.36, 0.5, q) * sm(0.95, 0.8, q)      # light gathered by the cornea
+    warm = sm(rag + 0.06, rag - 0.08, q) * (0.75 + 0.25 * fib)
+    t = np.clip(t + 0.16 * warm, 0, 1)
+    k = t * 4
+    i0 = np.minimum(3, k.astype(int))
+    c = rmp[i0] + (rmp[i0 + 1] - rmp[i0]) * (k - i0)[..., None]
+    amber = np.array([156, 134, 70], dtype=np.float32)
+    c = c + (amber - c) * (0.45 * warm)[..., None]
+    pupil = sm(0.35, 0.31, q)
+    c = c + (np.array([20, 18, 18], dtype=np.float32) - c) * pupil[..., None]
+    img = bpy.data.images.new('iris', N, N, alpha=False)
+    px = np.concatenate([c / 255, np.ones((N, N, 1), dtype=np.float32)], axis=2)[::-1]
+    img.pixels.foreach_set(px.ravel().astype(np.float32))
+    img.pack()
+    IRIS_TEX['img'] = img
+    IRIS_TEX['t'] = t
+    return img
+
+
+def iris_colours(me, disc, r, s):
+    """Lay the painted iris (iris_image) onto the iris mesh through texture coordinates across the disc, and store
+    its tone at each point along the iris ramp ('iris_shade'), which the sprite renderer reads through the detail
+    pass."""
+    iris_image()
+    tt = IRIS_TEX['t']
+    N = tt.shape[0]
+    uvl = me.uv_layers.new(name='UVMap')
+    pos = {}
+    for v in me.vertices:
+        # from the flat disc the iris was made as, not from where it lies now (laid onto the ball, and taken back
+        # under the lids, the points move in depth, and through the iris's tilt that dragged the painting sideways)
+        dx, dz = disc[v.index]
+        pos[v.index] = ((dx * s / r + 1) / 2, (dz / r + 1) / 2)
+    for lp in me.loops:
+        uvl.data[lp.index].uv = pos[lp.vertex_index]
+    shades = []
+    for v in me.vertices:
+        u, w = pos[v.index]
+        i = min(N - 1, max(0, int((1 - w) * N)))
+        j = min(N - 1, max(0, int(u * N)))
+        q = math.hypot(u * 2 - 1, w * 2 - 1)
+        dark = smooth(0.35, 0.31, q)
+        shades.append(float(tt[i, j]) * (1 - dark) + 0.25 * dark)
+    sa = me.attributes.new('iris_shade', 'FLOAT', 'POINT')
+    sa.data.foreach_set('value', shades)
+
+
+def smooth(e0, e1, x):
+    t = min(1.0, max(0.0, (x - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+
+
+SCLERA_TEX = {}
+
+
+def sclera_image():
+    """The white of the eye, painted into a texture laid across the eye's opening (u from the inner corner to the
+    outer one across, w from the bottom to the top; one texture for both eyes, mirrored). Never pure white but a
+    soft ivory, cooler and greyer toward the corners where it turns away into the socket, the pink of the caruncle
+    at the inner corner, the shadow the upper lid casts across the top, and fine red veins: each starts at a corner
+    and wanders in toward the iris, thinning and forking as it goes, and fades before it reaches it."""
+    if 'img' in SCLERA_TEX:
+        return SCLERA_TEX['img']
+    W = 512
+    H = int(W * EYE_RZ * EYE_K / EYE_RX)
+    uu, ww = np.meshgrid((np.arange(W) + 0.5) / W * 2 - 1, 1 - (np.arange(H) + 0.5) / H * 2)
+    c = np.zeros((H, W, 3), dtype=np.float32) + np.array([236, 231, 220], dtype=np.float32)
+
+    def blend(col, k):
+        c[:] = c + (np.array(col, dtype=np.float32) - c) * k[..., None]
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    def field(nx, ny, seed):
+        """Smooth noise over the texture in -1..1: random values on an nx by ny lattice, eased between."""
+        g = np.random.default_rng(seed).uniform(-1, 1, (ny + 1, nx + 1))
+        fx = (np.arange(W) + 0.5) / W * nx
+        fy = (np.arange(H) + 0.5) / H * ny
+        ix, iy = np.minimum(fx.astype(int), nx - 1), np.minimum(fy.astype(int), ny - 1)
+        tx, ty = fx - ix, fy - iy
+        tx, ty = tx * tx * (3 - 2 * tx), ty * ty * (3 - 2 * ty)
+        a_ = g[iy][:, ix] * (1 - tx) + g[iy][:, ix + 1] * tx
+        b_ = g[iy + 1][:, ix] * (1 - tx) + g[iy + 1][:, ix + 1] * tx
+        return a_ * (1 - ty)[:, None] + b_ * ty[:, None]
+    # where each point lies between the eye's centre line (0) and the lid's edge (1), above and below
+    top = np.array([[lid_top(u) for u in row] for row in uu]) / EYE_RZ
+    bot = np.array([[lid_bottom(u) for u in row] for row in uu]) / EYE_RZ
+    e = np.where(ww > 0, ww * EYE_K / np.maximum(top, 0.05), -ww * EYE_K / np.maximum(bot, 0.05))
+    # the ball's roundness: a marble lit from the front, brightest a little above and inside the middle, its
+    # tone turning warmer and darker as it curves away toward each corner, where it sinks into the socket
+    ru = np.abs(uu)
+    # lit as a ball: the white is part of a sphere a little wider than the opening, and its tone follows how
+    # much each point faces a light in front of and above the face (Lambert), so it is brightest just above the
+    # middle, turns gradually darker down toward the lower lid and round into each corner, and never shows a
+    # ring; the shade is a warm, darkened ivory, never grey or blue
+    R = 1.12
+    px_, pz_ = uu / R, (ww * EYE_RZ * EYE_K / EYE_RX) / R
+    ny_ = np.sqrt(np.clip(1 - px_ * px_ - pz_ * pz_, 0, 1))
+    L = np.array([0.0, 0.3, 0.954])                                          # (across, up, toward the viewer)
+    lam = np.clip(px_ * L[0] + pz_ * L[1] + ny_ * L[2], 0, 1)
+    blend([156, 124, 110], 0.75 * (1 - lam) ** 1.1)
+    blend([168, 140, 134], 0.5 * sm(0.75, 1.0, ru))
+    blend([214, 150, 138], 0.85 * sm(0.8, 0.97, -uu))                         # the caruncle, at the inner corner
+    # the skin of the white: faint warm and cool patches and a fine grain, so it never reads as flat paint
+    m = field(9, 4, 11) * 0.6 + field(23, 9, 12) * 0.4
+    blend([234, 212, 178], 0.35 * np.clip(m, 0, 1))
+    blend([214, 204, 192], 0.3 * np.clip(-m, 0, 1))
+    c[:] = c * (1 + 0.04 * field(90, 30, 13) + 0.02 * field(200, 70, 14))[..., None]
+    # where it meets the lids: the upper lid shades the top of the ball in a soft, broad band that deepens
+    # into the lid's edge, and the lower lid's wet rim is a thin pink line with a little shade above it, so the
+    # white passes into the skin through a tone rather than meeting it at a hard edge
+    up = np.where(ww > 0, e, 0)
+    lo = np.where(ww < 0, e, 0)
+    blend([176, 160, 154], 0.6 * sm(0.15, 0.85, up))
+    blend([128, 104, 100], 0.75 * sm(0.75, 1.0, up))
+    blend([182, 162, 156], 0.45 * sm(0.45, 0.85, lo))
+    blend([196, 128, 120], 0.7 * sm(0.82, 1.0, lo))
+    # the corners: where the lids close over the ball it is in their shade and wet with the pink of the lid's
+    # inner skin, so toward each point the white warms and darkens into the skin's own tone, and the lids'
+    # edges continue round it rather than stopping at a pale tip
+    blend([204, 154, 132], sm(0.42, 0.88, ru) ** 0.8)
+    # the veins: the conjunctival vessels enter from under the lids and the corners and branch inward toward
+    # the iris, thinning as they go. They are grown by space colonisation (Runions et al., the algorithm for leaf
+    # venation): scattered attraction points, denser toward the corners and thinning out before the iris, pull
+    # the nearest tip of the network toward them and are used up when it arrives, so the branches spread to fill
+    # the space without crossing. Each vessel's width then follows Murray's law (a parent's radius cubed is the sum
+    # of its children's), so the trunks are thick and the twigs hair-fine, and the drawn paths wander with a
+    # low-frequency noise so no segment runs straight.
+    rng = np.random.default_rng(7)
+    PX = W / 2.0                                  # pixels per unit of u (and roughly of the opening's height)
+    def inside(u_, h_):
+        # within the opening (h_ in the same units as lid_top), with a little margin from the lids' edges
+        return (-lid_bottom(u_) * 0.92 < h_ < lid_top(u_) * 0.92) if abs(u_) < 0.97 else False
+    att = []
+    while len(att) < 1400:
+        u_ = rng.uniform(-1, 1)
+        h_ = rng.uniform(-0.5, 0.6)
+        dens = smooth(0.28, 0.75, abs(u_)) * (0.35 + 0.65 * smooth(0.3, 1.0, abs(h_) / 0.4))
+        if rng.random() < dens and inside(u_, h_):
+            att.append((u_, h_))
+    att = np.array(att)
+    # roots: under the lids (above and below, toward the sides) and at both corners
+    roots = []
+    for side in (-1, 1):
+        roots.append((0.985 * side, 0.0))
+        for uq in (0.35, 0.5, 0.62, 0.75, 0.88):
+            roots.append((uq * side + rng.normal(0, 0.04), lid_top(uq) * 0.97))
+            roots.append((uq * side + rng.normal(0, 0.04), -lid_bottom(uq) * 0.97))
+    # and scattered seeds within the white itself, so it fills with many short, separate little trees rather
+    # than a few long ones running in from the edges
+    for k_ in rng.choice(len(att), 36, replace=False):
+        roots.append(tuple(att[k_]))
+    nodes = [np.array(r_, dtype=np.float64) for r_ in roots]
+    parent = [-1] * len(nodes)
+    D, DI, DK = 0.007, 0.07, 0.012                # step, reach of an attractor, distance at which it is used up
+    alive = np.ones(len(att), dtype=bool)
+    for it in range(900):
+        if not alive.any():
+            break
+        N_ = np.array(nodes)
+        A = att[alive]
+        d = np.linalg.norm(A[:, None, :] - N_[None, :, :], axis=2)
+        near = d.argmin(1)
+        dmin = d[np.arange(len(A)), near]
+        grow_dirs = {}
+        for ai in np.nonzero(dmin < DI)[0]:
+            v_ = A[ai] - N_[near[ai]]
+            grow_dirs.setdefault(near[ai], []).append(v_ / max(1e-9, np.linalg.norm(v_)))
+        if not grow_dirs:
+            break
+        for ni, dirs in grow_dirs.items():
+            g_ = np.sum(dirs, axis=0)
+            g_ = g_ / max(1e-9, np.linalg.norm(g_)) + rng.normal(0, 0.3, 2)
+            g_ /= max(1e-9, np.linalg.norm(g_))
+            nodes.append(N_[ni] + g_ * D)
+            parent.append(ni)
+        N_ = np.array(nodes)
+        idx = np.nonzero(alive)[0]
+        dd = np.linalg.norm(att[idx][:, None, :] - N_[None, :, :], axis=2).min(1)
+        alive[idx[dd < DK]] = False
+    # widths from the tips back toward the roots (Murray's law)
+    n_ = len(nodes)
+    rad = np.full(n_, 0.3)                        # a tip's radius in pixels
+    kids = [[] for _ in range(n_)]
+    for i_, p_ in enumerate(parent):
+        if p_ >= 0:
+            kids[p_].append(i_)
+    for i_ in range(n_ - 1, -1, -1):
+        if kids[i_]:
+            rad[i_] = sum(rad[k_] ** 3 for k_ in kids[i_]) ** (1 / 3)
+    rad = np.minimum(rad * 1.1, 1.5)
+    # draw each segment as a soft capsule, its path wandering with a smooth noise
+    wob = lambda q_, sd: 0.006 * (np.sin(q_[0] * 37 + sd) + np.sin(q_[1] * 53 - sd * 1.7) + np.sin((q_[0] + q_[1]) * 91 + sd * 0.3))
+    pts = [np.array([(q_[0] + wob(q_, 1.0) + 1) / 2 * W, (1 - (q_[1] + wob(q_, 4.0)) / (EYE_RZ * EYE_K)) / 2 * H]) for q_ in nodes]
+    mask = np.zeros((H, W), dtype=np.float32)
+    yy, xx = np.mgrid[0:H, 0:W]
+    for i_, p_ in enumerate(parent):
+        if p_ < 0:
+            continue
+        a_, b_ = pts[p_], pts[i_]
+        r_ = 0.5 * (rad[i_] + rad[p_])
+        x0, x1 = int(max(0, min(a_[0], b_[0]) - 4)), int(min(W, max(a_[0], b_[0]) + 5))
+        y0, y1 = int(max(0, min(a_[1], b_[1]) - 4)), int(min(H, max(a_[1], b_[1]) + 5))
+        if x0 >= x1 or y0 >= y1:
+            continue
+        X_, Y_ = xx[y0:y1, x0:x1], yy[y0:y1, x0:x1]
+        ab = b_ - a_
+        t_ = np.clip(((X_ - a_[0]) * ab[0] + (Y_ - a_[1]) * ab[1]) / max(1e-9, ab @ ab), 0, 1)
+        dist = np.hypot(X_ - (a_[0] + t_ * ab[0]), Y_ - (a_[1] + t_ * ab[1]))
+        k_ = (0.3 + 0.7 * min(1.0, r_ / 1.4)) * np.exp(-(dist / max(0.55, r_)) ** 2)
+        np.maximum(mask[y0:y1, x0:x1], k_, out=mask[y0:y1, x0:x1])
+    mask *= sm(0.22, 0.55, np.abs(uu)) * (0.75 + 0.25 * sm(0.6, 0.9, np.abs(uu)))   # faint mid-way, gone before the iris
+    # a faint flush round the larger vessels, then the vessels themselves, deeper red where they are thicker
+    soft = mask.copy()
+    for _ in range(3):
+        soft = (soft + np.roll(soft, 1, 0) + np.roll(soft, -1, 0) + np.roll(soft, 1, 1) + np.roll(soft, -1, 1)) / 5
+    blend([214, 140, 128], 0.18 * np.clip(soft * 2.0, 0, 1))
+    blend([180, 62, 60], 0.68 * mask)
+    img = bpy.data.images.new('sclera', W, H, alpha=False)
+    px = np.concatenate([c / 255, np.ones((H, W, 1), dtype=np.float32)], axis=2)[::-1]
+    img.pixels.foreach_set(px.ravel().astype(np.float32))
+    img.pack()
+    SCLERA_TEX['img'] = img
+    return img
+
+
+def eye_relief(x, z, s, ex, ez):
+    """How far the skin round one eye stands forward (head coordinates; the eye's centre at ex, ez): the lids and
+    the folds about them, sculpted into the face's own surface so they flow out of it rather than sitting on it.
+    A few broad, soft forms, each following the curve of the opening (lid_top, lid_bottom) and ending at or before
+    its corners (lines carried on past the corners, or several narrow bands, read as stray creases): the rim of the
+    upper lid rolling over the top of the ball, one crease above it, the rim of the lower lid, and one shallow fold
+    under it where the lower lid meets the cheek."""
+    def g(t, w):
+        return math.exp(-(t / w) ** 2)
+    u = (x - ex) * s / EYE_RX
+    if abs(u) > 1.9:
+        return 0.0
+    uc = max(-1.0, min(1.0, u))
+    dz = z - ez - u * EYE_RX * EYE_TILT
+    T, B = lid_top(uc), lid_bottom(uc)
+    inside = smooth(1.08, 0.85, abs(u))                # 1 within the opening, easing out past its corners
+    d = 0.0
+    # the opening itself: inside the lids' edges the skin is drawn well back behind the ball, so exactly the
+    # traced shape of white shows, its edge where the lids meet the ball
+    if abs(u) < 1.0:
+        d -= 0.12 * smooth(0.0, 0.12, dz + B) * smooth(0.0, 0.12, T - dz)
+    # the lid margins: one rounded lip running round the whole opening, the upper and lower lids joining in it at
+    # each corner, standing a little proud of the ball and rolling onto it, so the ball fills the opening from
+    # behind the lids rather than sitting in a hole with a gap round it
+    cornr = smooth(1.06, 0.96, abs(u))
+    lip_t = 0.085 * g(dz - (T - 0.012 * min(1.0, T / 0.08)), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
+    lip_b = 0.07 * g(dz + (B - 0.012 * min(1.0, B / 0.08)), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
+    d += max(lip_t, lip_b) * cornr
+    # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
+    d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    # the crease of the upper lid: a clear, narrow fold a lid's breadth above the edge, following its curve and
+    # fading out toward either corner, with the soft fullness under the brow rolling over it from above (the
+    # upper lid is the one that moves, so it carries the eye's one strong fold)
+    cz = T + 0.13 + 0.035 * (1 - uc * uc)
+    cf = smooth(1.05, 0.55, abs(u + 0.05))
+    d -= 0.014 * g(dz - cz, 0.045) * cf
+    # lower lid: a soft rim along the lower edge, and one shallow fold where it meets the cheek
+    d += 0.04 * g(dz + (B - 0.02), 0.085) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
+    # past the outer corner: the upper lid laps over the lower and its fold runs on a little way beyond the
+    # cusp, a tapering groove whose upper wall faces down into shadow, with a soft hollow round it (as in a real
+    # eye, the corner is the deepest, darkest point and the shade fades out along the line of the lid)
+    if u > 0.9:
+        k = max(0.0, u - 1.0)
+        taper = smooth(0.9, 1.0, u) * max(0.0, 1 - k / 0.5) ** 1.6
+        d -= 0.03 * g(dz + 0.04 * k, 0.07 * (1 - 0.5 * k)) * taper * smooth(1.0, 1.15, u)
+        d -= 0.035 * g(dz + 0.02 * k, 0.14) * smooth(0.85, 1.0, u) * smooth(1.5, 1.05, u)
+    lz = -(B + 0.17 + 0.03 * uc)
+    d -= 0.007 * g(dz - lz, 0.08) * smooth(0.9, 0.4, abs(u - 0.1))
+    return d
+
+
+def sculpt_eyes(hb, eyes):
+    """Sculpt the lids and folds into the head mesh (see eye_relief): the faces round each eye are first cut
+    finer, so the folds, a few hundredths of a unit across, have the vertices to hold them."""
+    # one patch over the whole middle of the face, from above the brows to below the nose, so its edge (where the
+    # finer mesh meets the coarser) is nowhere near the eyes or the nose
+    ez = eyes[0][1]
+    region = [f for f in hb.faces
+              if abs(f.calc_center_median().x) < 3.0 and ez - 1.75 < f.calc_center_median().z < ez + 1.35
+              and f.calc_center_median().y < 0]
+    inside = set(region)
+    edges = list({e for f in region for e in f.edges})
+    # the patch's edge: new points along it stay on the straight edges the coarser faces beyond still share
+    rim = [(e.verts[0].co.copy(), e.verts[1].co.copy()) for e in edges if any(lf not in inside for lf in e.link_faces)]
+    ra = np.array([a for a, b in rim]); rb = np.array([b for a, b in rim])
+    # cut to points about 0.014 apart, whatever the head's own mesh: ten cuts on the first head's edges (a
+    # finer head needs fewer, or the eyes' patch alone runs to half a million points)
+    mean_edge = float(np.mean([e.calc_length() for e in edges]))
+    cuts = max(2, int(round(mean_edge / 0.0141)) - 1)
+    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=cuts, use_grid_fill=True, smooth=0.0)
+    new = [v for v in res['geom'] if isinstance(v, bmesh.types.BMVert) and v.co.y < 0]
+    P = np.array([v.co for v in new])
+    rim_d = np.full(len(new), 1e9)
+    for a_, b_ in zip(ra, rb):
+        ab = b_ - a_
+        t = np.clip(((P - a_) @ ab) / (ab @ ab), 0, 1)
+        rim_d = np.minimum(rim_d, np.linalg.norm(P - (a_ + t[:, None] * ab), axis=1))
+    # the rest lie on the old flat faces: put each back onto the head's own smooth surface before sculpting, easing
+    # from the flat faces at the patch's edge to the smooth surface a little way in, so no step shows where the
+    # finer mesh meets the coarser (a hard switch drew a line across the nose)
+    for v, r in zip(new, rim_d):
+        w = smooth(0.0, 0.9, float(r))
+        if w <= 0:
+            continue
+        y = head_front_y(v.co.x / HEAD_H, v.co.z / HEAD_H)
+        if y is not None:
+            v.co.y += w * (y * HEAD_H - v.co.y)
+    for v in hb.verts:
+        if v.co.y >= 0:
+            continue
+        d = sum(eye_relief(v.co.x, v.co.z, s, ex, ez) for ex, ez, s in eyes)
+        if d:
+            v.co.y -= d
+
+
+def build_eye(head, head_tree, s, x, ey, ez):
+    """One eye, set into the socket of the sculpted head (head coordinates; s is the side, x the eye's centre
+    across, ey the face's surface there, ez its height). Sized from life: the eye is about a fifth of the face's
+    width and the iris a little over a third of the eye. The parts: the ball, shaped to the lids' opening and a
+    little larger, painted with its shading and veins (sclera_image); an iris looking straight ahead, laid onto
+    the ball with a slight glossy swell and the pupil and its shading painted on (iris_colours), so the sun leaves
+    a real highlight on it; and an arched brow, full at the nose and tapering to a fine tail. The lids and the
+    folds round the eye are sculpted into the head (eye_relief). At sprite size this paints a white-iris-white
+    row."""
+    RX, RY, RZ = EYE_RX, 0.36, EYE_RZ
+    TILT = EYE_TILT
+    cy = ey + 0.24                                  # the white's front stands 0.12 proud of the skin
+    white = almond(RX, RY, RZ, s)
+    bmesh.ops.rotate(white, cent=(0, 0, 0), matrix=Euler((0, -s * TILT, 0)).to_matrix(), verts=white.verts)
+    bmesh.ops.translate(white, vec=(x, cy, ez), verts=white.verts)
+    # bend the white round the face, so it stands the same height proud of the skin all round its edge: a straight
+    # one sank under the socket wall at the inner corner (pushing the iris over to the nose side at sprite size) and
+    # under the rim below, and stood out past the lids at the outer corner, where the face turns back
+    def skin_y(px, pz):
+        h = head_tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        return h[0].y if h[0] is not None else ey
+    for v in white.verts:
+        v.co.y += skin_y(v.co.x, v.co.z) - ey
+    # (the skin is taken back inside the opening, see eye_relief, so the ball is followed against its plain
+    # surface; past the lids' edges the ball turns back under the skin, so only the opening shows white)
+    for v in white.verts:
+        uu_ = (v.co.x - x) * s / RX
+        dz_ = v.co.z - ez - uu_ * RX * TILT
+        lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
+        over = abs(dz_) / max(lim, 1e-3)
+        # (toward the lids the ball is kept full, so its edge meets the lids' margins rather than falling away
+        # from them into a dark gap, and then turns back under them)
+        v.co.y -= 0.07 * min(1.0, over) ** 2      # (a smooth swell with no onset: a smoothstep left a kink the gloss drew as a crease)
+        v.co.y += 1.1 * smooth(0.97, 1.06, over) ** 1.5
+    wtree = bvh_of(white)
+    # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
+    # and up from the centre line, so one painting serves both eyes
+    uvl = white.loops.layers.uv.new('UVMap')
+    for f in white.faces:
+        for lp in f.loops:
+            co = lp.vert.co
+            u = (co.x - x) * s / RX
+            lp[uvl].uv = ((u + 1) / 2, ((co.z - ez - u * RX * TILT) / (RZ * EYE_K) + 1) / 2)
+    wo = mesh_obj(f'Eye white {s}', white, M_SCLERA, head, subdiv=0)
+    # toward each corner the ball turns back under the skin, so the lids lap over its tips and the white narrows
+    # into the corner and passes beneath it, instead of ending at a cut edge level with the skin. (A shape key:
+    # the sprite sheet turns it off, since at sprite size the tips are the white pixel beside the iris.)
+    wo.shape_key_add(name='Basis')
+    tk = wo.shape_key_add(name='tuck', from_mix=False)
+    for kv in tk.data:
+        kv.co.y += 0.05 * smooth(0.8, 1.0, abs(kv.co.x - x) / RX) ** 1.5
+    tk.value = 1.0
+    # for the sprite sheet only: the white drawn a little larger round its own centre, so a pixel of it still
+    # shows either side of the iris at that size
+    sp = wo.shape_key_add(name='sprite', from_mix=False)
+    for kv in sp.data:
+        kv.co.x = x + (kv.co.x - x) * 1.12
+        kv.co.z = ez + (kv.co.z - ez) * 1.0
+    sp.value = 0.0
+
+    def front(px, pz):
+        """The nearest surface (the face or the white) in front of (px, pz), seen from the camera."""
+        best = 1e9
+        h = head_tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        if h[0] is not None:
+            best = h[0].y
+        h = wtree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        if h[0] is not None:
+            best = min(best, h[0].y)
+        return best
+
+    def lid_z(u, top):
+        """The edge of the eye's opening at u (-1 inner corner .. 1 outer corner across), upper or lower."""
+        return ez + (lid_top(u) if top else -lid_bottom(u)) + u * RX * TILT
+
+    # the iris lies on the curve of the white, turned to face the way it faces there (the white bends with the
+    # face, so a disc square to the camera sank into it on the nose side and read as a lens with the pupil off
+    # centre)
+    IR = 0.31                                       # its top under the upper lid, its foot on the lower one
+    iz = ez - EYE_LIFT + 0.06
+    hits = [wtree.ray_cast(Vector((x + dx, -50, iz + dz)), Vector((0, 1, 0)))
+            for dx, dz in ((0, 0), (0.2, 0), (-0.2, 0), (0, 0.15), (0, -0.15))]
+    n = sum((h[1] for h in hits if h[0] is not None), Vector()).normalized()
+    c = hits[0][0]
+    turn = Vector((0, -1, 0)).rotation_difference(n)
+    iris = iris_dome(IR, 0.05)
+    disc = [(v.co.x, v.co.z) for v in iris.verts]   # (where each point lies on the flat disc, for its painting)
+    bmesh.ops.rotate(iris, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=iris.verts)
+    # laid onto the ball itself: each point of the iris sits just over the white's surface, with only the slight
+    # swell of the cornea in the middle, so it never stands out from the eye (or is cut by it) at any angle
+    iris.verts.index_update()
+    spr_y = [0.0] * len(iris.verts)
+    for v in iris.verts:
+        t = min(1.0, math.hypot(v.co.x, v.co.z) / IR)
+        # (where the iris runs past the white, under a lid, it is sent back behind the skin, so the lid covers its
+        # edge cleanly instead of the iris climbing the lid as a dark wall)
+        h = wtree.ray_cast(Vector((c.x + v.co.x, -50, c.z + v.co.z)), Vector((0, 1, 0)))
+        if h[0] is not None:
+            # a stiff disc where the ball is open to view (part flat, part following the ball: on the ball alone
+            # its lower rim turned down steeply and read as a dark crescent), easing to follow the ball exactly
+            # where the ball turns back under the lids, so it passes under them with the white and stands out
+            # nowhere (pushed back on its own it left walls and a flat-cut edge in the 3/4 views)
+            px_, pz_ = c.x + v.co.x, c.z + v.co.z
+            uu_ = (px_ - x) * s / RX
+            dz_ = pz_ - ez - uu_ * RX * TILT
+            lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
+            wf = 0.6 * smooth(0.95, 0.8, abs(dz_) / max(lim, 1e-3))
+            flat = -(n.x * v.co.x + n.z * v.co.z) / n.y
+            surf = h[0].y - c.y
+            ov = abs(dz_) / max(lim, 1e-3)
+            lift = (0.04 + 0.05 * (1 - t * t)) * smooth(1.0, 0.86, ov) - 0.04 * smooth(0.94, 1.0, ov)
+            v.co.y = min(wf * flat + (1 - wf) * surf, surf) - lift
+            # (for the sprite sheet: the iris following the ball more closely, which keeps its pixel showing in
+            # the side views; a shape key, see sprite_mode)
+            spr_y[v.index] = 0.75 * surf + 0.25 * min(flat, surf) - (0.006 + 0.07 * (1 - t * t))
+        else:
+            v.co.y = 0.3
+            spr_y[v.index] = 0.3
+    o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
+    o.shape_key_add(name='Basis')
+    sk = o.shape_key_add(name='sprite', from_mix=False)
+    for kv, y in zip(sk.data, spr_y):
+        kv.co.y = y
+    sk.value = 0.0
+    o.visible_shadow = False        # (it lies on the white; its shadow fell as a grey column down to the lower lid)
+    iris_colours(o.data, disc, IR, s)
+
+    def on_face(us, radii, zf, lift, span=RX, n=36):
+        """A smooth curve over the face through the heights zf(u) (resampled finely, so a tube along it is
+        round rather than a chain of straight pieces), with its radii eased between the given ones."""
+        fine = np.linspace(us[0], us[-1], n)
+        pts = []
+        for u in fine:
+            px = x + s * u * span
+            pz = zf(u)
+            pts.append((px, front(px, pz) - lift, pz))
+        return pts, list(np.interp(fine, us, radii))
+
+    # (the lids, their creases and the folds under the eye are sculpted into the skin itself: see eye_relief)
+    # the brow: on the brow ridge, starting just outside the bridge of the nose, rising in a soft arch to its peak
+    # two thirds of the way out and falling away to a fine tail past the outer corner
+    # (for the sprites only: in the 3-D model the brow is painted hair by hair, see brow_image; the solid tube
+    # reads better than the painting at a pixel or two)
+    bus = list(np.linspace(BROW_US[0], BROW_US[-1], 36))
+    brow, br = on_face(bus, [brow_line(u)[1] for u in bus], lambda u: ez - EYE_LIFT + brow_line(u)[0], 0.03, span=1.1)
+    bo = mesh_obj(f'Brow tube {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
+    bo.hide_render = True
+    bo.hide_viewport = True
+
+
+def _perlin2(x, y, seed=0):
+    """Gradient (Perlin) noise in 2-D, about -1..1, vectorised over numpy arrays: a random unit gradient at each
+    lattice point, dotted with the offset to it and blended with the quintic fade 6t^5 - 15t^4 + 10t^3 (Perlin's
+    improved noise, 2002). Unlike value noise it has no blocky lattice artefacts and its features are all one size,
+    which is what fBm and domain warping need."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    xi, yi = np.floor(x).astype(np.int64), np.floor(y).astype(np.int64)
+    xf, yf = x - xi, y - yi
+
+    def grad(ix, iy):
+        h = (ix * 374761393 + iy * 668265263 + seed * 1442695041) & 0xFFFFFFFF
+        h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+        a = (h & 0xFFFF) / 65536.0 * 2 * np.pi
+        return np.cos(a), np.sin(a)
+
+    def fade(t):
+        return t * t * t * (t * (t * 6 - 15) + 10)
+    n = []
+    for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+        gx, gy = grad(xi + dx, yi + dy)
+        n.append(gx * (xf - dx) + gy * (yf - dy))
+    u, v = fade(xf), fade(yf)
+    return 1.414 * ((n[0] * (1 - u) + n[1] * u) * (1 - v) + (n[2] * (1 - u) + n[3] * u) * v)
+
+
+def _fbm2(x, y, seed=0, octaves=5, lac=2.0, gain=0.5):
+    """Fractal Brownian motion: octaves of gradient noise, each at twice the frequency and half the amplitude."""
+    tot, amp, norm = 0.0, 1.0, 0.0
+    for o in range(octaves):
+        tot = tot + amp * _perlin2(x * lac ** o, y * lac ** o, seed + 17 * o)
+        norm += amp
+        amp *= gain
+    return tot / norm
+
+
+def _warped_fbm(x, y, seed=0, k=3.0):
+    """Domain-warped fBm (Quilez, "Domain warping"): fBm sampled at a point pushed about by two more fBm fields,
+    f(p + k q(p)), q = (fbm(p), fbm(p + offset)). The warp drags the noise into the swirled, filamentary shapes of
+    smoke instead of the even blobs of plain fBm."""
+    qx = _fbm2(x, y, seed + 1, 4)
+    qy = _fbm2(x + 5.2, y + 1.3, seed + 2, 4)
+    return _fbm2(x + k * qx, y + k * qy, seed + 3, 5)
+
+
+SHADOW_TEX = {}
+SH_U0, SH_U1, SH_V0, SH_V1 = -1.75, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
+
+
+def eyeshadow_image():
+    """The eyeshadow, painted into a texture laid over the lid (u across, dz up from the corner line, the same
+    mapping as the lids' relief): a smoky, desaturated grey-mauve wash from the lid's edge up over the crease, fuller and taller
+    toward the outer corner and gone at the inner one, a charcoal smoked into the outer V and along the upper
+    lash line, and a fainter, lighter wash along the lower lid. Colour and opacity in one RGBA image,
+    so the skin shows through and the wash fades into it instead of ending at an edge."""
+    if 'img' in SHADOW_TEX:
+        return SHADOW_TEX['img']
+    W, H = 640, 300
+    uu, dd = np.meshgrid(SH_U0 + (np.arange(W) + 0.5) / W * (SH_U1 - SH_U0), SH_V1 - (np.arange(H) + 0.5) / H * (SH_V1 - SH_V0))
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    uc = np.clip(uu, -1, 1)
+    T = np.array([lid_top(u) for u in uc[0]])[None, :] + 0 * uu
+    B = np.array([lid_bottom(u) for u in uc[0]])[None, :] + 0 * uu
+    above = dd - T
+    below = -B - dd
+    tall = 0.46 + 0.16 * sm(-0.2, 0.9, uu)                    # how far up the wash reaches: taller toward the outer corner
+    across = sm(-1.3, -0.7, uu) * (0.85 + 0.15 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.55, -1.3, uu)
+    lid = sm(-0.012, 0.012, above) * (1 - sm(0.3 * tall, tall, above))
+    # the deeper colour: smoked along the lash line and into the outer V (a wedge opening up and out from the corner)
+    deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
+    vwedge = sm(0.55, 1.05, uu) * (1 - sm(0.3 * tall, 1.1 * tall, np.abs(dd - (T + 0.07 + 0.2 * np.maximum(0, uu - 0.9)))))
+    deep = np.maximum(deep * 0.8, 0.6 * vwedge * sm(1.5, 0.95, uu))
+    base = np.array([70, 60, 56], dtype=np.float32)          # a warm charcoal: near-black with a little brown, so it
+    dark = np.array([34, 29, 28], dtype=np.float32)          # sits on warm skin (a mauve fought it); deepest in the corners
+    col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
+    a = 0.8 * lid * across + 0.1 * deep * lid * across
+    # under the lower lashes, outer half only
+    low = sm(-0.01, 0.015, below) * (1 - sm(0.06, 0.3, below)) * sm(-1.0, -0.5, uu) * sm(1.35, 1.0, uu)
+    col = col + (np.array([92, 80, 74], dtype=np.float32) - col) * low[..., None]
+    a = np.maximum(a, 0.5 * low * (0.7 + 0.3 * sm(0.0, 0.9, uu)))
+    # the hollow beside the nose, where the lid meets the bridge: the inner corner's own soft shade
+    hollow = np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
+    col = col + (base - col) * np.clip(hollow, 0, 1)[..., None] * (1 - low[..., None]) * 0.6
+    a = np.maximum(a, 0.2 * hollow)
+    # the far ends, past each corner, thin out rather than pooling into dark patches
+    a *= 1 - 0.45 * sm(0.85, 1.35, uu) - 0.4 * sm(-0.85, -1.35, uu)
+    a *= sm(SH_V0, SH_V0 + 0.15, dd) * sm(SH_V1, SH_V1 - 0.15, dd) * sm(SH_U0, SH_U0 + 0.2, uu) * sm(SH_U1, SH_U1 - 0.2, uu)   # (no hard edge at the patch's border)
+    # nothing inside the opening itself
+    a *= 1 - ((above < 0) & (below < 0) & (np.abs(uu) < 1.0))
+    rgb = np.array([_srgb_lin01(c / 255) for c in col.reshape(-1, 3)], dtype=np.float32).reshape(H, W, 3) if False else col / 255
+    # smoke: domain-warped gradient fBm in the opacity (see _warped_fbm), so the wash drifts and thins in soft,
+    # swirled wisps instead of grading smoothly or breaking into even blobs
+    smoke = _warped_fbm(uu * 2.2, dd * 2.6, seed=9, k=2.5)
+    a = a * np.clip(0.95 + 0.6 * smoke, 0.55, 1.3)
+    img = bpy.data.images.new('eyeshadow', W, H, alpha=True)
+    a = a * 0.78                  # (charcoal reads much stronger than the mauve did at the same opacity)
+    px = np.concatenate([rgb, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
+    img.pixels.foreach_set(px.ravel().astype(np.float32))
+    img.pack()
+    SHADOW_TEX['img'] = img
+    return img
+
+
+LASH_TEX = {}
+
+
+def lash_image():
+    """The lashes, painted into a texture over the same patch as the eyeshadow (same mapping), grown by noise rather
+    than drawn one by one. Along each lid margin, 1-D fractal noise sets the length and the lean of the strands and
+    a second, slower noise gathers them into clumps (neighbouring strands pull toward their clump's direction, as
+    real lashes stick together); each strand is a curved, tapering stroke that leaves the lid turned outward and curls
+    back up, drawn at twice the size and then softened. Over them go a dense fuzz of short, faint, thin strands
+    with random directions, a soft halo (the lashes' blur against the skin) and a grain of fine noise in the
+    opacity, so the fringe reads as fuzzy hair rather than a row of spikes, and a smoky liner along the lid edge."""
+    if 'img' in LASH_TEX:
+        return LASH_TEX['img']
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H, SS = 1024, 600, 2
+    rng = np.random.default_rng(5)
+
+    def px(u, dz):
+        return ((u - SH_U0) / (SH_U1 - SH_U0) * W * SS, (SH_V1 - dz) / (SH_V1 - SH_V0) * H * SS)
+
+    layer = Image.new('L', (W * SS, H * SS), 0)          # opacity of the strands
+    dr = ImageDraw.Draw(layer)
+    cover = Image.new('L', (W * SS, H * SS), 0)          # where a strand is, at full value (to unpremultiply the colour)
+    dc = ImageDraw.Draw(cover)
+    paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))   # each strand's own colour along its length
+    dp = ImageDraw.Draw(paint)
+    fuzz = Image.new('L', (W * SS, H * SS), 0)
+    fd = ImageDraw.Draw(fuzz)
+    ROOT = np.array([16, 10, 11], dtype=np.float32)      # the lash at the lid: near-black
+    TIP = np.array([58, 40, 34], dtype=np.float32)       # toward the tip it thins and lets light through: a warm brown
+    SHEEN = np.array([84, 72, 70], dtype=np.float32)  # the soft highlight where the curve faces the light
+
+    def stroke(u0, z0, ang, length, curl, wid, top, val, steps=14, tone=0.0, shade=True, d=None):
+        """One tapering curved stroke: starts at (u0, z0), leaves at ang off straight up (down for a lower
+        lash; positive leans toward the outer corner), curls back toward upright by `curl`, and is nudged along
+        its length by curl noise (the curl of a gradient-noise potential: a divergence-free flow, so neighbouring
+        strands bend together without bunching or crossing). Shaded root to tip, with a sheen part-way along."""
+        sign = 1.0 if top else -1.0
+        u, z = u0, z0
+        p = px(u, z)
+        for k in range(steps):
+            t = (k + 1) / steps
+            a = ang - curl * t if top else ang + 0.25 * curl * t
+            e = 0.01
+            pu = (_perlin2((u) * 7, (z + e) * 7, 77) - _perlin2(u * 7, (z - e) * 7, 77)) / (2 * e)
+            pz = -(_perlin2((u + e) * 7, z * 7, 77) - _perlin2((u - e) * 7, z * 7, 77)) / (2 * e)
+            du = math.sin(a) + 0.012 * float(pu) * t
+            dz_ = sign * math.cos(a) + 0.012 * float(pz) * t
+            n_ = math.hypot(du, dz_) or 1.0
+            u += du / n_ * length / steps
+            z += dz_ / n_ * length / steps
+            q = px(u, z)
+            w = max(1, int(wid * (1 - 0.82 * t) * SS))
+            (d or dr).line([p, q], fill=val, width=w)
+            if shade:
+                c = ROOT + (TIP - ROOT) * min(1.0, (t ** 1.8) * (0.7 + 0.5 * tone))
+                c = c + (SHEEN - c) * 0.3 * math.exp(-((t - 0.42) / 0.13) ** 2) * (0.5 + 0.5 * tone)
+                dc.line([p, q], fill=255, width=w)
+                dp.line([p, q], fill=tuple(int(v) for v in c), width=w)
+            p = q
+
+    # the roots: blue-noise positions along each lid (1-D Poisson-disk sampling by dart throwing, Bridson-style:
+    # no two closer than a minimum spacing), so the lashes are evenly irregular instead of clumping and gapping at
+    # random; then gradient-noise fBm along the lid sets each one's length and lean, and a slower one gathers
+    # neighbours into clumps that lean together
+    def poisson1(n, lo, hi, seed):
+        r_ = np.random.default_rng(seed)
+        dmin = (hi - lo) / n * 0.6
+        pts_, tries = [], 0
+        while len(pts_) < n and tries < n * 60:
+            c_ = r_.uniform(lo, hi)
+            tries += 1
+            if all(abs(c_ - q_) >= dmin for q_ in pts_):
+                pts_.append(c_)
+        return sorted(pts_)
+    for top, count in ((True, 110), (False, 55)):
+        roots = poisson1(count, -0.88, 1.07, 3) if top else poisson1(count, -0.3, 1.05, 4)
+        for u0 in roots:
+            edge = lid_top(u0) if top else -lid_bottom(u0)
+            outer = smooth(-0.9, 1.0, u0)
+            len_n = float(_fbm2(u0 * 3.0, 0.5, 21, 4))
+            lean_n = float(_fbm2(u0 * 2.4, 4.5, 31, 4))
+            clump = float(_perlin2(u0 * 5.0, 9.5, 41))
+            tone = 0.5 + 0.5 * float(_perlin2(u0 * 9.0, 2.5, 51))
+            length = ((0.07 + 0.12 * outer ** 1.2 - 0.05 * smooth(0.95, 1.1, u0)) * (1 + 0.35 * len_n) * (0.85 + 0.3 * rng.random())) * (1.0 if top else 0.45)
+            lean = (-0.05 + 0.85 * outer ** 1.3 + 0.35 * lean_n + 0.25 * clump) + 0.08 * (rng.random() - 0.5)
+            stroke(u0, edge - (0.005 if top else -0.005), lean, length, 0.12 + 0.12 * rng.random(),
+                   0.0075 / (SH_U1 - SH_U0) * W if top else 0.005 / (SH_U1 - SH_U0) * W, top, int(200 + 55 * rng.random()), tone=tone)
+    # the fuzz: many short faint thin strands in every direction near the margins
+    for top in (True, False):
+        for _ in range(260 if top else 110):
+            u0 = (-0.9 + 2.0 * rng.random()) if top else (-0.35 + 1.45 * rng.random())
+            edge = lid_top(u0) if top else -lid_bottom(u0)
+            ang = rng.normal(0.35 * smooth(-0.9, 1.0, u0), 0.55)
+            stroke(u0, edge + (rng.random() - 0.3) * 0.02 * (1 if top else -1), ang, (0.02 + 0.05 * rng.random()) * (1 if top else 0.6), 0.5, 0.003 / (SH_U1 - SH_U0) * W, top, int(70 + 90 * rng.random()), steps=6, shade=False, d=fd)
+    # the smoky liner hugging the lid's edge
+    pts = [px(u, lid_top(u) + 0.006) for u in np.linspace(-1.0, 1.08, 90)]
+    dr.line(pts, fill=150, width=int(0.016 / (SH_U1 - SH_U0) * W * SS), joint='curve')
+    pts = [px(u, -lid_bottom(u) - 0.004) for u in np.linspace(-0.3, 1.0, 60)]
+    dr.line(pts, fill=70, width=int(0.008 / (SH_U1 - SH_U0) * W * SS), joint='curve')
+    a1 = np.asarray(layer.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(1.1)), dtype=np.float32) / 255
+    a2 = np.asarray(fuzz.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(1.3)), dtype=np.float32) / 255
+    halo = np.asarray(layer.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(7)), dtype=np.float32) / 255
+    yy, xx = np.mgrid[0:H, 0:W]
+    grain = 0.8 + 0.2 * _fbm2(xx / 6.0, yy / 6.0, 61, 3)       # fine gradient-noise grain in the opacity
+    a = np.clip(a1 * 1.5 + a2 * 0.35 * grain + halo * 0.12, 0, 1)
+    a *= 0.85 + 0.15 * grain
+    # the colour: each strand's painted shading (unpremultiplied by its coverage), dark where only fuzz, halo or
+    # liner lie
+    cov = np.asarray(cover.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
+    pnt = np.asarray(paint.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32)
+    strand = pnt / np.maximum(cov, 1e-3)[..., None]
+    w_ = np.clip(cov * 2.5, 0, 1)[..., None]
+    col = (ROOT + (np.clip(strand, 0, 255) - ROOT) * w_) / 255
+    img = bpy.data.images.new('lashes', W, H, alpha=True)
+    pxl = np.concatenate([col, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
+    img.pixels.foreach_set(pxl.ravel().astype(np.float32))
+    img.pack()
+    LASH_TEX['img'] = img
+    return img
+
+
+BROW_TEX = {}
+BR_U0, BR_U1, BR_V0, BR_V1 = -1.28, 2.25, 0.62, 1.92     # the brow patch's extent, in the eye patch's units (u, dz)
+BROW_US = [-0.7, 1.08]          # the brow's inner and outer ends (brow units)
+
+
+def brow_line(ub):
+    """The brow's centre height above the eye's centre and its half-height, at ub (in the brow's own units: the
+    face's x from the eye's centre over 1.1). Both are single smooth closed forms, with no table to interpolate
+    (a piecewise-linear one showed its corners as kinks along the brow's edges): the centre is a skewed sine arch,
+    s^1.45 pushing its peak about 60% of the way out, so it rises gently from the nose and falls more steeply
+    into the tail; the half-height is full at the head, swells a little just past it and thins smoothly to a fine
+    tail."""
+    u = min(max(ub, BROW_US[0]), BROW_US[-1])
+    t = (u - BROW_US[0]) / (BROW_US[-1] - BROW_US[0])
+    zc = 0.93 + 0.35 * math.sin(math.pi * t ** 1.45) - 0.05 * t
+    rise = math.sin(0.5 * math.pi * min(1.0, t / 0.28))
+    r = 0.016 + 0.17 * (1 - t) ** 0.65 * (0.72 + 0.28 * rise)
+    return zc, r
+
+
+def brow_image():
+    """The brow, painted hair by hair into a texture over its patch (u across in eye widths, dz up from the line
+    between the eye's corners). How a brow grows (as brow artists draw it): at the head, by the nose, the hairs
+    stand up and fan a little outward; through the body the lower hairs angle up and out and the upper ones down
+    and out, meeting in a soft ridge just above the middle (the herringbone that gives a brow its shape); the tail
+    lies flat along the arch. The head is feathered and sparse, the lower edge of the body dense and crisp, the
+    top soft. The noise, as for the lashes: hair roots scattered with 2-D Poisson-disk sampling (Bridson's dart
+    throwing, so the hairs are evenly irregular), gradient-noise fBm for each hair's length, angle and tone, curl
+    noise bending neighbouring hairs together, and each hair shaded dark at the root to a lighter, warmer tip
+    with a sheen part-way along. Under the hairs, a sparse powder of skin-toned brown smoked with domain-warped
+    fBm, so the skin between hairs doesn't read as gaps."""
+    if 'img' in BROW_TEX:
+        return BROW_TEX['img']
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H, SS = 1200, 420, 2
+    rng = np.random.default_rng(17)
+    K = EYE_RX / 1.1                    # eye-patch u to brow ub
+
+    def centre(u):
+        zc, r = brow_line(u * K)
+        return zc - EYE_LIFT - u * EYE_RX * EYE_TILT, r
+
+    def px(u, dz):
+        return ((u - BR_U0) / (BR_U1 - BR_U0) * W * SS, (BR_V1 - dz) / (BR_V1 - BR_V0) * H * SS)
+
+    U_IN, U_OUT = BROW_US[0] / K, BROW_US[-1] / K
+    cover = Image.new('L', (W * SS, H * SS), 0)
+    dc = ImageDraw.Draw(cover)
+    alpha = Image.new('L', (W * SS, H * SS), 0)
+    da = ImageDraw.Draw(alpha)
+    paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))
+    dp = ImageDraw.Draw(paint)
+    ROOT = np.array([40, 24, 17], dtype=np.float32)
+    TIP = np.array([116, 66, 36], dtype=np.float32)
+    SHEEN = np.array([156, 104, 68], dtype=np.float32)
+
+    def slope(u):
+        e = 0.02
+        return (centre(u + e)[0] - centre(u - e)[0]) / (2 * e)
+
+    def flow(u, dz):
+        """The direction a hair grows at (u, dz), as an angle from straight outward (positive: up)."""
+        zc, r = centre(u)
+        ub = u * K
+        tang = math.atan(slope(u))
+        side = (dz - (zc + 0.15 * r)) / max(r, 1e-3)              # -1 at the lower edge, +1 at the upper
+        body = tang + math.radians(24) * smooth(0.2, -0.9, side) - math.radians(16) * smooth(-0.1, 0.9, side)
+        head = math.radians(82 - 10 * smooth(-0.7, -0.35, ub))
+        w = smooth(-0.3, -0.55, ub)
+        tail = smooth(0.7, 1.0, ub)
+        a = body * (1 - w) + head * w
+        return a * (1 - tail) + tang * tail
+
+    # roots: 2-D Poisson-disk sampling over the brow's shape (dart throwing on a cell grid)
+    dmin = 0.022
+    cell = dmin / math.sqrt(2)
+    grid = {}
+    roots = []
+    tries = 0
+    while tries < 60000 and len(roots) < 1400:
+        tries += 1
+        u = rng.uniform(U_IN - 0.05, U_OUT)
+        zc, r = centre(u)
+        dz = zc + rng.uniform(-1.0, 1.0) * r * 1.05
+        # the head is sparse (feathered), the tail thins out
+        ub = u * K
+        side0 = (dz - zc) / max(r, 1e-3)
+        # a rounded, feathered head: the top of the head starts further out than its lower edge
+        keep = (0.3 + 0.7 * smooth(-0.72, -0.3, ub)) * smooth(-0.74, -0.55, ub - 0.12 * max(0.0, side0) ** 2)
+        keep *= 1 - 0.5 * smooth(0.75, 1.08, ub)
+        if rng.random() > keep:
+            continue
+        gi, gj = int(u / cell), int(dz / cell)
+        ok = True
+        for di in (-2, -1, 0, 1, 2):
+            for dj in (-2, -1, 0, 1, 2):
+                q = grid.get((gi + di, gj + dj))
+                if q is not None and (q[0] - u) ** 2 + (q[1] - dz) ** 2 < dmin * dmin:
+                    ok = False
+        if ok:
+            grid[(gi, gj)] = (u, dz)
+            roots.append((u, dz))
+    # draw from the top of the brow down, so the dense lower hairs lie over the upper ones
+    roots.sort(key=lambda p: -p[1])
+    for u0, z0 in roots:
+        zc, r = centre(u0)
+        ub = u0 * K
+        side = (z0 - zc) / max(r, 1e-3)
+        len_n = float(_fbm2(u0 * 4.0, z0 * 4.0, 71, 4))
+        ang_n = float(_fbm2(u0 * 3.0, z0 * 3.0 + 7.0, 81, 4))
+        tone = 0.5 + 0.5 * float(_perlin2(u0 * 11.0, z0 * 11.0, 91))
+        length = (0.11 + 0.05 * smooth(-0.6, 0.3, ub) - 0.05 * smooth(0.65, 1.08, ub)) * (1 + 0.3 * len_n) * (0.85 + 0.3 * rng.random())
+        if ub < -0.35:
+            length *= 0.8
+        wid = 0.0078 * (1 - 0.35 * smooth(0.65, 1.08, ub))
+        # opacity: crisp and full at the lower edge of the body, softer at the top, feathered at the head
+        val = 255 * (0.7 + 0.3 * smooth(0.8, -0.4, side)) * (0.55 + 0.45 * smooth(-0.75, -0.35, ub))
+        steps = 12
+        u, z = u0, z0
+        p = px(u, z)
+        jitter = 0.18 * ang_n + 0.08 * (rng.random() - 0.5)
+        for k in range(steps):
+            t = (k + 1) / steps
+            a = flow(u, z) + jitter
+            e = 0.01
+            pu = (_perlin2(u * 6, (z + e) * 6, 101) - _perlin2(u * 6, (z - e) * 6, 101)) / (2 * e)
+            pz = -(_perlin2((u + e) * 6, z * 6, 101) - _perlin2((u - e) * 6, z * 6, 101)) / (2 * e)
+            du = math.cos(a) + 0.01 * float(pu) * t
+            dz_ = math.sin(a) + 0.01 * float(pz) * t
+            n_ = math.hypot(du, dz_) or 1.0
+            u += du / n_ * length / steps
+            z += dz_ / n_ * length / steps
+            q = px(u, z)
+            w = max(1, int(wid / (BR_U1 - BR_U0) * W * SS * (1 - 0.75 * t)))
+            c = ROOT + (TIP - ROOT) * min(1.0, t ** 1.5 * (0.65 + 0.6 * tone))
+            # the sheen: where the hair turns toward the light, along the upper middle of the brow
+            lit = 0.35 * math.exp(-((t - 0.5) / 0.18) ** 2) * (0.4 + 0.6 * smooth(-0.6, 0.6, side)) * (0.5 + 0.5 * tone)
+            c = c + (SHEEN - c) * lit
+            # the lower hairs and the head sit in the shadow of the brow bone's turn: a touch darker
+            c = c * (0.86 + 0.14 * smooth(-1.0, 0.2, side))
+            dc.line([p, q], fill=255, width=w)
+            da.line([p, q], fill=int(val * (1 - 0.45 * t)), width=w)
+            dp.line([p, q], fill=tuple(int(v) for v in c), width=w)
+            p = q
+    a_h = np.asarray(alpha.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32) / 255
+    cov = np.asarray(cover.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32) / 255
+    pnt = np.asarray(paint.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.7)), dtype=np.float32)
+    strand = np.clip(pnt / np.maximum(cov, 1e-3)[..., None], 0, 255)
+    # the powder under the hairs: the brow's shape, soft at the top and the head, smoked with warped fBm
+    uu, dd = np.meshgrid(BR_U0 + (np.arange(W) + 0.5) / W * (BR_U1 - BR_U0), BR_V1 - (np.arange(H) + 0.5) / H * (BR_V1 - BR_V0))
+    zc_row = np.array([centre(u)[0] for u in uu[0]])[None, :]
+    r_row = np.array([centre(u)[1] for u in uu[0]])[None, :]
+    sd = (dd - zc_row) / np.maximum(r_row, 1e-3)
+    ubb = uu * K
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    shape = sm(-1.15, -0.8, sd) * sm(1.2, 0.6, sd) * sm(BROW_US[0] - 0.08, BROW_US[0] + 0.25, ubb) * sm(BROW_US[-1] + 0.05, BROW_US[-1] - 0.25, ubb)
+    smoke = _warped_fbm(uu * 3.0, dd * 3.0, seed=111, k=2.0)
+    powder = shape * (0.5 + 0.15 * smoke) * sm(-0.85, -0.55, ubb - 0.12 * np.clip(sd, 0, None) ** 2) * (0.6 + 0.4 * sm(-0.75, -0.3, ubb))
+    grain = 0.85 + 0.15 * _fbm2(np.arange(W)[None, :] / 5.0 + 0 * dd, np.arange(H)[:, None] / 5.0 + 0 * uu, 121, 3)
+    a = np.clip(1 - (1 - np.clip(a_h * 1.6 * grain, 0, 1)) * (1 - powder), 0, 1)
+    POWDER = np.array([104, 62, 38], dtype=np.float32)
+    w_ = np.clip(cov * 2.2, 0, 1)[..., None]
+    col = (POWDER + (strand - POWDER) * w_) / 255
+    img = bpy.data.images.new('brows', W, H, alpha=True)
+    pxl = np.concatenate([col, a[..., None]], axis=2)[::-1]
+    img.pixels.foreach_set(pxl.ravel().astype(np.float32))
+    img.pack()
+    BROW_TEX['img'] = img
+    return img
+
+
+def eye_makeup(head, tree, eyes):
+    """Eyeshadow and lashes for both eyes, on the finished head (tree: its surface after the lids are sculpted).
+    Each is a thin skin of the face itself (a grid of the lid's area, each point cast onto the head and lifted a
+    hair), the shadow carrying the painting from eyeshadow_image and the lashes, a hair above it, the fuzzy
+    fringe from lash_image."""
+    def material(name, image):
+        m = bpy.data.materials.new(name)
+        m.use_nodes = True
+        nt = m.node_tree
+        for n in list(nt.nodes):
+            nt.nodes.remove(n)
+        out = nt.nodes.new('ShaderNodeOutputMaterial')
+        p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        tex = nt.nodes.new('ShaderNodeTexImage')
+        tex.image = image
+        tex.interpolation = 'Cubic'
+        tex.extension = 'EXTEND'
+        nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+        nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
+        p.inputs['Roughness'].default_value = 0.55 if name == 'eyeshadow' else 0.8
+        if name == 'brow paint':
+            p.inputs['Specular IOR Level'].default_value = 0.2     # hair is matte here: a full sheen turned it grey
+        nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+        m.surface_render_method = 'BLENDED'
+        return m
+
+    def fade_by_facing(img, ext, tag):
+        """Thin a painting out where the face turns away from the front. Each patch is laid on by casting
+        straight back from the front, so where the skin turns sideways (the socket's outer wall, the side of the
+        face past the outer corner) one column of the painting is stretched over a wide band of skin, which seen in
+        profile showed as a dark smear under and behind the eye. The painting is shared by both eyes (mirrored), so
+        the facing is measured round the right eye."""
+        if img.get('faced'):
+            return
+        from PIL import Image as PImage
+        ex, ez, s = next(e for e in eyes if e[2] == 1)
+        U0, U1, V0, V1 = ext
+        NX, NY = 128, 56
+        f = np.ones((NY, NX), dtype=np.float32)
+        for j in range(NY):
+            dz = V1 - (j + 0.5) / NY * (V1 - V0)
+            for i in range(NX):
+                u = U0 + (i + 0.5) / NX * (U1 - U0)
+                h = tree.ray_cast(Vector((ex + u * EYE_RX, -50, ez + u * EYE_RX * EYE_TILT + dz)), Vector((0, 1, 0)))
+                fwd = -h[1].y if h[0] is not None else 0.0
+                t = min(1.0, max(0.0, (fwd - 0.4) / 0.3))
+                f[j, i] = t * t * (3 - 2 * t)
+        W, H = img.size
+        fm = np.asarray(PImage.fromarray((f * 255).astype(np.uint8)).resize((W, H), PImage.BILINEAR), dtype=np.float32) / 255
+        px = np.array(img.pixels[:], dtype=np.float32).reshape(H, W, 4)
+        px[..., 3] *= fm[::-1]
+        img.pixels.foreach_set(px.ravel())
+        img.pack()
+        img['faced'] = 1
+
+    shadow_img, lash_img, brow_img = eyeshadow_image(), lash_image(), brow_image()
+    fade_by_facing(shadow_img, (SH_U0, SH_U1, SH_V0, SH_V1), 'shadow')
+    fade_by_facing(lash_img, (SH_U0, SH_U1, SH_V0, SH_V1), 'lash')
+    fade_by_facing(brow_img, (BR_U0, BR_U1, BR_V0, BR_V1), 'brow')
+    shadow_m = material('eyeshadow', shadow_img)
+    lash_m = material('lash paint', lash_img)
+    brow_m = material('brow paint', brow_img)
+
+    def surf(px, pz):
+        h = tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        return h[0].y if h[0] is not None else None
+
+    def patch(name, ex, ez, s, off, m, NU=150, NV=84, ext=None):
+        U0, U1, V0, V1 = ext or (SH_U0, SH_U1, SH_V0, SH_V1)
+        bm = bmesh.new()
+        uvl = bm.loops.layers.uv.new('UVMap')
+        grid = []
+        for j in range(NV + 1):
+            row = []
+            for i in range(NU + 1):
+                u = U0 + (U1 - U0) * i / NU
+                dz = V0 + (V1 - V0) * j / NV
+                px, pz = ex + s * u * EYE_RX, ez + u * EYE_RX * EYE_TILT + dz
+                y = surf(px, pz)
+                row.append(bm.verts.new((px, (y if y is not None else 0.0) - off, pz)))
+            grid.append(row)
+        for j in range(NV):
+            for i in range(NU):
+                vs = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+                f = bm.faces.new(vs if s > 0 else vs[::-1])
+                for lp in f.loops:
+                    k = vs.index(lp.vert)
+                    lp[uvl].uv = ((i + (1 if k in (1, 2) else 0)) / NU, (j + (1 if k in (2, 3) else 0)) / NV)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        me = bpy.data.meshes.new(f'{name} {s}')
+        bm.to_mesh(me)
+        bm.free()
+        for pl in me.polygons:
+            pl.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(f'{name} {s}', me)
+        link(o, head)
+        o.visible_shadow = False
+
+    for ex, ez, s in eyes:
+        patch('Eyeshadow', ex, ez, s, 0.022, shadow_m, NU=90, NV=44)
+        patch('Lashes', ex, ez, s, 0.034, lash_m, NU=110, NV=56)
+        patch('Brow paint', ex, ez, s, 0.02, brow_m, NU=90, NV=32, ext=(BR_U0, BR_U1, BR_V0, BR_V1))
+
+
 def build():
     reset()
     sc = bpy.context.scene
@@ -2086,7 +3623,10 @@ def build():
     mesh_obj('Belt keeper', belt_strip(1.35, 1.75, 0.82, 0.52, nseg=2), M_BELT, body, subdiv=0, solid=0.16)
 
     # ---- neck and head
-    mesh_obj('Neck', loft([(57.0, 1.45, 1.55, 0, 0.55), (51.0, 1.7, 1.75, 0, 0.45)]), M_SKIN, body)
+    # (the neck above the collar is part of the head's sculpt, see head_section; this is only its lower part,
+    # under the collar and the mantle, running on down into the shirt)
+    mesh_obj('Neck', loft([(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (51.0, 2.3, 2.15, 0, 0.2)]),
+             M_SKIN, body)
     head = empty('Head', (0, 0, HEAD_Z), body)
     hb = sculpted_head()
     # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
@@ -2094,20 +3634,20 @@ def build():
     for s in (-1, 1):
         x = s * 0.14 * HEAD_H
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
-    mouth_y = surface_y(hb, 0, 0.258 * HEAD_H)
+    mouth_y = surface_y(hb, 0, MOUTH_Z * HEAD_H)
     head_tree = bvh_of(hb)
-    mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    # (the eyes are set against the head before its lids are sculpted, so the balls follow the plain socket and
+    # the lids then close over their edges)
+    eyes = [(feat[s][0], 0.525 * HEAD_H + EYE_LIFT, s) for s in (-1, 1)]
     for s in (-1, 1):
         x, ey, by = feat[s]
-        ez = 0.525 * HEAD_H
-        # an almond of white set into the socket, the iris in the middle, a dark lash line across the top
-        mesh_obj(f'Eye white {s}', ellipsoid(0.85, 0.2, 0.4, 12, 8), M_SCLERA, head, loc=(x, ey + 0.16, ez), subdiv=0)
-        mesh_obj(f'Iris {s}', ellipsoid(0.4, 0.2, 0.42, 10, 8), M_EYE, head, loc=(x - s * 0.05, ey + 0.02, ez - 0.03), subdiv=0)
-        mesh_obj(f'Lash {s}', ellipsoid(0.95, 0.25, 0.16, 12, 6), M_LASH, head, loc=(x + s * 0.06, ey + 0.02, ez + 0.38), subdiv=0)
-        brow = ellipsoid(0.9, 0.2, 0.15, 12, 6)
-        bmesh.ops.rotate(brow, cent=(0, 0, 0), matrix=Euler((0, -s * 0.1, 0)).to_matrix(), verts=brow.verts)
-        mesh_obj(f'Brow {s}', brow, M_BROW, head, loc=(x + s * 0.05, by + 0.2, 0.645 * HEAD_H), subdiv=0)
-    mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
+        build_eye(head, head_tree, s, x, ey, 0.525 * HEAD_H + EYE_LIFT)
+    sculpt_eyes(hb, eyes)
+    final_tree = bvh_of(hb)
+    mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    eye_makeup(head, final_tree, eyes)
+    # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)
+    mesh_obj('Mouth', ellipsoid(0.66, 0.1, 0.06, 12, 6), M_LIPS, head, loc=(0, mouth_y + 0.1, MOUTH_Z * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
     # side locks framing the face, and the long fall down the back
@@ -2115,6 +3655,9 @@ def build():
     bmesh.ops.translate(cap, vec=(0, 0.06 * HEAD_H, 0.56 * HEAD_H), verts=cap.verts)
     bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.1, 6.4),
                            plane_no=Vector((0, -0.45, -0.89)).normalized(), clear_outer=True)
+    # (and stopped above the jaw: lower down, beside the face, its edges stood out from behind the side locks)
+    bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, 0, 2.2),
+                           plane_no=Vector((0, 0, -1)), clear_outer=True)
     # over the brow the cap lies close to the skull, thinning to nothing at the front hairline, so the front of
     # the head reads as hair growing from the scalp rather than as a cap; the back and the crown keep their volume
     hl_n = Vector((0, -0.45, -0.89)).normalized()
@@ -2155,13 +3698,14 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.62, 1.35, s * 3.3, 0.9), (2.0, 0.6, 1.3, s * 3.45, 1.35),
-                                         (-1.0, 0.6, 1.25, s * 3.65, 1.5), (-2.0, 0.5, 1.0, s * 3.75, 1.6), (-2.6, 0.25, 0.45, s * 3.8, 1.7)]),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.62, 1.5, s * 2.9, 0.35), (4.5, 0.7, 2.05, s * 3.22, 1.35), (2.0, 0.8, 1.75, s * 2.85, 2.45),
+                                         (-1.0, 0.75, 1.7, s * 3.0, 2.55), (-2.0, 0.6, 1.4, s * 3.1, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
     mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.6, 0, 2.1), (0.5, 3.6, 1.8, 0, 2.8),
-                                (-0.4, 3.2, 1.3, 0, 3.0)]), M_HAIR, head)
+                                (-0.4, 3.1, 1.2, 0, 2.95),
+                                (-1.4, 2.3, 0.7, 0, 2.75)]), M_HAIR, head)
     HAIR_PARTS[:] = [head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall']]
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
@@ -2422,6 +3966,25 @@ def build():
     sun = link(bpy.data.objects.new('Sun', sun_data))
     # lit from the upper left and in front, as the painted sprites are (fixed to the camera, not the figure)
     sun.rotation_euler = Vector((0.55, 0.75, -0.62)).to_track_quat('-Z', 'Y').to_euler()
+    # the eyes have a sun of their own, the same light from the same way, whose shadows only the eyes cast: the
+    # lids' shadow from the low sun fell across the white as a hard brown band (the lids are sculpted into the
+    # head, so at this light it read as a stain), and the main sun leaves the eyes alone
+    eyes_ = [o for o in bpy.data.objects if o.name.startswith(('Eye white', 'Iris'))]
+    if eyes_:
+        only = bpy.data.collections.new('eyes lit')
+        for o in eyes_:
+            only.objects.link(o)
+        skip = bpy.data.collections.new('eyes not lit')
+        for o in eyes_:
+            skip.objects.link(o)
+        for co in skip.collection_objects:
+            co.light_linking.link_state = 'EXCLUDE'
+        sun.light_linking.receiver_collection = skip
+        esun = link(bpy.data.objects.new('Eye sun', sun_data.copy()))
+        esun.data.name = 'Eye sun'
+        esun.rotation_euler = sun.rotation_euler.copy()
+        esun.light_linking.receiver_collection = only
+        esun.light_linking.blocker_collection = only
     world = bpy.data.worlds.new('World')
     world.use_nodes = True
     bg = world.node_tree.nodes.get('Background')
@@ -2716,7 +4279,11 @@ def to_pixels(ch):
         sel = solid & (mid == m)
         if not sel.any():
             continue
-        if d['flat'] is not None:
+        if d['flat'] == 'painted':
+            # the iris: its tone is the one painted on it (the detail pass carries it), kept off the two ends of
+            # the ramp so the two or three pixels of iris stay a readable green
+            tone = np.clip(np.rint(det[sel] * 4), 1, 3).astype(int)
+        elif d['flat'] is not None:
             tone = np.full(sel.sum(), d['flat'])
         else:
             L = light[sel] * (1.0 + (det[sel] - 0.5) * 2 * d['detail'])
@@ -2765,7 +4332,8 @@ def to_pixels(ch):
 
 def sprite_mode(on):
     """At sprite size the hair's strand relief is finer than a pixel and only adds speckle; the painted strands
-    (the detail pass) carry it there instead, so the relief is turned down for the sheet."""
+    (the detail pass) carry it there instead, so the relief is turned down for the sheet; the iris is drawn larger
+    (see below)."""
     m = bpy.data.materials.get('hair')
     nt = m.node_tree
     for n in nt.nodes:
@@ -2775,13 +4343,27 @@ def sprite_mode(on):
     out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
     nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
     # the mantle's wool and the brooch's gold, likewise: their close-up surfaces are for the 3D view only
-    for name in ('mantle', 'clasp', 'boots', 'boot cuff', 'trousers', 'knee patch'):
+    for name in ('mantle', 'clasp', 'boots', 'boot cuff', 'trousers', 'knee patch', 'skin'):
         nt = bpy.data.materials[name].node_tree
         out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
         nt.links.new(nt.nodes['sprite bsdf' if on else 'close bsdf'].outputs['BSDF'], out.inputs['Surface'])
+    # the iris is life-size, a pixel and a bit across in the sheet, and in the 3/4 views it fell between pixel
+    # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
         if o.name.startswith('Wool fuzz'):
             o.hide_render = on
+        if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint')):
+            o.hide_render = on         # (finer than a sprite pixel: nothing to draw there)
+            o.hide_viewport = on
+        if o.name.startswith('Brow tube'):
+            o.hide_render = not on
+            o.hide_viewport = not on
+        if o.name.startswith('Iris'):
+            o.scale = (1.11,) * 3 if on else (1.0,) * 3
+            o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
+        if o.name.startswith('Eye white') and o.data.shape_keys:
+            o.data.shape_keys.key_blocks['tuck'].value = 0.0 if on else 1.0
+            o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
 
 
 def render_sheet(out_png, tmp):
