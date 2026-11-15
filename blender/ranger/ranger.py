@@ -1116,25 +1116,38 @@ def _traced(table, u):
     return max(0.0, v)
 
 
-EYE_INNER_CUSP = 2.4   # how sharply the lids close into the inner corner: 1 as traced, below 1 blunter, above 1 more acute
+EYE_INNER_CUSP = 2.2   # how sharply the lids close into the inner corner: 1 as traced, below 1 blunter, above 1 more acute
 
 
 def _cusp(u):
-    """Near the inner corner the traced heights are scaled by a power of the distance from it, so the lids meet in
-    a finer point (EYE_INNER_CUSP above 1) or a blunter, rounder end (below 1); the rest of the line is untouched."""
+    """The lids' bend toward the inner corner: the traced heights are scaled by a power of the distance from that
+    corner taken over the whole width (not only near it), so both curves lean into it and meet in a finer point
+    (EYE_INNER_CUSP above 1) or a blunter end (below 1), and each lid is then scaled back to its traced height at
+    its peak, so the eye keeps its size and the whole shape bends with the corner rather than kinking near it."""
     t = (max(-1.0, min(1.0, u)) + 1) / 2
-    return (t / 0.16) ** (0.5 * (EYE_INNER_CUSP - 1)) if 0 < t < 0.16 else (0.0 if t <= 0 else 1.0)
+    return t ** (0.35 * (EYE_INNER_CUSP - 1)) if t > 0 else (1.0 if EYE_INNER_CUSP <= 1 else 0.0)
+
+
+_CUSP_NORM = {}
+
+
+def _cusp_norm(table):
+    key = (id(table), EYE_INNER_CUSP)
+    if key not in _CUSP_NORM:
+        us = [i / 400 * 2 - 1 for i in range(401)]
+        _CUSP_NORM[key] = max(_traced(table, u) for u in us) / max(_traced(table, u) * _cusp(u) for u in us)
+    return _CUSP_NORM[key]
 
 
 def lid_top(u):
     """How far the upper lid's edge stands above the line between the corners at u (-1 inner corner .. 1 outer
     corner): the traced LID_TOP, sharpened at the inner corner (_cusp)."""
-    return EYE_RX * EYE_OPEN * _traced(LID_TOP, u) * _cusp(u)
+    return EYE_RX * EYE_OPEN * _traced(LID_TOP, u) * _cusp(u) * _cusp_norm(LID_TOP)
 
 
 def lid_bottom(u):
     """The lower lid's edge below the line between the corners: the traced LID_BOTTOM, sharpened like the top."""
-    return EYE_RX * EYE_OPEN * _traced(LID_BOTTOM, u) * _cusp(u)
+    return EYE_RX * EYE_OPEN * _traced(LID_BOTTOM, u) * _cusp(u) * _cusp_norm(LID_BOTTOM)
 
 
 def almond(rx, ry, rz, s, seg=192, rings=128):
