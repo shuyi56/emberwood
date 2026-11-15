@@ -489,7 +489,8 @@ def main():
     bake_hands()
     bake_gold()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
-    for name, ratio in (('Hair', 0.11),):
+    # and the head is cut very fine round the eyes for the sprites' sculpted lids: the model needs far less
+    for name, ratio in (('Hair', 0.11), ('Head shape', 0.4)):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')
         d.ratio = ratio
     # the solid brows are for the sprites only: the model has the painted ones
