@@ -95,7 +95,7 @@ if args.game:
     cam.location = (0, -dist * math.cos(pitch), aim + dist * math.sin(pitch))
     cam.rotation_euler = (math.pi / 2 - pitch, 0, 0)
     tiles = []
-    for name, fov, rx, ry in (('wide', 38, 760, 600), ('head', 9, 600, 600)):
+    for name, fov, rx, ry in (('wide', 38, 760, 600), ('head', 5.5, 600, 600)):
         cam.data.angle = math.radians(fov)
         if name == 'head':
             # aim at the head from the same spot
