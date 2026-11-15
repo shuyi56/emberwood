@@ -579,6 +579,8 @@ def make_material(mid):
         ao = nt.nodes.new('ShaderNodeAmbientOcclusion')
         ao.inputs['Distance'].default_value = 1.6
         ao.samples = 8
+        # (each piece shades only itself: the fringe darkened the side hair under its edge into a crease)
+        ao.only_local = True
         aok = nt.nodes.new('ShaderNodeMapRange')
         aok.inputs['To Min'].default_value = 0.45
         nt.links.new(ao.outputs['AO'], aok.inputs['Value'])
@@ -1214,7 +1216,7 @@ def drape_fall(dg):
             x = ue * width(z) * (1.0 - 0.12 * max(0.0, (vs - 0.75) / 0.25) ** 2 * abs(u))
             # thick down the middle, thin to soft edges; thinner toward the end, and rounded off at the tip
             # (never thinner than a few voxels: a sheet thinner than the remesh breaks up into rods and tatters)
-            grow = min(1.0, (z_top - z) / 3.0)
+            grow = min(1.0, (z_top - z) / 5.0)
             grow = grow * grow * (3 - 2 * grow)
             t_ = (0.95 - 0.3 * vs) * max(0.0, 1 - u * u) ** (0.5 if z < -0.5 else 1.4) * (1.0 if v < 0.92 else math.cos((v - 0.92) / 0.08 * math.pi / 2) ** 0.5)
             # (the tips are the thinnest part: a lock ends in a wisp, not a rounded slab)
@@ -1269,6 +1271,15 @@ def drape_fall(dg):
             slope = (b[1] - a[1]) / (a[2] - b[2]) if a[2] > b[2] else 0.0
             for k in range(hull[-1] + 1, len(pts)):
                 pts[k][1] = max(pts[k][1], b[1] + slope * (b[2] - pts[k][2]))
+        # where the hanging line leaves the round of the head it turned a corner (a bump in profile, high on the
+        # back of the head): the outline there is eased round in a curve, a hand's breadth either way
+        for _ in range(3):
+            ys = [q[1] for q in pts]
+            for k, q in enumerate(pts):
+                fe = min(1.0, max(0.0, (q[2] - 0.5) / 1.5), max(0.0, (7.4 - q[2]) / 2.4))
+                if fe > 0.0 and k >= 8:
+                    w_ = ys[k - 8:k + 9]
+                    q[1] = lerp(q[1], max(q[4] + 0.15, sum(w_) / len(w_)), fe)
         col_out, col_in = [], []
         for j, (x, y, z, t, sup) in enumerate(pts):
             v = j / (NZ - 1)
@@ -1380,7 +1391,7 @@ def fuse_hair(head, names, voxel=0.065):
                                         use_x=True, use_y=True, use_z=False, preserve_volume=True)
     # the side locks run into the hair beside them: the hollow where they meet is relaxed out, so they read as
     # the front of the side hair rather than a separate piece laid on it
-    sides = [v for v in bm.verts if -3.5 < v.co.z < 7.0 and abs(v.co.x) > 1.6 and v.co.y < 5.0]
+    sides = [v for v in bm.verts if -3.5 < v.co.z < 8.2 and abs(v.co.x) > 1.6 and v.co.y < 5.0]
     for k_ in range(30):
         bmesh.ops.smooth_laplacian_vert(bm, verts=sides, lambda_factor=0.7, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=k_ % 3 == 2, preserve_volume=True)
@@ -1481,8 +1492,13 @@ def curtain_bang(tree, s):
             tuck = min(1.0, t / 0.35)
             tuck = tuck * tuck * (3 - 2 * tuck)     # (the roots surface gradually from under the hair)
             rr = rad * (0.6 + 0.4 * tuck) * max(0.0, 1 - t) ** 0.6 + 0.012
+            # (the strands that sweep round onto the side thin out and sink into the side hair as they go, so the
+            # fringe runs on into it rather than lying on it as a layer with a step along its edge)
+            sink = min(1.0, max(0.0, (f - 0.4) / 0.5)) * max(0.0, (t - 0.2) / 0.8) ** 1.1
+            rr *= 1.0 - 0.6 * sink
             # (the tips settle onto the skin; the root starts under the cap)
-            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) - 0.45 * (1 - tuck)))
+            cs.append(o + d * (r + 0.04 + rr * (1 - 0.6 * t) + layer * tuck * (1 - t * t) * (1 - sink)
+                               - 0.45 * (1 - tuck) - 0.4 * sink))
             ds.append(d)
             rrs.append(rr)
             ts.append(t)
@@ -2372,7 +2388,7 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.4, s * 2.9, 0.5), (4.5, 0.66, 1.55, s * 3.26, 1.35), (2.0, 0.8, 1.75, s * 2.85, 2.45),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.62, 1.5, s * 2.9, 0.35), (4.5, 0.7, 2.05, s * 3.22, 1.35), (2.0, 0.8, 1.75, s * 2.85, 2.45),
                                          (-1.0, 0.75, 1.7, s * 3.0, 2.55), (-2.0, 0.6, 1.4, s * 3.1, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
