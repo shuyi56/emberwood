@@ -678,8 +678,10 @@ def box(sx, sy, sz):
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
-UPPER, FORE = 11.0, 8.6
+UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
 LEG_X, SH_X = 3.3, 6.1
+# the trunk's two pivots for the walk: the pelvis turns about the hip joints, the chest about the waist above it
+CHEST_Z, NECK_Z = 41.0, 51.0
 # the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
 # either way, in radians (the world model takes a longer stride: see export_glb.py)
 GAIT, ARM_SWING = 1.0, 0.4
@@ -1550,6 +1552,10 @@ def build_rig(body):
     vl.objects.active = arm
     bpy.ops.object.mode_set(mode='EDIT')
     eb = arm_data.edit_bones
+    for name, h, t in (('Pelvis', (0, 0, HIP_Z), (0, 0, CHEST_Z - 1.0)), ('Chest', (0, 0, CHEST_Z), (0, 0, NECK_Z)),
+                       ('Neck', (0, 0, NECK_Z), (0, 0, HEAD_Z))):
+        b = eb.new(name)
+        b.head, b.tail = h, t
     for side, s in (('R', 1), ('L', -1)):
         lx, ax = -s * LEG_X, -s * SH_X
         segs = [('Thigh', (lx, 0, HIP_Z), (lx, 0, HIP_Z - THIGH)),
@@ -1564,15 +1570,44 @@ def build_rig(body):
     bpy.ops.object.mode_set(mode='OBJECT')
 
 
-PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist'}
+PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
+            'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Neck': 'Head'}
+
+
+def trunk_weights(co):
+    """The trunk's bones for a point of the torso: the pelvis below the waist, the chest above it (blended over
+    the waist, so the body twists there in one piece), and the neck following the head at the top."""
+    chest = 1.0 - _smooth(CHEST_Z + 2.5, CHEST_Z - 5.5, co.z)
+    neck = 1.0 - _smooth(NECK_Z + 4.5, NECK_Z + 0.5, co.z)
+    return {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+
+
+def skin_trunk(body):
+    """Every mesh carried by the body (the shirt, jerkin, belt, mantle, collar, neck...) is handed over to the
+    rig's trunk bones, so the hips and shoulders can turn against each other through the walk."""
+    for o in [c for c in body.children if c.type == 'MESH']:
+        mw = o.matrix_world.copy()
+        o.parent = None
+        o.matrix_world = mw
+        groups = {}
+        for v in o.data.vertices:
+            for bone, w in trunk_weights(mw @ v.co).items():
+                if w <= 1e-4:
+                    continue
+                if bone not in groups:
+                    groups[bone] = o.vertex_groups.new(name=bone)
+                groups[bone].add([v.index], w, 'REPLACE')
+        m = o.modifiers.new('rig', 'ARMATURE')
+        m.object = RIG['arm']
+        o.modifiers.move(len(o.modifiers) - 1, 0)    # (deformed first, before its thickness and smoothing)
 
 
 def finish_rig():
     arm = RIG['arm']
     bpy.context.view_layer.update()
     for pb in arm.pose.bones:
-        seg, side = pb.name.split('.')
-        target = bpy.data.objects[f'{PIVOT_OF[seg]}.{side}']
+        seg, _, side = pb.name.partition('.')
+        target = bpy.data.objects[f'{PIVOT_OF[seg]}.{side}' if side else PIVOT_OF[seg]]
         c = pb.constraints.new('CHILD_OF')
         c.target = target
         # (taken in the rest pose: the bone then moves exactly as its pivot moves away from rest)
@@ -1682,7 +1717,11 @@ def build():
     reset()
     sc = bpy.context.scene
     root = empty('Ranger', (0, 0, 0))
-    body = empty('Body', (0, 0, 0), root)   # carries the walk's bob
+    body = empty('Body', (0, 0, 0), root)   # carries the walk's bob and sway
+    # (the pelvis and chest turn against each other through the walk: the legs hang from the one, the arms from
+    # the other, and the torso's meshes are skinned across both; see skin_trunk)
+    pelvis = empty('Pelvis', (0, 0, HIP_Z), body)
+    chest = empty('Chest', (0, 0, CHEST_Z), body)
 
     # ---- torso: the body in its shirt, then a fitted jerkin over it: shaped to the bust, drawn in at the waist,
     # following the hips and flaring a little below them into a short skirt
@@ -1939,7 +1978,7 @@ def build():
     ARM = ARM_PROFILE
     for side, s in (('R', 1), ('L', -1)):
         x = -s * SH_X   # the figure's right is -X (she faces -Y)
-        sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z), body)
+        sh = empty(f'Shoulder.{side}', (x, 0.2, SH_Z - CHEST_Z), chest)
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
         w = arm_weights(side)
@@ -1969,7 +2008,7 @@ def build():
            (-THIGH - SHIN, 1.35)]
     for side, s in (('R', 1), ('L', -1)):
         x = -s * LEG_X
-        hip = empty(f'Hip.{side}', (x, 0, HIP_Z), body)
+        hip = empty(f'Hip.{side}', (x, 0, 0), pelvis)
         kn = empty(f'Knee.{side}', (0, 0, -THIGH), hip)
         an = empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
         w = leg_weights(side)
@@ -1999,6 +2038,7 @@ def build():
                  M_BOOTS, loc=(x, 0, az), skin=w)
         mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, loc=(x, 0, az),
                  subdiv=1, skin=w)
+    skin_trunk(body)
     finish_rig()
 
     # ---- camera and light
@@ -2107,13 +2147,20 @@ def leg_ik(hip_z, fwd, foot_z):
 # foot's pitch, toes up positive (up at the heel strike, flat through the stance, rolling up onto the toes to push
 # off, and lifted again through the swing so the toes clear the ground).
 GAIT_HIP = [(0.0, 22), (0.15, 17), (0.35, 0), (0.52, -13), (0.62, -8), (0.71, 10), (0.81, 25), (0.9, 27)]
-GAIT_KNEE = [(0.0, 3), (0.12, 15), (0.3, 5), (0.45, 7), (0.6, 30), (0.7, 56), (0.8, 55), (0.9, 22), (0.97, 4)]
-GAIT_FOOT = [(0.0, 14), (0.08, 0), (0.42, 0), (0.52, -14), (0.61, -32), (0.7, -12), (0.82, 6), (0.94, 12)]
+GAIT_KNEE = [(0.0, 4), (0.12, 19), (0.3, 6), (0.45, 9), (0.6, 38), (0.7, 63), (0.8, 58), (0.9, 25), (0.97, 5)]
+GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -34), (0.7, -14), (0.82, 5), (0.94, 13)]
 # The arms swing against the legs: each arm is furthest forward a little after the leg on its own side is furthest
-# back, and the elbow folds as the arm swings forward and opens as it swings back, lagging behind the shoulder, so
-# the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum
+# back. The elbow is never straight: it opens to a soft bend as the arm swings back and folds to about 60 degrees as
+# it swings forward, lagging behind the shoulder, so the forearm follows through instead of the arm swinging stiff
+# from the shoulder like a pendulum; and in front the forearm comes across toward the middle of the body.
 ARM_LAG, ELBOW_LAG = 0.05, 0.08
 STANCE = 0.62
+# The trunk (in radians, and design pixels for the sway): the pelvis turns about its vertical axis with the legs, the
+# hip of the leg swinging through carried forward with it; it lists, the hip over the standing leg high and the
+# other dropping; and the body sways over whichever foot bears the weight. The chest turns the other way, with the
+# arms, and tilts against the pelvis, so the shoulders counter the hips; the head holds steady over it all.
+PELVIS_TURN, PELVIS_LIST, CHEST_TURN, CHEST_TILT, SWAY, LEAN = 0.2, 0.075, 1.0, 0.6, 0.85, 0.035
+FOOT_X = 0.85          # the feet are set a little inside the hips: a walk is narrower than a stance
 
 
 def cyclic(keys, t):
@@ -2152,19 +2199,27 @@ def foot_lift(pitch):
     return 3.0 * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
 
 
+def pelvis_list(t):
+    """The pelvis's tilt about the forward axis at walk phase t (of the right leg): positive lifts the right hip.
+    It is highest over the standing leg early in its single support, as the other hip drops off it."""
+    return PELVIS_LIST * math.sin(2 * math.pi * (t + 0.05))
+
+
 def walk_drop(t):
     """How far the hips sit below their standing height at walk phase t (t of the right leg): whichever foot bears
     the weight stays on the ground, so the body rises over the straight leg in mid-stance and dips as the legs
-    spread. The swing leg's foot is wherever its joints put it, lifted clear of the ground."""
+    spread. The swing leg's foot is wherever its joints put it, lifted clear of the ground. (The standing leg's
+    hip is raised by the pelvis's list, so the body sits that much lower.)"""
     best = None
-    for tl in (t, t + 0.5):
+    lst = pelvis_list(t)
+    for tl, s in ((t, 1), (t + 0.5, -1)):
         tl %= 1.0
         if tl >= STANCE:
             continue
         th, kb, pitch = gait_leg(tl)
         down = leg_fk(th, kb)[1]
         need = HIP_Z - ANKLE_Z - foot_lift(pitch)
-        d = need - down
+        d = need - down + s * LEG_X * math.sin(lst)
         best = d if best is None else min(best, d)     # (the higher: no foot sinks into the ground)
     return best if best is not None else 0.0
 
@@ -2176,46 +2231,63 @@ def pose(col):
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
     # (the right leg's point in its cycle: its heel strikes when its foot is furthest forward)
     tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
+    snap = lambda v: round(v * RES) / RES          # whole sheet pixels, so the face never shifts by a fraction
     if walking:
         bob = walk_drop(tr)
+        thr, thl = gait_leg(tr)[0], gait_leg(tr + 0.5)[0]
+        turn = PELVIS_TURN * (thr - thl)      # the hip of the forward leg carried forward
+        lst = pelvis_list(tr)
+        sway = -SWAY * math.sin(2 * math.pi * (tr - 0.06))   # over the right foot in its mid-stance (-X is her right)
     else:
         bob = 1.0 if col == 1 else 0.0
-    bob = round(bob * RES) / RES          # whole sheet pixels, so the face never shifts by a fraction
-    ob['Body'].location = (0, 0, -bob)
-    hip_z = HIP_Z - bob
+        turn = lst = sway = 0.0
+    bob, sway = snap(bob), snap(sway)
+    ob['Body'].location = (sway, 0, -bob)
     ob['Body'].rotation_euler = (0, 0, 0)
+    ob['Pelvis'].rotation_euler = (0, lst, turn)
+    ob['Chest'].rotation_euler = (LEAN if walking else 0.0, -CHEST_TILT * lst, -CHEST_TURN * turn)
+    hip_z = HIP_Z - bob
 
     for side, s in (('R', 1), ('L', -1)):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
-        out, turn = 0.0, 0.0
+        out, toe = 0.0, 0.0
+        roll = 0.0
         if walking:
             t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
             th, kb, pitch = gait_leg(t)
+            # the leg leans in under the body so the foot keeps to its track, whichever way the body has swayed and
+            # the pelvis tilted (the hip's own roll is what is left after the pelvis's)
+            down = leg_fk(th, kb)[1]
+            hip_x = sway - s * LEG_X * math.cos(lst)
+            roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * FOOT_X) / down))) - lst
         else:
             # hip-width stance: weight on the right leg, under the body; the left foot eased forward, out, and turned out
             fwd = -1.0 if s > 0 else 4.6
             out = 0.0 if s > 0 else 0.6
-            turn = 0.0 if s > 0 else 0.35
+            toe = 0.0 if s > 0 else 0.35
             th, shn = leg_ik(hip_z, fwd, ANKLE_Z)
             kb, pitch = th - shn, 0.0
-        hip.location = (-s * (LEG_X + out), 0, HIP_Z)
-        hip.rotation_euler = (-th, 0, 0)
+        hip.location = (-s * (LEG_X + out), 0, 0)
+        hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
-        # (the foot is held at its pitch from level: the ankle takes out the shin's lean)
-        an.rotation_euler = (th - kb + pitch, 0, -s * turn)
+        # (the foot is held at its pitch from level: the ankle takes out the shin's lean, and the foot is turned
+        # back against the pelvis's turn, so it points down the line of the walk)
+        an.rotation_euler = (th - kb + pitch, 0, -s * toe - turn)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
-            a = ARM_SWING * (0.12 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
+            a = ARM_SWING * (0.15 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
             fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
-            bend = 0.22 + 0.62 * fold ** 1.4
-            flick = 0.06 + 0.08 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
+            bend = 0.3 + 0.85 * fold
+            flick = 0.06 + 0.1 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
+            across = 0.12 * max(0.0, a)
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
             flick = 0.1
-        sh.rotation_euler = (-a, s * 0.17, 0)   # held a little off the body, so the waist shows
+            across = 0.0
+        sh.rotation_euler = (-a, s * 0.17, s * across)   # held a little off the body, so the waist shows
         el.rotation_euler = (-bend, 0, 0)
         wr.rotation_euler = (flick, 0, 0)
 
