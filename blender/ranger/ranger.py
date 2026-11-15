@@ -1758,6 +1758,51 @@ def build_eye(head, head_tree, s, x, ey, ez):
     mesh_obj(f'Brow {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
 
 
+def _perlin2(x, y, seed=0):
+    """Gradient (Perlin) noise in 2-D, about -1..1, vectorised over numpy arrays: a random unit gradient at each
+    lattice point, dotted with the offset to it and blended with the quintic fade 6t^5 - 15t^4 + 10t^3 (Perlin's
+    improved noise, 2002). Unlike value noise it has no blocky lattice artefacts and its features are all one size,
+    which is what fBm and domain warping need."""
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    xi, yi = np.floor(x).astype(np.int64), np.floor(y).astype(np.int64)
+    xf, yf = x - xi, y - yi
+
+    def grad(ix, iy):
+        h = (ix * 374761393 + iy * 668265263 + seed * 1442695041) & 0xFFFFFFFF
+        h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+        a = (h & 0xFFFF) / 65536.0 * 2 * np.pi
+        return np.cos(a), np.sin(a)
+
+    def fade(t):
+        return t * t * t * (t * (t * 6 - 15) + 10)
+    n = []
+    for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+        gx, gy = grad(xi + dx, yi + dy)
+        n.append(gx * (xf - dx) + gy * (yf - dy))
+    u, v = fade(xf), fade(yf)
+    return 1.414 * ((n[0] * (1 - u) + n[1] * u) * (1 - v) + (n[2] * (1 - u) + n[3] * u) * v)
+
+
+def _fbm2(x, y, seed=0, octaves=5, lac=2.0, gain=0.5):
+    """Fractal Brownian motion: octaves of gradient noise, each at twice the frequency and half the amplitude."""
+    tot, amp, norm = 0.0, 1.0, 0.0
+    for o in range(octaves):
+        tot = tot + amp * _perlin2(x * lac ** o, y * lac ** o, seed + 17 * o)
+        norm += amp
+        amp *= gain
+    return tot / norm
+
+
+def _warped_fbm(x, y, seed=0, k=3.0):
+    """Domain-warped fBm (Quilez, "Domain warping"): fBm sampled at a point pushed about by two more fBm fields,
+    f(p + k q(p)), q = (fbm(p), fbm(p + offset)). The warp drags the noise into the swirled, filamentary shapes of
+    smoke instead of the even blobs of plain fBm."""
+    qx = _fbm2(x, y, seed + 1, 4)
+    qy = _fbm2(x + 5.2, y + 1.3, seed + 2, 4)
+    return _fbm2(x + k * qx, y + k * qy, seed + 3, 5)
+
+
 SHADOW_TEX = {}
 SH_U0, SH_U1, SH_V0, SH_V1 = -1.75, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
 
@@ -1787,11 +1832,11 @@ def eyeshadow_image():
     # the deeper colour: smoked along the lash line and into the outer V (a wedge opening up and out from the corner)
     deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
     vwedge = sm(0.55, 1.05, uu) * (1 - sm(0.3 * tall, 1.1 * tall, np.abs(dd - (T + 0.07 + 0.2 * np.maximum(0, uu - 0.9)))))
-    deep = np.maximum(deep * 0.9, vwedge * sm(1.5, 0.95, uu))
+    deep = np.maximum(deep * 0.8, 0.6 * vwedge * sm(1.5, 0.95, uu))
     base = np.array([118, 88, 100], dtype=np.float32)
-    dark = np.array([50, 40, 52], dtype=np.float32)
+    dark = np.array([78, 62, 76], dtype=np.float32)            # (a soft charcoal-mauve: the corners deepen the tone, never to near-black)
     col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
-    a = 0.8 * lid * across + 0.2 * deep * lid * across
+    a = 0.8 * lid * across + 0.1 * deep * lid * across
     # under the lower lashes, outer half only
     low = sm(-0.01, 0.015, below) * (1 - sm(0.06, 0.3, below)) * sm(-1.0, -0.5, uu) * sm(1.35, 1.0, uu)
     col = col + (np.array([128, 96, 112], dtype=np.float32) - col) * low[..., None]
@@ -1799,16 +1844,17 @@ def eyeshadow_image():
     # the hollow beside the nose, where the lid meets the bridge: the inner corner's own soft shade
     hollow = np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
     col = col + (base - col) * np.clip(hollow, 0, 1)[..., None] * (1 - low[..., None]) * 0.6
-    a = np.maximum(a, 0.4 * hollow)
+    a = np.maximum(a, 0.2 * hollow)
+    # the far ends, past each corner, thin out rather than pooling into dark patches
+    a *= 1 - 0.45 * sm(0.85, 1.35, uu) - 0.4 * sm(-0.85, -1.35, uu)
     a *= sm(SH_V0, SH_V0 + 0.15, dd) * sm(SH_V1, SH_V1 - 0.15, dd) * sm(SH_U0, SH_U0 + 0.2, uu) * sm(SH_U1, SH_U1 - 0.2, uu)   # (no hard edge at the patch's border)
     # nothing inside the opening itself
     a *= 1 - ((above < 0) & (below < 0) & (np.abs(uu) < 1.0))
     rgb = np.array([_srgb_lin(c / 255) for c in col.reshape(-1, 3)], dtype=np.float32).reshape(H, W, 3) if False else col / 255
-    # smoke: a slow cloud of noise in the opacity, so the wash drifts and thins unevenly instead of grading smoothly
-    from PIL import Image
-    r = np.random.default_rng(9)
-    cloud = sum(0.5 ** o * np.asarray(Image.fromarray((r.random((6 * 2 ** o, 9 * 2 ** o)) * 255).astype(np.uint8)).resize((W, H), Image.BICUBIC), dtype=np.float32) / 255 for o in range(3)) / 1.75
-    a = a * (0.8 + 0.5 * cloud)
+    # smoke: domain-warped gradient fBm in the opacity (see _warped_fbm), so the wash drifts and thins in soft,
+    # swirled wisps instead of grading smoothly or breaking into even blobs
+    smoke = _warped_fbm(uu * 2.2, dd * 2.6, seed=9, k=2.5)
+    a = a * np.clip(0.95 + 0.6 * smoke, 0.55, 1.3)
     img = bpy.data.images.new('eyeshadow', W, H, alpha=True)
     px = np.concatenate([rgb, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
     img.pixels.foreach_set(px.ravel().astype(np.float32))
@@ -1834,63 +1880,84 @@ def lash_image():
     W, H, SS = 1024, 600, 2
     rng = np.random.default_rng(5)
 
-    def noise1(n, scale, seed):
-        g = np.random.default_rng(seed).uniform(-1, 1, int(n * scale) + 3)
-        xs = np.arange(n) * scale
-        i = xs.astype(int)
-        t = xs - i
-        t = t * t * (3 - 2 * t)
-        return g[i] * (1 - t) + g[i + 1] * t
-
-    def fbm1(n, seed, base=0.012):
-        return sum(0.5 ** o * noise1(n, base * 2 ** o, seed + o) for o in range(4)) / 1.875
-
     def px(u, dz):
         return ((u - SH_U0) / (SH_U1 - SH_U0) * W * SS, (SH_V1 - dz) / (SH_V1 - SH_V0) * H * SS)
 
-    layer = Image.new('L', (W * SS, H * SS), 0)
+    layer = Image.new('L', (W * SS, H * SS), 0)          # opacity of the strands
     dr = ImageDraw.Draw(layer)
+    cover = Image.new('L', (W * SS, H * SS), 0)          # where a strand is, at full value (to unpremultiply the colour)
+    dc = ImageDraw.Draw(cover)
+    paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))   # each strand's own colour along its length
+    dp = ImageDraw.Draw(paint)
     fuzz = Image.new('L', (W * SS, H * SS), 0)
     fd = ImageDraw.Draw(fuzz)
+    ROOT = np.array([16, 10, 11], dtype=np.float32)      # the lash at the lid: near-black
+    TIP = np.array([58, 40, 34], dtype=np.float32)       # toward the tip it thins and lets light through: a warm brown
+    SHEEN = np.array([84, 72, 70], dtype=np.float32)  # the soft highlight where the curve faces the light
 
-    def stroke(d, u0, z0, ang, length, curl, wid, top, val, steps=14):
+    def stroke(u0, z0, ang, length, curl, wid, top, val, steps=14, tone=0.0, shade=True, d=None):
         """One tapering curved stroke: starts at (u0, z0), leaves at ang off straight up (down for a lower
-        lash; positive leans toward the outer corner), curls back toward upright by `curl`."""
+        lash; positive leans toward the outer corner), curls back toward upright by `curl`, and is nudged along
+        its length by curl noise (the curl of a gradient-noise potential: a divergence-free flow, so neighbouring
+        strands bend together without bunching or crossing). Shaded root to tip, with a sheen part-way along."""
         sign = 1.0 if top else -1.0
         u, z = u0, z0
         p = px(u, z)
         for k in range(steps):
             t = (k + 1) / steps
             a = ang - curl * t if top else ang + 0.25 * curl * t
-            u += math.sin(a) * length / steps
-            z += sign * math.cos(a) * length / steps
+            e = 0.01
+            pu = (_perlin2((u) * 7, (z + e) * 7, 77) - _perlin2(u * 7, (z - e) * 7, 77)) / (2 * e)
+            pz = -(_perlin2((u + e) * 7, z * 7, 77) - _perlin2((u - e) * 7, z * 7, 77)) / (2 * e)
+            du = math.sin(a) + 0.012 * float(pu) * t
+            dz_ = sign * math.cos(a) + 0.012 * float(pz) * t
+            n_ = math.hypot(du, dz_) or 1.0
+            u += du / n_ * length / steps
+            z += dz_ / n_ * length / steps
             q = px(u, z)
             w = max(1, int(wid * (1 - 0.82 * t) * SS))
-            d.line([p, q], fill=val, width=w)
+            (d or dr).line([p, q], fill=val, width=w)
+            if shade:
+                c = ROOT + (TIP - ROOT) * min(1.0, (t ** 1.8) * (0.7 + 0.5 * tone))
+                c = c + (SHEEN - c) * 0.3 * math.exp(-((t - 0.42) / 0.13) ** 2) * (0.5 + 0.5 * tone)
+                dc.line([p, q], fill=255, width=w)
+                dp.line([p, q], fill=tuple(int(v) for v in c), width=w)
             p = q
 
-    N = 4000
-    ufine = np.linspace(-1.2, 1.4, N)
-    len_n = fbm1(N, 21, 0.02)
-    lean_n = fbm1(N, 31, 0.015)
-    clump = noise1(N, 0.05, 41)                         # slow: which strands lean together
+    # the roots: blue-noise positions along each lid (1-D Poisson-disk sampling by dart throwing, Bridson-style:
+    # no two closer than a minimum spacing), so the lashes are evenly irregular instead of clumping and gapping at
+    # random; then gradient-noise fBm along the lid sets each one's length and lean, and a slower one gathers
+    # neighbours into clumps that lean together
+    def poisson1(n, lo, hi, seed):
+        r_ = np.random.default_rng(seed)
+        dmin = (hi - lo) / n * 0.6
+        pts_, tries = [], 0
+        while len(pts_) < n and tries < n * 60:
+            c_ = r_.uniform(lo, hi)
+            tries += 1
+            if all(abs(c_ - q_) >= dmin for q_ in pts_):
+                pts_.append(c_)
+        return sorted(pts_)
     for top, count in ((True, 110), (False, 55)):
-        for _ in range(count):
-            f = rng.random()
-            u0 = (-0.88 + 1.95 * f) if top else (-0.3 + 1.35 * f)
-            k = int((u0 - ufine[0]) / (ufine[-1] - ufine[0]) * (N - 1))
+        roots = poisson1(count, -0.88, 1.07, 3) if top else poisson1(count, -0.3, 1.05, 4)
+        for u0 in roots:
             edge = lid_top(u0) if top else -lid_bottom(u0)
             outer = smooth(-0.9, 1.0, u0)
-            length = ((0.07 + 0.12 * outer ** 1.2 - 0.05 * smooth(0.95, 1.1, u0)) * (1 + 0.3 * len_n[k]) * (0.8 + 0.4 * rng.random())) * (1.0 if top else 0.45)
-            lean = (-0.05 + 0.85 * outer ** 1.3 + 0.28 * lean_n[k] + 0.22 * clump[k]) + 0.12 * (rng.random() - 0.5)
-            stroke(dr, u0, edge - (0.005 if top else -0.005), lean, length, 0.12 + 0.12 * rng.random(), 0.0075 / (SH_U1 - SH_U0) * W if top else 0.005 / (SH_U1 - SH_U0) * W, top, int(180 + 75 * rng.random()))
+            len_n = float(_fbm2(u0 * 3.0, 0.5, 21, 4))
+            lean_n = float(_fbm2(u0 * 2.4, 4.5, 31, 4))
+            clump = float(_perlin2(u0 * 5.0, 9.5, 41))
+            tone = 0.5 + 0.5 * float(_perlin2(u0 * 9.0, 2.5, 51))
+            length = ((0.07 + 0.12 * outer ** 1.2 - 0.05 * smooth(0.95, 1.1, u0)) * (1 + 0.35 * len_n) * (0.85 + 0.3 * rng.random())) * (1.0 if top else 0.45)
+            lean = (-0.05 + 0.85 * outer ** 1.3 + 0.35 * lean_n + 0.25 * clump) + 0.08 * (rng.random() - 0.5)
+            stroke(u0, edge - (0.005 if top else -0.005), lean, length, 0.12 + 0.12 * rng.random(),
+                   0.0075 / (SH_U1 - SH_U0) * W if top else 0.005 / (SH_U1 - SH_U0) * W, top, int(200 + 55 * rng.random()), tone=tone)
     # the fuzz: many short faint thin strands in every direction near the margins
     for top in (True, False):
         for _ in range(260 if top else 110):
             u0 = (-0.9 + 2.0 * rng.random()) if top else (-0.35 + 1.45 * rng.random())
             edge = lid_top(u0) if top else -lid_bottom(u0)
             ang = rng.normal(0.35 * smooth(-0.9, 1.0, u0), 0.55)
-            stroke(fd, u0, edge + (rng.random() - 0.3) * 0.02 * (1 if top else -1), ang, (0.02 + 0.05 * rng.random()) * (1 if top else 0.6), 0.5, 0.003 / (SH_U1 - SH_U0) * W, top, int(70 + 90 * rng.random()), steps=6)
+            stroke(u0, edge + (rng.random() - 0.3) * 0.02 * (1 if top else -1), ang, (0.02 + 0.05 * rng.random()) * (1 if top else 0.6), 0.5, 0.003 / (SH_U1 - SH_U0) * W, top, int(70 + 90 * rng.random()), steps=6, shade=False, d=fd)
     # the smoky liner hugging the lid's edge
     pts = [px(u, lid_top(u) + 0.006) for u in np.linspace(-1.0, 1.08, 90)]
     dr.line(pts, fill=150, width=int(0.016 / (SH_U1 - SH_U0) * W * SS), joint='curve')
@@ -1900,10 +1967,16 @@ def lash_image():
     a2 = np.asarray(fuzz.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(1.3)), dtype=np.float32) / 255
     halo = np.asarray(layer.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(7)), dtype=np.float32) / 255
     yy, xx = np.mgrid[0:H, 0:W]
-    grain = 0.75 + 0.25 * (np.sin(xx * 0.9 + 3 * np.sin(yy * 0.37)) * np.sin(yy * 1.1 + 2 * np.sin(xx * 0.23)))
+    grain = 0.8 + 0.2 * _fbm2(xx / 6.0, yy / 6.0, 61, 3)       # fine gradient-noise grain in the opacity
     a = np.clip(a1 * 1.5 + a2 * 0.35 * grain + halo * 0.12, 0, 1)
     a *= 0.85 + 0.15 * grain
-    col = np.zeros((H, W, 3), dtype=np.float32) + np.array([20, 13, 14], dtype=np.float32) / 255
+    # the colour: each strand's painted shading (unpremultiplied by its coverage), dark where only fuzz, halo or
+    # liner lie
+    cov = np.asarray(cover.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
+    pnt = np.asarray(paint.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32)
+    strand = pnt / np.maximum(cov, 1e-3)[..., None]
+    w_ = np.clip(cov * 2.5, 0, 1)[..., None]
+    col = (ROOT + (np.clip(strand, 0, 255) - ROOT) * w_) / 255
     img = bpy.data.images.new('lashes', W, H, alpha=True)
     pxl = np.concatenate([col, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
     img.pixels.foreach_set(pxl.ravel().astype(np.float32))
