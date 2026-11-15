@@ -1101,7 +1101,7 @@ EYE_K = 1.3            # the ball reaches this much past the lids' opening, up a
 # turns up quickly into the outer corner. The two meet in a point at each corner.
 LID_TOP = [0, 0.1106, 0.2062, 0.2839, 0.3501, 0.41, 0.4623, 0.5013, 0.5282, 0.5511, 0.5727, 0.589, 0.5986, 0.6055, 0.6122, 0.6167, 0.6177, 0.6171, 0.6165, 0.6147, 0.6105, 0.605, 0.5994, 0.5928, 0.5841, 0.5738, 0.5632, 0.5513, 0.5359, 0.5173, 0.4976, 0.4764, 0.4494, 0.4143, 0.3714, 0.3211, 0.2644, 0.2021, 0.1363, 0.0686, 0]
 LID_BOTTOM = [0, 0.0301, 0.0576, 0.079, 0.0957, 0.1113, 0.1268, 0.1419, 0.1566, 0.1713, 0.1858, 0.2, 0.2138, 0.2274, 0.2409, 0.2535, 0.2648, 0.2754, 0.286, 0.2958, 0.3039, 0.311, 0.3181, 0.3243, 0.3283, 0.3307, 0.3328, 0.334, 0.3326, 0.3289, 0.3246, 0.3187, 0.3072, 0.2893, 0.269, 0.2475, 0.2195, 0.181, 0.1309, 0.0684, 0]
-EYE_OPEN = 0.82        # the photograph's eye is held wide open; hers is relaxed, a little narrower
+EYE_OPEN = 0.72        # the photograph's eye is held wide open; hers is relaxed, a little narrower
 
 
 def _traced(table, u):
