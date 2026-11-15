@@ -1093,61 +1093,77 @@ EYE_LIFT = -0.05        # the line between the corners sits this much below the 
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
-# The opening of the eye, traced from a photograph of a real eye looking straight at the camera
-# (Wikimedia Commons, "Light brown.amber eye.JPG"): the upper and lower lid margins' heights above and below the
-# line joining the inner corner (u -1) and the outer (u 1), at 41 even steps, in units of the eye's half-width.
-# The upper lid climbs steeply out of the inner corner, is highest a little inside the middle and falls in a
-# long, even sweep to the outer corner; the lower lid is a shallow curve, lowest a little outside the middle, and
-# turns up quickly into the outer corner. The two meet in a point at each corner.
-LID_TOP = [0, 0.1106, 0.2062, 0.2839, 0.3501, 0.41, 0.4623, 0.5013, 0.5282, 0.5511, 0.5727, 0.589, 0.5986, 0.6055, 0.6122, 0.6167, 0.6177, 0.6171, 0.6165, 0.6147, 0.6105, 0.605, 0.5994, 0.5928, 0.5841, 0.5738, 0.5632, 0.5513, 0.5359, 0.5173, 0.4976, 0.4764, 0.4494, 0.4143, 0.3714, 0.3211, 0.2644, 0.2021, 0.1363, 0.0686, 0]
-LID_BOTTOM = [0, 0.0301, 0.0576, 0.079, 0.0957, 0.1113, 0.1268, 0.1419, 0.1566, 0.1713, 0.1858, 0.2, 0.2138, 0.2274, 0.2409, 0.2535, 0.2648, 0.2754, 0.286, 0.2958, 0.3039, 0.311, 0.3181, 0.3243, 0.3283, 0.3307, 0.3328, 0.334, 0.3326, 0.3289, 0.3246, 0.3187, 0.3072, 0.2893, 0.269, 0.2475, 0.2195, 0.181, 0.1309, 0.0684, 0]
-EYE_OPEN = 0.72        # the photograph's eye is held wide open; hers is relaxed, a little narrower
+# The opening of the eye, constructed from the eyelid's anatomy rather than traced. Measured adult proportions
+# (oculoplastic references): the fissure is about 30 mm wide and 10 mm high; the upper lid is highest a little to
+# the nose side of the pupil and the lower lid lowest a little to the temple side of it, so the two peaks sit on a
+# diagonal; the lids meet at roughly 60 degrees at each corner; and the outer corner sits 2-3 mm above the inner one
+# (EYE_TILT). At the inner corner the lids pull away from the ball round the caruncle and meet in a short
+# straight wedge before they turn into the arch; at the outer corner they lie on the ball and close more steeply. Artists build the same shape from planes: the upper lid as two side planes and
+# a top, the lower lid as two, joined by curves.
+#
+# Each lid is a short straight run out of the inner corner (the wedge round the caruncle) followed by two cubic
+# Hermite segments, run end -> peak -> outer corner, with a level tangent at the peak. The run is short and its
+# tangent carries straight on into the first segment, so the lid leaves the corner straight for a moment and then
+# bends continuously into the arch (no long straight ramp). At the outer corner the lids close more steeply.
+# Heights are in units of the eye's half-width (EYE_RX), above or below the line joining the corners
+# (u -1 inner .. 1 outer).
+EYE_OPEN = 0.72               # the opening's height, as a fraction of the reference (a relaxed, slightly narrowed eye)
+EYE_TOP_PEAK = (-0.18, 0.62)   # where the upper lid is highest (u) and how high (before EYE_OPEN): nasal of centre
+EYE_BOT_LOW = (0.30, 0.32)     # where the lower lid is lowest and how low: temporal of centre
+EYE_INNER_ANGLES = (50.0, 13.0)    # degrees the upper and lower lids leave the inner corner at (about 63 between them)
+EYE_OUTER_ANGLES = (44.0, 30.0)    # degrees they close into the outer corner at
+EYE_INNER_RUN = 0.05          # how far the lids run straight out of the inner corner, in units of EYE_RX
+EYE_INNER_TANGENT = 0.8       # how far that straight direction carries into the curve (fraction of the chord to the peak)
+EYE_PEAK_FULL = (1.25, 1.2)   # peak tangent length (fraction of the chord), upper and lower: how full each arch is
+EYE_OUTER_TANGENT = 0.5       # tangent length at the outer corner (fraction of the chord)
+
+_LID_CACHE = {}
 
 
-def _traced(table, u):
-    """The traced profile at u, eased between its samples (Catmull-Rom), so the edge bends smoothly."""
-    u = max(-1.0, min(1.0, u))
-    n = len(table) - 1
-    f = (u + 1) / 2 * n
-    i = min(n - 1, int(f))
-    t = f - i
-    p0, p1, p2, p3 = table[max(0, i - 1)], table[i], table[i + 1], table[min(n, i + 2)]
-    v = 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3)
-    return max(0.0, v)
+def _lid_curve(top):
+    """The sampled curve of one lid (u, height in units of EYE_RX), built as above; cached per setting."""
+    i = 0 if top else 1
+    peak = EYE_TOP_PEAK if top else EYE_BOT_LOW
+    key = (top, peak, EYE_OPEN, EYE_INNER_ANGLES, EYE_OUTER_ANGLES, EYE_INNER_RUN, EYE_INNER_TANGENT, EYE_PEAK_FULL, EYE_OUTER_TANGENT)
+    if key in _LID_CACHE:
+        return _LID_CACHE[key]
+    pu, ph = peak[0], peak[1] * EYE_OPEN
+    ai, ao = math.radians(EYE_INNER_ANGLES[i]), math.radians(EYE_OUTER_ANGLES[i])
+    dx, dy = math.cos(ai), math.sin(ai)
 
-
-EYE_INNER_CUSP = 2.2   # how sharply the lids close into the inner corner: 1 as traced, below 1 blunter, above 1 more acute
-
-
-def _cusp(u):
-    """The lids' bend toward the inner corner: the traced heights are scaled by a power of the distance from that
-    corner taken over the whole width (not only near it), so both curves lean into it and meet in a finer point
-    (EYE_INNER_CUSP above 1) or a blunter end (below 1), and each lid is then scaled back to its traced height at
-    its peak, so the eye keeps its size and the whole shape bends with the corner rather than kinking near it."""
-    t = (max(-1.0, min(1.0, u)) + 1) / 2
-    return t ** (0.35 * (EYE_INNER_CUSP - 1)) if t > 0 else (1.0 if EYE_INNER_CUSP <= 1 else 0.0)
-
-
-_CUSP_NORM = {}
-
-
-def _cusp_norm(table):
-    key = (id(table), EYE_INNER_CUSP)
-    if key not in _CUSP_NORM:
-        us = [i / 400 * 2 - 1 for i in range(401)]
-        _CUSP_NORM[key] = max(_traced(table, u) for u in us) / max(_traced(table, u) * _cusp(u) for u in us)
-    return _CUSP_NORM[key]
+    def hermite(p0, t0, p1, t1, n=240):
+        out = []
+        for k in range(n):
+            s = k / n
+            h00, h10, h01, h11 = 2 * s ** 3 - 3 * s * s + 1, s ** 3 - 2 * s * s + s, -2 * s ** 3 + 3 * s * s, s ** 3 - s * s
+            out.append((h00 * p0[0] + h10 * t0[0] + h01 * p1[0] + h11 * t1[0], h00 * p0[1] + h10 * t0[1] + h01 * p1[1] + h11 * t1[1]))
+        return out
+    q = (-1.0 + EYE_INNER_RUN * dx, EYE_INNER_RUN * dy)
+    pts = [(-1.0 + EYE_INNER_RUN * dx * k / 20, EYE_INNER_RUN * dy * k / 20) for k in range(20)]
+    c0 = math.hypot(pu - q[0], ph - q[1])
+    c1 = math.hypot(1 - pu, ph)
+    pf = EYE_PEAK_FULL[i]
+    pts += hermite(q, (EYE_INNER_TANGENT * c0 * dx, EYE_INNER_TANGENT * c0 * dy), (pu, ph), (pf * c0, 0.0))
+    pts += hermite((pu, ph), (pf * c1, 0.0), (1.0, 0.0), (EYE_OUTER_TANGENT * c1 * math.cos(ao), -EYE_OUTER_TANGENT * c1 * math.sin(ao)))
+    pts.append((1.0, 0.0))
+    pts.sort()
+    us = np.array([p[0] for p in pts])
+    hs = np.maximum(0.0, np.array([p[1] for p in pts]))
+    _LID_CACHE[key] = (us, hs)
+    return us, hs
 
 
 def lid_top(u):
     """How far the upper lid's edge stands above the line between the corners at u (-1 inner corner .. 1 outer
-    corner): the traced LID_TOP, sharpened at the inner corner (_cusp)."""
-    return EYE_RX * EYE_OPEN * _traced(LID_TOP, u) * _cusp(u) * _cusp_norm(LID_TOP)
+    corner)."""
+    us, hs = _lid_curve(True)
+    return EYE_RX * float(np.interp(max(-1.0, min(1.0, u)), us, hs))
 
 
 def lid_bottom(u):
-    """The lower lid's edge below the line between the corners: the traced LID_BOTTOM, sharpened like the top."""
-    return EYE_RX * EYE_OPEN * _traced(LID_BOTTOM, u) * _cusp(u) * _cusp_norm(LID_BOTTOM)
+    """The lower lid's edge below the line between the corners."""
+    us, hs = _lid_curve(False)
+    return EYE_RX * float(np.interp(max(-1.0, min(1.0, u)), us, hs))
 
 
 def almond(rx, ry, rz, s, seg=192, rings=128):
