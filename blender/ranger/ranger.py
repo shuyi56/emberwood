@@ -679,7 +679,7 @@ HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
-LEG_X, SH_X = 3.3, 6.1
+LEG_X, SH_X = 3.3, 5.75
 # the trunk's two pivots for the walk: the pelvis turns about the hip joints, the chest about the waist above it
 CHEST_Z, NECK_Z = 41.0, 51.0
 # the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
@@ -1602,6 +1602,30 @@ def skin_trunk(body):
         o.modifiers.move(len(o.modifiers) - 1, 0)    # (deformed first, before its thickness and smoothing)
 
 
+def mantle_on_arms(names):
+    """Where the mantle lies over the round of each arm it rides on the arm: those points are handed over in part
+    to the upper arm's bone, more the further out and down the arm they are, so the wool is carried with the arm as
+    it swings instead of the arm swinging out through it (and the mantle can lie close over the arm)."""
+    for o in [bpy.data.objects[n] for n in names if n in bpy.data.objects] + \
+             [o for o in bpy.data.objects if o.name.startswith('Wool fuzz')]:
+        mw = o.matrix_world
+        gs = {g.name: g for g in o.vertex_groups}
+        for s, side in ((1, 'R'), (-1, 'L')):
+            name = f'UpperArm.{side}'
+            gs[name] = gs.get(name) or o.vertex_groups.new(name=name)
+        for v in o.data.vertices:
+            co = mw @ v.co
+            for s, side in ((1, 'R'), (-1, 'L')):
+                out = min(1.0, max(0.0, (-s * co.x - (SH_X - 1.6)) / 2.6))
+                down = min(1.0, max(0.0, (SH_Z + 2.0 - co.z) / 2.5))
+                wa = (out * out * (3 - 2 * out)) * (down * down * (3 - 2 * down)) * 0.85
+                if wa <= 1e-4:
+                    continue
+                for g in v.groups:
+                    g.weight *= 1.0 - wa
+                gs[f'UpperArm.{side}'].add([v.index], wa, 'REPLACE')
+
+
 def finish_rig():
     arm = RIG['arm']
     bpy.context.view_layer.update()
@@ -1935,7 +1959,10 @@ def build():
         xr, yr = -rx * math.sin(phi), -ry * math.cos(phi)
         a = math.atan2(-xr, -yr)
         rr = math.hypot(xr, yr)
-        gap = 0.25 + 0.4 * f
+        # (close over the round of each arm, a little looser over the chest and back: standing well off the
+        # arms the wool squares the shoulders off into a wide shelf)
+        side = math.sin(a) ** 2
+        gap = lerp(0.25 + 0.4 * f, 0.1 + 0.12 * f, side)
         hull = body_hull(z, a, cy) + gap
         dw = min(1.0, max(0.0, (53.2 - z) / 1.6))
         dw = dw * dw * (3 - 2 * dw)
@@ -1946,9 +1973,10 @@ def build():
         fold = (0.62 * pinch(6 * phi + 0.4 + 0.3 * math.sin(2.1 * z)) +
                 0.38 * f * pinch(14 * phi + 1.3 + 0.5 * z)) * (1 - 0.8 * w)
         pull, lift = brooch_pull(z, phi)
-        k = 1 + 0.085 * f * fold - pull / max(ry, 1.0)
-        # (the hem drops a little at the sides, where it lies over the round of the arm)
-        hem = (-0.75 * math.sin(phi) ** 4 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
+        k = 1 + 0.085 * f * fold * (1 - 0.6 * side) - pull / max(ry, 1.0)
+        # (the hem drops at the sides, falling over the round of the arm and ending below it, so the wool caps
+        # the shoulder instead of stopping at its corner)
+        hem = (-2.0 * math.sin(phi) ** 4 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
         return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.55 * f * fold + lift
 
     MN = 200     # (fine enough round for the pleats at the brooch)
@@ -2050,6 +2078,7 @@ def build():
         mesh_obj(f'Sole.{side}', loft([(-2.75, 1.85, 3.45, 0, -1.7), (-ANKLE_Z, 1.8, 3.35, 0, -1.7)]), M_SOLE, loc=(x, 0, az),
                  subdiv=1, skin=w)
     skin_trunk(body)
+    mantle_on_arms(['Mantle', 'Mail trim'])
     finish_rig()
 
     # ---- camera and light
