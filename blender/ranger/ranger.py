@@ -940,29 +940,29 @@ def mouth_relief(x, z):
     nose's wing toward the corner of the mouth, and the crease under the lower lip."""
     ax = abs(x)
     d = 0.0
-    across_u = math.exp(-(x / 0.085) ** 4)                 # the upper lip runs nearly full height to its corners
-    bow = 0.006 * math.exp(-((ax - 0.022) / 0.012) ** 2)   # the peaks of the cupid's bow
-    top = 0.296 + bow - 0.012 * (ax / 0.1) ** 2
+    across_u = math.exp(-(x / 0.07) ** 4)                 # the upper lip runs nearly full height to its corners
+    bow = 0.006 * math.exp(-((ax - 0.019) / 0.011) ** 2)   # the peaks of the cupid's bow
+    top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     t = (z - 0.258) / max(0.01, top - 0.258)
     if 0.0 < t < 1.25:
         d += 0.03 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
     d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.008)          # the tubercle
-    across_l = math.exp(-(x / 0.072) ** 4)
+    across_l = math.exp(-(x / 0.06) ** 4)
     d += 0.032 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
     # the line between the lips, deepest at the corners where the lips tuck in
-    d -= (0.012 + 0.014 * (ax / 0.1) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.11) ** 6)
+    d -= (0.012 + 0.014 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
-        d += gauss(x, z, sx * 0.105, 0.257, 0.014, 0.012, -0.006)    # the corners
+        d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.006)    # the corners
         d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
         for k in range(6):
             u = k / 5
-            px, pz = sx * (0.075 + 0.04 * u), 0.355 - 0.1 * u
+            px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
     d += gauss(x, z, 0, 0.385, 0.032, 0.026, 0.01)         # the ball of the nose's tip
-    d += gauss(x, z, 0, 0.19, 0.06, 0.012, -0.014)         # the crease under the lower lip
+    d += gauss(x, z, 0, 0.19, 0.05, 0.012, -0.014)         # the crease under the lower lip
     return d
 
 
@@ -2337,7 +2337,7 @@ def build():
         bmesh.ops.rotate(brow, cent=(0, 0, 0), matrix=Euler((0, -s * 0.1, 0)).to_matrix(), verts=brow.verts)
         mesh_obj(f'Brow {s}', brow, M_BROW, head, loc=(x + s * 0.05, by + 0.2, 0.645 * HEAD_H), subdiv=0)
     # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)
-    mesh_obj('Mouth', ellipsoid(0.8, 0.1, 0.06, 12, 6), M_LIPS, head, loc=(0, mouth_y + 0.1, MOUTH_Z * HEAD_H), subdiv=0)
+    mesh_obj('Mouth', ellipsoid(0.66, 0.1, 0.06, 12, 6), M_LIPS, head, loc=(0, mouth_y + 0.1, MOUTH_Z * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
     # side locks framing the face, and the long fall down the back
