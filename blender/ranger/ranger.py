@@ -1135,7 +1135,7 @@ def drape_fall(dg):
         hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
         return hit[0].y if hit[0] is not None else 0.0
 
-    W = [(7.2, 2.0), (6.0, 3.0), (4.5, 3.6), (1.5, 3.7), (-1.5, 4.1), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+    W = [(7.2, 2.0), (6.0, 2.9), (4.5, 3.2), (1.5, 3.2), (-1.5, 3.85), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
 
     def width(z):
         for (z0, w0), (z1, w1) in zip(W, W[1:]):
@@ -1247,7 +1247,16 @@ def drape_fall(dg):
             # the nape would show its underside from the side); where it lies on the mantle it is pressed thinner
             gap = y - sup
             th = t if gap < t + 0.3 else max(t, gap - 0.15)
-            col_in.append(Vector((x, max(y - th, sup + 0.12) if z < -0.5 else y - th, z)))
+            yi = max(y - th, sup + 0.12) if z < -0.5 else y - th
+            # its sides are rounded over (an elliptical edge between the outside and the inside) rather than cut
+            # off square: a square side is a flat wall as deep as the hair, seen as a hard corner down the back
+            if abs(u) > 0.6 and y - yi > 0.3:
+                f_ = min(1.0, (abs(u) - 0.6) / 0.4)
+                c_, h_ = 0.5 * (y + yi), 0.5 * (y - yi)
+                h_ = max(0.12, h_ * math.sqrt(max(0.0, 1.0 - f_ * f_)))
+                y, yi = c_ + h_, c_ - h_
+                col_out[-1][1] = y
+            col_in.append(Vector((x, yi, z)))
         col_out = [Vector((x, y, z)) for x, y, z, t, sup in col_out]
         inner.append(col_in)
         outer.append(col_out)
@@ -1333,6 +1342,12 @@ def fuse_hair(head, names, voxel=0.065):
     ends = [v for v in bm.verts if v.co.z < -6.0]
     for _ in range(14):
         bmesh.ops.smooth_laplacian_vert(bm, verts=ends, lambda_factor=0.8, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=False, preserve_volume=True)
+    # the side locks run into the hair beside them: the hollow where they meet is relaxed out, so they read as
+    # the front of the side hair rather than a separate piece laid on it
+    sides = [v for v in bm.verts if -3.5 < v.co.z < 6.5 and abs(v.co.x) > 1.9 and v.co.y < 2.5]
+    for _ in range(5):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=sides, lambda_factor=0.7, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=False, preserve_volume=True)
     band = [v for v in bm.verts if -4.0 < v.co.z < 7.5 and v.co.y > 1.0]
     for _ in range(4):
@@ -2319,8 +2334,9 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.3, s * 2.9, 0.3), (4.5, 0.66, 1.35, s * 3.26, 0.9), (2.0, 1.0, 1.3, s * 3.05, 1.35),
-                                         (-1.0, 0.95, 1.25, s * 3.3, 1.5), (-2.0, 0.75, 1.0, s * 3.5, 1.6), (-2.6, 0.35, 0.45, s * 3.7, 1.7)]),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.5, s * 2.9, 0.6), (4.5, 0.66, 1.75, s * 3.26, 1.35), (2.0, 1.0, 2.0, s * 3.05, 2.2),
+                                         (-1.0, 0.95, 1.95, s * 3.3, 2.3), (-2.0, 0.75, 1.5, s * 3.45, 2.4), (-3.0, 0.55, 1.2, s * 3.55, 2.6),
+                                         (-4.0, 0.2, 0.5, s * 3.6, 2.8)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
