@@ -1097,7 +1097,7 @@ EYE_K = 1.3            # the ball reaches this much past the lids' opening, up a
 # turns up quickly into the outer corner. The two meet in a point at each corner.
 LID_TOP = [0, 0.1106, 0.2062, 0.2839, 0.3501, 0.41, 0.4623, 0.5013, 0.5282, 0.5511, 0.5727, 0.589, 0.5986, 0.6055, 0.6122, 0.6167, 0.6177, 0.6171, 0.6165, 0.6147, 0.6105, 0.605, 0.5994, 0.5928, 0.5841, 0.5738, 0.5632, 0.5513, 0.5359, 0.5173, 0.4976, 0.4764, 0.4494, 0.4143, 0.3714, 0.3211, 0.2644, 0.2021, 0.1363, 0.0686, 0]
 LID_BOTTOM = [0, 0.0301, 0.0576, 0.079, 0.0957, 0.1113, 0.1268, 0.1419, 0.1566, 0.1713, 0.1858, 0.2, 0.2138, 0.2274, 0.2409, 0.2535, 0.2648, 0.2754, 0.286, 0.2958, 0.3039, 0.311, 0.3181, 0.3243, 0.3283, 0.3307, 0.3328, 0.334, 0.3326, 0.3289, 0.3246, 0.3187, 0.3072, 0.2893, 0.269, 0.2475, 0.2195, 0.181, 0.1309, 0.0684, 0]
-EYE_OPEN = 0.85        # the photograph's eye is held wide open; hers is relaxed, a little narrower
+EYE_OPEN = 0.82        # the photograph's eye is held wide open; hers is relaxed, a little narrower
 
 
 def _traced(table, u):
@@ -1268,7 +1268,7 @@ def iris_image():
     return img
 
 
-def iris_colours(me, to_disc, r, s):
+def iris_colours(me, disc, r, s):
     """Lay the painted iris (iris_image) onto the iris mesh through texture coordinates across the disc, and store
     its tone at each point along the iris ramp ('iris_shade'), which the sprite renderer reads through the detail
     pass."""
@@ -1278,8 +1278,10 @@ def iris_colours(me, to_disc, r, s):
     uvl = me.uv_layers.new(name='UVMap')
     pos = {}
     for v in me.vertices:
-        p = to_disc @ v.co
-        pos[v.index] = ((p.x * s / r + 1) / 2, (p.z / r + 1) / 2)
+        # from the flat disc the iris was made as, not from where it lies now (laid onto the ball, and taken back
+        # under the lids, the points move in depth, and through the iris's tilt that dragged the painting sideways)
+        dx, dz = disc[v.index]
+        pos[v.index] = ((dx * s / r + 1) / 2, (dz / r + 1) / 2)
     for lp in me.loops:
         uvl.data[lp.index].uv = pos[lp.vertex_index]
     shades = []
@@ -1440,8 +1442,8 @@ def eye_relief(x, z, s, ex, ez):
     # each corner, standing a little proud of the ball and rolling onto it, so the ball fills the opening from
     # behind the lids rather than sitting in a hole with a gap round it
     cornr = smooth(1.06, 0.96, abs(u))
-    lip_t = 0.095 * g(dz - (T - 0.025), 0.05) * (0.6 + 0.4 * (1 - uc * uc))
-    lip_b = 0.075 * g(dz + (B - 0.02), 0.05) * (0.6 + 0.4 * (1 - uc * uc))
+    lip_t = 0.085 * g(dz - (T - 0.012 * min(1.0, T / 0.08)), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
+    lip_b = 0.07 * g(dz + (B - 0.012 * min(1.0, B / 0.08)), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
     d += max(lip_t, lip_b) * cornr
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
     d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
@@ -1538,8 +1540,8 @@ def build_eye(head, head_tree, s, x, ey, ez):
         over = abs(dz_) / max(lim, 1e-3)
         # (toward the lids the ball is kept full, so its edge meets the lids' margins rather than falling away
         # from them into a dark gap, and then turns back under them)
-        v.co.y -= 0.09 * smooth(0.45, 0.93, over)
-        v.co.y += 1.1 * smooth(0.93, 0.98, over)
+        v.co.y -= 0.09 * smooth(0.45, 0.98, over)
+        v.co.y += 1.1 * smooth(0.98, 1.03, over)
     wtree = bvh_of(white)
     # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
     # and up from the centre line, so one painting serves both eyes
@@ -1592,31 +1594,46 @@ def build_eye(head, head_tree, s, x, ey, ez):
     c = hits[0][0]
     turn = Vector((0, -1, 0)).rotation_difference(n)
     iris = iris_dome(IR, 0.05)
+    disc = [(v.co.x, v.co.z) for v in iris.verts]   # (where each point lies on the flat disc, for its painting)
     bmesh.ops.rotate(iris, cent=(0, 0, 0), matrix=turn.to_matrix(), verts=iris.verts)
     # laid onto the ball itself: each point of the iris sits just over the white's surface, with only the slight
     # swell of the cornea in the middle, so it never stands out from the eye (or is cut by it) at any angle
+    iris.verts.index_update()
+    spr_y = [0.0] * len(iris.verts)
     for v in iris.verts:
         t = min(1.0, math.hypot(v.co.x, v.co.z) / IR)
         # (where the iris runs past the white, under a lid, it is sent back behind the skin, so the lid covers its
         # edge cleanly instead of the iris climbing the lid as a dark wall)
         h = wtree.ray_cast(Vector((c.x + v.co.x, -50, c.z + v.co.z)), Vector((0, 1, 0)))
         if h[0] is not None:
-            # (half-way between the ball's surface and a flat disc square to its normal: on the ball alone its
-            # lower rim turned down steeply under the lower lid and read as a dark crescent)
-            flat = -(n.x * v.co.x + n.z * v.co.z) / n.y
-            surf = h[0].y - c.y
-            v.co.y = 0.75 * surf + 0.25 * min(flat, surf) - (0.006 + 0.07 * (1 - t * t))
-            # past the lids' edges it goes back faster than the white, so no rim of it shows under the lids
+            # a stiff disc where the ball is open to view (part flat, part following the ball: on the ball alone
+            # its lower rim turned down steeply and read as a dark crescent), easing to follow the ball exactly
+            # where the ball turns back under the lids, so it passes under them with the white and stands out
+            # nowhere (pushed back on its own it left walls and a flat-cut edge in the 3/4 views)
             px_, pz_ = c.x + v.co.x, c.z + v.co.z
             uu_ = (px_ - x) * s / RX
             dz_ = pz_ - ez - uu_ * RX * TILT
             lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
-            v.co.y += 0.6 * (smooth(1.03, 1.1, dz_ / max(lim, 1e-3)) + smooth(0.88, 0.97, -dz_ / max(lim, 1e-3)))
+            wf = 0.6 * smooth(0.95, 0.8, abs(dz_) / max(lim, 1e-3))
+            flat = -(n.x * v.co.x + n.z * v.co.z) / n.y
+            surf = h[0].y - c.y
+            ov = abs(dz_) / max(lim, 1e-3)
+            lift = (0.04 + 0.05 * (1 - t * t)) * smooth(1.0, 0.86, ov) - 0.04 * smooth(0.94, 1.0, ov)
+            v.co.y = min(wf * flat + (1 - wf) * surf, surf) - lift
+            # (for the sprite sheet: the iris following the ball more closely, which keeps its pixel showing in
+            # the side views; a shape key, see sprite_mode)
+            spr_y[v.index] = 0.75 * surf + 0.25 * min(flat, surf) - (0.006 + 0.07 * (1 - t * t))
         else:
             v.co.y = 0.3
+            spr_y[v.index] = 0.3
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
+    o.shape_key_add(name='Basis')
+    sk = o.shape_key_add(name='sprite', from_mix=False)
+    for kv, y in zip(sk.data, spr_y):
+        kv.co.y = y
+    sk.value = 0.0
     o.visible_shadow = False        # (it lies on the white; its shadow fell as a grey column down to the lower lid)
-    iris_colours(o.data, turn.inverted(), IR, s)
+    iris_colours(o.data, disc, IR, s)
 
     def on_face(us, radii, zf, lift, span=RX, n=36):
         """A smooth curve over the face through the heights zf(u) (resampled finely, so a tube along it is
@@ -1906,6 +1923,25 @@ def build():
     sun = link(bpy.data.objects.new('Sun', sun_data))
     # lit from the upper left and in front, as the painted sprites are (fixed to the camera, not the figure)
     sun.rotation_euler = Vector((0.55, 0.75, -0.62)).to_track_quat('-Z', 'Y').to_euler()
+    # the eyes have a sun of their own, the same light from the same way, whose shadows only the eyes cast: the
+    # lids' shadow from the low sun fell across the white as a hard brown band (the lids are sculpted into the
+    # head, so at this light it read as a stain), and the main sun leaves the eyes alone
+    eyes_ = [o for o in bpy.data.objects if o.name.startswith(('Eye white', 'Iris'))]
+    if eyes_:
+        only = bpy.data.collections.new('eyes lit')
+        for o in eyes_:
+            only.objects.link(o)
+        skip = bpy.data.collections.new('eyes not lit')
+        for o in eyes_:
+            skip.objects.link(o)
+        for co in skip.collection_objects:
+            co.light_linking.link_state = 'EXCLUDE'
+        sun.light_linking.receiver_collection = skip
+        esun = link(bpy.data.objects.new('Eye sun', sun_data.copy()))
+        esun.data.name = 'Eye sun'
+        esun.rotation_euler = sun.rotation_euler.copy()
+        esun.light_linking.receiver_collection = only
+        esun.light_linking.blocker_collection = only
     world = bpy.data.worlds.new('World')
     world.use_nodes = True
     bg = world.node_tree.nodes.get('Background')
@@ -2113,6 +2149,7 @@ def sprite_mode(on):
     for o in bpy.data.objects:
         if o.name.startswith('Iris'):
             o.scale = (1.11,) * 3 if on else (1.0,) * 3
+            o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
         if o.name.startswith('Eye white') and o.data.shape_keys:
             o.data.shape_keys.key_blocks['tuck'].value = 0.0 if on else 1.0
             o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
