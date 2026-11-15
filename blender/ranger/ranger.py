@@ -209,6 +209,25 @@ def wool_closeup(nt, bsdf, out, rmp):
     nt.links.new(wb.outputs['BSDF'], out.inputs['Surface'])
 
 
+def skin_closeup(nt, bsdf, out, lin):
+    """The skin up close: a soft contact shadow where the hair lies against it or hangs just off it (and in the
+    other shut-in places: under the jaw, round the nose), deepening toward a warmer, redder tone the way skin does
+    in shade, so the hair sits on the face instead of being cut out against it."""
+    bsdf.name = 'sprite bsdf'
+    ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.9)
+    ao.samples = 16
+    k = _node(nt, 'ShaderNodeMapRange', Value=ao.outputs['AO'], **{'From Min': 0.25, 'From Max': 1.0})
+    col = _node(nt, 'ShaderNodeMix', Factor=k.outputs['Result'])
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (lin[0] * 0.42, lin[1] * 0.26, lin[2] * 0.22, 1)
+    col.inputs['B'].default_value = (*lin, 1)
+    sb = _node(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': col.outputs['Result']})
+    sb.name = 'close bsdf'
+    sb.inputs['Roughness'].default_value = 0.6
+    sb.inputs['Specular IOR Level'].default_value = 0.25
+    nt.links.new(sb.outputs['BSDF'], out.inputs['Surface'])
+
+
 def gold_closeup(nt, bsdf, out):
     """The brooch up close: worn gold, brighter on its raised midrib and rim than down in the hollows, where the
     tarnish and the shadow of the wool collect."""
@@ -611,6 +630,8 @@ def make_material(mid):
         leather_closeup(nt, bsdf, out, d['ramp'], suede=mid == M_CUFF)
     if mid in (M_LEGS, M_KNEE):
         cloth_closeup(nt, bsdf, out, d['ramp'], canvas=mid == M_KNEE)
+    if mid == M_SKIN:
+        skin_closeup(nt, bsdf, out, lin)
     m.diffuse_color = (*lin, 1.0)
     # the material's id, read back after the render to pick its palette ramp
     aid = nt.nodes.new('ShaderNodeOutputAOV')
@@ -1360,10 +1381,10 @@ def fuse_hair(head, names, voxel=0.065):
     # the side locks run into the hair beside them: the hollow where they meet is relaxed out, so they read as
     # the front of the side hair rather than a separate piece laid on it
     sides = [v for v in bm.verts if -3.5 < v.co.z < 7.0 and abs(v.co.x) > 1.6 and v.co.y < 5.0]
-    for k_ in range(12):
+    for k_ in range(30):
         bmesh.ops.smooth_laplacian_vert(bm, verts=sides, lambda_factor=0.7, lambda_border=0.0,
-                                        use_x=True, use_y=True, use_z=False, preserve_volume=True)
-    band = [v for v in bm.verts if -4.0 < v.co.z < 7.5 and v.co.y > 1.0]
+                                        use_x=True, use_y=True, use_z=k_ % 3 == 2, preserve_volume=True)
+    band = [v for v in bm.verts if -4.0 < v.co.z < 9.0 and v.co.y > 1.0]
     for _ in range(8):
         bmesh.ops.smooth_laplacian_vert(bm, verts=band, lambda_factor=0.5, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
@@ -2351,8 +2372,8 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.4, s * 2.9, 0.5), (4.5, 0.66, 1.55, s * 3.26, 1.35), (2.0, 1.0, 1.75, s * 3.05, 2.45),
-                                         (-1.0, 0.95, 1.7, s * 3.3, 2.55), (-2.0, 0.7, 1.4, s * 3.4, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.4, s * 2.9, 0.5), (4.5, 0.66, 1.55, s * 3.26, 1.35), (2.0, 0.8, 1.75, s * 2.85, 2.45),
+                                         (-1.0, 0.75, 1.7, s * 3.0, 2.55), (-2.0, 0.6, 1.4, s * 3.1, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
@@ -2968,7 +2989,7 @@ def sprite_mode(on):
     out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
     nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
     # the mantle's wool and the brooch's gold, likewise: their close-up surfaces are for the 3D view only
-    for name in ('mantle', 'clasp', 'boots', 'boot cuff', 'trousers', 'knee patch'):
+    for name in ('mantle', 'clasp', 'boots', 'boot cuff', 'trousers', 'knee patch', 'skin'):
         nt = bpy.data.materials[name].node_tree
         out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
         nt.links.new(nt.nodes['sprite bsdf' if on else 'close bsdf'].outputs['BSDF'], out.inputs['Surface'])
