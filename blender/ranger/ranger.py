@@ -1355,8 +1355,14 @@ def eye_relief(x, z, s, ex, ez):
     # the opening itself: inside the lids' edges the skin is drawn well back behind the ball, so exactly the
     # traced shape of white shows, its edge where the lids meet the ball
     if abs(u) < 1.0:
-        e = 0.04
-        d -= 0.2 * smooth(-e, e, dz + B) * smooth(e, -e, dz - T)
+        d -= 0.12 * smooth(0.0, 0.12, dz + B) * smooth(0.0, 0.12, T - dz)
+    # the lid margins: one rounded lip running round the whole opening, the upper and lower lids joining in it at
+    # each corner, standing a little proud of the ball and rolling onto it, so the ball fills the opening from
+    # behind the lids rather than sitting in a hole with a gap round it
+    cornr = smooth(1.22, 1.0, abs(u))
+    lip_t = 0.085 * g(dz - (T - 0.012), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
+    lip_b = 0.07 * g(dz + (B - 0.012), 0.055) * (0.6 + 0.4 * (1 - uc * uc))
+    d += max(lip_t, lip_b) * cornr
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
     d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     # the crease of the upper lid: a clear, narrow fold a lid's breadth above the edge, following its curve and
@@ -1373,7 +1379,7 @@ def eye_relief(x, z, s, ex, ez):
     if u > 0.9:
         k = max(0.0, u - 1.0)
         taper = smooth(0.9, 1.0, u) * max(0.0, 1 - k / 0.5) ** 1.6
-        d -= 0.07 * g(dz + 0.04 * k, 0.06 * (1 - 0.6 * k)) * taper
+        d -= 0.05 * g(dz + 0.04 * k, 0.06 * (1 - 0.6 * k)) * taper * smooth(1.0, 1.12, u)
         d -= 0.035 * g(dz + 0.02 * k, 0.14) * smooth(0.85, 1.0, u) * smooth(1.5, 1.05, u)
     lz = -(B + 0.17 + 0.03 * uc)
     d -= 0.007 * g(dz - lz, 0.08) * smooth(0.9, 0.4, abs(u - 0.1))
@@ -1394,7 +1400,7 @@ def sculpt_eyes(hb, eyes):
     # the patch's edge: new points along it stay on the straight edges the coarser faces beyond still share
     rim = [(e.verts[0].co.copy(), e.verts[1].co.copy()) for e in edges if any(lf not in inside for lf in e.link_faces)]
     ra = np.array([a for a, b in rim]); rb = np.array([b for a, b in rim])
-    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=7, use_grid_fill=True, smooth=0.0)
+    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=10, use_grid_fill=True, smooth=0.0)
     new = [v for v in res['geom'] if isinstance(v, bmesh.types.BMVert) and v.co.y < 0]
     P = np.array([v.co for v in new])
     rim_d = np.full(len(new), 1e9)
@@ -1450,7 +1456,10 @@ def build_eye(head, head_tree, s, x, ey, ez):
         dz_ = v.co.z - ez - uu_ * RX * TILT
         lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
         over = abs(dz_) / max(lim, 1e-3)
-        v.co.y += 1.0 * smooth(1.0, 1.06, over)
+        # (toward the lids the ball is kept full, so its edge meets the lids' margins rather than falling away
+        # from them into a dark gap, and then turns back under them)
+        v.co.y -= 0.09 * smooth(0.45, 0.97, over)
+        v.co.y += 1.1 * smooth(0.97, 1.04, over)
     wtree = bvh_of(white)
     # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
     # and up from the centre line, so one painting serves both eyes
@@ -1522,7 +1531,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
             uu_ = (px_ - x) * s / RX
             dz_ = pz_ - ez - uu_ * RX * TILT
             lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
-            v.co.y += 0.6 * (smooth(0.99, 1.06, dz_ / max(lim, 1e-3)) + smooth(0.88, 0.97, -dz_ / max(lim, 1e-3)))
+            v.co.y += 0.6 * (smooth(1.03, 1.1, dz_ / max(lim, 1e-3)) + smooth(0.88, 0.97, -dz_ / max(lim, 1e-3)))
         else:
             v.co.y = 0.3
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
