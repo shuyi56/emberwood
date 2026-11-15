@@ -1988,7 +1988,7 @@ def lash_image():
 
 BROW_TEX = {}
 BR_U0, BR_U1, BR_V0, BR_V1 = -1.28, 2.25, 0.62, 1.92     # the brow patch's extent, in the eye patch's units (u, dz)
-BROW_US = [-0.78, -0.55, -0.25, 0.05, 0.35, 0.6, 0.85, 1.1, 1.3]
+BROW_US = [-0.7, -0.5, -0.25, 0.0, 0.25, 0.5, 0.7, 0.9, 1.08]
 BROW_R = [0.12, 0.17, 0.18, 0.17, 0.15, 0.12, 0.09, 0.06, 0.02]
 
 
@@ -1998,7 +1998,7 @@ def brow_line(ub):
     rising in a soft arch to its peak two thirds of the way out and falling away to a fine tail past the outer
     corner."""
     u = min(max(ub, BROW_US[0]), BROW_US[-1])
-    zc = 1.08 + 0.28 * math.sin(math.pi * (u + 0.8) / 2.5) ** 1.2 - 0.12 * smooth(0.95, 1.3, u)
+    zc = 0.92 + 0.36 * math.sin(math.pi * (u + 0.72) / 2.24) - 0.24 * smooth(0.6, 1.08, u)
     return zc, float(np.interp(u, BROW_US, BROW_R))
 
 
@@ -2049,9 +2049,9 @@ def brow_image():
         tang = math.atan(slope(u))
         side = (dz - (zc + 0.15 * r)) / max(r, 1e-3)              # -1 at the lower edge, +1 at the upper
         body = tang + math.radians(24) * smooth(0.2, -0.9, side) - math.radians(16) * smooth(-0.1, 0.9, side)
-        head = math.radians(82 - 10 * smooth(-0.78, -0.4, ub))
-        w = smooth(-0.35, -0.62, ub)
-        tail = smooth(0.85, 1.15, ub)
+        head = math.radians(82 - 10 * smooth(-0.7, -0.35, ub))
+        w = smooth(-0.3, -0.55, ub)
+        tail = smooth(0.7, 1.0, ub)
         a = body * (1 - w) + head * w
         return a * (1 - tail) + tang * tail
 
@@ -2070,8 +2070,8 @@ def brow_image():
         ub = u * K
         side0 = (dz - zc) / max(r, 1e-3)
         # a rounded, feathered head: the top of the head starts further out than its lower edge
-        keep = (0.3 + 0.7 * smooth(-0.8, -0.35, ub)) * smooth(-0.82, -0.62, ub - 0.12 * max(0.0, side0) ** 2)
-        keep *= 1 - 0.5 * smooth(0.9, 1.3, ub)
+        keep = (0.3 + 0.7 * smooth(-0.72, -0.3, ub)) * smooth(-0.74, -0.55, ub - 0.12 * max(0.0, side0) ** 2)
+        keep *= 1 - 0.5 * smooth(0.75, 1.08, ub)
         if rng.random() > keep:
             continue
         gi, gj = int(u / cell), int(dz / cell)
@@ -2093,10 +2093,10 @@ def brow_image():
         len_n = float(_fbm2(u0 * 4.0, z0 * 4.0, 71, 4))
         ang_n = float(_fbm2(u0 * 3.0, z0 * 3.0 + 7.0, 81, 4))
         tone = 0.5 + 0.5 * float(_perlin2(u0 * 11.0, z0 * 11.0, 91))
-        length = (0.11 + 0.05 * smooth(-0.6, 0.3, ub) - 0.05 * smooth(0.8, 1.3, ub)) * (1 + 0.3 * len_n) * (0.85 + 0.3 * rng.random())
+        length = (0.11 + 0.05 * smooth(-0.6, 0.3, ub) - 0.05 * smooth(0.65, 1.08, ub)) * (1 + 0.3 * len_n) * (0.85 + 0.3 * rng.random())
         if ub < -0.35:
             length *= 0.8
-        wid = 0.0078 * (1 - 0.35 * smooth(0.8, 1.3, ub))
+        wid = 0.0078 * (1 - 0.35 * smooth(0.65, 1.08, ub))
         # opacity: crisp and full at the lower edge of the body, softer at the top, feathered at the head
         val = 255 * (0.7 + 0.3 * smooth(0.8, -0.4, side)) * (0.55 + 0.45 * smooth(-0.75, -0.35, ub))
         steps = 12
