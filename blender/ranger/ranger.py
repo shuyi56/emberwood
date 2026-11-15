@@ -1720,18 +1720,18 @@ def build_eye(head, head_tree, s, x, ey, ez):
 
 
 SHADOW_TEX = {}
-SH_U0, SH_U1, SH_V0, SH_V1 = -1.15, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
+SH_U0, SH_U1, SH_V0, SH_V1 = -1.75, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
 
 
 def eyeshadow_image():
     """The eyeshadow, painted into a texture laid over the lid (u across, dz up from the corner line, the same
     mapping as the lids' relief): a smoky, desaturated grey-mauve wash from the lid's edge up over the crease, fuller and taller
     toward the outer corner and gone at the inner one, a charcoal smoked into the outer V and along the upper
-    lash line, and a faint smudge under the outer half of the lower lashes. Colour and opacity in one RGBA image,
+    lash line, and a fainter, lighter wash along the lower lid. Colour and opacity in one RGBA image,
     so the skin shows through and the wash fades into it instead of ending at an edge."""
     if 'img' in SHADOW_TEX:
         return SHADOW_TEX['img']
-    W, H = 512, 300
+    W, H = 640, 300
     uu, dd = np.meshgrid(SH_U0 + (np.arange(W) + 0.5) / W * (SH_U1 - SH_U0), SH_V1 - (np.arange(H) + 0.5) / H * (SH_V1 - SH_V0))
 
     def sm(e0, e1, x):
@@ -1743,7 +1743,7 @@ def eyeshadow_image():
     above = dd - T
     below = -B - dd
     tall = 0.46 + 0.16 * sm(-0.2, 0.9, uu)                    # how far up the wash reaches: taller toward the outer corner
-    across = sm(-1.0, -0.55, uu) * (0.85 + 0.15 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.12, -0.9, uu)
+    across = sm(-1.3, -0.7, uu) * (0.85 + 0.15 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.55, -1.3, uu)
     lid = sm(-0.012, 0.012, above) * (1 - sm(0.3 * tall, tall, above))
     # the deeper colour: smoked along the lash line and into the outer V (a wedge opening up and out from the corner)
     deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
@@ -1754,10 +1754,14 @@ def eyeshadow_image():
     col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
     a = 0.8 * lid * across + 0.2 * deep * lid * across
     # under the lower lashes, outer half only
-    low = sm(-0.005, 0.02, below) * (1 - sm(0.05, 0.16, below)) * sm(0.0, 0.8, uu) * sm(1.4, 1.0, uu)
-    col = col + (dark - col) * low[..., None]
-    a = np.maximum(a, 0.3 * low)
-    a *= (np.abs(uu) < 1.0) * 1.0 + (np.abs(uu) >= 1.0) * 1.0
+    low = sm(-0.01, 0.015, below) * (1 - sm(0.06, 0.3, below)) * sm(-1.0, -0.5, uu) * sm(1.35, 1.0, uu)
+    col = col + (np.array([128, 96, 112], dtype=np.float32) - col) * low[..., None]
+    a = np.maximum(a, 0.5 * low * (0.7 + 0.3 * sm(0.0, 0.9, uu)))
+    # the hollow beside the nose, where the lid meets the bridge: the inner corner's own soft shade
+    hollow = np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
+    col = col + (base - col) * np.clip(hollow, 0, 1)[..., None] * (1 - low[..., None]) * 0.6
+    a = np.maximum(a, 0.4 * hollow)
+    a *= sm(SH_V0, SH_V0 + 0.15, dd) * sm(SH_V1, SH_V1 - 0.15, dd) * sm(SH_U0, SH_U0 + 0.2, uu) * sm(SH_U1, SH_U1 - 0.2, uu)   # (no hard edge at the patch's border)
     # nothing inside the opening itself
     a *= 1 - ((above < 0) & (below < 0) & (np.abs(uu) < 1.0))
     rgb = np.array([_srgb_lin(c / 255) for c in col.reshape(-1, 3)], dtype=np.float32).reshape(H, W, 3) if False else col / 255
@@ -1900,7 +1904,7 @@ def eye_makeup(head, tree, eyes):
         h = tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
         return h[0].y if h[0] is not None else None
 
-    def patch(name, ex, ez, s, off, m, NU=120, NV=84):
+    def patch(name, ex, ez, s, off, m, NU=150, NV=84):
         bm = bmesh.new()
         uvl = bm.loops.layers.uv.new('UVMap')
         grid = []
@@ -1933,7 +1937,7 @@ def eye_makeup(head, tree, eyes):
 
     for ex, ez, s in eyes:
         patch('Eyeshadow', ex, ez, s, 0.022, shadow_m)
-        patch('Lashes', ex, ez, s, 0.034, lash_m, NU=160, NV=110)
+        patch('Lashes', ex, ez, s, 0.034, lash_m, NU=200, NV=110)
 
 
 def build():
