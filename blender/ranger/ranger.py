@@ -921,7 +921,7 @@ LEG_X, SH_X = 3.3, 5.75
 CHEST_Z, NECK_Z = 41.0, 51.0
 # the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
 # either way, in radians (the world model takes a longer stride: see export_glb.py)
-GAIT, ARM_SWING = 1.0, 0.62
+GAIT, ARM_SWING = 1.0, 0.2
 
 
 def gauss(x, z, x0, z0, sx, sz, amp):
@@ -4211,14 +4211,14 @@ def pose(col):
         if walking:
             a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG))
             fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
-            bend = 0.25 + 0.8 * fold
-            flick = 0.06 + 0.1 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
+            bend = 0.42 + 0.2 * fold
+            flick = 0.08 + 0.05 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
             flick = 0.1
         # (held a little off the body, so the waist shows, and a little further out as it swings back, past the hip)
-        sh.rotation_euler = (-a, s * (0.17 + 0.1 * max(0.0, -a)), 0)
+        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-bend, 0, 0)
         wr.rotation_euler = (flick, 0, 0)
 
