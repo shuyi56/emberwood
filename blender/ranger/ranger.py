@@ -1831,23 +1831,23 @@ def lash_image():
     len_n = fbm1(N, 21, 0.02)
     lean_n = fbm1(N, 31, 0.015)
     clump = noise1(N, 0.05, 41)                         # slow: which strands lean together
-    for top, count in ((True, 260), (False, 130)):
+    for top, count in ((True, 110), (False, 55)):
         for _ in range(count):
             f = rng.random()
             u0 = (-0.88 + 1.95 * f) if top else (-0.3 + 1.35 * f)
             k = int((u0 - ufine[0]) / (ufine[-1] - ufine[0]) * (N - 1))
             edge = lid_top(u0) if top else -lid_bottom(u0)
             outer = smooth(-0.9, 1.0, u0)
-            length = ((0.1 + 0.2 * outer ** 1.2 - 0.07 * smooth(0.95, 1.1, u0)) * (1 + 0.45 * len_n[k]) * (0.8 + 0.4 * rng.random())) * (1.0 if top else 0.45)
+            length = ((0.07 + 0.12 * outer ** 1.2 - 0.05 * smooth(0.95, 1.1, u0)) * (1 + 0.3 * len_n[k]) * (0.8 + 0.4 * rng.random())) * (1.0 if top else 0.45)
             lean = (-0.05 + 0.85 * outer ** 1.3 + 0.28 * lean_n[k] + 0.22 * clump[k]) + 0.12 * (rng.random() - 0.5)
-            stroke(dr, u0, edge - (0.005 if top else -0.005), lean, length, 0.55 + 0.4 * rng.random(), 0.0085 / (SH_U1 - SH_U0) * W if top else 0.006 / (SH_U1 - SH_U0) * W, top, int(180 + 75 * rng.random()))
+            stroke(dr, u0, edge - (0.005 if top else -0.005), lean, length, 0.55 + 0.4 * rng.random(), 0.0075 / (SH_U1 - SH_U0) * W if top else 0.005 / (SH_U1 - SH_U0) * W, top, int(180 + 75 * rng.random()))
     # the fuzz: many short faint thin strands in every direction near the margins
     for top in (True, False):
-        for _ in range(1100 if top else 500):
+        for _ in range(260 if top else 110):
             u0 = (-0.9 + 2.0 * rng.random()) if top else (-0.35 + 1.45 * rng.random())
             edge = lid_top(u0) if top else -lid_bottom(u0)
             ang = rng.normal(0.35 * smooth(-0.9, 1.0, u0), 0.55)
-            stroke(fd, u0, edge + (rng.random() - 0.3) * 0.02 * (1 if top else -1), ang, (0.03 + 0.09 * rng.random()) * (1 if top else 0.6), 0.5, 0.0035 / (SH_U1 - SH_U0) * W, top, int(70 + 90 * rng.random()), steps=6)
+            stroke(fd, u0, edge + (rng.random() - 0.3) * 0.02 * (1 if top else -1), ang, (0.02 + 0.05 * rng.random()) * (1 if top else 0.6), 0.5, 0.003 / (SH_U1 - SH_U0) * W, top, int(70 + 90 * rng.random()), steps=6)
     # the smoky liner hugging the lid's edge
     pts = [px(u, lid_top(u) + 0.006) for u in np.linspace(-1.0, 1.08, 90)]
     dr.line(pts, fill=150, width=int(0.016 / (SH_U1 - SH_U0) * W * SS), joint='curve')
@@ -1858,7 +1858,7 @@ def lash_image():
     halo = np.asarray(layer.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(7)), dtype=np.float32) / 255
     yy, xx = np.mgrid[0:H, 0:W]
     grain = 0.75 + 0.25 * (np.sin(xx * 0.9 + 3 * np.sin(yy * 0.37)) * np.sin(yy * 1.1 + 2 * np.sin(xx * 0.23)))
-    a = np.clip(a1 * 1.7 + a2 * 0.5 * grain + halo * 0.28, 0, 1)
+    a = np.clip(a1 * 1.5 + a2 * 0.35 * grain + halo * 0.12, 0, 1)
     a *= 0.85 + 0.15 * grain
     col = np.zeros((H, W, 3), dtype=np.float32) + np.array([20, 13, 14], dtype=np.float32) / 255
     img = bpy.data.images.new('lashes', W, H, alpha=True)
