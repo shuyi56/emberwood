@@ -33,6 +33,8 @@ sc.render.film_transparent = False
 bg = sc.world.node_tree.nodes['Background']
 bg.inputs['Color'].default_value = (0.09, 0.14, 0.07, 1)
 bg.inputs['Strength'].default_value = 1.6
+if hasattr(sc.render.image_settings, 'media_type'):
+    sc.render.image_settings.media_type = 'IMAGE'
 sc.render.image_settings.file_format = 'PNG'
 sc.render.image_settings.color_depth = '8'
 cam = sc.camera
