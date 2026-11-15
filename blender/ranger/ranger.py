@@ -953,9 +953,9 @@ def face_relief(x, z):
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
         h = (0.012 + 0.04 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.05 * math.exp(-((0.36 - z) / 0.02) ** 2)
+        h = 0.05 * math.exp(-((0.36 - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
     w = 0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - 0.37) / 0.06)
-    d += h * 0.5 * (math.exp(-(x / w) ** 2) + math.exp(-(x / w) ** 4))
+    d += h * math.exp(-(x / (1.15 * w)) ** 2)      # (a rounded ridge: steep sides cast a hard shadow line from above)
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.018)      # the muzzle: the teeth and jaw carry the mouth forward
     d += mouth_relief(x, z)
@@ -982,9 +982,11 @@ def mouth_relief(x, z):
     across_l = math.exp(-(x / 0.06) ** 4)
     d += 0.024 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
     # the line between the lips, deepest at the corners where the lips tuck in
-    d -= (0.008 + 0.008 * (ax / 0.082) ** 2) * math.exp(-((z - 0.258) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
+    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    d -= (0.008 + 0.006 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
-        d += gauss(x, z, sx * 0.086, 0.257, 0.013, 0.012, -0.004)    # the corners
+        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.004)    # the corners, lifted
         d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
@@ -3242,7 +3244,7 @@ def lash_image():
 
 BROW_TEX = {}
 BR_U0, BR_U1, BR_V0, BR_V1 = -1.28, 2.25, 0.62, 1.92     # the brow patch's extent, in the eye patch's units (u, dz)
-BROW_US = [-0.7, 1.08]          # the brow's inner and outer ends (brow units)
+BROW_US = [-0.6, 1.1]          # the brow's inner and outer ends (brow units)
 
 
 def brow_line(ub):
