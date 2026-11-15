@@ -2862,13 +2862,13 @@ def eyeshadow_image():
     deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
     vwedge = sm(0.55, 1.05, uu) * (1 - sm(0.3 * tall, 1.1 * tall, np.abs(dd - (T + 0.07 + 0.2 * np.maximum(0, uu - 0.9)))))
     deep = np.maximum(deep * 0.8, 0.6 * vwedge * sm(1.5, 0.95, uu))
-    base = np.array([118, 88, 100], dtype=np.float32)
-    dark = np.array([78, 62, 76], dtype=np.float32)            # (a soft charcoal-mauve: the corners deepen the tone, never to near-black)
+    base = np.array([70, 60, 56], dtype=np.float32)          # a warm charcoal: near-black with a little brown, so it
+    dark = np.array([34, 29, 28], dtype=np.float32)          # sits on warm skin (a mauve fought it); deepest in the corners
     col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
     a = 0.8 * lid * across + 0.1 * deep * lid * across
     # under the lower lashes, outer half only
     low = sm(-0.01, 0.015, below) * (1 - sm(0.06, 0.3, below)) * sm(-1.0, -0.5, uu) * sm(1.35, 1.0, uu)
-    col = col + (np.array([128, 96, 112], dtype=np.float32) - col) * low[..., None]
+    col = col + (np.array([92, 80, 74], dtype=np.float32) - col) * low[..., None]
     a = np.maximum(a, 0.5 * low * (0.7 + 0.3 * sm(0.0, 0.9, uu)))
     # the hollow beside the nose, where the lid meets the bridge: the inner corner's own soft shade
     hollow = np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
@@ -2885,6 +2885,7 @@ def eyeshadow_image():
     smoke = _warped_fbm(uu * 2.2, dd * 2.6, seed=9, k=2.5)
     a = a * np.clip(0.95 + 0.6 * smoke, 0.55, 1.3)
     img = bpy.data.images.new('eyeshadow', W, H, alpha=True)
+    a = a * 0.78                  # (charcoal reads much stronger than the mauve did at the same opacity)
     px = np.concatenate([rgb, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
     img.pixels.foreach_set(px.ravel().astype(np.float32))
     img.pack()
