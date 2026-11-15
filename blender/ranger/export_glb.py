@@ -159,6 +159,7 @@ def bake_hair_shade(rays=10, dist=1.6):
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
     import numpy as np
+    bpy.context.scene.frame_set(IDLE_FRAME)    # (the points below are the rest shape, which is how she stands at idle)
     dg = bpy.context.evaluated_depsgraph_get()
     vs, ps = [], []
     for o in bpy.context.scene.objects:
@@ -219,6 +220,7 @@ def bake_wool(rays=12, dist=1.4):
     from mathutils import Vector, noise
     from mathutils.bvhtree import BVHTree
     import numpy as np
+    bpy.context.scene.frame_set(IDLE_FRAME)    # (the points below are the rest shape, which is how she stands at idle)
     dg = bpy.context.evaluated_depsgraph_get()
     vs, ps = [], []
     for o in bpy.context.scene.objects:
