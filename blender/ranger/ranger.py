@@ -1646,8 +1646,8 @@ def hand_mesh(s):
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
-    t1 = t0 + Vector((0.25 * inward, -0.18, -0.85))
-    t2 = t1 + Vector((0.18 * inward, 0.05, -0.55))
+    t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
+    t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.26)
     capsule(t0, t1, 0.34)
