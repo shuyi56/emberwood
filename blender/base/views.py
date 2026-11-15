@@ -9,6 +9,7 @@
 --turn     the whole figure in its 3D look (sprite_mode off): front, front 3/4, profile, back 3/4 and back, in a
            row (DIR/turn.png), posed at sheet column --frame (default 0, the idle)
 --head     the head and shoulders from the same five angles (DIR/head.png)
+--set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
 """
 import importlib
 import math
@@ -140,6 +141,10 @@ def row(cam, out, tmp, size, centre, height, ortho=True, dist=200.0):
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), f'{FIGURE}-views'))
     os.makedirs(out, exist_ok=True)
+    for i, a in enumerate(argv):
+        if a == '--set':
+            k, v = argv[i + 1].split('=', 1)
+            setattr(F, k, eval(v))
     F.build()
     sc = bpy.context.scene
     sc.frame_set(1)

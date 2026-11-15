@@ -188,7 +188,7 @@ def bodice_form(z, phi):
     for x0 in SEAMS_X:
         for sgn in (-1, 1):
             a = math.asin(max(-1.0, min(1.0, sgn * x0 / rx)))
-            d = phi + a           # (phi of the point where x = -rx sin(phi) = sgn * x0, i.e. phi = -a)
+            d = wrap(phi + a)     # (phi of the point where x = -rx sin(phi) = sgn * x0, i.e. phi = -a)
             seam = _gs(d, 0.0, 0.035) * max(0.0, c) ** 0.5
             off -= 0.06 * seam
             cr += 0.45 * seam
@@ -274,8 +274,8 @@ def cowl_form(z, phi, f):
     c = math.cos(phi)
     front = max(0.0, math.cos(phi - 0.06)) ** 2
     # the swags: U-shaped folds across the front, rising toward the shoulders, deepest toward the hem
-    u = z + 2.1 * (phi - 0.06) ** 2
-    v = fold_ridge(2 * math.pi * (u - 48.6) / 2.5 + 0.25 * math.sin(1.7 * phi))
+    u = z + 2.1 * wrap(phi - 0.06) ** 2      # (phi wrapped: just left of the front it is near 2 pi)
+    v = fold_ridge(2 * math.pi * (u - 48.6) / 2.5 + 0.25 * math.sin(1.7 * wrap(phi)))
     k = front * smoothstep(0.3, 0.75, f) * (1.0 - smoothstep(51.6, 52.6, z))
     off += 0.38 * k * v
     cr += 0.8 * k * max(0.0, -v)
@@ -320,6 +320,7 @@ def cowl_pt(zr, phi, extra=0.0):
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
 TIE_EL = 0.55                    # how high up the back of the head the tail is tied (radians above level)
 TIE = {}
+FUSE = True       # melt the hair's pieces into one (views.py --set FUSE=False shows them apart)
 
 # the hairline: its height round the head, as an elevation seen from HC (|angle| from the front: the forehead,
 # a little higher at the temples, down in front of the ears, behind them, and across the nape)
@@ -377,8 +378,12 @@ def hair_cap(head_tree):
     bm = bmesh.new()
     rows, weights = [], []
 
+    miss = []
+
     def skull(d):
         hit = head_tree.ray_cast(HC + d * 20.0, -d, 20.0)
+        if hit[0] is None:
+            miss.append(tuple(d))
         return (hit[0] - HC).length if hit[0] is not None else 4.0
 
     tie_r = skull(A)
@@ -413,8 +418,12 @@ def hair_cap(head_tree):
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     bm.normal_update()
     f0 = bm.faces[len(bm.faces) // 2]
-    if f0.normal.dot(f0.calc_center_median() - HC) < 0:      # (outward, so its thickness is laid on outside)
+    flip = f0.normal.dot(f0.calc_center_median() - HC) < 0
+    if flip:      # (outward, so its thickness is laid on outside)
         bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    side = [(v.co - HC).length for v in rows[0][NU // 4 - 2:NU // 4 + 3]]
+    print(f'hair cap: {len(miss)} rays missed the skull; normals flipped: {flip}; hairline at the side '
+          f'{[round(v.co.z, 2) for v in rows[0][NU // 4 - 2:NU // 4 + 3]]} at r {[round(x, 2) for x in side]}', flush=True)
     bm.verts.index_update()
     w = [x for r in weights for x in r] + [1.0]
     return bm, w
@@ -505,6 +514,8 @@ def build_hair(head, head_tree):
                                                                         0.5 * (1 - i / (n_ - 1)) ** 0.8 + 0.04), n=16),
                  M_HAIR, head, subdiv=0)
         names.append(f'Hair lock {j}')
+    if not FUSE:          # (for checking the pieces before they are melted together)
+        return None
     hair = fuse_parts(head, names)
     # the tie: a leather thong wound round the root of the tail, in three turns
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
@@ -606,7 +617,7 @@ def bracer_form(z, phi, s):
     pm = s * phi
     off, cr = 0.0, 0.0
     k = _gs(z, -UPPER - FORE + 1.4, 1.0) * max(0.0, math.cos(pm - 0.4)) ** 2
-    v = fold_ridge(4.0 * (z + UPPER + FORE) + 1.2 * pm)
+    v = fold_ridge(4.0 * (z + UPPER + FORE) + pm)
     off += 0.06 * k * v
     cr += 0.5 * k * max(0.0, -v)
     lace = _gs(wrap(pm - math.pi / 2), 0.0, 0.12)
