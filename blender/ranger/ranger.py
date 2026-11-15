@@ -2434,6 +2434,9 @@ def build():
     # exactly one surface (no blended edges), and passes for the sun's light and the surface normal
     sc.render.engine = 'CYCLES'
     sc.cycles.device = 'CPU'
+    # keep the scene loaded in Cycles between renders: only what changed (the pose, the turn) is synced again,
+    # so after the first frame a cell takes about half a second instead of twenty (the samples cost nothing)
+    sc.render.use_persistent_data = True
     sc.cycles.samples = 1
     sc.cycles.use_adaptive_sampling = False
     sc.cycles.use_denoising = False
