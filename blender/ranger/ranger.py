@@ -1621,7 +1621,7 @@ def hand_mesh(s):
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
     # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
     # size, slim fingers any longer read as spidery)
-    for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.75, 0.98, 0.22)):
+    for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.8, 0.98, 0.22)):
         # (the two pieces of each finger meet end to end at the middle joint with only a little overlap, and the
         # finger starts a touch lower in the palm: overlapping fully, their fields add up and swell into a knob)
         p = Vector((0.05 * inward, y0, -2.6))
@@ -1639,16 +1639,19 @@ def hand_mesh(s):
     blob((0.1 * inward, 0.5, -1.1), (0.4, 0.4, 0.75), 0.75)
     # the little-finger edge of the palm: one straight ridge from the wrist to the pinky knuckle, so the
     # outline runs smoothly down that side with no dip between the heel of the hand and the pinky
-    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.72, -2.45), 0.46)
+    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, -2.3), 0.44)
+    # (tapering on into the pinky's first segment, so the edge narrows down into the finger instead of
+    # stepping in at the knuckle)
+    capsule((0.05 * inward, 0.72, -2.2), (0.15 * inward, 0.8, -2.95), 0.3)
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
-    t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
-    t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
+    t1 = t0 + Vector((0.25 * inward, -0.18, -0.85))
+    t2 = t1 + Vector((0.18 * inward, 0.05, -0.55))
     # the web of skin from the thumb's first joint to the root of the index finger
-    capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.3)
-    capsule(t0, t1, 0.4)
-    capsule(t1, t2, 0.3)
+    capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.26)
+    capsule(t0, t1, 0.34)
+    capsule(t1, t2, 0.25)
 
     dg = bpy.context.evaluated_depsgraph_get()
     me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
