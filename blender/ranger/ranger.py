@@ -1621,10 +1621,10 @@ def hand_mesh(s):
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
     # fingers, index at the front to pinky at the back (the middle finger a little shorter than the palm, as in life:
     # longer and the hand reads as all fingers)
-    for y0, L, r in ((-0.9, 1.5, 0.35), (-0.3, 1.62, 0.36), (0.3, 1.54, 0.34), (0.78, 1.22, 0.31)):
+    for y0, L, r in ((-0.86, 1.5, 0.26), (-0.29, 1.62, 0.27), (0.27, 1.54, 0.25), (0.75, 1.22, 0.22)):
         p = Vector((0.05 * inward, y0, -2.55))
         ang = 0.3
-        for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.88)):
+        for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.85)):
             ang += extra
             d = Vector((inward * math.sin(ang), 0.0, -math.cos(ang)))
             q = p + d * (L * frac)
@@ -1645,8 +1645,8 @@ def hand_mesh(s):
     t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.3)
-    capsule(t0, t1, 0.46)
-    capsule(t1, t2, 0.37)
+    capsule(t0, t1, 0.4)
+    capsule(t1, t2, 0.3)
 
     dg = bpy.context.evaluated_depsgraph_get()
     me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
@@ -1659,8 +1659,8 @@ def hand_mesh(s):
     # the metaball pieces leave small bulges where they overlap (a lump on the back of the hand by the index finger,
     # another on the little-finger edge by the wrist): relax the surface so it reads as one smooth skin, holding its
     # volume, without melting the fingers together
-    for _ in range(6):
-        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.35, lambda_border=0.0,
+    for _ in range(4):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.25, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
     # (a little smaller than life, about two thirds of the face's length: at this size, held out on a swinging arm
     # toward the viewer, a life-size hand reads as far too big against the slim forearm and the sleeve)

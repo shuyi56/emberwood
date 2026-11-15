@@ -422,7 +422,7 @@ def bake_hands(rays=24, dist=1.3):
             # the clefts between the fingers (the fingers are one fused surface, so the shade marks them apart),
             # from the knuckles to the tips
             fz = min(1.0, max(0.0, (-q.z - 2.4) / 0.5))
-            gap = max(math.exp(-((q.y - g) / 0.11) ** 2) for g in (-0.59, 0.0, 0.53))
+            gap = max(math.exp(-((q.y - g) / 0.11) ** 2) for g in (-0.56, 0.0, 0.5))
             c = c + (dark * 0.75 - c) * 0.6 * gap * fz
             # the palm side, turned to the body and away from the light, a shade deeper; up at the wrist the skin
             # falls into the shade of the cuff
