@@ -1109,7 +1109,9 @@ def hair_flow(co):
     the curve from the parting drew rings round the back of the head, like the ridges of a shell.)"""
     # (measured as a distance round the head rather than an angle, so near the neck the strands do not crowd
     # into a fan; the angle is taken from the back, so its one break falls at the parting, not down her back)
-    return (math.atan2(co.x, co.y - 0.5) * max(2.5, math.hypot(co.x, co.y - 0.5)), 0.0, co.z * 0.6)
+    # (the distance round is taken at one fixed radius: scaled by each point's own distance from the axis, the
+    # streaks bent into arcs wherever the hair swells out, as over the side locks)
+    return (math.atan2(co.x, co.y - 0.5) * 3.6, 0.0, co.z * 0.6)
 
 
 def drape_fall(dg):
@@ -1132,10 +1134,15 @@ def drape_fall(dg):
     body = BVHTree.FromPolygons(vs, ps)
 
     def back_y(x, z):
-        hit = body.ray_cast(Vector((x, 30.0, z)), Vector((0, -1, 0)), 40.0)
-        return hit[0].y if hit[0] is not None else 0.0
+        # (a ray that misses at the very edge, past the side of the head or the mantle, takes what lies a little
+        # further in: taking 0 there pulled the edges of the fall forward beside her face as thin flaps)
+        for k_ in range(8):
+            hit = body.ray_cast(Vector((x * 0.94 ** k_, 30.0, z)), Vector((0, -1, 0)), 40.0)
+            if hit[0] is not None:
+                return hit[0].y
+        return 0.0
 
-    W = [(7.2, 2.0), (6.0, 2.9), (4.5, 3.2), (1.5, 3.2), (-1.5, 3.85), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
+    W = [(7.2, 2.0), (6.0, 2.9), (4.5, 3.2), (1.5, 3.3), (-1.5, 3.65), (-4.5, 4.3), (-9.0, 4.1), (-13.0, 3.6), (-16.0, 3.0), (-17.5, 2.2)]
 
     def width(z):
         for (z0, w0), (z1, w1) in zip(W, W[1:]):
@@ -1194,12 +1201,18 @@ def drape_fall(dg):
             # (what it rests on, blurred across: the hair bridges the folds of the mantle instead of carrying
             # each fold down its whole length as a groove)
             # (only below the nape: over the round of the head a blurred support would sink into the hair beneath)
-            sup = back_y(x, z) if z > -0.5 else sum(back_y(x + dx_, z) * w_ for dx_, w_ in
-                                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1)))
+            # (the change from lying over the head to hanging over the mantle is eased over a hand's breadth
+            # either side of the nape: switched at one height it left a notch across the fall)
+            wb = min(1.0, max(0.0, (0.5 - z) / 2.0))
+            wb = wb * wb * (3 - 2 * wb)
+            sup = back_y(x, z)
+            if wb > 0.0:
+                sup = lerp(sup, sum(back_y(x + dx_, z) * w_ for dx_, w_ in
+                                    ((-0.9, 0.1), (-0.45, 0.2), (0.0, 0.4), (0.45, 0.2), (0.9, 0.1))), wb)
             # the least it can be: flush with the hair over the head at the top, then lying over what is under it.
             # Over the head its edges lie flush with the hair beneath (the extra thickness goes inward, out of
             # sight), so they leave no rim along the sides of the head
-            y = sup + t_ * grow if z > -0.5 else max(sup + t * grow, sup + 0.52)
+            y = lerp(sup + t_ * grow, max(sup + t * grow, sup + 0.52), wb)
             pts.append([x, y, z, t, sup])
         # hair hangs: pulled down by its weight it spans straight from one thing that holds it out to the next (the
         # back of the skull, then the mantle) and never sinks into the hollow between them. So its outside is the
@@ -1241,20 +1254,21 @@ def drape_fall(dg):
             vs = min(1.0, (z_top - z) / (z_top - z_end))
             if vs > 0.8:          # the ends turn in a little toward her back rather than flicking out
                 y = lerp(y, max(sup + 0.52, y - 0.6), ((vs - 0.8) / 0.2) ** 2 * 0.7)
-            y = max(sup + 0.42 if z < -0.5 else y - 1.0, y)
+            wb = min(1.0, max(0.0, (0.5 - z) / 2.0))
+            wb = wb * wb * (3 - 2 * wb)
+            y = max(lerp(y - 1.0, sup + 0.42, wb), y)
             col_out.append([x, y, z, t, sup])
             # where it spans a hollow it is the full mass of hair down to what is under it (a thin sheet bridging
             # the nape would show its underside from the side); where it lies on the mantle it is pressed thinner
             gap = y - sup
             th = t if gap < t + 0.3 else max(t, gap - 0.15)
-            yi = max(y - th, sup + 0.12) if z < -0.5 else y - th
-            # its sides are rounded over (an elliptical edge between the outside and the inside) rather than cut
-            # off square: a square side is a flat wall as deep as the hair, seen as a hard corner down the back
-            if abs(u) > 0.6 and y - yi > 0.3:
-                f_ = min(1.0, (abs(u) - 0.6) / 0.4)
-                c_, h_ = 0.5 * (y + yi), 0.5 * (y - yi)
-                h_ = max(0.12, h_ * math.sqrt(max(0.0, 1.0 - f_ * f_)))
-                y, yi = c_ + h_, c_ - h_
+            yi = lerp(y - th, max(y - th, sup + 0.12), wb)
+            # its sides are rounded over down onto what it lies on, rather than cut off square: a square side is a
+            # flat wall as deep as the hair, seen as a hard corner down the back (and an edge rounded about its
+            # middle instead stands proud of the hair beneath as a ridge)
+            if abs(u) > 0.45 and y - yi > 0.3:
+                f_ = min(1.0, (abs(u) - 0.45) / 0.55)
+                y = yi + max(0.15, (y - yi) * math.sqrt(max(0.0, 1.0 - f_ * f_)))
                 col_out[-1][1] = y
             col_in.append(Vector((x, yi, z)))
         col_out = [Vector((x, y, z)) for x, y, z, t, sup in col_out]
@@ -1345,12 +1359,12 @@ def fuse_hair(head, names, voxel=0.065):
                                         use_x=True, use_y=True, use_z=False, preserve_volume=True)
     # the side locks run into the hair beside them: the hollow where they meet is relaxed out, so they read as
     # the front of the side hair rather than a separate piece laid on it
-    sides = [v for v in bm.verts if -3.5 < v.co.z < 6.5 and abs(v.co.x) > 1.9 and v.co.y < 2.5]
-    for _ in range(5):
+    sides = [v for v in bm.verts if -3.5 < v.co.z < 7.0 and abs(v.co.x) > 1.6 and v.co.y < 5.0]
+    for k_ in range(12):
         bmesh.ops.smooth_laplacian_vert(bm, verts=sides, lambda_factor=0.7, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=False, preserve_volume=True)
     band = [v for v in bm.verts if -4.0 < v.co.z < 7.5 and v.co.y > 1.0]
-    for _ in range(4):
+    for _ in range(8):
         bmesh.ops.smooth_laplacian_vert(bm, verts=band, lambda_factor=0.5, lambda_border=0.0,
                                         use_x=True, use_y=True, use_z=True, preserve_volume=True)
     hair = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
@@ -2294,6 +2308,9 @@ def build():
     bmesh.ops.translate(cap, vec=(0, 0.06 * HEAD_H, 0.56 * HEAD_H), verts=cap.verts)
     bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, -2.1, 6.4),
                            plane_no=Vector((0, -0.45, -0.89)).normalized(), clear_outer=True)
+    # (and stopped above the jaw: lower down, beside the face, its edges stood out from behind the side locks)
+    bmesh.ops.bisect_plane(cap, geom=cap.verts[:] + cap.edges[:] + cap.faces[:], plane_co=(0, 0, 2.2),
+                           plane_no=Vector((0, 0, -1)), clear_outer=True)
     # over the brow the cap lies close to the skull, thinning to nothing at the front hairline, so the front of
     # the head reads as hair growing from the scalp rather than as a cap; the back and the crown keep their volume
     hl_n = Vector((0, -0.45, -0.89)).normalized()
@@ -2334,14 +2351,14 @@ def build():
         bang.visible_shadow = False
         strand_colours(bang)
         # (kept slim and close in to the fall, so once fused it reads as the front of the side hair, not a tube on it)
-        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.5, s * 2.9, 0.6), (4.5, 0.66, 1.75, s * 3.26, 1.35), (2.0, 1.0, 2.0, s * 3.05, 2.2),
-                                         (-1.0, 0.95, 1.95, s * 3.3, 2.3), (-2.0, 0.75, 1.5, s * 3.45, 2.4), (-3.0, 0.55, 1.2, s * 3.55, 2.6),
-                                         (-4.0, 0.2, 0.5, s * 3.6, 2.8)]),
+        mesh_obj(f'Side lock {s}', loft([(7.0, 0.6, 1.4, s * 2.9, 0.5), (4.5, 0.66, 1.55, s * 3.26, 1.35), (2.0, 1.0, 1.75, s * 3.05, 2.45),
+                                         (-1.0, 0.95, 1.7, s * 3.3, 2.55), (-2.0, 0.7, 1.4, s * 3.4, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]),
                  M_HAIR, head)
     # the hair over the back of the head, down to the nape; the long hair below is draped once the mantle is on
     # (see drape_fall)
     mesh_obj('Hair fall', loft([(7.5, 3.4, 3.4, 0, 0.75), (4.5, 3.75, 4.05, 0, 0.9), (2.0, 3.75, 2.6, 0, 2.1), (0.5, 3.6, 1.8, 0, 2.8),
-                                (-0.4, 3.2, 1.3, 0, 3.0)]), M_HAIR, head)
+                                (-0.4, 3.1, 1.2, 0, 2.95),
+                                (-1.4, 2.3, 0.7, 0, 2.75)]), M_HAIR, head)
     HAIR_PARTS[:] = [head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall']]
 
     # ---- mantle: a short shoulder cape, its hem lifting over the arms; a mail trim along the hem and a leaf clasp
