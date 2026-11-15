@@ -1302,7 +1302,9 @@ def jerkin_form(z, phi):
 
 # the sleeve's radius down the arm (local height from the shoulder joint, radius), before the deltoid and folds
 ARM_PROFILE = [(1.6, 0.3), (1.35, 1.3), (0.85, 1.95), (0.0, 2.15), (-2.0, 2.1), (-5.5, 1.88), (-UPPER, 1.65), (-UPPER - 2.2, 1.78),
-               (-UPPER - 5.0, 1.55), (-UPPER - FORE + 0.6, 1.3)]
+               (-UPPER - 5.0, 1.55), (-UPPER - FORE + 1.2, 1.36), (-UPPER - FORE - 0.3, 1.42), (-UPPER - FORE - 1.1, 1.5)]
+# (the sleeve runs on past the wrist and opens a little, so it falls over the root of the hand: the hand shows from
+# under a cuff wider than its wrist instead of hanging below a sleeve as wide as it is)
 
 
 def _profile(table, z):
@@ -1631,7 +1633,9 @@ def hand_mesh(s):
     bm.from_mesh(me)
     bpy.data.meshes.remove(me)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
-    bmesh.ops.scale(bm, vec=(1.22, 1.22, 1.22), verts=bm.verts)   # about the length of the face, as in life
+    # (a little smaller than life, about two thirds of the face's length: at this size, held out on a swinging arm
+    # toward the viewer, a life-size hand reads as far too big against the slim forearm and the sleeve)
+    bmesh.ops.scale(bm, vec=(0.98, 0.98, 1.0), verts=bm.verts)
     return bm
 
 
@@ -1916,17 +1920,24 @@ def build():
         el = empty(f'Elbow.{side}', (0, 0, -UPPER), sh)
         wr = empty(f'Wrist.{side}', (0, 0, -FORE), el)
         w = arm_weights(side)
-        zs = [1.55 - 0.22 * i for i in range(int((1.55 + UPPER + FORE - 0.6) / 0.22) + 1)]
+        zs = [1.55 - 0.22 * i for i in range(int((1.55 + UPPER + FORE + 1.1) / 0.22) + 1)]
+
+        def sleeve_w(co, w=w):
+            # (the sleeve hangs from the forearm: its end does not tip with the hand)
+            d = w(co)
+            d[f'Forearm.{side}'] = d.get(f'Forearm.{side}', 0.0) + d.pop(f'Hand.{side}', 0.0)
+            return d
 
         def arm_pt(z, phi, s=s):
             r = profile(ARM, z) + deltoid(z, phi, s) + sleeve_folds(z, phi, s)[0]
             # the elbow: a little point at the back of the joint
             back = 0.25 * math.exp(-((z + UPPER) / 0.9) ** 2) * max(0.0, -math.cos(phi))
             return -r * math.sin(phi), -(r * 1.03 + back * 0) * math.cos(phi) + back
-        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=w)
+        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=sleeve_w, solid=0.12)
         crease_attr(so, lambda co, s=s: sleeve_folds(co.z, math.atan2(-co.x, -co.y), s)[1])
-        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE + 1.0, 1.45, 1.5), (-UPPER - FORE - 0.4, 1.52, 1.57)]), M_SHIRT,
-                 loc=(x, 0.2, SH_Z), subdiv=0, skin=w)
+        # the shirt's cuff, a narrow band showing just below the end of the sleeve
+        mesh_obj(f'Shirt cuff.{side}', loft([(-UPPER - FORE - 0.7, 1.42, 1.46), (-UPPER - FORE - 1.5, 1.42, 1.46)], cap_top=False, cap_bot=False),
+                 M_SHIRT, loc=(x, 0.2, SH_Z), subdiv=0, skin=sleeve_w, solid=0.1)
         mesh_obj(f'Hand.{side}', hand_mesh(s), M_SKIN, loc=(x, 0.2, SH_Z - UPPER - FORE - 0.1), subdiv=0, skin=w)
 
     # ---- legs: one trouser leg from the hip to the ankle with a rounded kneecap and a patch over it, soft boots
@@ -2176,7 +2187,7 @@ def pose(col):
             a = ARM_SWING * (0.12 + math.cos(2 * math.pi * (t - 0.5 - ARM_LAG)))
             fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - ELBOW_LAG))
             bend = 0.22 + 0.62 * fold ** 1.4
-            flick = 0.06 + 0.16 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
+            flick = 0.06 + 0.08 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
             a = 0.12 if s > 0 else -0.04
             bend = 0.32 if s > 0 else 0.2
