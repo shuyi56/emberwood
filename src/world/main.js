@@ -1443,11 +1443,11 @@ void main() {
   // timeline holds a walk cycle (frames 1-25, at 24 fps) and the idle stance (frame 40): the walk's phase
   // follows the hero's stride, so the feet keep pace with the ground they cover.
   const MODEL_SCALE = 2.2 / 80 * 1.2, WALK_SECONDS = 24 / 24, IDLE_SECONDS = 39 / 24;
-  // The ground one walk cycle of a model covers: two steps, the planted foot carried back 26.1 model units in each
-  // (the stance of the world model's gait; see the walk cycle in blender/ranger/ranger.py), let out by 30% so the
-  // cadence stays a brisk walk at the party's pace rather than a scurry. A model's walk phase advances with the
-  // ground it covers, so its legs keep up with it.
-  const WORLD_CYCLE = 2 * 26.1 * MODEL_SCALE * 1.3;
+  // The ground one walk cycle of a model covers: two steps, the planted foot carried back 27.0 model units in each
+  // (the stance of the world model's gait, with the pelvis's turn; see the walk cycle in blender/ranger/ranger.py),
+  // let out by 30% so the cadence stays a brisk walk at the party's pace rather than a scurry. A model's walk phase
+  // advances with the ground it covers, so its legs keep up with it.
+  const WORLD_CYCLE = 2 * 27.0 * MODEL_SCALE * 1.3;
   const gltf = new GLTFLoader();
   function loadModel(file, g) {
     const anim = { mixer: null, actions: [] };
