@@ -1083,18 +1083,20 @@ def tube(pts, radii, flat=0.5, n=10):
 
 
 EYE_RX, EYE_RZ = 0.76, 0.36
-EYE_TILT = 0.082       # the outer corner sits higher than the inner point (as traced)
-EYE_LIFT = 0.07         # the opening sits this much above the iris's line (traced), so white shows over it
+EYE_TILT = 0.092       # the outer corner sits higher than the inner one (as in the photograph)
+EYE_LIFT = -0.05        # the line between the corners sits this much below the iris's centre (as in the photograph)
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
-# The opening of the eye, traced from a reference outline (John's drawing over the render): the upper and lower
-# lids' heights above and below the line joining the two corners, at 41 even steps from the inner corner (u -1)
-# to the outer (u 1), in units of the eye's half-width. From the sharp inner point the upper lid climbs in a long,
-# nearly straight line, levels off over the outer half and turns down in a round sweep to the outer corner; the
-# lower lid falls away quickly from the inner point into a deep, even curve, lowest just inside the middle.
-LID_TOP = [0, 0.0199, 0.0402, 0.0601, 0.08, 0.1003, 0.1205, 0.139, 0.1534, 0.167, 0.1829, 0.1981, 0.2115, 0.2235, 0.2356, 0.2476, 0.2583, 0.2685, 0.2785, 0.2887, 0.2987, 0.3082, 0.315, 0.32, 0.3262, 0.3331, 0.3367, 0.3372, 0.337, 0.3361, 0.3352, 0.3343, 0.3322, 0.3294, 0.3233, 0.307, 0.2771, 0.2394, 0.1973, 0.1243, 0]
-LID_BOTTOM = [0, 0.072, 0.1257, 0.1672, 0.2042, 0.2379, 0.2678, 0.2939, 0.3186, 0.3427, 0.3649, 0.3851, 0.4041, 0.4217, 0.4374, 0.4492, 0.4566, 0.4613, 0.4653, 0.4688, 0.4703, 0.4699, 0.4682, 0.4652, 0.4615, 0.4572, 0.4516, 0.4454, 0.4392, 0.433, 0.4261, 0.4173, 0.4059, 0.3906, 0.3702, 0.3452, 0.3145, 0.2728, 0.2169, 0.1305, 0]
+# The opening of the eye, traced from a photograph of a real eye looking straight at the camera
+# (Wikimedia Commons, "Light brown.amber eye.JPG"): the upper and lower lid margins' heights above and below the
+# line joining the inner corner (u -1) and the outer (u 1), at 41 even steps, in units of the eye's half-width.
+# The upper lid climbs steeply out of the inner corner, is highest a little inside the middle and falls in a
+# long, even sweep to the outer corner; the lower lid is a shallow curve, lowest a little outside the middle, and
+# turns up quickly into the outer corner. The two meet in a point at each corner.
+LID_TOP = [0, 0.1106, 0.2062, 0.2839, 0.3501, 0.41, 0.4623, 0.5013, 0.5282, 0.5511, 0.5727, 0.589, 0.5986, 0.6055, 0.6122, 0.6167, 0.6177, 0.6171, 0.6165, 0.6147, 0.6105, 0.605, 0.5994, 0.5928, 0.5841, 0.5738, 0.5632, 0.5513, 0.5359, 0.5173, 0.4976, 0.4764, 0.4494, 0.4143, 0.3714, 0.3211, 0.2644, 0.2021, 0.1363, 0.0686, 0]
+LID_BOTTOM = [0, 0.0301, 0.0576, 0.079, 0.0957, 0.1113, 0.1268, 0.1419, 0.1566, 0.1713, 0.1858, 0.2, 0.2138, 0.2274, 0.2409, 0.2535, 0.2648, 0.2754, 0.286, 0.2958, 0.3039, 0.311, 0.3181, 0.3243, 0.3283, 0.3307, 0.3328, 0.334, 0.3326, 0.3289, 0.3246, 0.3187, 0.3072, 0.2893, 0.269, 0.2475, 0.2195, 0.181, 0.1309, 0.0684, 0]
+EYE_OPEN = 0.82        # the photograph's eye is held wide open; hers is relaxed, a little narrower
 
 
 def _traced(table, u):
@@ -1109,25 +1111,15 @@ def _traced(table, u):
     return max(0.0, v)
 
 
-def _with_point(table, u, slope):
-    """The traced profile, with the inner corner drawn as a sharp point: the edge leaves the corner as a straight
-    line (rising `slope` per unit of u), then eases into the traced curve between u -0.75 and -0.45."""
-    line = slope * (u + 1)
-    if u <= -0.75:
-        return line
-    k = smooth(-0.75, -0.45, u)
-    return line + (_traced(table, u) - line) * k
-
-
 def lid_top(u):
     """How far the upper lid's edge stands above the line between the corners at u (-1 inner corner .. 1 outer
-    corner): the traced LID_TOP, out of a sharp inner point."""
-    return EYE_RX * _with_point(LID_TOP, u, 0.36)
+    corner): the traced LID_TOP."""
+    return EYE_RX * EYE_OPEN * _traced(LID_TOP, u)
 
 
 def lid_bottom(u):
-    """The lower lid's edge below the line between the corners: the traced LID_BOTTOM, out of the same point."""
-    return EYE_RX * _with_point(LID_BOTTOM, u, 0.42)
+    """The lower lid's edge below the line between the corners: the traced LID_BOTTOM."""
+    return EYE_RX * EYE_OPEN * _traced(LID_BOTTOM, u)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
@@ -1353,6 +1345,11 @@ def eye_relief(x, z, s, ex, ez):
     T, B = lid_top(uc), lid_bottom(uc)
     inside = smooth(1.3, 0.85, abs(u))                # 1 within the opening, easing out past its corners
     d = 0.0
+    # the opening itself: inside the lids' edges the skin is drawn well back behind the ball, so exactly the
+    # traced shape of white shows, its edge where the lids meet the ball
+    if abs(u) < 1.0:
+        e = 0.04
+        d -= 0.2 * smooth(-e, e, dz + B) * smooth(e, -e, dz - T)
     # upper lid: a broad rim along the edge of the opening, fullest over the iris, closing to the corners
     d += 0.06 * g(dz - (T - 0.045), 0.1) * (0.3 + 0.7 * (1 - uc * uc) ** 0.5) * inside
     # the crease of the upper lid: a clear, narrow fold a lid's breadth above the edge, following its curve and
@@ -1382,7 +1379,7 @@ def sculpt_eyes(hb, eyes):
     # the patch's edge: new points along it stay on the straight edges the coarser faces beyond still share
     rim = [(e.verts[0].co.copy(), e.verts[1].co.copy()) for e in edges if any(lf not in inside for lf in e.link_faces)]
     ra = np.array([a for a, b in rim]); rb = np.array([b for a, b in rim])
-    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=5, use_grid_fill=True, smooth=0.0)
+    res = bmesh.ops.subdivide_edges(hb, edges=edges, cuts=7, use_grid_fill=True, smooth=0.0)
     new = [v for v in res['geom'] if isinstance(v, bmesh.types.BMVert) and v.co.y < 0]
     P = np.array([v.co for v in new])
     rim_d = np.full(len(new), 1e9)
@@ -1431,6 +1428,14 @@ def build_eye(head, head_tree, s, x, ey, ez):
         return h[0].y if h[0] is not None else ey
     for v in white.verts:
         v.co.y += skin_y(v.co.x, v.co.z) - ey
+    # (the skin is taken back inside the opening, see eye_relief, so the ball is followed against its plain
+    # surface; past the lids' edges the ball turns back under the skin, so only the opening shows white)
+    for v in white.verts:
+        uu_ = (v.co.x - x) * s / RX
+        dz_ = v.co.z - ez - uu_ * RX * TILT
+        lim = lid_top(uu_) if dz_ > 0 else lid_bottom(uu_)
+        over = abs(dz_) / max(lim, 1e-3)
+        v.co.y += 1.0 * smooth(1.0, 1.06, over)
     wtree = bvh_of(white)
     # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
     # and up from the centre line, so one painting serves both eyes
@@ -1500,6 +1505,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
         else:
             v.co.y = 0.3
     o = mesh_obj(f'Iris {s}', iris, M_EYE, head, loc=c, subdiv=0)
+    o.visible_shadow = False        # (it lies on the white; its shadow fell as a grey column down to the lower lid)
     iris_colours(o.data, turn.inverted(), IR, s)
 
     def on_face(us, radii, zf, lift, span=RX, n=36):
