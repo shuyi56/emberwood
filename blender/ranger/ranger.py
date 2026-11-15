@@ -1840,7 +1840,7 @@ def lash_image():
             outer = smooth(-0.9, 1.0, u0)
             length = ((0.07 + 0.12 * outer ** 1.2 - 0.05 * smooth(0.95, 1.1, u0)) * (1 + 0.3 * len_n[k]) * (0.8 + 0.4 * rng.random())) * (1.0 if top else 0.45)
             lean = (-0.05 + 0.85 * outer ** 1.3 + 0.28 * lean_n[k] + 0.22 * clump[k]) + 0.12 * (rng.random() - 0.5)
-            stroke(dr, u0, edge - (0.005 if top else -0.005), lean, length, 0.55 + 0.4 * rng.random(), 0.0075 / (SH_U1 - SH_U0) * W if top else 0.005 / (SH_U1 - SH_U0) * W, top, int(180 + 75 * rng.random()))
+            stroke(dr, u0, edge - (0.005 if top else -0.005), lean, length, 0.12 + 0.12 * rng.random(), 0.0075 / (SH_U1 - SH_U0) * W if top else 0.005 / (SH_U1 - SH_U0) * W, top, int(180 + 75 * rng.random()))
     # the fuzz: many short faint thin strands in every direction near the margins
     for top in (True, False):
         for _ in range(260 if top else 110):
