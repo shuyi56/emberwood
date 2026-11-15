@@ -1087,18 +1087,18 @@ EYE_TILT = 0.0         # the two corners level
 EYE_K = 1.3            # the ball reaches this much past the lids' opening, up and down, and turns in under them
 
 
-def _lid(u, peak, inner, outer):
+def _lid(u, peak, inner, outer, y_in=0.45, y_out=0.45):
     """A lid's edge over the eye's width (u -1 inner corner .. 1 outer), 0 at both corners and 1 at `peak`, drawn
     the way a painter draws an eye: from each corner the edge leaves as a straight line, so the two lids meet
     there in a clear point, then bends into a smooth arc over the eyeball. `inner` and `outer` are how far along
-    each side (as a fraction of the way from that corner to the peak) the straight part runs; it rises to 45%
-    of the height there, then a curve carries on from it without a kink (same slope) and levels off at the peak."""
+    each side (as a fraction of the way from that corner to the peak) the straight part runs, and y_in and y_out
+    how high it has risen there (a lower rise over a longer run is a narrower, sharper point); then a curve carries on from it without a kink (same slope) and levels off at the peak."""
     u = max(-1.0, min(1.0, u))
     if u <= peak:
-        d, span, f = u + 1.0, peak + 1.0, inner
+        d, span, f, y0 = u + 1.0, peak + 1.0, inner, y_in
     else:
-        d, span, f = 1.0 - u, 1.0 - peak, outer
-    L, y0 = f * span, 0.45
+        d, span, f, y0 = 1.0 - u, 1.0 - peak, outer, y_out
+    L = f * span
     m = y0 / L
     if d <= L:
         return m * d
@@ -1110,13 +1110,13 @@ def _lid(u, peak, inner, outer):
 def lid_top(u):
     """How far the upper lid's edge stands above the eye's centre line at u (-1 inner corner .. 1 outer corner):
     straight out of each corner point, then a smooth arc, highest a little toward the temple."""
-    return 1.05 * EYE_RZ * _lid(u, 0.15, 0.35, 0.3)
+    return 1.05 * EYE_RZ * _lid(u, 0.2, 0.55, 0.35, 0.32, 0.4)
 
 
 def lid_bottom(u):
     """The lower lid's edge below the centre line: the same kind of line, shallower, lowest a little toward the
     temple."""
-    return 0.7 * EYE_RZ * _lid(u, 0.1, 0.35, 0.3)
+    return 0.7 * EYE_RZ * _lid(u, 0.1, 0.6, 0.4, 0.38, 0.45)
 
 
 def almond(rx, ry, rz, s, seg=96, rings=64):
