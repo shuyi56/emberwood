@@ -3215,9 +3215,42 @@ def eye_makeup(head, tree, eyes):
         m.surface_render_method = 'BLENDED'
         return m
 
-    shadow_m = material('eyeshadow', eyeshadow_image())
-    lash_m = material('lash paint', lash_image())
-    brow_m = material('brow paint', brow_image())
+    def fade_by_facing(img, ext, tag):
+        """Thin a painting out where the face turns away from the front. Each patch is laid on by casting
+        straight back from the front, so where the skin turns sideways (the socket's outer wall, the side of the
+        face past the outer corner) one column of the painting is stretched over a wide band of skin, which seen in
+        profile showed as a dark smear under and behind the eye. The painting is shared by both eyes (mirrored), so
+        the facing is measured round the right eye."""
+        if img.get('faced'):
+            return
+        from PIL import Image as PImage
+        ex, ez, s = next(e for e in eyes if e[2] == 1)
+        U0, U1, V0, V1 = ext
+        NX, NY = 128, 56
+        f = np.ones((NY, NX), dtype=np.float32)
+        for j in range(NY):
+            dz = V1 - (j + 0.5) / NY * (V1 - V0)
+            for i in range(NX):
+                u = U0 + (i + 0.5) / NX * (U1 - U0)
+                h = tree.ray_cast(Vector((ex + u * EYE_RX, -50, ez + u * EYE_RX * EYE_TILT + dz)), Vector((0, 1, 0)))
+                fwd = -h[1].y if h[0] is not None else 0.0
+                t = min(1.0, max(0.0, (fwd - 0.4) / 0.3))
+                f[j, i] = t * t * (3 - 2 * t)
+        W, H = img.size
+        fm = np.asarray(PImage.fromarray((f * 255).astype(np.uint8)).resize((W, H), PImage.BILINEAR), dtype=np.float32) / 255
+        px = np.array(img.pixels[:], dtype=np.float32).reshape(H, W, 4)
+        px[..., 3] *= fm[::-1]
+        img.pixels.foreach_set(px.ravel())
+        img.pack()
+        img['faced'] = 1
+
+    shadow_img, lash_img, brow_img = eyeshadow_image(), lash_image(), brow_image()
+    fade_by_facing(shadow_img, (SH_U0, SH_U1, SH_V0, SH_V1), 'shadow')
+    fade_by_facing(lash_img, (SH_U0, SH_U1, SH_V0, SH_V1), 'lash')
+    fade_by_facing(brow_img, (BR_U0, BR_U1, BR_V0, BR_V1), 'brow')
+    shadow_m = material('eyeshadow', shadow_img)
+    lash_m = material('lash paint', lash_img)
+    brow_m = material('brow paint', brow_img)
 
     def surf(px, pz):
         h = tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
