@@ -1619,9 +1619,9 @@ def hand_mesh(s):
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
-    # fingers, index at the front to pinky at the back (the middle finger a little shorter than the palm, as in life:
-    # longer and the hand reads as all fingers)
-    for y0, L, r in ((-0.86, 1.5, 0.26), (-0.29, 1.62, 0.27), (0.27, 1.54, 0.25), (0.75, 1.22, 0.22)):
+    # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
+    # size, slim fingers any longer read as spidery)
+    for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.75, 0.98, 0.22)):
         p = Vector((0.05 * inward, y0, -2.55))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.85)):

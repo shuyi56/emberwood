@@ -417,7 +417,7 @@ def bake_hands(rays=24, dist=1.3):
             c = c + (light - c) * 0.35 * back
             # flushed knuckles and fingertips
             knuckle = math.exp(-((q.z + 2.55) / 0.45) ** 2)
-            tip = min(1.0, max(0.0, (-q.z - 3.6) / 0.9))
+            tip = min(1.0, max(0.0, (-q.z - 3.2) / 0.8))
             c = c + (flush - c) * min(1.0, 0.7 * knuckle + 0.8 * tip)
             # the clefts between the fingers (the fingers are one fused surface, so the shade marks them apart),
             # from the knuckles to the tips
