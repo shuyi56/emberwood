@@ -908,13 +908,13 @@ def face_relief(x, z):
     for s in (-1, 1):
         d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
-        d += gauss(x, z, s * 0.235, 0.46, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
-        d += gauss(x, z, s * 0.14, 0.41, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
-        d += gauss(x, z, s * 0.19, 0.32, 0.1, 0.085, 0.038)      # the cheek filled out under the cheekbone, no hollow
+        d += gauss(x, z, s * 0.23, 0.415, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
+        d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
+        d += gauss(x, z, s * 0.19, 0.3, 0.1, 0.08, 0.034)      # the cheek filled out under the cheekbone, no hollow
         d += gauss(x, z, s * 0.17, 0.25, 0.075, 0.07, 0.022)       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.058, 0.37, 0.024, 0.022, 0.026)   # wing of the nose
         d += gauss(x, z, s * 0.043, 0.378, 0.008, 0.022, -0.005)  # the groove between the wing and the tip
-        d += gauss(x, z, s * 0.235, 0.555, 0.035, 0.07, 0.018)   # the outer rim of the eye socket, brow to cheekbone
+        d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     if z > 0.36:
