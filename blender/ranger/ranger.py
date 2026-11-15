@@ -1656,6 +1656,12 @@ def hand_mesh(s):
     bm.from_mesh(me)
     bpy.data.meshes.remove(me)
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+    # the metaball pieces leave small bulges where they overlap (a lump on the back of the hand by the index finger,
+    # another on the little-finger edge by the wrist): relax the surface so it reads as one smooth skin, holding its
+    # volume, without melting the fingers together
+    for _ in range(6):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.35, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
     # (a little smaller than life, about two thirds of the face's length: at this size, held out on a swinging arm
     # toward the viewer, a life-size hand reads as far too big against the slim forearm and the sleeve)
     bmesh.ops.scale(bm, vec=(0.98, 0.98, 1.0), verts=bm.verts)

@@ -345,6 +345,95 @@ def bake_cloth_form(rays=16, dist=2.4):
     sc.frame_set(1)
 
 
+def bake_hands(rays=24, dist=1.3):
+    """The hands for the world, which would otherwise be one flat skin tone: a material of their own ('hand skin')
+    coloured by the vertex colour 'handskin' (linear RGB). Each point takes the shade of how shut in it is (rays
+    over its surface that meet the hand, the sleeve or the body within a short distance: between the fingers, in
+    the curl of the palm, under the cuff), the blood-warm flush of the knuckles and the fingertips, and the paler
+    skin over the back of the hand. Cast in her idle stance, as for the cloth."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    import numpy as np
+    sc = bpy.context.scene
+    sc.frame_set(IDLE_FRAME)
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in sc.objects:
+        if o.type != 'MESH':
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        base = len(vs)
+        vs += [o.matrix_world @ v.co for v in me.vertices]
+        ps += [[base + i for i in p.vertices] for p in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    tree = BVHTree.FromPolygons(vs, ps)
+    rng = np.random.default_rng(13)
+    dirs = rng.normal(size=(rays, 3))
+    dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+
+    def lin(c):
+        c = np.asarray(c, dtype=np.float64) / 255.0
+        return np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
+    S = ranger.SKIN
+    dark, mid, light = lin(S[1]), lin(S[2]), lin(S[3])
+    flush = lin([214, 140, 118])
+    skin_mat = bpy.data.materials['skin']
+    hand_mat = skin_mat.copy()
+    hand_mat.name = 'hand skin'
+    nt = hand_mat.node_tree
+    p = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
+    col = nt.nodes.new('ShaderNodeVertexColor')
+    col.layer_name = 'handskin'
+    nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+    p.inputs['Roughness'].default_value = 0.62
+    p.inputs['Specular IOR Level'].default_value = 0.3
+    p.inputs['Sheen Weight'].default_value = 0.5
+    p.inputs['Sheen Roughness'].default_value = 0.4
+    p.inputs['Sheen Tint'].default_value = (0.6, 0.3, 0.25, 1.0)
+    for side in ('R', 'L'):
+        o = bpy.data.objects[f'Hand.{side}']
+        me = o.data
+        me.materials[0] = hand_mat
+        pm = o.evaluated_get(dg).to_mesh()
+        nmx = o.matrix_world.to_3x3().inverted().transposed()
+        posed = [(o.matrix_world @ v.co, (nmx @ v.normal).normalized()) for v in pm.vertices]
+        o.evaluated_get(dg).to_mesh_clear()
+        cols = []
+        for v, (pp, n) in zip(me.vertices, posed):
+            q = v.co                                  # (the hand's own frame: wrist at the top, fingers down)
+            hit = 0.0
+            for d in dirs:
+                d = Vector(d)
+                if d.dot(n) < 0:
+                    d = -d
+                d = (d + n).normalized()
+                h = tree.ray_cast(pp + n * 0.04, d, dist)
+                if h[0] is not None:
+                    hit += 1.0 - 0.6 * h[3] / dist
+            ao = hit / rays
+            c = mid.copy()
+            # the back of the hand a shade paler, the palm side a shade warmer
+            back = max(0.0, min(1.0, 0.5 + 0.8 * v.normal.x * (1 if side == 'R' else -1) * -1))
+            c = c + (light - c) * 0.35 * back
+            # flushed knuckles and fingertips
+            knuckle = math.exp(-((q.z + 2.55) / 0.45) ** 2)
+            tip = min(1.0, max(0.0, (-q.z - 3.6) / 0.9))
+            c = c + (flush - c) * min(1.0, 0.7 * knuckle + 0.8 * tip)
+            # the clefts between the fingers (the fingers are one fused surface, so the shade marks them apart),
+            # from the knuckles to the tips
+            fz = min(1.0, max(0.0, (-q.z - 2.4) / 0.5))
+            gap = max(math.exp(-((q.y - g) / 0.11) ** 2) for g in (-0.59, 0.0, 0.53))
+            c = c + (dark * 0.75 - c) * 0.6 * gap * fz
+            # the palm side, turned to the body and away from the light, a shade deeper; up at the wrist the skin
+            # falls into the shade of the cuff
+            c = c + (dark - c) * (0.35 * (1.0 - back) + 0.5 * min(1.0, max(0.0, (q.z + 0.2) / 1.0)))
+            c = c * (1.0 - 0.75 * ao)
+            c = c + (dark - c) * 0.4 * ao
+            cols += [*c, 1.0]
+        me.color_attributes.new('handskin', 'FLOAT_COLOR', 'POINT').data.foreach_set('color', cols)
+    sc.frame_set(1)
+
+
 def main():
     argv = sys.argv[1:]
     out = argv[argv.index('--out') + 1] if '--out' in argv else os.path.join(HERE, '..', '..', 'public', 'models', 'ranger.glb')
@@ -377,6 +466,7 @@ def main():
     bake_hair_shade()
     bake_wool()
     bake_cloth_form()
+    bake_hands()
     bake_gold()
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
     for name, ratio in (('Hair', 0.11),):
