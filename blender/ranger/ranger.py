@@ -142,11 +142,15 @@ def make_material(mid):
         nt.nodes.remove(bsdf)
         bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
         bsdf.inputs['Base Color'].default_value = (*lin, 1.0)
-        bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.22
+        bsdf.inputs['Roughness'].default_value = 0.1 if mid == M_EYE else 0.35
         bsdf.inputs['IOR'].default_value = 1.38
         # the film of tears: a clear, mirror-smooth coat over the whole ball, as on a glass marble
         bsdf.inputs['Coat Weight'].default_value = 1.0
-        bsdf.inputs['Coat Roughness'].default_value = 0.03
+        # (the white's coat a little less mirror-like than the cornea's: its surface is far flatter than a real
+        # ball's, so a mirror coat threw the sun back as a large hard-edged patch on the lower white)
+        bsdf.inputs['Coat Roughness'].default_value = 0.03 if mid == M_EYE else 0.16
+        if mid == M_SCLERA:
+            bsdf.inputs['Coat Weight'].default_value = 0.6
         bsdf.inputs['Coat IOR'].default_value = 1.38
         nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
         if mid == M_EYE:
@@ -1384,7 +1388,7 @@ def sclera_image():
         # within the opening (h_ in the same units as lid_top), with a little margin from the lids' edges
         return (-lid_bottom(u_) * 0.92 < h_ < lid_top(u_) * 0.92) if abs(u_) < 0.97 else False
     att = []
-    while len(att) < 400:
+    while len(att) < 1400:
         u_ = rng.uniform(-1, 1)
         h_ = rng.uniform(-0.5, 0.6)
         dens = smooth(0.28, 0.75, abs(u_)) * (0.35 + 0.65 * smooth(0.3, 1.0, abs(h_) / 0.4))
@@ -1395,14 +1399,18 @@ def sclera_image():
     roots = []
     for side in (-1, 1):
         roots.append((0.985 * side, 0.0))
-        for uq in (0.5, 0.78):
+        for uq in (0.35, 0.5, 0.62, 0.75, 0.88):
             roots.append((uq * side + rng.normal(0, 0.04), lid_top(uq) * 0.97))
             roots.append((uq * side + rng.normal(0, 0.04), -lid_bottom(uq) * 0.97))
+    # and scattered seeds within the white itself, so it fills with many short, separate little trees rather
+    # than a few long ones running in from the edges
+    for k_ in rng.choice(len(att), 36, replace=False):
+        roots.append(tuple(att[k_]))
     nodes = [np.array(r_, dtype=np.float64) for r_ in roots]
     parent = [-1] * len(nodes)
-    D, DI, DK = 0.012, 0.25, 0.03                # step, reach of an attractor, distance at which it is used up
+    D, DI, DK = 0.007, 0.07, 0.012                # step, reach of an attractor, distance at which it is used up
     alive = np.ones(len(att), dtype=bool)
-    for it in range(400):
+    for it in range(900):
         if not alive.any():
             break
         N_ = np.array(nodes)
@@ -1418,7 +1426,7 @@ def sclera_image():
             break
         for ni, dirs in grow_dirs.items():
             g_ = np.sum(dirs, axis=0)
-            g_ = g_ / max(1e-9, np.linalg.norm(g_)) + rng.normal(0, 0.18, 2)
+            g_ = g_ / max(1e-9, np.linalg.norm(g_)) + rng.normal(0, 0.3, 2)
             g_ /= max(1e-9, np.linalg.norm(g_))
             nodes.append(N_[ni] + g_ * D)
             parent.append(ni)
@@ -1428,7 +1436,7 @@ def sclera_image():
         alive[idx[dd < DK]] = False
     # widths from the tips back toward the roots (Murray's law)
     n_ = len(nodes)
-    rad = np.full(n_, 0.38)                        # a tip's radius in pixels
+    rad = np.full(n_, 0.3)                        # a tip's radius in pixels
     kids = [[] for _ in range(n_)]
     for i_, p_ in enumerate(parent):
         if p_ >= 0:
@@ -1436,7 +1444,7 @@ def sclera_image():
     for i_ in range(n_ - 1, -1, -1):
         if kids[i_]:
             rad[i_] = sum(rad[k_] ** 3 for k_ in kids[i_]) ** (1 / 3)
-    rad = np.minimum(rad * 1.25, 2.2)
+    rad = np.minimum(rad * 1.1, 1.5)
     # draw each segment as a soft capsule, its path wandering with a smooth noise
     wob = lambda q_, sd: 0.006 * (np.sin(q_[0] * 37 + sd) + np.sin(q_[1] * 53 - sd * 1.7) + np.sin((q_[0] + q_[1]) * 91 + sd * 0.3))
     pts = [np.array([(q_[0] + wob(q_, 1.0) + 1) / 2 * W, (1 - (q_[1] + wob(q_, 4.0)) / (EYE_RZ * EYE_K)) / 2 * H]) for q_ in nodes]
@@ -1595,8 +1603,8 @@ def build_eye(head, head_tree, s, x, ey, ez):
         over = abs(dz_) / max(lim, 1e-3)
         # (toward the lids the ball is kept full, so its edge meets the lids' margins rather than falling away
         # from them into a dark gap, and then turns back under them)
-        v.co.y -= 0.09 * min(1.0, over) ** 2      # (a smooth swell with no onset: a smoothstep left a kink the gloss drew as a crease)
-        v.co.y += 1.1 * smooth(0.98, 1.03, over)
+        v.co.y -= 0.07 * min(1.0, over) ** 2      # (a smooth swell with no onset: a smoothstep left a kink the gloss drew as a crease)
+        v.co.y += 1.1 * smooth(0.97, 1.06, over) ** 1.5
     wtree = bvh_of(white)
     # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
     # and up from the centre line, so one painting serves both eyes

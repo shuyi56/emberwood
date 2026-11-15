@@ -47,7 +47,7 @@ def plain_materials():
         if mid in (ranger.M_EYE, ranger.M_SCLERA):
             # the eye stays wet and glossy, so the world's lights leave a highlight on it; the iris and the
             # white keep their paintings (iris_image, sclera_image) as textures
-            p.inputs['Roughness'].default_value = 0.06 if mid == ranger.M_EYE else 0.14
+            p.inputs['Roughness'].default_value = 0.06 if mid == ranger.M_EYE else 0.32
             if mid == ranger.M_EYE:
                 tex = nt.nodes.new('ShaderNodeTexImage')
                 tex.image = ranger.iris_image()
