@@ -1,6 +1,6 @@
 """Close-ups of the ranger's face and the whole figure in the 3-D look (sprite_mode off), for checking eye, brow
 and face work. Run as python3 face_views.py --out DIR [--angles 0,1] [--zoom 3.4] [--hz 0.6]
-[--full] [--hide Eyeshadow,Lashes]. Angles are in eighths of a turn (0 faces the camera, 1 is the 3/4 view)."""
+[--full] [--game] [--hide Eyeshadow,Lashes]. Angles are in eighths of a turn (0 faces the camera, 1 is the 3/4 view)."""
 import argparse
 import math
 import os
@@ -19,6 +19,7 @@ ap.add_argument('--angles', default='0,1')
 ap.add_argument('--zoom', type=float, default=3.4)
 ap.add_argument('--hz', type=float, default=0.6)
 ap.add_argument('--full', action='store_true')
+ap.add_argument('--game', action='store_true', help='also the world\'s close follow camera: perspective, 38 degree field, 27 degrees down')
 ap.add_argument('--hide', default='', help='comma-separated object name prefixes to leave out, e.g. Eyeshadow,Lashes')
 args = ap.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:])
 os.makedirs(args.out, exist_ok=True)
@@ -82,4 +83,34 @@ shoot('face', args.zoom, ranger.HEAD_Z + args.hz * ranger.HEAD_H, 600, 540)
 if args.full:
     top = ranger.HEAD_Z + ranger.HEAD_H
     shoot('full', top * 1.08, top * 0.5, 400, 640)
+if args.game:
+    # the world's camera at its closest (src/world/main.js: distance 7 world units at a 27 degree pitch, aimed 0.9
+    # above the ground, field 38 degrees; the model is scaled by 2.2 / 80 * 1.2), facing her, then the same view
+    # narrowed onto the head
+    scale = 2.2 / 80 * 1.2
+    dist, pitch, aim = 7 / scale, math.radians(27), 0.9 / scale
+    root.rotation_euler = (0, 0, 0)
+    cam.data.type = 'PERSP'
+    cam.data.sensor_fit = 'VERTICAL'
+    cam.location = (0, -dist * math.cos(pitch), aim + dist * math.sin(pitch))
+    cam.rotation_euler = (math.pi / 2 - pitch, 0, 0)
+    tiles = []
+    for name, fov, rx, ry in (('wide', 38, 760, 600), ('head', 5.5, 600, 600)):
+        cam.data.angle = math.radians(fov)
+        if name == 'head':
+            # aim at the head from the same spot
+            head = Vector((0, 0, ranger.HEAD_Z + 0.5 * ranger.HEAD_H))
+            cam.rotation_euler = (head - cam.location).to_track_quat('-Z', 'Y').to_euler()
+        sc.render.resolution_x, sc.render.resolution_y = rx, ry
+        sc.render.filepath = os.path.join(args.out, f'_game_{name}.png')
+        bpy.ops.render.render(write_still=True)
+        tiles.append(Image.open(sc.render.filepath).convert('RGB'))
+        os.remove(sc.render.filepath)
+    sheet = Image.new('RGB', (sum(t.width for t in tiles), max(t.height for t in tiles)))
+    x = 0
+    for t in tiles:
+        sheet.paste(t, (x, 0))
+        x += t.width
+    sheet.save(os.path.join(args.out, 'game.png'))
+    print('wrote', os.path.join(args.out, 'game.png'))
 root.rotation_euler = (0, 0, 0)
