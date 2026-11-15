@@ -110,6 +110,7 @@ M_MAIL = mat_def(15, 'mail trim', ramp(0x7e827c, 0.08), 0.35)
 # painted onto the iris as vertex colours (see iris_colours), and the sprite picks its tone from that painting
 M_EYE = mat_def(16, 'iris', [[30, 42, 30], [50, 76, 44], [72, 104, 58], [104, 134, 74], [148, 146, 86]], 0.0, flat='painted')
 M_SCLERA = mat_def(21, 'eye white', [[206, 198, 186], [226, 220, 208], [224, 217, 205], [234, 229, 218], [242, 238, 230]], 0.0, flat=1)
+M_LASH = mat_def(23, 'lashes', ramp(0x2a1c18, 0.06), 0.0, flat=1)
 M_BROW = mat_def(17, 'brow', ramp(0x60463a, 0.08), 0.0, flat=1)
 M_LIPS = mat_def(18, 'lips', [[150, 86, 74], [168, 100, 86], [184, 116, 100], [196, 132, 114], [210, 150, 132]], 0.0, flat=1)
 M_LACE = mat_def(19, 'laces', ramp(0x4a3a2c, 0.08), 0.0)
@@ -1719,6 +1720,175 @@ def build_eye(head, head_tree, s, x, ey, ez):
     mesh_obj(f'Brow {s}', tube(brow, br, flat=0.4, n=12), M_BROW, head, subdiv=0)
 
 
+SHADOW_TEX = {}
+SH_U0, SH_U1, SH_V0, SH_V1 = -1.15, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
+
+
+def eyeshadow_image():
+    """The eyeshadow, painted into a texture laid over the lid (u across, dz up from the corner line, the same
+    mapping as the lids' relief): a dusty plum-mauve wash from the lid's edge up over the crease, fuller and taller
+    toward the outer corner and gone at the inner one, a deeper aubergine smoked into the outer V and along the upper
+    lash line, and a faint smudge under the outer half of the lower lashes. Colour and opacity in one RGBA image,
+    so the skin shows through and the wash fades into it instead of ending at an edge."""
+    if 'img' in SHADOW_TEX:
+        return SHADOW_TEX['img']
+    W, H = 512, 300
+    uu, dd = np.meshgrid(SH_U0 + (np.arange(W) + 0.5) / W * (SH_U1 - SH_U0), SH_V1 - (np.arange(H) + 0.5) / H * (SH_V1 - SH_V0))
+
+    def sm(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    uc = np.clip(uu, -1, 1)
+    T = np.array([lid_top(u) for u in uc[0]])[None, :] + 0 * uu
+    B = np.array([lid_bottom(u) for u in uc[0]])[None, :] + 0 * uu
+    above = dd - T
+    below = -B - dd
+    tall = 0.46 + 0.16 * sm(-0.2, 0.9, uu)                    # how far up the wash reaches: taller toward the outer corner
+    across = sm(-1.0, -0.35, uu) * (0.8 + 0.2 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.12, -0.9, uu)
+    lid = sm(-0.005, 0.03, above) * (1 - sm(0.5 * tall, tall, above))
+    # the deeper colour: smoked along the lash line and into the outer V (a wedge opening up and out from the corner)
+    deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
+    vwedge = sm(0.55, 1.05, uu) * (1 - sm(0.3 * tall, 1.1 * tall, np.abs(dd - (T + 0.07 + 0.2 * np.maximum(0, uu - 0.9)))))
+    deep = np.maximum(deep * 0.9, vwedge * sm(1.5, 0.95, uu))
+    base = np.array([140, 76, 108], dtype=np.float32)
+    dark = np.array([92, 48, 88], dtype=np.float32)
+    col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
+    a = 0.78 * lid * across + 0.2 * deep * lid * across
+    # under the lower lashes, outer half only
+    low = sm(-0.005, 0.02, below) * (1 - sm(0.05, 0.16, below)) * sm(0.0, 0.8, uu) * sm(1.4, 1.0, uu)
+    col = col + (dark - col) * low[..., None]
+    a = np.maximum(a, 0.3 * low)
+    a *= (np.abs(uu) < 1.0) * 1.0 + (np.abs(uu) >= 1.0) * 1.0
+    # nothing inside the opening itself
+    a *= 1 - ((above < 0) & (below < 0) & (np.abs(uu) < 1.0))
+    rgb = np.array([_srgb_lin(c / 255) for c in col.reshape(-1, 3)], dtype=np.float32).reshape(H, W, 3) if False else col / 255
+    img = bpy.data.images.new('eyeshadow', W, H, alpha=True)
+    px = np.concatenate([rgb, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
+    img.pixels.foreach_set(px.ravel().astype(np.float32))
+    img.pack()
+    SHADOW_TEX['img'] = img
+    return img
+
+
+def eye_makeup(head, tree, eyes):
+    """Eyeshadow and lashes for both eyes, on the finished head (tree: its surface after the lids are sculpted).
+    The shadow is a thin skin of the face itself (a grid of the lid's area, each point cast onto the head and
+    lifted a hair) carrying the painting from eyeshadow_image. The lashes are tapered, curled strands standing
+    from the lid margins: long and sweeping outward at the outer corner, short and upright at the inner one, with a
+    few shorter ones, pointing down and out, under the lower lid."""
+    m = bpy.data.materials.new('eyeshadow')
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = eyeshadow_image()
+    tex.interpolation = 'Cubic'
+    tex.extension = 'EXTEND'
+    nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+    nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
+    p.inputs['Roughness'].default_value = 0.55
+    nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    m.surface_render_method = 'BLENDED'
+
+    def surf(px, pz):
+        h = tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+        return h[0].y if h[0] is not None else None
+
+    rng = np.random.default_rng(11)
+    for ex, ez, s in eyes:
+        # --- the shadow
+        NU, NV = 120, 84
+        bm = bmesh.new()
+        uvl = bm.loops.layers.uv.new('UVMap')
+        grid = []
+        for j in range(NV + 1):
+            row = []
+            for i in range(NU + 1):
+                u = SH_U0 + (SH_U1 - SH_U0) * i / NU
+                dz = SH_V0 + (SH_V1 - SH_V0) * j / NV
+                px, pz = ex + s * u * EYE_RX, ez + u * EYE_RX * EYE_TILT + dz
+                y = surf(px, pz)
+                row.append(bm.verts.new((px, (y if y is not None else 0.0) - 0.022, pz)))
+            grid.append(row)
+        for j in range(NV):
+            for i in range(NU):
+                vs = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+                f = bm.faces.new(vs if s > 0 else vs[::-1])
+                for lp in f.loops:
+                    k = vs.index(lp.vert)
+                    uu_ = (i + (1 if k in (1, 2) else 0)) / NU
+                    vv_ = (j + (1 if k in (2, 3) else 0)) / NV
+                    lp[uvl].uv = (uu_, vv_)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        me = bpy.data.meshes.new(f'Eyeshadow {s}')
+        bm.to_mesh(me)
+        bm.free()
+        for pl in me.polygons:
+            pl.use_smooth = True
+        me.materials.append(m)
+        o = bpy.data.objects.new(f'Eyeshadow {s}', me)
+        link(o, head)
+        o.visible_shadow = False
+
+        # --- the lashes
+        lb = bmesh.new()
+
+        def lash(u, top, length, lean, curl, rad):
+            """One strand from the lid margin at u: it leaves the lid turned `lean` (radians, + toward the outer
+            corner) off straight up (or down), a little forward, and curls back toward the up direction."""
+            edge = lid_top(u) if top else -lid_bottom(u)
+            px = ex + s * u * EYE_RX
+            pz = ez + u * EYE_RX * EYE_TILT + edge
+            y = surf(px, pz + (0.03 if top else -0.03))
+            if y is None:
+                return
+            base = Vector((px, y - 0.01, pz))
+            sign = 1.0 if top else -1.0
+            ang = lean
+            pts, rs = [], []
+            pos = base.copy()
+            n = 6
+            for k in range(n):
+                t = k / (n - 1)
+                pts.append(pos.copy())
+                rs.append(rad * (1 - 0.8 * t) ** 1.2 + 0.002)
+                step = length / (n - 1)
+                a = ang - 0.35 * curl * t if top else ang + 0.2 * t
+                d = Vector((s * math.sin(a), -0.85 * (1 - t) ** 1.5 - 0.05, sign * math.cos(a)))
+                pos = pos + d.normalized() * step
+            tb = tube(pts, rs, flat=1.0, n=5)
+            tmp = {}
+            for v in tb.verts:
+                tmp[v] = lb.verts.new(v.co)
+            for f in tb.faces:
+                lb.faces.new([tmp[v] for v in f.verts])
+            tb.free()
+
+        for i in range(46):
+            f = i / 45
+            u = -0.72 + 1.8 * f                     # from near the inner corner to just past the outer one
+            length = 0.13 + 0.2 * smooth(0.0, 0.9, f) ** 1.1 - 0.06 * smooth(0.9, 1.0, f)
+            length *= 0.9 + 0.2 * rng.random()
+            lean = (-0.1 + 0.75 * f ** 1.3) + 0.1 * (rng.random() - 0.5)
+            lash(min(u, 1.0), True, length, lean, 1.0 + 0.3 * rng.random(), 0.0115)
+        for i in range(20):
+            f = i / 19
+            u = -0.2 + 1.1 * f
+            lash(u, False, (0.07 + 0.05 * f) * (0.85 + 0.3 * rng.random()), 0.15 + 0.5 * f, 0.6, 0.007)
+        me = bpy.data.meshes.new(f'Lashes {s}')
+        lb.to_mesh(me)
+        lb.free()
+        for pl in me.polygons:
+            pl.use_smooth = True
+        me.materials.append(mat(M_LASH))
+        o = bpy.data.objects.new(f'Lashes {s}', me)
+        link(o, head)
+        o.visible_shadow = False
+
+
 def build():
     reset()
     sc = bpy.context.scene
@@ -1793,7 +1963,9 @@ def build():
         x, ey, by = feat[s]
         build_eye(head, head_tree, s, x, ey, 0.525 * HEAD_H + EYE_LIFT)
     sculpt_eyes(hb, eyes)
+    final_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    eye_makeup(head, final_tree, eyes)
     mesh_obj('Mouth', ellipsoid(0.55, 0.2, 0.11, 10, 6), M_LIPS, head, loc=(0, mouth_y + 0.05, 0.258 * HEAD_H), subdiv=0)
 
     # ---- hair: a cap over the skull cut along a sloping hairline, curtain bangs parted at the centre,
@@ -2210,6 +2382,9 @@ def sprite_mode(on):
     # the iris is life-size, a pixel and a bit across in the sheet, and in the 3/4 views it fell between pixel
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
+        if o.name.startswith(('Eyeshadow', 'Lashes')):
+            o.hide_render = on         # (finer than a sprite pixel: nothing to draw there)
+            o.hide_viewport = on
         if o.name.startswith('Iris'):
             o.scale = (1.11,) * 3 if on else (1.0,) * 3
             o.data.shape_keys.key_blocks['sprite'].value = 1.0 if on else 0.0
