@@ -1743,8 +1743,8 @@ def eyeshadow_image():
     above = dd - T
     below = -B - dd
     tall = 0.46 + 0.16 * sm(-0.2, 0.9, uu)                    # how far up the wash reaches: taller toward the outer corner
-    across = sm(-1.0, -0.35, uu) * (0.8 + 0.2 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.12, -0.9, uu)
-    lid = sm(-0.01, 0.1, above) * (1 - sm(0.2 * tall, tall, above))
+    across = sm(-1.0, -0.55, uu) * (0.85 + 0.15 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.12, -0.9, uu)
+    lid = sm(-0.012, 0.012, above) * (1 - sm(0.3 * tall, tall, above))
     # the deeper colour: smoked along the lash line and into the outer V (a wedge opening up and out from the corner)
     deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
     vwedge = sm(0.55, 1.05, uu) * (1 - sm(0.3 * tall, 1.1 * tall, np.abs(dd - (T + 0.07 + 0.2 * np.maximum(0, uu - 0.9)))))
@@ -1752,7 +1752,7 @@ def eyeshadow_image():
     base = np.array([118, 88, 100], dtype=np.float32)
     dark = np.array([50, 40, 52], dtype=np.float32)
     col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
-    a = 0.6 * lid * across + 0.3 * deep * lid * across
+    a = 0.8 * lid * across + 0.2 * deep * lid * across
     # under the lower lashes, outer half only
     low = sm(-0.005, 0.02, below) * (1 - sm(0.05, 0.16, below)) * sm(0.0, 0.8, uu) * sm(1.4, 1.0, uu)
     col = col + (dark - col) * low[..., None]
@@ -1765,7 +1765,7 @@ def eyeshadow_image():
     from PIL import Image
     r = np.random.default_rng(9)
     cloud = sum(0.5 ** o * np.asarray(Image.fromarray((r.random((6 * 2 ** o, 9 * 2 ** o)) * 255).astype(np.uint8)).resize((W, H), Image.BICUBIC), dtype=np.float32) / 255 for o in range(3)) / 1.75
-    a = a * (0.55 + 0.9 * cloud)
+    a = a * (0.8 + 0.5 * cloud)
     img = bpy.data.images.new('eyeshadow', W, H, alpha=True)
     px = np.concatenate([rgb, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
     img.pixels.foreach_set(px.ravel().astype(np.float32))
