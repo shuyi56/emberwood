@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bpy  # noqa: E402
 import ranger  # noqa: E402
+import female  # noqa: E402  (the base figure, on the path once ranger is imported)
 
 WALK_FRAMES = 24
 IDLE_FRAME = 40
@@ -460,10 +461,11 @@ def main():
     out = os.path.abspath(out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
-    ranger.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
+    # (the walk's settings belong to the base figure, whose pose() reads them)
+    female.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
     # in the world she covers ground at a good pace, so the walk takes a longer stride than the sprite sheet's and
     # swings the arms further. WORLD_CYCLE in src/world/main.js is the ground one cycle covers (see stride_length).
-    ranger.GAIT, ranger.ARM_SWING = 1.3, 0.7
+    female.GAIT, female.ARM_SWING = 1.3, 0.7
     ranger.build()
     sc = bpy.context.scene
     for o in sc.objects:
