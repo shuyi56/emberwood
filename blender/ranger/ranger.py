@@ -1371,44 +1371,99 @@ def sclera_image():
     # inner skin, so toward each point the white warms and darkens into the skin's own tone, and the lids'
     # edges continue round it rather than stopping at a pale tip
     blend([204, 154, 132], sm(0.42, 0.88, ru) ** 0.8)
-    # the veins, grown as wandering, forking strokes from the corners, in pixels
+    # the veins: the conjunctival vessels enter from under the lids and the corners and branch inward toward
+    # the iris, thinning as they go. They are grown by space colonisation (Runions et al., the algorithm for leaf
+    # venation): scattered attraction points, denser toward the corners and thinning out before the iris, pull
+    # the nearest tip of the network toward them and are used up when it arrives, so the branches spread to fill
+    # the space without crossing. Each vessel's width then follows Murray's law (a parent's radius cubed is the sum
+    # of its children's), so the trunks are thick and the twigs hair-fine, and the drawn paths wander with a
+    # low-frequency noise so no segment runs straight.
     rng = np.random.default_rng(7)
+    PX = W / 2.0                                  # pixels per unit of u (and roughly of the opening's height)
+    def inside(u_, h_):
+        # within the opening (h_ in the same units as lid_top), with a little margin from the lids' edges
+        return (-lid_bottom(u_) * 0.92 < h_ < lid_top(u_) * 0.92) if abs(u_) < 0.97 else False
+    att = []
+    while len(att) < 400:
+        u_ = rng.uniform(-1, 1)
+        h_ = rng.uniform(-0.5, 0.6)
+        dens = smooth(0.28, 0.75, abs(u_)) * (0.35 + 0.65 * smooth(0.3, 1.0, abs(h_) / 0.4))
+        if rng.random() < dens and inside(u_, h_):
+            att.append((u_, h_))
+    att = np.array(att)
+    # roots: under the lids (above and below, toward the sides) and at both corners
+    roots = []
+    for side in (-1, 1):
+        roots.append((0.985 * side, 0.0))
+        for uq in (0.5, 0.78):
+            roots.append((uq * side + rng.normal(0, 0.04), lid_top(uq) * 0.97))
+            roots.append((uq * side + rng.normal(0, 0.04), -lid_bottom(uq) * 0.97))
+    nodes = [np.array(r_, dtype=np.float64) for r_ in roots]
+    parent = [-1] * len(nodes)
+    D, DI, DK = 0.012, 0.25, 0.03                # step, reach of an attractor, distance at which it is used up
+    alive = np.ones(len(att), dtype=bool)
+    for it in range(400):
+        if not alive.any():
+            break
+        N_ = np.array(nodes)
+        A = att[alive]
+        d = np.linalg.norm(A[:, None, :] - N_[None, :, :], axis=2)
+        near = d.argmin(1)
+        dmin = d[np.arange(len(A)), near]
+        grow_dirs = {}
+        for ai in np.nonzero(dmin < DI)[0]:
+            v_ = A[ai] - N_[near[ai]]
+            grow_dirs.setdefault(near[ai], []).append(v_ / max(1e-9, np.linalg.norm(v_)))
+        if not grow_dirs:
+            break
+        for ni, dirs in grow_dirs.items():
+            g_ = np.sum(dirs, axis=0)
+            g_ = g_ / max(1e-9, np.linalg.norm(g_)) + rng.normal(0, 0.18, 2)
+            g_ /= max(1e-9, np.linalg.norm(g_))
+            nodes.append(N_[ni] + g_ * D)
+            parent.append(ni)
+        N_ = np.array(nodes)
+        idx = np.nonzero(alive)[0]
+        dd = np.linalg.norm(att[idx][:, None, :] - N_[None, :, :], axis=2).min(1)
+        alive[idx[dd < DK]] = False
+    # widths from the tips back toward the roots (Murray's law)
+    n_ = len(nodes)
+    rad = np.full(n_, 0.38)                        # a tip's radius in pixels
+    kids = [[] for _ in range(n_)]
+    for i_, p_ in enumerate(parent):
+        if p_ >= 0:
+            kids[p_].append(i_)
+    for i_ in range(n_ - 1, -1, -1):
+        if kids[i_]:
+            rad[i_] = sum(rad[k_] ** 3 for k_ in kids[i_]) ** (1 / 3)
+    rad = np.minimum(rad * 1.25, 2.2)
+    # draw each segment as a soft capsule, its path wandering with a smooth noise
+    wob = lambda q_, sd: 0.006 * (np.sin(q_[0] * 37 + sd) + np.sin(q_[1] * 53 - sd * 1.7) + np.sin((q_[0] + q_[1]) * 91 + sd * 0.3))
+    pts = [np.array([(q_[0] + wob(q_, 1.0) + 1) / 2 * W, (1 - (q_[1] + wob(q_, 4.0)) / (EYE_RZ * EYE_K)) / 2 * H]) for q_ in nodes]
     mask = np.zeros((H, W), dtype=np.float32)
     yy, xx = np.mgrid[0:H, 0:W]
-
-    def splat(px, py, r, k):
-        x0, x1 = int(max(0, px - 3 * r - 1)), int(min(W, px + 3 * r + 2))
-        y0, y1 = int(max(0, py - 3 * r - 1)), int(min(H, py + 3 * r + 2))
+    for i_, p_ in enumerate(parent):
+        if p_ < 0:
+            continue
+        a_, b_ = pts[p_], pts[i_]
+        r_ = 0.5 * (rad[i_] + rad[p_])
+        x0, x1 = int(max(0, min(a_[0], b_[0]) - 4)), int(min(W, max(a_[0], b_[0]) + 5))
+        y0, y1 = int(max(0, min(a_[1], b_[1]) - 4)), int(min(H, max(a_[1], b_[1]) + 5))
         if x0 >= x1 or y0 >= y1:
-            return
-        d2 = (xx[y0:y1, x0:x1] - px) ** 2 + (yy[y0:y1, x0:x1] - py) ** 2
-        np.maximum(mask[y0:y1, x0:x1], k * np.exp(-d2 / (2 * r * r)), out=mask[y0:y1, x0:x1])
-
-    def grow(px, py, ang, r, k, steps, depth):
-        for _ in range(steps):
-            splat(px, py, r, k)
-            ang += rng.normal(0, 0.28)
-            px += math.cos(ang) * 1.2
-            py += math.sin(ang) * 1.2
-            r = max(0.6, r * 0.99)
-            k *= 0.995
-            if depth < 2 and rng.random() < 0.03:
-                grow(px, py, ang + rng.choice([-1, 1]) * rng.uniform(0.5, 1.0), r * 0.7, k * 0.8,
-                     int(steps * rng.uniform(0.3, 0.5)), depth + 1)
-    # from the corners, and from under the lids above and below, each heading in toward the iris
-    starts = []
-    for side, n in ((1, 2), (-1, 2)):
-        for _ in range(n):
-            starts.append((W - 2 if side > 0 else 2, H / 2 + rng.normal(0, H * 0.1)))
-        for top_, u in ((True, rng.uniform(0.45, 0.8)), (False, rng.uniform(0.4, 0.75))):
-            u *= side
-            h = (lid_top(u) if top_ else -lid_bottom(u)) / EYE_RZ / EYE_K
-            starts.append(((u + 1) / 2 * W, (1 - h) / 2 * H))
-    for px, py in starts:
-        ang = math.atan2(H / 2 - py, W / 2 - px) + rng.normal(0, 0.3)
-        grow(px, py, ang, rng.uniform(1.6, 2.4), rng.uniform(0.85, 1.0), int(rng.uniform(80, 140)), 0)
-    mask *= sm(0.2, 0.45, np.abs(uu))           # they fade before the iris
-    blend([178, 62, 58], 0.8 * mask)
+            continue
+        X_, Y_ = xx[y0:y1, x0:x1], yy[y0:y1, x0:x1]
+        ab = b_ - a_
+        t_ = np.clip(((X_ - a_[0]) * ab[0] + (Y_ - a_[1]) * ab[1]) / max(1e-9, ab @ ab), 0, 1)
+        dist = np.hypot(X_ - (a_[0] + t_ * ab[0]), Y_ - (a_[1] + t_ * ab[1]))
+        k_ = (0.3 + 0.7 * min(1.0, r_ / 1.4)) * np.exp(-(dist / max(0.55, r_)) ** 2)
+        np.maximum(mask[y0:y1, x0:x1], k_, out=mask[y0:y1, x0:x1])
+    mask *= sm(0.22, 0.55, np.abs(uu)) * (0.75 + 0.25 * sm(0.6, 0.9, np.abs(uu)))   # faint mid-way, gone before the iris
+    # a faint flush round the larger vessels, then the vessels themselves, deeper red where they are thicker
+    soft = mask.copy()
+    for _ in range(3):
+        soft = (soft + np.roll(soft, 1, 0) + np.roll(soft, -1, 0) + np.roll(soft, 1, 1) + np.roll(soft, -1, 1)) / 5
+    blend([214, 140, 128], 0.18 * np.clip(soft * 2.0, 0, 1))
+    blend([180, 62, 60], 0.68 * mask)
     img = bpy.data.images.new('sclera', W, H, alpha=False)
     px = np.concatenate([c / 255, np.ones((H, W, 1), dtype=np.float32)], axis=2)[::-1]
     img.pixels.foreach_set(px.ravel().astype(np.float32))
@@ -1540,7 +1595,7 @@ def build_eye(head, head_tree, s, x, ey, ez):
         over = abs(dz_) / max(lim, 1e-3)
         # (toward the lids the ball is kept full, so its edge meets the lids' margins rather than falling away
         # from them into a dark gap, and then turns back under them)
-        v.co.y -= 0.09 * smooth(0.45, 0.98, over)
+        v.co.y -= 0.09 * min(1.0, over) ** 2      # (a smooth swell with no onset: a smoothstep left a kink the gloss drew as a crease)
         v.co.y += 1.1 * smooth(0.98, 1.03, over)
     wtree = bvh_of(white)
     # texture coordinates for the painted white (sclera_image): across from the inner corner to the outer one,
