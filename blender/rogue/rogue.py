@@ -1095,7 +1095,11 @@ def leggings_top(body):
         # only then sink away between them, so the valley between the thighs opens gradually
         kx = smoothstep(31.6, 28.6, z)
         ky = 0.85 * smoothstep(29.4, 27.7, z) if y < 0 else 0.7 * smoothstep(28.8, 27.7, z)
-        return x * (1.0 - 0.8 * kx), y * (1.0 - ky)
+        # the front centre lies flat across the lower belly into the crotch instead of rounding forward (a full
+        # front there read as a bulge); the sides stay level with the thighs so no hollow opens beside them
+        if y < 0:
+            ky += 0.22 * smoothstep(31.8, 29.4, z) * (1.0 - smoothstep(0.6, 2.2, abs(x * (1.0 - 0.8 * kx))))
+        return x * (1.0 - 0.8 * kx), y * (1.0 - min(ky, 0.92))
     parts = [loft_fn([37.0 - 0.3 * i for i in range(32)], seat_pt, n=96)]
     lo = LEG_TOP_Z - HIP_Z
     for s_ in (1, -1):
@@ -1110,9 +1114,10 @@ def leggings_top(body):
             # (the bare tube was shallower than the seat there, which left the seat standing over it as a shelf)
             full = 0.8 * smoothstep(-6.0, -0.5, z) * max(0.0, -math.cos(phi)) ** 1.5
             # and the insides of the thighs meet at the crotch and part gradually below it, so the gap between the
-            # legs closes in a soft pointed arch (the seat's flat underside closed it square)
+            # legs closes in a soft pointed arch (the seat's flat underside closed it square); they stop just short
+            # of the midline and swell only on the very inside, so the join adds no volume of its own
             inner = max(0.0, -s_ * math.sin(phi)) ** 2
-            rx = r + (LEG_X - r + 0.06) * smoothstep(-5.6, -2.6, z) * inner
+            rx = r + (LEG_X - r - 0.08) * smoothstep(-5.2, -2.8, z) * inner ** 1.5
             return x0 - rx * math.sin(phi), -(r * 1.04) * math.cos(phi) + full
         bm_ = loft_fn(zs, leg_pt, n=56)
         bmesh.ops.translate(bm_, vec=(0, 0, HIP_Z), verts=bm_.verts)
