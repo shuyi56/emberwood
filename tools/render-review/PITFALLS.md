@@ -117,3 +117,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Spot:** A request whose diff only raises the same constant again, with a note that the previous round changed little. Build both commits headless and ray-cast the surface profile where the problem is: if the last change already moved that surface, the visible problem is made by something else.
 - **Fix:** Before another round, measure which surface is actually forward at the spot (a ray-cast profile at a few x across it, from the built scene) and change the function that makes it. Do not raise the same number again.
 - **Also seen:** Round 22: the front factor went from 0.35 * inner to 0.55 * inner ** 3 and the surface moved 0.11; at the back the marked lobe and the columns beside it moved in together, so the lobe stood as proud as before between deeper grooves. Measure the problem relative to its neighbours (`tools/render-review/profile.py`), not by how far one point moved.
+
+## P018 A new part built under a shell that already covers its place
+
+- **Seen:** Rogue ears, request #56 (2026-11-16): the ears were added at th 1.45 to 1.95 while the hair cap's HAIRLINE still ran down past them, as it was drawn for a head without ears. The render showed only a lobe tip. The hair check passed, because a part hidden inside the hair is not a clash.
+- **Spot:** A commit adds a mesh (ears, jewellery, a collar) and leaves the shell over that spot unchanged: compare the new part's span with the curve that bounds the covering shell (HAIRLINE for the cap, hems for cloth) in the same coordinates. In the headless build, ray-cast from outside toward the new part in profile and 3/4: the first hit must be the new part over most of its area.
+- **Fix:** Open the covering shell round the new part in the same commit, with clearance, and state both spans in the request note (the part's and the opening's). Ask for the render only once the ray-cast shows the part outermost.
