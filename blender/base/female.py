@@ -1062,6 +1062,19 @@ def skin_tones():
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(['Neck', 'Head shape', 'Hair']), dist=2.0)
+        elif o.name.startswith('Arm.'):
+            # a bare arm (see bare_arm; local height from the shoulder joint): the plain skin of the hand's back,
+            # a touch warmer on the outside, which catches the light, and cooler on the inside, toward the body,
+            # with a faint warmth over the point of the elbow and the thin cool skin coming down to the wrist
+            s = 1 if o.name.endswith('R') else -1
+            z = co[:, 2]
+            outside = np.clip(-s * nr[:, 0], 0, 1)
+            inside = np.clip(s * nr[:, 0], 0, 1)
+            flush = 0.15 * outside + 0.35 * np.exp(-((z + UPPER) / 0.9) ** 2) * np.clip(nr[:, 1], 0, 1)
+            cold = 0.3 * inside + 0.3 * np.clip((-z - UPPER - FORE + 2.0) / 2.0, 0, 1)
+            crease = 0.2 * np.exp(-((z + UPPER) / 0.4) ** 2) * np.clip(-nr[:, 1], 0, 1)   # inside the elbow
+            local = BVHTree.FromPolygons([v.co for v in me.vertices], [list(p.vertices) for p in me.polygons])
+            occ = _occlusion(co, nr, local, dist=0.9)
         else:      # a hand: the wrist at the origin, the fingers down; the back of the hand faces away from her
             s = 1 if o.name.endswith('R') else -1
             z = co[:, 2]
