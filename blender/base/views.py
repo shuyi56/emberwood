@@ -9,6 +9,9 @@
 --turn     the whole figure in its 3D look (sprite_mode off): front, front 3/4, profile, back 3/4 and back, in a
            row (DIR/turn.png), posed at sheet column --frame (default 0, the idle)
 --head     the head and shoulders from the same five angles (DIR/head.png)
+--clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
+           the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
+           show (DIR/turn-clay.png, DIR/head-clay.png)
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
 """
 import importlib
@@ -138,6 +141,31 @@ def row(cam, out, tmp, size, centre, height, ortho=True, dist=200.0):
     print('wrote', out)
 
 
+def clay(on, saved):
+    """Every mesh in one matte grey (on), or back as it was (off)."""
+    if on:
+        m = bpy.data.materials.get('clay') or bpy.data.materials.new('clay')
+        m.use_nodes = True
+        b = m.node_tree.nodes.get('Principled BSDF')
+        b.inputs['Base Color'].default_value = (0.42, 0.40, 0.38, 1)
+        b.inputs['Roughness'].default_value = 0.55
+        for o in bpy.data.objects:
+            if o.type != 'MESH':
+                continue
+            saved[o.name] = ([s.material for s in o.material_slots], o.hide_render)
+            if o.name.startswith(('Wool fuzz', 'Eyeshadow', 'Lashes', 'Brow paint', 'Hair paint')):
+                o.hide_render = True
+            for s in o.material_slots:
+                s.material = m
+    else:
+        for name, (mats, hide) in saved.items():
+            o = bpy.data.objects[name]
+            for s, mm in zip(o.material_slots, mats):
+                s.material = mm
+            o.hide_render = hide
+        saved.clear()
+
+
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), f'{FIGURE}-views'))
     os.makedirs(out, exist_ok=True)
@@ -155,11 +183,15 @@ def main():
         sc.frame_set(int(opt('--frame', 0)) + 1)
         size = int(opt('--size', 360))
         cam = look_3d(int(opt('--samples', 32)))
+        saved = {}
         with tempfile.TemporaryDirectory() as tmp:
-            if '--turn' in argv:
-                row(cam, os.path.join(out, 'turn.png'), tmp, (size, int(size * 1.75)), (0, 0, 32.5), 68.0)
-            if '--head' in argv:
-                row(cam, os.path.join(out, 'head.png'), tmp, (size, size), (0, 0, 55.5), 17.0)
+            for look in ('', '-clay') if '--clay' in argv else ('',):
+                clay(look == '-clay', saved)
+                if '--turn' in argv:
+                    row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), (0, 0, 32.5), 68.0)
+                if '--head' in argv:
+                    row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), (0, 0, 55.5), 17.0)
+            clay(False, saved)
 
 
 main()

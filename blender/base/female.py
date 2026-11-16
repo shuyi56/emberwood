@@ -3457,7 +3457,7 @@ def sprite_mode(on):
     for o in bpy.data.objects:
         if o.name.startswith('Wool fuzz'):
             o.hide_render = on
-        if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint')):
+        if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint', 'Hair paint')):
             o.hide_render = on         # (finer than a sprite pixel: nothing to draw there)
             o.hide_viewport = on
         if o.name.startswith('Brow tube'):

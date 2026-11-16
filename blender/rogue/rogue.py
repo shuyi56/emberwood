@@ -26,7 +26,7 @@ import bpy  # noqa: E402
 import bmesh  # noqa: E402
 from mathutils import Vector, Matrix  # noqa: E402
 from female import *  # noqa: E402,F401,F403  (the base figure: shapes, materials, rig, walk and sprite pipeline)
-from female import _profile, _gs, _torso_dims  # noqa: E402,F401
+from female import _profile, _gs, _torso_dims, _perlin2  # noqa: E402,F401
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
@@ -573,7 +573,7 @@ def temple_wisp(head_tree, side):
         r = (hit[0] - HC).length if hit[0] is not None else 4.0
         return HC + d * (r + lift)
     th = lambda x: side * x   # noqa: E731
-    pts = [on(th(0.62), 0.62, 0.1), on(th(0.7), 0.38, 0.2), on(th(0.86), 0.05, 0.22), on(th(0.92), -0.32, 0.2),
+    pts = [on(th(0.5), 0.8, 0.08), on(th(0.66), 0.48, 0.14), on(th(0.74), 0.3, 0.2), on(th(0.86), 0.05, 0.22), on(th(0.92), -0.32, 0.2),
            on(th(0.86), -0.62, 0.18), on(th(0.74), -0.8, 0.16)]
     path = catmull(pts, 40)
     n_ = len(path)
@@ -583,6 +583,215 @@ def temple_wisp(head_tree, side):
         w = 0.36 * (1.0 - u) ** 0.6 + 0.03
         return w * 0.4, w
     return sweep(path, rad, n=12)
+
+
+# The front of the hair, painted strand by strand: a texture over the band from just below the hairline to a
+# few fingers back from it, laid both on the hair (over its own colours) and on a thin skin of the scalp under it,
+# so single strands leave the skin, gather into the combed hair and run back, and the hairline is a soft edge of
+# strands rather than the hair's cut edge. Its coordinates: round the head (the azimuth from the front, as for the
+# hairline) and up from the hairline (elevation above it), both seen from the skull's centre.
+PT_TH = 1.75                         # it reaches this far round from the front on each side
+PT_V0, PT_V1 = -0.13, 0.6            # from just below the hairline to well into the hair
+PT_W, PT_H = 2400, 520
+PAINT = {}
+
+
+def paint_uv(co):
+    d = Vector(co) - HC
+    th = math.atan2(-d.x, -d.y)
+    el = math.asin(max(-1.0, min(1.0, d.z / max(d.length, 1e-6))))
+    v = el - HAIRLINE(abs(th))
+    return (th + PT_TH) / (2 * PT_TH), (v - PT_V0) / (PT_V1 - PT_V0)
+
+
+def hairline_image():
+    """The strands, painted (as the base paints the brows): roots scattered evenly-irregular over the band, dense in
+    the hair and thinning out just under the hairline into a few fine baby hairs; each strand grows along the comb
+    (up and back at the front, away from the parting, round toward the tie at the temples and sides), bent
+    together with its neighbours by curl noise, tapering, faded in at its root, dark at the root to lighter along
+    its length, each its own tone. Under them a faint shade of the scalp showing through, so the skin between the
+    first strands is not left bare."""
+    if 'img' in PAINT:
+        return PAINT['img']
+    from PIL import Image, ImageDraw, ImageFilter
+    SS = 2
+    W, H = PT_W * SS, PT_H * SS
+    rng = np.random.default_rng(23)
+    R0 = 3.3                                          # the skull's radius, for lengths on the canvas
+    rmp = MATERIALS[M_HAIR]['ramp'].astype(np.float32)
+    DARK, MID, LIGHT = rmp[1], rmp[2], rmp[3]
+
+    def px(th, v):
+        return ((th + PT_TH) / (2 * PT_TH) * W, (PT_V1 - v) / (PT_V1 - PT_V0) * H)
+
+    def comb(th, v):
+        """The direction the hair is combed at (th, v), as unit (round, up) on the skin."""
+        dp_ = wrap(th - PART)
+        away = math.copysign(1.0, dp_) * 0.55 * math.exp(-abs(dp_) / 0.25) * (1.0 - smoothstep(0.1, 0.45, v))
+        back = math.copysign(1.0, th) * 1.3 * smoothstep(0.3, 1.35, abs(th))
+        a = away + back
+        return math.sin(a), math.cos(a)
+
+    cover = Image.new('L', (W, H), 0)
+    alpha = Image.new('L', (W, H), 0)
+    paint = Image.new('RGB', (W, H), (0, 0, 0))
+    dc, da, dp = ImageDraw.Draw(cover), ImageDraw.Draw(alpha), ImageDraw.Draw(paint)
+    roots = []
+    n_try = 70000
+    ths = rng.uniform(-PT_TH + 0.05, PT_TH - 0.05, n_try)
+    vs = rng.uniform(PT_V0 + 0.02, PT_V1 - 0.05, n_try)
+    for th0, v0 in zip(ths, vs):
+        # density: full in the hair, thinning across the hairline, a few baby hairs below it
+        dens = 0.08 + 0.92 * smoothstep(-0.07, 0.06, v0)
+        if rng.random() < dens * 0.32:
+            roots.append((th0, v0))
+    # draw from the hairline back, so the strands nearer the front lie over the ones behind
+    roots.sort(key=lambda p: -p[1])
+    for th0, v0 in roots:
+        baby = v0 < 0.0
+        tone = 0.5 + 0.5 * float(_perlin2(th0 * 9.0, v0 * 9.0, 31)) + 0.25 * (rng.random() - 0.5)
+        length = (0.22 + 0.12 * rng.random()) if baby else (0.7 + 0.6 * rng.random())
+        wid = (0.008 if baby else 0.013) * (0.8 + 0.4 * rng.random())
+        val = 255 * ((0.45 + 0.3 * rng.random()) if baby else (0.75 + 0.25 * rng.random()))
+        steps = 8 if baby else 16
+        th, v = th0, v0
+        p = px(th, v)
+        for k in range(steps):
+            t = (k + 1) / steps
+            el = HAIRLINE(min(abs(th), math.pi)) + v
+            a_th, a_v = comb(th, v)
+            e = 0.01
+            cu = float(_perlin2(th * 5.0, (v + e) * 5.0, 41) - _perlin2(th * 5.0, (v - e) * 5.0, 41)) / (2 * e)
+            cv = -float(_perlin2((th + e) * 5.0, v * 5.0, 41) - _perlin2((th - e) * 5.0, v * 5.0, 41)) / (2 * e)
+            a_th += 0.02 * cu * (1.6 if baby else 1.0)
+            a_v += 0.02 * cv * (1.6 if baby else 1.0)
+            n_ = math.hypot(a_th, a_v) or 1.0
+            ds = length / steps
+            th += a_th / n_ * ds / (R0 * max(0.3, math.cos(el)))
+            v += a_v / n_ * ds / R0
+            if not (-PT_TH < th < PT_TH and PT_V0 < v < PT_V1):
+                break
+            q = px(th, v)
+            w = max(1, int(round(wid * W / (2 * PT_TH * R0) * (1.0 - 0.6 * t))))
+            fade_in = min(1.0, 0.35 + t * 2.5)
+            c = DARK + (MID - DARK) * min(1.0, 0.4 + 0.8 * t) * (0.7 + 0.6 * tone)
+            c = c + (LIGHT - c) * (0.2 + 0.45 * math.exp(-((t - 0.6) / 0.25) ** 2)) * tone
+            dc.line([p, q], fill=255, width=w)
+            da.line([p, q], fill=int(val * fade_in * (1 - 0.2 * t)), width=w)
+            dp.line([p, q], fill=tuple(int(max(0, min(255, x))) for x in c), width=w)
+            p = q
+    a_h = np.asarray(alpha.resize((PT_W, PT_H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
+    cov = np.asarray(cover.resize((PT_W, PT_H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
+    pnt = np.asarray(paint.resize((PT_W, PT_H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32)
+    strand = np.clip(pnt / np.maximum(cov, 1e-3)[..., None], 0, 255)
+    # the scalp showing through at the hairline: a faint shade of the hair, soft, thickening into the hair
+    vv = PT_V1 - (np.arange(PT_H) + 0.5) / PT_H * (PT_V1 - PT_V0)
+    sm = np.clip((vv + 0.03) / 0.1, 0, 1)
+    shade = (sm * sm * (3 - 2 * sm))[:, None] * np.ones((1, PT_W)) * 0.45
+    a = np.clip(1 - (1 - np.clip(a_h * 1.5, 0, 1)) * (1 - shade), 0, 1)
+    w_ = np.clip(cov * 2.2, 0, 1)[..., None]
+    col = (DARK + (strand - DARK) * w_) / 255
+    # (nothing at the canvas's border: a surface without these coordinates samples its corner)
+    a[:2, :] = a[-2:, :] = a[:, :2] = a[:, -2:] = 0.0
+    # and round the sides it fades out, where the band ends and the hair's own colours carry on
+    uu = np.abs((np.arange(PT_W) + 0.5) / PT_W * 2 - 1)
+    a *= np.clip((1.0 - uu) / 0.12, 0, 1)[None, :]
+    # and back into the hair, where the hair's own strands carry on
+    a *= np.clip((PT_V1 - vv) / 0.18, 0, 1)[:, None]
+    img = bpy.data.images.new('hairline strands', PT_W, PT_H, alpha=True)
+    img.pixels.foreach_set(np.concatenate([col, a[..., None]], axis=2)[::-1].ravel().astype(np.float32))
+    img.pack()
+    PAINT['img'] = img
+    return img
+
+
+def set_paint_uv(o):
+    """The painted band's coordinates on a mesh, as its UV map 'paint'."""
+    me = o.data
+    uv = me.uv_layers.new(name='paint')
+    vals = []
+    for lp in me.loops:
+        vals += paint_uv(me.vertices[lp.vertex_index].co)
+    uv.data.foreach_set('uv', vals)
+
+
+def paint_hair(hair):
+    """Lay the painted strands over the hair's own colours (in the close-up look; the sheet keeps its plain
+    surface), wherever the band reaches."""
+    img = hairline_image()
+    set_paint_uv(hair)
+    nt = bpy.data.materials[MATERIALS[M_HAIR]['name']].node_tree
+    col = next(n for n in nt.nodes if n.type == 'VERTEX_COLOR' and n.layer_name == 'strands')
+    targets = [(lk.to_node, lk.to_socket) for lk in nt.links if lk.from_node == col]
+    uvn = nt.nodes.new('ShaderNodeUVMap')
+    uvn.uv_map = 'paint'
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = img
+    tex.interpolation = 'Cubic'
+    tex.extension = 'CLIP'
+    nt.links.new(uvn.outputs['UV'], tex.inputs['Vector'])
+    mix = nt.nodes.new('ShaderNodeMix')
+    mix.data_type = 'RGBA'
+    nt.links.new(tex.outputs['Alpha'], mix.inputs['Factor'])
+    nt.links.new(col.outputs['Color'], mix.inputs['A'])
+    nt.links.new(tex.outputs['Color'], mix.inputs['B'])
+    for node, sock in targets:
+        nt.links.new(mix.outputs['Result'], sock)
+
+
+def scalp_paint(head, head_tree):
+    """The thin skin of the scalp under the front of the hair that carries the strands past the hair's edge onto
+    the skin: a grid over the band below the hairline, each point cast onto the head and lifted a hair."""
+    img = hairline_image()
+    NU, NV = 360, 36
+    V_TOP = 0.12                    # (up under the hair, which hides the rest)
+    bm = bmesh.new()
+    grid = []
+    for j in range(NV + 1):
+        v = PT_V0 + (V_TOP - PT_V0) * j / NV
+        row = []
+        for i in range(NU + 1):
+            th = -PT_TH + 2 * PT_TH * i / NU
+            d = _dir(th, HAIRLINE(abs(th)) + v)
+            hit = head_tree.ray_cast(HC + d * 20.0, -d, 20.0)
+            r = (hit[0] - HC).length if hit[0] is not None else 3.3
+            row.append(bm.verts.new(HC + d * (r + 0.012)))
+        grid.append(row)
+    for j in range(NV):
+        for i in range(NU):
+            bm.faces.new((grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    me = bpy.data.meshes.new('Hair paint')
+    bm.to_mesh(me)
+    bm.free()
+    for pl in me.polygons:
+        pl.use_smooth = True
+    m = bpy.data.materials.new('hair paint')
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    b = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    uvn = nt.nodes.new('ShaderNodeUVMap')
+    uvn.uv_map = 'paint'
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = img
+    tex.interpolation = 'Cubic'
+    tex.extension = 'CLIP'
+    nt.links.new(uvn.outputs['UV'], tex.inputs['Vector'])
+    nt.links.new(tex.outputs['Color'], b.inputs['Base Color'])
+    nt.links.new(tex.outputs['Alpha'], b.inputs['Alpha'])
+    b.inputs['Roughness'].default_value = 0.7
+    b.inputs['Specular IOR Level'].default_value = 0.2
+    nt.links.new(b.outputs['BSDF'], out.inputs['Surface'])
+    m.surface_render_method = 'BLENDED'
+    me.materials.append(m)
+    o = bpy.data.objects.new('Hair paint', me)
+    link(o, head)
+    o.visible_shadow = False
+    set_paint_uv(o)
+    return o
 
 
 def fine_streaks(o):
@@ -638,6 +847,8 @@ def build_hair(head, head_tree):
         return None
     hair = fuse_parts(head, ['Hair cap', 'Hair tail'])
     fine_streaks(hair)
+    paint_hair(hair)
+    scalp_paint(head, head_tree)
     tail_clumps(head, path, lens)
     # (the wisps stay their own pieces: their fine ends are thinner than the fusing grid and would melt away)
     for side in (1, -1):
