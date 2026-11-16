@@ -40,22 +40,28 @@ def shaped(S, FACE_WARP, HEAD_W):
         top = zl + (top - zl) * pinch ** 0.8
         t = (z - zl) / max(0.004, top - zl)
         fall = 0.0095 * max(0.4, pinch)
-        if 0.0 < t and z < top + fall:
-            d += 0.016 * S['lipUpper'] * pinch ** 1.6 * math.sin(min(1.0, t) * math.pi * 0.96) ** 0.8 * (
-                1.0 if t <= 1.0 else 0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
+        if z < top + fall:
+            if t <= 0.0:
+                prof = 0.42 * math.exp(-((zl - z) / 0.003) ** 2)
+            elif t <= 1.0:
+                prof = math.sin((0.11 + 0.85 * t) * math.pi) ** 0.8
+            else:
+                prof = math.sin(0.96 * math.pi) ** 0.8 * (0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
+            d += 0.016 * S['lipUpper'] * pinch ** 1.6 * prof
         d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005 * S['lipUpper'])
         low = 0.034 * hl[1] * pinch ** 1.4
-        d += 0.017 * S['lipLower'] * pinch ** 2 * math.exp(-((z - (zl - 0.56 * low)) / max(0.004, 0.47 * low)) ** 2)
-        d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.079) ** 6)
+        zc, sg = zl - 0.56 * low, max(0.004, 0.47 * low)
+        d += 0.017 * S['lipLower'] * pinch ** 2 * math.exp(-((z - zc) / (sg * 1.25 if z > zc else sg)) ** 2)
+        d -= 0.0065 * pinch ** 0.5 * math.exp(-((z - zl) / 0.0035) ** 2) * math.exp(-(x / 0.079) ** 6)
         for sx in (-1, 1):
             d += gauss(x, z, sx * 0.079, 0.262, 0.012, 0.011, -0.002)
-            d += gauss(x, z, sx * 0.02, 0.31, 0.009, 0.018, 0.0035)
+            d += gauss(x, z, sx * 0.022, 0.306, 0.013, 0.016, 0.0012)
             for k in range(6):
                 u = k / 5
                 px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
                 d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
                 d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
-        d += gauss(x, z, 0, 0.312, 0.012, 0.02, -0.0015)
+        d += gauss(x, z, 0, 0.308, 0.012, 0.018, -0.0008)
         d += gauss(x, z, 0, 0.385 + nl, 0.028 * nw, 0.024, 0.006 * S['tipBall'])
         d += gauss(x, z, 0, 0.19, 0.05, 0.014, -0.008)
         return d

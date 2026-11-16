@@ -705,7 +705,10 @@ def measure(face):
     else:
         cz, cf = None, None
     mk = np.nonzero((zh > 0.2) & (zh < 0.3))[0]
-    mouth_line = mk[np.argmax(yf[mk])]
+    # (the crease between the lips: the sharpest dip in the profile, not simply its deepest point, which with
+    # closed lips is the hollow under the nose)
+    sharp = [(yf[i] - 0.5 * (yf[i - 3] + yf[i + 3]), i) for i in mk[3:-3] if yf[i] >= yf[i - 1] and yf[i] >= yf[i + 1]]
+    mouth_line = max(sharp)[1] if sharp else mk[np.argmax(yf[mk])]
     bz = F.brow_line(0.0)[0] if 'brow_line' in F.g else None
     out['features'] = {'nose_tip_z': nz, 'nose_tip_fwd': nf, 'chin_z': cz, 'chin_fwd': cf,
                        'mouth_line_z': round(float(zh[mouth_line]), 4), 'eye_line_z': round(float(ez / H), 4),
