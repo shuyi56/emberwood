@@ -4628,11 +4628,18 @@ def locked_foot(t):
     a = AHEAD * STANCE_L * STRIDE
     pitch = math.radians(cyclic(GAIT_FOOT, t))
     if t < STANCE_L:
-        return a - STRIDE * t, ANKLE_Z + foot_lift(pitch), pitch, True
+        return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
     u = (t - STANCE_L) / (1 - STANCE_L)
     span = STRIDE * (1 - STANCE_L)
-    fwd = _hermite(a - STANCE_L * STRIDE, a, -0.25 * span, -0.15 * span, u)
+    off = toe_roll(math.radians(cyclic(GAIT_FOOT, STANCE_L)))
+    fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
     return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+
+
+def toe_roll(pitch):
+    """How far forward the ankle moves as the heel lifts and the foot rolls over the ball of the foot (3 ahead of
+    the ankle, as in foot_lift), so the ball stays where it was planted instead of sliding back under her."""
+    return 3.0 * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
 
 
 def locked_turn(tr):
@@ -4746,6 +4753,25 @@ def pose(col):
         wr.rotation_euler = (flick, 0, 0)
 
 
+def _euler_m(e):
+    """The matrix of a Blender XYZ Euler (X applied first)."""
+    (ca, sa), (cb, sb), (cc, sc) = [(math.cos(v), math.sin(v)) for v in e]
+    rx = np.array([[1, 0, 0], [0, ca, -sa], [0, sa, ca]])
+    ry = np.array([[cb, 0, sb], [0, 1, 0], [-sb, 0, cb]])
+    rz = np.array([[cc, -sc, 0], [sc, cc, 0], [0, 0, 1]])
+    return rz @ ry @ rx
+
+
+def foot_level(pelvis, hip, knee, pitch):
+    """The ankle's XYZ Euler that sets the foot pointing straight down the line of the walk, its sole level from
+    side to side and pitched only by `pitch` (toes up positive), whatever the pelvis's turn and list and the leg's
+    roll above it. (Taking each of those out one angle at a time, as pose() does, leaves the foot turned and rolled
+    by a few degrees once the shin leans far over, most at push-off, where it shows as the foot twisting on its toes.)"""
+    parent = _euler_m(pelvis) @ _euler_m(hip) @ _euler_m(knee)
+    m = parent.T @ _euler_m((pitch, 0.0, 0.0))
+    return (math.atan2(m[2, 1], m[2, 2]), -math.asin(max(-1.0, min(1.0, m[2, 0]))), math.atan2(m[1, 0], m[0, 0]))
+
+
 def pose_locked(col):
     """The world model's walk (LOCKED_WALK) at sheet column col: feet planted on their paths (locked_foot), the
     hips at locked_hips, the legs solved to reach, and the arms swinging against the legs with the forearm following
@@ -4778,7 +4804,7 @@ def pose_locked(col):
         hip.location = (-s * LEG_X, 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
-        an.rotation_euler = (th - kb + pitch, 0, -turn)
+        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch)
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
