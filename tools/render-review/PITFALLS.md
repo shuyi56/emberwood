@@ -110,3 +110,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Rogue rounds 13 to 15: the painted side locks were half-transparent, the skin showed through and tinted them pink (78% of the painted texels half-transparent at b14e416, 32% once each strand was opaque), and their colour had been shifted away from the hair's ramp to compensate. John rejected the painted locks after three render rounds.
 - **Spot:** The strand paint part of `hair_check.py`: more than 45% of a strand texture's painted texels with alpha between 0.08 and 0.7, or its mean colour further than 0.045 in chromaticity from `MATERIALS[M_HAIR]['ramp']`. The texture over a skin tone is saved as `paint-<name>.png`.
 - **Fix:** Paint each strand opaque and thin a lock by the gaps between its strands. Take the tones from the hair's ramp unchanged; if the lock renders darker or redder than the hair above it, fix the material or the lighting it sits in, not the paint.
+
+## P017 Turning one knob further when the last render barely moved
+
+- **Seen:** Rogue rounds 19 and 20 (2026-11-16): a crotch mound 'shrank only slightly' after the seat's front-centre recession went to 0.22, so round 20 doubled it to 0.42. Measured headless, the centre was already 0.1 behind the thigh fronts and round 20 made a trough 1 deep; the mound that stayed was the inner-thigh fill from another function (leg_pt), which neither round touched.
+- **Spot:** A request whose diff only raises the same constant again, with a note that the previous round changed little. Build both commits headless and ray-cast the surface profile where the problem is: if the last change already moved that surface, the visible problem is made by something else.
+- **Fix:** Before another round, measure which surface is actually forward at the spot (a ray-cast profile at a few x across it, from the built scene) and change the function that makes it. Do not raise the same number again.
