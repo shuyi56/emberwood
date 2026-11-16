@@ -37,7 +37,7 @@ M_BROW = mat_def(17, 'brow', ramp(0x2f221c, 0.08), 0.0, flat=1)
 M_EYE = mat_def(16, 'iris', [[30, 28, 24], [58, 50, 38], [86, 74, 52], [114, 100, 70], [142, 130, 92]], 0.0, flat='painted')
 M_TABARD = mat_def(30, 'tabard', ramp(0xd6cbb0, 0.09), 0.05, closeup='canvas', form=True)
 M_TRIM = mat_def(31, 'embroidery', ramp(0x9b2f25, 0.09), 0.0, closeup='canvas')
-M_PLATE = mat_def(32, 'plate', ramp(0x8e9196, 0.13), 0.0)
+M_PLATE = mat_def(32, 'plate', ramp(0x8e9196, 0.13), 0.0, closeup='steel')   # (steel_closeup)
 M_BIND = mat_def(33, 'binding', ramp(0x38291f, 0.08), 0.18, surface='leather')
 M_SLEEVE = mat_def(34, 'gambeson', ramp(0x4f3c2e, 0.1), 0.07, surface='twill', closeup='cloth', form=True)
 M_BRACER = mat_def(35, 'bracers', ramp(0x7a5337, 0.1), 0.22, surface='leather', closeup='suede', form=True)
@@ -52,6 +52,8 @@ M_STITCH = mat_def(43, 'stitching', ramp(0xa8927a, 0.08), 0.0, flat=2)
 # the scar: a little paler and pinker than the skin round it
 M_ROBE = mat_def(46, 'robe', ramp(0x4a3227, 0.1), 0.1, surface='wool', closeup='wool', form=True)
 M_ROBE_TRIM = mat_def(47, 'robe trim', ramp(0x9c7c45, 0.09), 0.0, closeup='canvas')
+M_CAPE = mat_def(48, 'cape', ramp(0x3b2a21, 0.1), 0.12, surface='wool', closeup='wool', form=True)
+M_LINING = mat_def(49, 'cape lining', ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
 M_SCAR = mat_def(44, 'scar', [[178, 114, 100], [202, 142, 124], [216, 164, 144], [226, 182, 164], [236, 202, 186]], 0.0)
 
 
@@ -261,15 +263,18 @@ def robe_edge(z):
 
 
 def robe_hem(phi):
-    return 20.8 - 0.7 * max(0.0, -math.cos(phi))
+    # (the hem rises and falls with the folds: up at each crest, down in the valleys)
+    v = 0.75 * pinch(5.0 * phi + 0.6 + 0.3 * math.sin(8.4)) + 0.25 * pinch(11.0 * phi + 1.9 + 4.2)
+    return 20.8 - 0.7 * max(0.0, -math.cos(phi)) + 0.35 * v * (1.0 - 0.6 * max(0.0, math.cos(phi)) ** 2)
 
 
 def robe_form(z, phi):
     """(radial offset, crease) of the robe's wool: below the belt a few deep folds round the sides and back,
     deepening toward the hem, and soft folds down the back from the shoulders."""
-    k = smoothstep(37.0, 24.0, z) * (1.0 - 0.7 * max(0.0, math.cos(phi)) ** 2)
-    v = pinch(6.0 * phi + 0.6 + 0.25 * math.sin(0.4 * z))
-    off = 0.3 * k * v
+    k = smoothstep(37.5, 23.0, z) * (1.0 - 0.6 * max(0.0, math.cos(phi)) ** 2)
+    # (a few deep folds, each a little off true as it falls, and a shallower one between)
+    v = 0.75 * pinch(5.0 * phi + 0.6 + 0.3 * math.sin(0.4 * z)) + 0.25 * pinch(11.0 * phi + 1.9 + 0.2 * z)
+    off = 0.55 * k * v
     cr = 0.8 * k * max(0.0, -v)
     b = smoothstep(51.0, 47.0, z) * smoothstep(38.0, 41.0, z) * max(0.0, -math.cos(phi)) ** 2
     w = fold_ridge(4.0 * phi + 0.5)
@@ -336,6 +341,241 @@ def robe_y(x, z, lift=0.0):
 # side of the face and over the ears, and the long fall down her back, all fused into one surface; then waves
 # pressed into it, a few broad S-curves running across the locks. (Head-local coordinates: the chin at the origin,
 # the face toward -Y.)
+# ---------------------------------------------------------------- the cape
+# Over the shoulders and hanging to the knees behind, open in front: a dark wool outside lined in red. Over the
+# shoulders it lies on the body (the slope of the shoulders, the round of each arm) a little off it; below them it
+# hangs free in a few deep folds, close behind the shoulder blades so the hair hangs straight down it. Its fronts
+# are pinned at the chest by two gold medallions, and part below them, wider toward the hem.
+CAPE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.7, 3.1, 0.35), (51.3, 5.55, 3.8, 0.3), (50.3, 7.0, 4.25, 0.3),
+              (49.3, 8.0, 4.55, 0.3), (48.4, 8.55, 4.7, 0.3), (47.0, 8.9, 4.8, 0.3), (42.0, 9.0, 4.85, 0.35),
+              (34.0, 9.2, 5.0, 0.4), (26.0, 9.55, 5.2, 0.45), (18.0, 10.0, 5.5, 0.5)]
+CAPE_BACK = [(53.4, 2.65), (52.4, 3.3), (51.3, 3.3), (49.0, 3.45), (45.0, 3.65), (38.0, 3.9), (28.0, 4.3), (18.0, 4.8)]
+CAPE_EDGE = [(53.4, 0.3), (51.0, 0.4), (50.3, 0.46), (49.3, 0.6), (47.5, 0.95), (45.0, 1.2), (30.0, 1.32), (18.0, 1.4)]
+CLASP_Z = 50.3
+
+
+def _table(T, z):
+    for (z0, a), (z1, b) in zip(T, T[1:]):
+        if z1 <= z <= z0:
+            return lerp(a, b, (z0 - z) / (z0 - z1))
+    return T[0][1] if z > T[0][0] else T[-1][1]
+
+
+def _rings(R, z):
+    """(rx, ry, cy) through the rings at z: one smooth (Catmull-Rom) curve, so the cloth is not flattened at each."""
+    for i in range(len(R) - 1):
+        a_, b_ = R[i], R[i + 1]
+        if b_[0] <= z <= a_[0]:
+            t = (a_[0] - z) / (a_[0] - b_[0])
+            p0, p3 = R[max(0, i - 1)], R[min(len(R) - 1, i + 2)]
+            t2, t3 = t * t, t * t * t
+            return tuple(0.5 * (2 * q1 + (q2 - q0) * t + (2 * q0 - 5 * q1 + 4 * q2 - q3) * t2 + (3 * q1 - q0 - 3 * q2 + q3) * t3)
+                         for q0, q1, q2, q3 in zip(p0[1:], a_[1:], b_[1:], p3[1:]))
+    return R[0][1:] if z > R[0][0] else R[-1][1:]
+
+
+def cape_fold(z, phi):
+    """The cape's folds below the shoulders: a few deep ones, pinched at the valleys and rounded over the crests,
+    wandering a little off true as they fall, and finer ones between that grow toward the hem."""
+    f = smoothstep(47.5, 22.0, z)
+    return f * (0.7 * pinch(5.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z)) + 0.3 * f * pinch(11.0 * phi + 1.1 + 0.25 * z)), f
+
+
+def cape_hem(phi):
+    fv, _ = cape_fold(19.0, phi)
+    return 19.2 + 3.2 * max(0.0, math.cos(phi)) ** 1.5 + 0.45 * fv
+
+
+CAPE_UNDER = None   # (z0, dz, n_phi, radii) of the clothes under the cape, once they are built (see under_table)
+
+
+def under_table(skip=('Hair',)):
+    """How far out the clothes already built reach, round the cape's axis at each height (the farthest surface
+    along each outward ray), spread a little and softened so the cape falls over them in smooth curves instead of
+    following every edge: over the robe's shoulders, its sleeves, the arms hanging at the sides and the skirt."""
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or o.name.startswith(skip) or o.name == 'Cape stand-in':
+            continue
+        q = o
+        while q.parent is not None and q.parent.name != 'Head':
+            q = q.parent
+        if q.parent is not None:
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        b = len(vs)
+        vs += [o.matrix_world @ v.co for v in me.vertices]
+        ps += [[b + i for i in pl.vertices] for pl in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    T = BVHTree.FromPolygons(vs, ps)
+    z0, dz, nz, nph = 18.0, 0.25, 147, 360
+    R = np.zeros((nz, nph))
+    for i in range(nz):
+        z = z0 + dz * i
+        cy = _rings(CAPE_RINGS, z)[2]
+        for j in range(nph):
+            a = 2 * math.pi * j / nph
+            d = Vector((-math.sin(a), -math.cos(a), 0.0))
+            org, far, t = Vector((0.0, cy, z)), 0.0, 0.0
+            for _ in range(24):
+                hit = T.ray_cast(org, d, 16.0 - t)
+                if hit[0] is None:
+                    break
+                t += hit[3] + 1e-3
+                far = t
+                org = hit[0] + d * 1e-3
+            R[i, j] = far
+    # spread (a running max over +-0.75 in height and +-6 degrees round), then soften
+    M = R.copy()
+    for di in range(-3, 4):
+        for dj in range(-6, 7):
+            M = np.maximum(M, np.roll(np.roll(R, dj, axis=1), di, axis=0) if di == 0 else
+                           np.roll(np.pad(R, ((3, 3), (0, 0)), mode='edge'), dj, axis=1)[3 + di:3 + di + nz])
+    for _ in range(3):
+        M = (M + np.roll(M, 1, 1) + np.roll(M, -1, 1) + np.roll(M, 2, 1) + np.roll(M, -2, 1)) / 5
+        P = np.pad(M, ((2, 2), (0, 0)), mode='edge')
+        M = (P[:-4] + P[1:-3] + P[2:-2] + P[3:-1] + P[4:]) / 5
+    return z0, dz, nph, M
+
+
+CAPE_UNDER_BACK = None   # (the table the hair was laid on: kept for the back, where the hair lies on the cape)
+
+
+def _under(T, z, a):
+    z0, dz, nph, M = T
+    fi = max(0.0, min(M.shape[0] - 1.001, (z - z0) / dz))
+    fj = (a % (2 * math.pi)) / (2 * math.pi) * nph
+    i, j = int(fi), int(fj)
+    u, v = fi - i, fj - j
+    j1 = (j + 1) % nph
+    j %= nph
+    return lerp(lerp(M[i, j], M[i, j1], v), lerp(M[i + 1, j], M[i + 1, j1], v), u)
+
+
+def under_r(z, a):
+    """(behind, where the hair lies on it, the cape keeps to what was there when the hair was laid, so the two
+    still meet; toward the sides it falls over the arms and sleeves too)"""
+    r = _under(CAPE_UNDER, z, a)
+    if CAPE_UNDER_BACK is None:
+        return r
+    wb = smoothstep(0.3, 0.6, -math.cos(a))
+    return lerp(r, _under(CAPE_UNDER_BACK, z, a), wb) if wb > 0 else r
+
+
+def cape_pt(z, phi, off=0.0):
+    rx, ry, cy = _rings(CAPE_RINGS, z)
+    w = max(0.0, -math.cos(phi)) ** 1.5
+    ry = lerp(ry, max(0.0, _table(CAPE_BACK, z) - cy), w)
+    xr, yr = -rx * math.sin(phi), -ry * math.cos(phi)
+    a = math.atan2(-xr, -yr)
+    rr = math.hypot(xr, yr) or 1.0
+    side = math.sin(a) ** 2
+    fv, f = cape_fold(z, phi)
+    # over the shoulders it lies on the body and arms a little off them; below, it hangs from them, never closer
+    gap = lerp(0.3 + 0.3 * f, 0.18 + 0.2 * f, side)
+    hull = body_hull(z, a, cy) + gap
+    dw = smoothstep(53.4, 52.0, z) * smoothstep(44.0, 47.5, z)
+    rd = max(lerp(rr, hull, dw), hull)
+    if CAPE_UNDER is not None:
+        rd = max(rd, under_r(z, a) + 0.32 + 0.12 * f + 0.25 * f * side)
+    k = (rd + off) / rr * (1.0 + 0.075 * fv * (1.0 - 0.5 * w))
+    return xr * k, cy + yr * k
+
+
+def cape_sheet(off=0.0, rows=96, cols=160):
+    def pt(i, j):
+        v = i / (rows - 1)
+        zz = lerp(53.4, 20.0, v)
+        e = _table(CAPE_EDGE, zz)
+        phi = e + (2 * math.pi - 2 * e) * j / (cols - 1)
+        e = _table(CAPE_EDGE, lerp(53.4, cape_hem(phi), v))
+        phi = e + (2 * math.pi - 2 * e) * j / (cols - 1)
+        z = lerp(53.4, cape_hem(phi), v ** 1.15)
+        x, y = cape_pt(z, phi, off)
+        return (x, y, z)
+    return face_out(grid(rows, cols, pt), axis_y=0.0)
+
+
+def cape_weights(co):
+    """The cape rides on the trunk; toward the hem the legs carry part of it, as they carry the robe's skirt, so a
+    thigh swinging back pushes the cloth along instead of the skirt coming through it."""
+    w = trunk_weights(co)
+    f = 0.85 * smoothstep(35.0, 27.0, co.z)
+    if f <= 1e-4:
+        return w
+    sk = skirt_weights(co)
+    keys = set(w) | set(sk)
+    return {k: lerp(w.get(k, 0.0), sk.get(k, 0.0), f) for k in keys}
+
+
+def cape_on_arms(names):
+    """Over the round of each arm the cape rides on the arm (as the base's mantle_on_arms); further down, where it
+    falls over the arm hanging at her side, the arm carries it as it swings, fading off a little way round, so the
+    cloth is pushed along instead of the hand passing through it."""
+    for o in [bpy.data.objects[n] for n in names if n in bpy.data.objects]:
+        mw = o.matrix_world
+        gs = {g.name: g for g in o.vertex_groups}
+        for side in ('R', 'L'):
+            for b_ in ('UpperArm', 'Forearm'):
+                nm = f'{b_}.{side}'
+                gs[nm] = gs.get(nm) or o.vertex_groups.new(name=nm)
+        ez = SH_Z - UPPER
+        for v in o.data.vertices:
+            co = mw @ v.co
+            for s_, side in ((1, 'R'), (-1, 'L')):
+                out = smoothstep(SH_X - 1.6, SH_X + 1.0, -s_ * co.x)
+                top = smoothstep(SH_Z + 2.0, SH_Z - 0.5, co.z) * smoothstep(SH_Z - 9.0, SH_Z - 4.0, co.z) * 0.7
+                d = math.hypot(co.x + s_ * SH_X, co.y - 0.2)
+                near = smoothstep(5.0, 2.2, d) * smoothstep(SH_Z - 1.0, SH_Z - 5.0, co.z) * \
+                    smoothstep(SH_Z - UPPER - FORE - 8.0, SH_Z - UPPER - FORE - 3.0, co.z)
+                wa = max(out * top, near)
+                if wa <= 1e-4:
+                    continue
+                lower = smoothstep(ez + 1.0, ez - 1.5, co.z)
+                for g in v.groups:
+                    g.weight *= 1.0 - wa
+                gs[f'UpperArm.{side}'].add([v.index], wa * (1 - lower), 'REPLACE')
+                if lower > 0:
+                    gs[f'Forearm.{side}'].add([v.index], wa * lower, 'REPLACE')
+
+
+def medallion():
+    """A gold medallion facing -Y: a domed disc in a raised rim, a boss in the middle and eight rays round it."""
+    bm = bmesh.new()
+    parts = [ellipsoid(0.82, 0.16, 0.82, 28, 10), ellipsoid(0.3, 0.2, 0.3, 16, 8)]
+    for k in range(8):
+        a = 2 * math.pi * k / 8
+        r = ellipsoid(0.09, 0.08, 0.26, 8, 6)
+        bmesh.ops.rotate(r, cent=(0, 0, 0), matrix=Matrix.Rotation(a, 3, 'Y'), verts=r.verts)
+        bmesh.ops.translate(r, vec=Vector((0.5 * math.sin(a), -0.1, 0.5 * math.cos(a))), verts=r.verts)
+        parts.append(r)
+    ring = bmesh.new()
+    loops = []
+    for i in range(32):
+        t = 2 * math.pi * i / 32
+        loop = []
+        for j in range(8):
+            u = 2 * math.pi * j / 8
+            rr = 0.82 + 0.1 * math.cos(u)
+            loop.append(ring.verts.new((rr * math.sin(t), -0.1 * math.sin(u) - 0.02, rr * math.cos(t))))
+        loops.append(loop)
+    for i in range(32):
+        for j in range(8):
+            a_, b_ = loops[i], loops[(i + 1) % 32]
+            ring.faces.new((a_[j], a_[(j + 1) % 8], b_[(j + 1) % 8], b_[j]))
+    parts.append(ring)
+    for part in parts:
+        tmp = bpy.data.meshes.new('part')
+        part.to_mesh(tmp)
+        part.free()
+        bm.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
+    return bm
+
+
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
 HAIRLINE = smooth_curve([(0.0, 0.5), (0.2, 0.52), (0.48, 0.56), (0.72, 0.36), (1.0, 0.08), (1.25, -0.2), (1.5, -0.5),
                          (1.8, -0.7), (2.1, -0.78), (2.6, -0.8), (math.pi, -0.8)])
@@ -434,8 +674,10 @@ def side_lock(s):
     # (shallow behind, so its back edge stays forward of the fall's side and the two round into one another)
     return loft([(7.4, 0.7, 1.4, s * 2.75 + wv(7.4), -0.05), (5.0, 0.95, 1.85, s * 3.2 + wv(5.0), 0.7),
                  (2.5, 1.0, 1.6, s * 3.2 + wv(2.5), 1.25), (0.0, 0.95, 1.4, s * 3.35 + wv(0.0), 1.65),
-                 (-1.6, 0.8, 1.15, s * 3.5 + wv(-1.6), 2.1), (-3.0, 0.6, 0.8, s * 3.5 + wv(-3.0), 2.4),
-                 (-4.2, 0.3, 0.35, s * 3.45, 2.6)])   # (it ends above the shoulder: lifted over it, it curled)
+                 (-1.6, 0.8, 1.15, s * 3.5 + wv(-1.6), 2.1), (-2.6, 0.7, 0.85, s * 3.5 + wv(-2.6), 2.8),
+                 (-3.4, 0.55, 0.55, s * 3.55, 3.35), (-4.2, 0.4, 0.35, s * 3.5, 3.6), (-5.0, 0.2, 0.15, s * 3.4, 3.8)])
+    # (below the jaw it sweeps back behind the shoulder and becomes the fall's front edge: ending over the shoulder
+    # it stood as a blob whose underside showed from the front)
 
 
 def drape_fall(dg):
@@ -449,7 +691,7 @@ def drape_fall(dg):
     for o in bpy.data.objects:
         if o.type != 'MESH' or not ((o.parent is not None and o.parent.name == 'Body') or
                                     o.name in ('Head shape', 'Hair fall', 'Hair cap') or
-                                    o.name.startswith(('Robe', 'Belt', 'Breastplate', 'Gambeson', 'Neck', 'Tabard'))):
+                                    o.name.startswith(('Robe', 'Belt', 'Breastplate', 'Gambeson', 'Neck', 'Tabard', 'Cape'))):
             continue
         me = o.evaluated_get(dg).to_mesh()
         base = len(vs)
@@ -560,7 +802,7 @@ def drape_fall(dg):
             yi = lerp(y - th, max(y - th, sup + 0.3), wb)
             if abs(u) > 0.45 and y - yi > 0.3:
                 f_ = min(1.0, (abs(u) - 0.45) / 0.55)
-                y = yi + max(0.15, (y - yi) * math.sqrt(max(0.0, 1.0 - f_ * f_)))
+                y = yi + max(0.3, (y - yi) * math.sqrt(max(0.0, 1.0 - f_ * f_)))   # (no thinner than 0.3)
             col_out.append(Vector((x, y, z)))
             col_in.append(Vector((x, yi, z)))
         inner.append(col_in)
@@ -662,7 +904,7 @@ def hair_join_weight(co):
     return smoothstep(6.0, 4.0, z) * smoothstep(-8.0, -5.0, z) * smoothstep(1.0, 2.0, abs(x)) * smoothstep(0.6, 1.6, y)
 
 
-CLOTHES = ('Robe', 'Breastplate', 'Belt', 'Neck', 'Gambeson', 'Tabard')   # (not the swinging arms)
+CLOTHES = ('Robe', 'Breastplate', 'Belt', 'Neck', 'Gambeson', 'Tabard', 'Cape', 'Medallion', 'Clasp')   # (not the swinging arms)
 
 
 def clothes_tree(space, dg):
@@ -719,7 +961,7 @@ def lift_needed(bm, tree, gap=0.22, need=None):
     return need
 
 
-def apply_lift(bm, need, reach=1.0):
+def apply_lift(bm, need, reach=1.6):
     """Move the hair by the needed displacements, spread to everything within `reach` of a vertex that needed it
     (the whole thickness of the hair there, so it keeps its shape) and eased off beyond."""
     from mathutils.kdtree import KDTree
@@ -807,6 +1049,57 @@ def hair_clearance(cols=range(10), gap=0.22):
     bm.to_mesh(hair.data)
     bm.free()
     hair.data.update()
+
+
+def steel_closeup(name):
+    """The greaves and the breastplate up close (the sprites keep the plain diffuse surface: see sprite_mode):
+    hammered steel, a little worn. Shallow overlapping dents from the hammer break up the light; the tone drifts
+    in broad patches; it is darker and duller down in the hollows, where grime collects, and polished brighter on
+    the high places that rub."""
+    m = bpy.data.materials.get(name)
+    if m is None:
+        return
+    nt = m.node_tree
+    out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+    bsdf = next(n for n in nt.nodes if n.type == 'BSDF_DIFFUSE')
+    bsdf.name = 'sprite bsdf'
+    rest = nt.nodes.new('ShaderNodeAttribute')
+    rest.attribute_name = 'rest'
+    vor = nt.nodes.new('ShaderNodeTexVoronoi')
+    vor.feature = 'SMOOTH_F1'
+    vor.inputs['Scale'].default_value = 2.6
+    nt.links.new(rest.outputs['Vector'], vor.inputs['Vector'])
+    bump = nt.nodes.new('ShaderNodeBump')
+    bump.inputs['Strength'].default_value = 0.35
+    bump.inputs['Distance'].default_value = 0.05
+    nt.links.new(vor.outputs['Distance'], bump.inputs['Height'])
+    patch = nt.nodes.new('ShaderNodeTexNoise')
+    patch.inputs['Scale'].default_value = 0.7
+    patch.inputs['Detail'].default_value = 3.0
+    nt.links.new(rest.outputs['Vector'], patch.inputs['Vector'])
+    ao = nt.nodes.new('ShaderNodeAmbientOcclusion')
+    ao.inputs['Distance'].default_value = 0.8
+    ao.samples = 8
+    tone = nt.nodes.new('ShaderNodeMath')
+    tone.operation = 'MULTIPLY'
+    nt.links.new(ao.outputs['AO'], tone.inputs[0])
+    nt.links.new(patch.outputs['Fac'], tone.inputs[1])
+    col = nt.nodes.new('ShaderNodeMix')
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (0.13, 0.13, 0.14, 1)
+    col.inputs['B'].default_value = (0.62, 0.63, 0.66, 1)
+    nt.links.new(tone.outputs['Value'], col.inputs['Factor'])
+    rough = nt.nodes.new('ShaderNodeMapRange')
+    rough.inputs['To Min'].default_value = 0.55
+    rough.inputs['To Max'].default_value = 0.22
+    nt.links.new(tone.outputs['Value'], rough.inputs['Value'])
+    pb = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    pb.name = 'close bsdf'
+    pb.inputs['Metallic'].default_value = 1.0
+    nt.links.new(col.outputs['Result'], pb.inputs['Base Color'])
+    nt.links.new(rough.outputs['Result'], pb.inputs['Roughness'])
+    nt.links.new(bump.outputs['Normal'], pb.inputs['Normal'])
+    nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
 def fuse_hair(head, names, voxel=0.065, close=0.6):
@@ -1131,8 +1424,12 @@ def build():
                                 (-0.4, 3.25, 1.3, 0, 2.95), (-1.4, 2.4, 0.75, 0, 2.75)]), M_HAIR, head)
     # (the robe's skirt is built after the rig, but the hair's ends rest on it: a stand-in for the drape to rest on)
     proxy = mesh_obj('Robe skirt stand-in', robe_sheet(39.9, None, 40, hem=robe_hem), M_ROBE, body, solid=0.15, subdiv=0)
+    global CAPE_UNDER
+    CAPE_UNDER = under_table()     # (what is built so far: the stand-in lies over the robe as the cape will)
+    proxy2 = mesh_obj('Cape stand-in', cape_sheet(rows=60, cols=100), M_CAPE, body, solid=0.12, subdiv=0)
     fuse_hair(head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall'])
     bpy.data.objects.remove(proxy)
+    bpy.data.objects.remove(proxy2)
 
     # ---- the rig (the base figure's)
     build_rig(body)
@@ -1178,9 +1475,23 @@ def build():
         def arm_pt(z, phi):
             r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + sleeve_form(z, phi, s)[0]
             return -r * math.sin(phi), -r * 1.03 * math.cos(phi)
-        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_ROBE, loc=(x, 0.2, SH_Z), skin=fore,
+        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=fore,
                       solid=0.12)
         crease_attr(so, lambda co: sleeve_form(co.z, math.atan2(-co.x, -co.y), s)[1])
+        # the robe's own sleeve over it, short: from the shoulder (its top rounded over the arm, full width there) to
+        # a little above the elbow, widening a touch to a soft bell, its end trimmed in the ochre band
+        SE = -UPPER + 3.6
+
+        def robe_sleeve_pt(z, phi, out=0.0):
+            r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + 0.24 + 0.45 * smoothstep(SE + 3.0, SE, z) + out
+            r *= 1.0 + 0.05 * pinch(5.0 * phi + 0.4) * smoothstep(SE + 3.5, SE, z)
+            return -r * math.sin(phi), -r * 1.03 * math.cos(phi)
+        rzs = [1.6 - 0.2 * i for i in range(int((1.6 - SE) / 0.2) + 1)] + [SE]
+        mesh_obj(f'Robe sleeve.{side}', loft_fn(rzs, robe_sleeve_pt, n=48, cap_bot=False), M_ROBE, loc=(x, 0.2, SH_Z),
+                 skin=w, solid=0.12)
+        mesh_obj(f'Robe sleeve hem.{side}', loft_fn([SE + 0.55, SE + 0.25, SE - 0.02], lambda z, p: robe_sleeve_pt(z, p, 0.07),
+                                                   n=48, cap_top=False, cap_bot=False),
+                 M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
         bzs = [BR_TOP - 0.2 * i for i in range(int((BR_TOP - BR_BOT) / 0.2) + 1)] + [BR_BOT]
         bo_ = mesh_obj(f'Bracer.{side}', loft_fn(bzs, lambda z, p: bracer_pt(z, p, s), n=56, cap_top=False, cap_bot=False),
                        M_BRACER, loc=(x, 0.2, SH_Z), skin=fore, solid=0.16)
@@ -1205,6 +1516,44 @@ def build():
             mesh_obj(f'Bracer buckle {j}.{side}', turned(frame_bm(0.62, 0.7, 0.13, 0.14), ph), M_STEEL,
                      loc=(x + bx, 0.2 + by2, SH_Z + zs_), skin=fore, subdiv=0)
     build_arms(chest, sleeve)   # (the hands are the base figure's)
+
+    # ---- the cape over it all: the dark wool, its red lining just inside, an ochre band down each front, and the
+    # two gold medallions that pin it at the chest, joined by a chain hanging between them
+    global CAPE_UNDER_BACK
+    CAPE_UNDER_BACK = CAPE_UNDER
+    CAPE_UNDER = under_table()
+    cp = mesh_obj('Cape', cape_sheet(), M_CAPE, skin=cape_weights, solid=0.12)
+    crease_attr(cp, lambda co: max(0.0, -cape_fold(co.z, math.atan2(-co.x, -co.y))[0]))
+    li = mesh_obj('Cape lining', cape_sheet(-0.16), M_LINING, skin=cape_weights)
+    crease_attr(li, lambda co: max(0.0, -cape_fold(co.z, math.atan2(-co.x, -co.y))[0]))
+    for s_ in (-1, 1):
+        def band(i, j, s_=s_, rows=80):
+            v = i / (rows - 1)
+            z = lerp(53.2, cape_hem(_table(CAPE_EDGE, 20.0)) + 0.1, v ** 1.15)
+            e = _table(CAPE_EDGE, z)
+            ph = e + 0.07 * j
+            x, y = cape_pt(z, ph, 0.08)
+            return (x, y, z) if s_ > 0 else (-x, y, z)
+        mesh_obj(f'Cape front {s_}', face_out(grid(80, 2, band), axis_y=0.0), M_ROBE_TRIM, skin=cape_weights, subdiv=0,
+                 solid=0.06)
+    clasps = []
+    for s_ in (-1, 1):
+        ph = _table(CAPE_EDGE, CLASP_Z) + 0.12
+        x, y = cape_pt(CLASP_Z, ph, 0.28)
+        x = x if s_ > 0 else -x
+        a = ph if s_ > 0 else -ph
+        mesh_obj(f'Medallion {s_}', turned(medallion(), a), M_GOLD, loc=(x, y, CLASP_Z), skin=cape_weights, subdiv=1)
+        clasps.append(Vector((x, y - 0.1, CLASP_Z - 0.2)))
+    a_, b_ = clasps
+    chain = []
+    for k in range(17):
+        t = k / 16
+        p_ = a_.lerp(b_, t)
+        p_.z -= 0.9 * math.sin(math.pi * t)
+        p_.y = min(p_.y, tab_y(p_.x, p_.z) - 0.25)
+        chain.append(p_)
+    mesh_obj('Clasp chain', tube(chain, [0.1] * len(chain), n=6), M_GOLD, skin=cape_weights, subdiv=0)
+
 
     # ---- legs: the trousers, and the tall boots over them
     def leg(side, s, x, w):
@@ -1270,6 +1619,66 @@ def build():
                 return gx, gy
             mesh_obj(f'Greave strap {j_}.{side}', loft_fn([zs_ + 0.28, zs_, zs_ - 0.28], strap_pt, n=56, cap_top=False,
                                                          cap_bot=False), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
+        # the greave's top and bottom edges rolled outward, a gilt border etched just inside each, and gold rivets
+        # down the front either side of the ridge and at each strap's ends
+        for z_, sg in ((GT, -1), (GB, 1)):
+            rz = [z_ + 0.17 * math.cos(math.pi * k / 4) for k in range(5)]
+            mesh_obj(f'Greave roll {"top" if sg < 0 else "foot"}.{side}',
+                     loft_fn(rz, lambda z, p, z_=z_: greave_pt(z_, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
+                             n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0, kz), skin=w, subdiv=0)
+            zb = z_ - sg * 0.55
+            mesh_obj(f'Greave border {"top" if sg < 0 else "foot"}.{side}',
+                     loft_fn([zb + 0.1, zb, zb - 0.1], lambda z, p, zb=zb: greave_pt(zb, p, 0.03), n=56, cap_top=False,
+                             cap_bot=False), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0, solid=0.03)
+        grv = []
+        for k in range(6):
+            zr_ = lerp(GT - 0.95, GB + 0.95, k / 5)
+            for ph in (-0.62, 0.62):
+                gx, gy = greave_pt(zr_, ph, 0.06)
+                grv.append((gx, gy, zr_))
+        for zs_ in (-2.4, -SHIN + 2.4):
+            for ph in (-1.35, 1.35):
+                gx, gy = greave_pt(zs_, ph, 0.14)
+                grv.append((gx, gy, zs_))
+        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
+        # the shoe: a toe cap of paler leather sewn over the front of the foot, its seam stitched in a double row,
+        # and a strap round the ankle buckled on the outside
+        YC = -3.85
+
+        tz0, tz1 = -SHIN - 1.65, -SHIN - 2.3
+        toe = []
+        for i in range(14):
+            z = lerp(tz0, tz1, i / 13)
+            rx, ry, cy = ring_r(rings, z)
+            ring_ = []
+            c = max(-1.0, min(1.0, (cy - YC) / ry))
+            p0 = math.acos(c)
+            for j in range(24):
+                ph = lerp(-p0, p0, j / 23)
+                ring_.append((-(rx + 0.05) * math.sin(ph), cy - (ry + 0.05) * math.cos(ph), z))
+            toe.append(ring_)
+        mesh_obj(f'Toe cap.{side}', face_out(grid(14, 24, lambda i, j: toe[i][j]), axis_y=0.0), M_CUFF, loc=(x, 0, kz),
+                 skin=w, subdiv=1, solid=0.05)
+        tst = []
+        for i in range(10):
+            z = lerp(tz0 - 0.05, tz1 + 0.05, i / 9)
+            rx, ry, cy = ring_r(rings, z)
+            for dy in (0.12, 0.34):
+                c = max(-1.0, min(1.0, (cy - YC - dy) / ry))
+                p0 = math.acos(c)
+                for f in (-1, 1):
+                    tst.append((-(rx + 0.1) * math.sin(f * p0), cy - (ry + 0.1) * math.cos(f * p0), z))
+        mesh_obj(f'Toe stitching.{side}', dots(tst, 0.08), M_STITCH, loc=(x, 0, kz), skin=w, subdiv=0)
+        za = -SHIN - 0.35
+        mesh_obj(f'Ankle strap.{side}', loft_fn([za + 0.22, za, za - 0.22],
+                                                lambda z, p: (lambda r: (-(r[0] + 0.08) * math.sin(p),
+                                                                         r[2] - (r[1] + 0.08) * math.cos(p)))(ring_r(rings, za)),
+                                                n=48, cap_top=False, cap_bot=False), M_BELT, loc=(x, 0, kz), skin=w,
+                 solid=0.1, subdiv=0)
+        ph = s * math.pi / 2
+        rx, ry, cy = ring_r(rings, za)
+        mesh_obj(f'Ankle buckle.{side}', turned(frame_bm(0.55, 0.52, 0.12, 0.12), ph), M_STEEL,
+                 loc=(x - (rx + 0.2) * math.sin(ph), cy - (ry + 0.2) * math.cos(ph), kz + za), skin=w, subdiv=0)
         az = kz - SHIN
         mesh_obj(f'Welt.{side}', loft([(-2.25, 1.86, 3.36, 0, -1.65), (-2.4, 1.97, 3.5, 0, -1.7), (-2.8, 2.0, 3.53, 0, -1.7),
                                        (-2.86, 1.92, 3.45, 0, -1.7)], n=40, cap_top=False, cap_bot=False),
@@ -1283,7 +1692,8 @@ def build():
                                        (-ANKLE_Z, 1.85, 3.38, 0, -1.7)], n=40), M_SOLE, loc=(x, 0, az), subdiv=1, skin=w)
     build_legs(pelvis, leg)
     # the rig, the camera and light, and the keyframes; then the hair kept clear of the clothes in every pose
-    res = finish_figure()
+    res = finish_figure(lambda: cape_on_arms(['Cape', 'Cape lining', 'Cape front -1', 'Cape front 1']))
+    steel_closeup('plate')
     if not os.environ.get('WARDEN_NO_CLEARANCE'):
         hair_clearance()
     return res
