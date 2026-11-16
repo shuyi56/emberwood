@@ -42,6 +42,8 @@ female.FACE.update({
 female.EYE_OPEN = 0.68
 female.EYE_TILT = 0.105
 female.EARS = True       # (her hair is drawn back into the tail, so they show)
+import ear  # noqa: E402
+ear.EAR_SU, ear.EAR_SV = 0.92 * 0.8, 0.78 * 0.8   # her ears a fifth smaller than the shared layout
 female.UNDER_JAW_SHADE = (0.0, 1.6, 0.75)   # (spread over the whole soft turn under her jaw: kept to the edge, it drew a line there)
 
 # ---------------------------------------------------------------- her materials
