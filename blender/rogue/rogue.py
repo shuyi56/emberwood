@@ -419,9 +419,10 @@ def hair_cap(head_tree):
             # combed sections running back to the tie: a few broad ones and finer grooves between, strongest at the
             # front and sides where the comb has drawn them, easing out into the mound
             fa = cap_flow(HC + d)[0] / 3.6
-            combed = (0.055 * math.sin(6.0 * fa + 0.6) + 0.03 * math.sin(15.0 * fa + 1.3)
-                      + 0.015 * math.sin(31.0 * fa + 0.2)) * edge * (1.0 - mound / MOUND)
-            r = rs + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed + part + swell
+            combed = (0.055 * math.sin(6.0 * fa + 0.6) + 0.03 * math.sin(15.0 * fa + 1.3)) * edge * (1.0 - mound / MOUND)
+            # (the edge is sunk into the skin and rises out of it, so the hair keeps the thickness the fusing grid
+            # needs, two of its cells, yet shows no rim: a thinner edge came out of the remesh as a ragged fringe)
+            r = rs - 0.1 * (1.0 - edge) + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed + part + swell
             row.append(bm.verts.new(HC + d * r))
             wr.append(edge)
         rows.append(row)
@@ -534,7 +535,7 @@ def tail_clumps(head, path, lens):
             for k in range(n):
                 q = 2 * math.pi * k / n
                 ring.append(bm.verts.new(ctr + ax * (rx * math.cos(q)) + dp * (ry * math.sin(q))))
-                rest.append((c * 9.0 + q * 0.8, 0.0, -0.3 * (L0 + lens[i])))
+                rest.append((c * 9.0 + q * 1.8, 0.0, -0.3 * (L0 + lens[i])))
                 tone.append(tn)
             rings.append(ring)
         for ra, rb in zip(rings, rings[1:]):
@@ -591,7 +592,7 @@ def build_hair(head, head_tree):
     for i_, w_ in enumerate(w):
         vg.add([i_], w_, 'REPLACE')
     cap_o.modifiers['thickness'].vertex_group = 'thick'
-    cap_o.modifiers['thickness'].thickness_vertex_group = 0.06
+    cap_o.modifiers['thickness'].thickness_vertex_group = 0.32
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     tree = body_tree(dg, ('Head shape', 'Hair cap'), Vector((0, 0, HEAD_Z)))
