@@ -128,3 +128,20 @@ stylized sculpts built lock by lock).
 10. Ride every lock on the cap's own surface: find the cap's radius down the lock's column the way `buildHair` does
     (scalp, ear clearance, depth, the hang rule) and add the lock's lift. Locks placed by their own estimate cut
     through the cap.
+
+## Ponytail: a hierarchy of locks, not one mass
+
+A real tail is gathered hair, so build it the way it is gathered (hair-card and groom breakdowns build tails in
+layered clumps, with longer cards defining volume and break-up cards on top).
+
+1. **Core.** A slim, darker tube down the middle, about half the tail's width. It is the shade inside the tail, seen
+   between the locks, and it stops the tail reading as see-through.
+2. **Primary locks.** About seven round the tail. They leave the tie together, bloom out just past it (the hair pushed
+   out by the tie), fall gathered through the middle, and part again toward the end. Each twists a little round the
+   tail and ends at its own length (86 to 100 percent).
+3. **Secondary locks.** Each primary is three thinner locks that lie together near the tie and split apart over the
+   lower half, tapering to points at staggered lengths.
+4. **Ends.** Cut the last stretch of every secondary lock into strands (a longer tip fade, about a third of a head), so
+   the end is many fine points, not one blunt tip.
+5. **Tone.** Each primary lock gets its own tone, and each secondary a small variation on it. The core is darker.
+6. **Check** from the side, the back 3/4 and the front 3/4, with the whole tail and tie in frame.
