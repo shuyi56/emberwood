@@ -611,7 +611,9 @@ def lock_image(W=256, H=1024):
             if prev is not None:
                 # (the tones of the hair it comes from: dark only at the root, under the hair's edge)
                 # (lifted a little: hanging in the shade of the hair above, at the hair's own tones it read darker)
-                base = np.minimum(255.0, (MID + (LIGHT - MID) * (0.45 + 0.55 * tone)) * 1.2)
+                # (and cooled: lit only by the light passing the face, the ramp's own hue came out redder than the
+                # hair above, which its sheen lifts toward a neutral brown)
+                base = np.minimum(255.0, (MID + (LIGHT - MID) * (0.45 + 0.55 * tone)) * np.array([1.12, 1.24, 1.32]))
                 c = DARK + (base - DARK) * min(1.0, 0.25 + 2.5 * t)
                 c = c + (LIGHT - c) * 0.4 * math.exp(-((t - 0.55) / 0.22) ** 2) * tone
                 w = max(1, int(wid * (1.0 - 0.7 * t ** 2)))
