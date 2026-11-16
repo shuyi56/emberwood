@@ -25,8 +25,12 @@ prints the measurements. With `--before`, the folder also holds a list of every 
 row is drawn and measured the same way, so a before costs nothing extra. (This is unlike the render queue, which
 must never be asked for a before.)
 
-Views: `front`, `three` (3/4), `profile`, `eyes`, `lips`, and `game`, which is the 3/4 view from the game's high
+Views: `front`, `three` (3/4), `profile`, `eyes`, `lips`, `ear` (a close-up of her lit right ear), `ear_back` (from
+behind, to see how far the ears stand off the skull), and `game`, which is the 3/4 view from the game's high
 camera, reduced to sprite scale and blown back up.
+
+A figure that imports `ear_grids` from `blender/shared/ear.py` gets its ears drawn too, set on its own head and
+coloured as its `skin_tones` colours them.
 
 ## From Python
 

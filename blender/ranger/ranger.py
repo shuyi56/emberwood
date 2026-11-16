@@ -29,6 +29,8 @@ import numpy as np
 from mathutils import Vector, Euler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
+from ear import ear_grids, ear_tones, side_x_finder  # noqa: E402  (the ears, sculpted as their own surface)
 FW, FH, RES, COLS, ROWS, WALK = 64, 80, 2, 10, 8, 8
 PW, PH = FW * RES, FH * RES
 GY = 77  # ground row in design pixels from the top of the frame
@@ -1037,6 +1039,15 @@ def skin_tones():
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(['Neck', 'Head shape', 'Hair']), dist=2.0)
+        elif o.name in EAR_TONES:
+            # the ears: rosier than the face, most of all round the rim and in the lobe, and dark in the bowl,
+            # the groove inside the rim and the fold behind (see ear_tones); a faint crease along the rim's roll
+            flush, shut = EAR_TONES[o.name]
+            gloss = 0.15 * (1 - shut)
+            crease = 0.3 * shut
+            occ = np.maximum(shut, _occlusion([o.matrix_world @ Vector(c) for c in co],
+                                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
+                                              world_tree(head_parts), dist=0.8))
         else:      # a hand: the wrist at the origin, the fingers down; the back of the hand faces away from her
             s = 1 if o.name.endswith('R') else -1
             z = co[:, 2]
@@ -1391,6 +1402,32 @@ def _section(z, c, s):
     x = w * sp(s)
     y = yw - front * sp(c) if c >= 0 else yw + back * sp(-c)
     return x, y
+
+
+EAR_TONES = {}     # each ear's (flush, shade) per point, for skin_tones (see ear_mesh)
+
+
+def ear_mesh(e, name):
+    """An ear's grid (ear_grids) as a mesh: rows round the outline joined end to end, the bowl's centre one point,
+    the rear face left open where it runs into the skull. Its colour per point goes to EAR_TONES[name]."""
+    P = e['P']
+    NT, NC = P.shape[:2]
+    bm = bmesh.new()
+    pole = bm.verts.new(tuple(P[:, 0].mean(0)))
+    vs = [[bm.verts.new(tuple(p)) for p in row[1:]] for row in P]
+    for i in range(NT):
+        a, b = vs[i], vs[(i + 1) % NT]
+        bm.faces.new((pole, a[0], b[0]))
+        for j in range(NC - 2):
+            bm.faces.new((a[j], b[j], b[j + 1], a[j + 1]))
+    # (outward: the outer face looks away from the head; the faces' winding, row to row then out along a row)
+    j = NC // 4
+    wind = np.cross(np.roll(P, -1, axis=0)[:, j] - P[:, j], P[:, j + 1] - P[:, j])[:, 0].sum()
+    if wind * e['side'] < 0:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    flush, shade = ear_tones(e)
+    EAR_TONES[name] = tuple(np.concatenate([[t[:, 0].mean()], t[:, 1:].ravel()]) for t in (flush, shade))
+    return bm
 
 
 def sculpted_head():
@@ -4067,6 +4104,10 @@ def build():
     sculpt_eyes(hb, eyes)
     final_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    # the ears, each sculpted as its own surface (blender/shared/ear.py) and set on the head's side
+    for e in ear_grids(side_x_finder(head_section, jaw_relief), HEAD_H):
+        name = 'Ear ' + ('L' if e['side'] > 0 else 'R')
+        mesh_obj(name, ear_mesh(e, name), M_SKIN, head, subdiv=0)
     eye_makeup(head, final_tree, eyes)
     lip_paint(head, final_tree)
     # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)

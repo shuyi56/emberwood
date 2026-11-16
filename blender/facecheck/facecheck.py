@@ -129,14 +129,15 @@ class Figure:
         sys.modules.update(stubs)
         here = os.path.dirname(path)
         base = os.path.join(here, '..', 'base')
-        sys.path[:0] = [here, base]
+        shared = os.path.join(here, '..', 'shared')
+        sys.path[:0] = [here, base, shared]
         for k in ('female',):             # (a fresh base figure for each figure, so colours do not leak between them)
             sys.modules.pop(k, None)
         try:
             ns = {'__name__': 'figure_' + self.name, '__file__': path}
             exec(compile(open(path).read(), path, 'exec'), ns)
         finally:
-            del sys.path[:2]
+            del sys.path[:3]
             for k in list(sys.modules):
                 if k in stubs or k == 'female':
                     if saved.get(k) is None:
@@ -391,7 +392,36 @@ def build(F, quality='normal', procs=None):
     for s in (-1, 1):
         bp, bt = eye_ball(F, E, s, front)
         face['balls'].append(dict(s=s, P=bp, tex=bt, n=grid_normals_open(bp), col=eye_colour(F, E, s, bp, bt)))
+    face['ears'] = ears(F)
     return face
+
+
+def ears(F):
+    """The figure's ears (blender/shared/ear.py), if it has them: set on its own head and coloured as its
+    skin_tones colours them (rosier than the face, dark in the bowl and where the flap meets the skull)."""
+    eg = F.ns.get('ear_grids') or F.g.get('ear_grids')
+    if eg is None:
+        return []
+    finder, tones = eg.__globals__['side_x_finder'], eg.__globals__['ear_tones']
+    skin = np.array(F.SKIN[2], dtype=np.float64) / 255
+    flushc, deep = np.array([204, 128, 112]) / 255, np.array([150, 78, 64]) / 255
+    out = []
+    for e in eg(finder(F.head_section, F.jaw_relief), F.HEAD_H):
+        P = e['P']
+        di = np.roll(P, -1, axis=0) - np.roll(P, 1, axis=0)
+        dj = np.gradient(P, axis=1)
+        n = np.cross(dj, di)
+        ln = np.linalg.norm(n, axis=-1, keepdims=True)
+        n = np.where(ln > 1e-9, n / np.maximum(ln, 1e-12), np.array([e['side'], 0, 0.0]))
+        NFs = int((e['rear'][0] == 0).sum())
+        if np.sum(n[:, 1:NFs, 0] * e['side']) < 0:
+            n = -n
+        flush, shade = tones(e)
+        c = skin + (flushc - skin) * (0.6 * flush)[..., None]
+        k = shade[..., None]
+        c = c * (1 - 0.45 * k) + deep * 0.18 * k
+        out.append(dict(side=e['side'], P=P, n=n, col=np.clip(c, 0, 1), gloss=np.zeros(P.shape[:2]) + 0.15))
+    return out
 
 
 def grid_normals_open(P):
@@ -471,14 +501,16 @@ def paint(face):
 VIEWS = {     # azimuth (degrees, + turns her to her left), elevation, distance, look-at height (head heights)
     'front': (0, 4, 34, 0.5), 'three': (35, 6, 34, 0.5), 'profile': (88, 3, 34, 0.5),
     'eyes': (12, 3, 15, 0.53), 'lips': (16, -2, 14, 0.27), 'game': (20, 38, 34, 0.5),
+    'ear': (-90, 3, 15, 0.49, 0.09), 'ear_back': (160, 6, 20, 0.5, 0.1),     # (and the look-at depth, if not 0)
 }
 LIGHT = np.array([-0.45, -0.75, 0.55])     # the key, from her right, in front and above (model axes)
 
 
 def _camera(view, H):
-    az, el, dist, ty = VIEWS[view]
+    az, el, dist, ty = VIEWS[view][:4]
+    tdepth = VIEWS[view][4] if len(VIEWS[view]) > 4 else 0.0
     az, el = math.radians(az), math.radians(el)
-    tgt = np.array([0, 0, ty * H])
+    tgt = np.array([0, tdepth * H, ty * H])
     eye = tgt + dist * np.array([math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el)])
     fwd = (tgt - eye) / np.linalg.norm(tgt - eye)
     right = np.cross(fwd, [0, 0, 1.0])
@@ -514,6 +546,8 @@ def draw(face, view='front', size=640, ss=2):
     parts = [(face['P'], face['n'], face['col'], face['gloss'], 0.55)]
     for b in face['balls']:
         parts.append((b['P'], b['n'], b['col'], np.ones(b['P'].shape[:2]) * 0.8, 0.1))
+    for e in face.get('ears', []):
+        parts.append((e['P'], e['n'], e['col'], e['gloss'], 0.6))
     xs, ys, ds, cs, rs = [], [], [], [], []
     for P, n, col, gloss, rough in parts:
         p = P.reshape(-1, 3)
@@ -524,7 +558,7 @@ def draw(face, view='front', size=640, ss=2):
         y = -(rel @ up) / d * f + W / 2
         # each point covers about its grid spacing on screen
         sp = np.maximum(np.linalg.norm(np.gradient(P, axis=0), axis=-1), np.linalg.norm(np.gradient(P, axis=1), axis=-1)).ravel()
-        r = np.clip(sp / d * f * 0.75, 0.6, 6)
+        r = np.clip(sp / d * f * 0.75, 0.6, 14)
         facing = np.sum(nn * (eye - p), -1) > 0
         k = facing & (d > 0)
         c = _shade(p[k], nn[k], col.reshape(-1, 3)[k], eye, gloss.ravel()[k], rough)
@@ -713,7 +747,7 @@ def sheet(rows, size):
 def main(argv=None):
     ap = argparse.ArgumentParser(description='Check a figure\'s face without Blender: views and measurements.')
     ap.add_argument('figure', help='a figure name (blender/<name>/<name>.py) or a path to its .py')
-    ap.add_argument('--views', default='front,three,profile,eyes,lips,game', help='any of ' + ','.join(VIEWS))
+    ap.add_argument('--views', default='front,three,profile,eyes,lips,ear,game', help='any of ' + ','.join(VIEWS))
     ap.add_argument('--size', type=int, default=480)
     ap.add_argument('--quality', default='normal', choices=list(QUALITY))
     ap.add_argument('--before', help='a git ref to compare with (e.g. origin/main): drawn and measured the same way')
