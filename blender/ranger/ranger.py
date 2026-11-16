@@ -3574,9 +3574,10 @@ def lip_painting(W=576, H=336):
     # into the line between them and the corners
     inner = np.where(upper > lower, sm(0.35, 0.0, tu), sm(0.3, 0.0, tl))
     corner = sm(0.05, 0.088, ax)
-    col = col + (DEEP - col) * np.clip(0.55 * inner + 0.45 * corner, 0, 1)[..., None]
+    col = col + (DEEP - col) * np.clip(0.4 * inner + 0.45 * corner, 0, 1)[..., None]
     # the line itself: a dark, soft parting, deepest at the corners
-    part = np.exp(-((w - zl) / 0.0026) ** 2) * sm(0.094, 0.078, ax)
+    # (narrow: wider, it read as the lips parted on a dark mouth)
+    part = np.exp(-((w - zl) / 0.0019) ** 2) * sm(0.094, 0.078, ax)
     col = col + (np.array([84, 42, 42], dtype=np.float32) - col) * np.clip(part * (0.75 + 0.25 * corner), 0, 1)[..., None]
     # the fine vertical creases across the lips (fanning a little outward toward the corners)
     # (irregular: their spacing wanders and each one fades in and out, so they read as texture, not stripes)

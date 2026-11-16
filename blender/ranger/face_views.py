@@ -64,7 +64,8 @@ def shoot(name, scale, z, rx, ry):
             def centre(o):
                 return o.matrix_world @ (sum((Vector(c) for c in o.bound_box), Vector()) / 8)
             if args.on == 'mouth':
-                cx = centre(bpy.data.objects['Mouth']).x
+                # (the lip paint, not the solid mouth line: that is hidden up close, so its transform is never updated)
+                cx = centre(bpy.data.objects.get('Lip paint') or bpy.data.objects['Mouth']).x
             else:
                 near = min((centre(o) for o in bpy.data.objects if o.name.startswith('Eye white')), key=lambda c: c.y)
                 cx = near.x
