@@ -425,7 +425,7 @@ def hair_cap(head_tree):
                       + 0.018 * math.sin(33.0 * fa + 0.2) * smoothstep(0.0, 0.08, t)) * (1.0 - mound / MOUND)
             # (the edge is sunk into the skin and rises out of it, so the hair keeps the thickness the fusing grid
             # needs, two of its cells, yet shows no rim: a thinner edge came out of the remesh as a ragged fringe)
-            r = rs - 0.1 * (1.0 - edge) + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed + part + swell
+            r = rs - 0.13 * (1.0 - edge) + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed + part + swell
             row.append(bm.verts.new(HC + d * r))
             wr.append(edge)
         rows.append(row)
@@ -566,22 +566,24 @@ def tail_clumps(head, path, lens):
 
 def temple_wisp(head_tree, side):
     """A loose lock at the temple: it slips out of the combed-back hair at the temple corner and falls down in front
-    of the ear to the jaw, curling forward at its end; flat, lying just off the side of the face."""
+    of the ear to the cheekbone; flat, lying on the side of the face, and melted into the hair at its root."""
     def on(th, el, lift):
         d = _dir(th, el)
         hit = head_tree.ray_cast(HC + d * 20.0, -d, 20.0)
         r = (hit[0] - HC).length if hit[0] is not None else 4.0
         return HC + d * (r + lift)
     th = lambda x: side * x   # noqa: E731
-    pts = [on(th(0.5), 0.8, 0.08), on(th(0.66), 0.48, 0.14), on(th(0.74), 0.3, 0.2), on(th(0.86), 0.05, 0.22), on(th(0.92), -0.32, 0.2),
-           on(th(0.86), -0.62, 0.18), on(th(0.74), -0.8, 0.16)]
+    # (lying on the skin: lifted by its own half-thickness and a hair, so no slit of shadow opens under it)
+    pts = [on(th(0.5), 0.8, 0.1), on(th(0.66), 0.48, 0.2), on(th(0.76), 0.25, 0.2), on(th(0.86), -0.05, 0.18),
+           on(th(0.88), -0.3, 0.15), on(th(0.82), -0.5, 0.12)]
     path = catmull(pts, 40)
     n_ = len(path)
 
     def rad(i, a):
         u = i / (n_ - 1)
-        w = 0.36 * (1.0 - u) ** 0.6 + 0.03
-        return w * 0.4, w
+        # (never thinner than two cells of the fusing grid, so it melts into the hair at its root and keeps its end)
+        w = 0.26 * (1.0 - u) ** 0.7 + 0.17
+        return w * 0.45, w
     return sweep(path, rad, n=12)
 
 
@@ -649,9 +651,11 @@ def hairline_image():
     roots.sort(key=lambda p: -p[1])
     for th0, v0 in roots:
         baby = v0 < 0.0
-        tone = 0.5 + 0.5 * float(_perlin2(th0 * 9.0, v0 * 9.0, 31)) + 0.25 * (rng.random() - 0.5)
+        # (its tone is its lock's, by where it is rooted round the head: locks a few pixels wide that read at
+        # the size the head is seen, where single strands are finer than a pixel)
+        tone = 0.5 + 0.5 * float(_perlin2(th0 * 28.0, 0.3, 31)) + 0.15 * (rng.random() - 0.5)
         length = (0.22 + 0.12 * rng.random()) if baby else (0.7 + 0.6 * rng.random())
-        wid = (0.008 if baby else 0.013) * (0.8 + 0.4 * rng.random())
+        wid = (0.009 if baby else 0.018) * (0.8 + 0.4 * rng.random())
         val = 255 * ((0.45 + 0.3 * rng.random()) if baby else (0.75 + 0.25 * rng.random()))
         steps = 8 if baby else 16
         th, v = th0, v0
@@ -674,7 +678,7 @@ def hairline_image():
             q = px(th, v)
             w = max(1, int(round(wid * W / (2 * PT_TH * R0) * (1.0 - 0.6 * t))))
             fade_in = min(1.0, 0.35 + t * 2.5)
-            c = DARK + (MID - DARK) * min(1.0, 0.4 + 0.8 * t) * (0.7 + 0.6 * tone)
+            c = DARK + (LIGHT - DARK) * min(1.0, 0.5 + 0.7 * t) * (0.1 + 0.75 * tone)
             c = c + (LIGHT - c) * (0.2 + 0.45 * math.exp(-((t - 0.6) / 0.25) ** 2)) * tone
             dc.line([p, q], fill=255, width=w)
             da.line([p, q], fill=int(val * fade_in * (1 - 0.2 * t)), width=w)
@@ -845,16 +849,13 @@ def build_hair(head, head_tree):
     mesh_obj('Hair tail', sweep(path, tail_r, n=28), M_HAIR, head, subdiv=0)
     if not FUSE:          # (for checking the pieces before they are melted together)
         return None
-    hair = fuse_parts(head, ['Hair cap', 'Hair tail'])
+    for side in (1, -1):
+        mesh_obj(f'Hair wisp {side}', temple_wisp(head_tree, side), M_HAIR, head, subdiv=0)
+    hair = fuse_parts(head, ['Hair cap', 'Hair tail', 'Hair wisp 1', 'Hair wisp -1'])
     fine_streaks(hair)
     paint_hair(hair)
     scalp_paint(head, head_tree)
     tail_clumps(head, path, lens)
-    # (the wisps stay their own pieces: their fine ends are thinner than the fusing grid and would melt away)
-    for side in (1, -1):
-        w_ = mesh_obj(f'Hair wisp {side}', temple_wisp(head_tree, side), M_HAIR, head, rest=hair_rest)
-        strand_colours(w_)
-        fine_streaks(w_)
     # the tie: a leather thong wound round the root of the tail, in three turns
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
     seg = path[max(0, k_tie - 4):k_tie + 6]

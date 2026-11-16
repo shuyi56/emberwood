@@ -106,6 +106,15 @@ def plain_materials():
                 tex = nt.nodes.new('ShaderNodeTexImage')
                 tex.image = ranger.sclera_image()
                 nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+        if mid == ranger.M_SKIN:
+            # skin: the baked 'skin' tone (blush, cool shade under the eyes and jaw, rosy knuckles, and the warm,
+            # reddened shade where it is shut in, which stands in for light scattering inside it, as the world's
+            # renderer has no subsurface scattering) as the vertex colour, a soft, satin surface
+            col = nt.nodes.new('ShaderNodeVertexColor')
+            col.layer_name = 'skin'
+            nt.links.new(col.outputs['Color'], p.inputs['Base Color'])
+            p.inputs['Roughness'].default_value = 0.6
+            p.inputs['Specular IOR Level'].default_value = 0.35
         if mid in (ranger.M_STEEL, ranger.M_GOLD, ranger.M_MAIL):
             p.inputs['Metallic'].default_value = 0.7
             p.inputs['Roughness'].default_value = 0.45
@@ -490,6 +499,12 @@ def main():
     bake_cloth_form()
     bake_hands()
     bake_gold()
+    # the sprite's passes ('skin fx') and the close-up texture's masks ('skin tex') mean nothing to the world: only
+    # the skin's colour goes into the model
+    for o in sc.objects:
+        for name in ('skin fx', 'skin tex'):
+            if o.type == 'MESH' and name in o.data.color_attributes:
+                o.data.color_attributes.remove(o.data.color_attributes[name])
     # the fused hair is a fine voxel surface, far denser than the world needs: thin it out
     # and the head is cut very fine round the eyes for the sprites' sculpted lids: the model needs far less
     for name, ratio in (('Hair', 0.11), ('Head shape', 0.4)):
@@ -498,6 +513,8 @@ def main():
     # the solid brows are for the sprites only: the model has the painted ones
     for o in [o for o in bpy.data.objects if o.name.startswith('Brow tube')]:
         bpy.data.objects.remove(o, do_unlink=True)
+    # and the solid line between the lips likewise: the model's lip paint draws it
+    bpy.data.objects.remove(bpy.data.objects['Mouth'], do_unlink=True)
     # the rig's armature is hidden for the sprite renders; the exporter needs it in the scene to write the skin
     bpy.data.objects['Rig'].hide_render = False
 
