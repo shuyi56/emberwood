@@ -496,6 +496,8 @@ def main():
     # the solid brows are for the sprites only: the model has the painted ones
     for o in [o for o in bpy.data.objects if o.name.startswith('Brow tube')]:
         bpy.data.objects.remove(o, do_unlink=True)
+    # and the solid line between the lips likewise: the model's lip paint draws it
+    bpy.data.objects.remove(bpy.data.objects['Mouth'], do_unlink=True)
     # the rig's armature is hidden for the sprite renders; the exporter needs it in the scene to write the skin
     bpy.data.objects['Rig'].hide_render = False
 

@@ -3608,7 +3608,7 @@ def lip_image():
 def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     """The lips' colour (lip_painting) on a thin skin of the face over the mouth: a grid of the patch, each point
     cast straight back onto the finished head and lifted a hair off it, like the eyeshadow. A touch glossier than
-    the skin round it, as lips are."""
+    the skin round it, as lips are, but not wet."""
     m = bpy.data.materials.new('lip paint')
     m.use_nodes = True
     nt = m.node_tree
@@ -3622,8 +3622,8 @@ def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     tex.extension = 'EXTEND'
     nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
     nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
-    p.inputs['Roughness'].default_value = 0.42
-    p.inputs['Specular IOR Level'].default_value = 0.35
+    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
+    p.inputs['Specular IOR Level'].default_value = 0.3
     nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
     m.surface_render_method = 'BLENDED'
     bm = bmesh.new()
@@ -4494,6 +4494,11 @@ def sprite_mode(on):
             o.hide_render = on         # (finer than a sprite pixel: nothing to draw there)
             o.hide_viewport = on
         if o.name.startswith('Brow tube'):
+            o.hide_render = not on
+            o.hide_viewport = not on
+        if o.name == 'Mouth':
+            # (the line between the lips is the sprites' mouth; up close the lip paint draws it, and the solid
+            # line stood forward of the paint in the corners as a pale sliver with a hard shadow under it)
             o.hide_render = not on
             o.hide_viewport = not on
         if o.name.startswith('Iris'):
