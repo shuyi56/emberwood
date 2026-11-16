@@ -1094,9 +1094,9 @@ def leggings_top(body):
         # stay level with the thighs' down to the crotch (drawn back higher up, they left a hollow there), and
         # only then sink away between them, so the valley between the thighs opens gradually
         kx = smoothstep(31.6, 28.6, z)
-        ky = 0.85 * smoothstep(29.4, 27.2, z) if y < 0 else 0.7 * smoothstep(28.8, 27.2, z)
+        ky = 0.85 * smoothstep(29.4, 27.7, z) if y < 0 else 0.7 * smoothstep(28.8, 27.7, z)
         return x * (1.0 - 0.8 * kx), y * (1.0 - ky)
-    parts = [loft_fn([37.0 - 0.3 * i for i in range(34)], seat_pt, n=96)]
+    parts = [loft_fn([37.0 - 0.3 * i for i in range(32)], seat_pt, n=96)]
     lo = LEG_TOP_Z - HIP_Z
     for s_ in (1, -1):
         x0 = -s_ * LEG_X
@@ -1109,7 +1109,11 @@ def leggings_top(body):
             # the seat's fullness carries on down the back of the thigh and eases out, so the two meet level
             # (the bare tube was shallower than the seat there, which left the seat standing over it as a shelf)
             full = 0.8 * smoothstep(-6.0, -0.5, z) * max(0.0, -math.cos(phi)) ** 1.5
-            return x0 - r * math.sin(phi), -(r * 1.04) * math.cos(phi) + full
+            # and the insides of the thighs meet at the crotch and part gradually below it, so the gap between the
+            # legs closes in a soft pointed arch (the seat's flat underside closed it square)
+            inner = max(0.0, -s_ * math.sin(phi)) ** 2
+            rx = r + (LEG_X - r + 0.06) * smoothstep(-5.6, -2.6, z) * inner
+            return x0 - rx * math.sin(phi), -(r * 1.04) * math.cos(phi) + full
         bm_ = loft_fn(zs, leg_pt, n=56)
         bmesh.ops.translate(bm_, vec=(0, 0, HIP_Z), verts=bm_.verts)
         parts.append(bm_)
@@ -1139,7 +1143,7 @@ def leggings_top(body):
     # relaxed in stages: most where the parts meet (between the legs, front and back), less round it, so the join
     # is a broad fillet and the relaxed part runs out into the rest without an edge; then the grid's own steps
     for lim, n_it in ((3.0, 24), (4.4, 8)):
-        join = [v for v in bm.verts if 26.0 < v.co.z < 32.6 and abs(v.co.x) < lim]
+        join = [v for v in bm.verts if 24.6 < v.co.z < 32.6 and abs(v.co.x) < lim]
         for _ in range(n_it):
             bmesh.ops.smooth_vert(bm, verts=join, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
     for _ in range(4):
