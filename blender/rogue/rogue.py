@@ -1099,6 +1099,9 @@ def leggings_top(body):
         # front there read as a bulge); the sides stay level with the thighs so no hollow opens beside them
         if y < 0:
             ky += 0.22 * smoothstep(31.8, 29.4, z) * (1.0 - smoothstep(0.6, 2.2, abs(x * (1.0 - 0.8 * kx))))
+        else:
+            # and at the back the centre tucks in under the buttocks a little sooner, so they part into the thighs
+            ky += 0.15 * smoothstep(30.6, 28.8, z) * (1.0 - smoothstep(0.5, 1.8, abs(x * (1.0 - 0.8 * kx))))
         return x * (1.0 - 0.8 * kx), y * (1.0 - min(ky, 0.92))
     parts = [loft_fn([37.0 - 0.3 * i for i in range(32)], seat_pt, n=96)]
     lo = LEG_TOP_Z - HIP_Z
@@ -1118,10 +1121,13 @@ def leggings_top(body):
             # of the midline and swell only on the very inside, so the join adds no volume of its own
             inner = max(0.0, -s_ * math.sin(phi)) ** 2
             rx = r + (LEG_X - r - 0.08) * smoothstep(-5.2, -2.8, z) * inner ** 1.5
-            # the filled inside sits back from the thigh's front, so the web falls to the seat's depth at the
-            # midline instead of standing as a lobe on each side of it
-            yk = 1.0 - 0.35 * smoothstep(-5.2, -2.8, z) * inner if math.cos(phi) > 0 else 1.0
-            return x0 - rx * math.sin(phi), -(r * 1.04) * math.cos(phi) * yk + full
+            # the filled inside sits back from the thigh's front and back, so the web falls to the seat's depth at
+            # the midline instead of standing as a lobe on each side of it (cubed, so it stays off the thigh)
+            # (front and back alike; at the back the seat's fullness eases off there too, so the buttocks run
+            # into the backs of the thighs without a rounded lobe between the legs)
+            web = smoothstep(-5.6, -2.6, z) * max(0.0, -s_ * math.sin(phi)) ** 3
+            yk = 1.0 - (0.55 if math.cos(phi) > 0 else 0.45) * web
+            return x0 - rx * math.sin(phi), (-(r * 1.04) * math.cos(phi) + full * (1.0 - 0.7 * web)) * yk
         bm_ = loft_fn(zs, leg_pt, n=56)
         bmesh.ops.translate(bm_, vec=(0, 0, HIP_Z), verts=bm_.verts)
         parts.append(bm_)
