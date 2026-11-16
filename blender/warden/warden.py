@@ -282,14 +282,17 @@ def robe_pt(z, phi, lift=0.0):
     """The robe at (z, phi): over the plate (pushed out from it) above the hips, flaring over them below; near its
     fronts it is brought forward over the tabard, so the fronts lie on the tabard instead of passing through it."""
     off, _ = robe_form(z, phi)
-    extra = R_SIDE - P_OFF + off + lift
+    # (close over the hips at the sides, where the arms hang against it)
+    hug = math.sin(phi) ** 4 * smoothstep(38.0, 35.5, z) * smoothstep(23.0, 27.0, z)
+    extra = (R_SIDE - P_OFF + off) * (1.0 - 0.85 * hug) + lift
     if z >= 32.0:
         x, y = plate_pt(z, phi)
         if z < 36.0:
             x2, y2 = torso_point(z, phi, P_OFF, bust=0.0)
             x, y = lerp(x2, x, smoothstep(32.0, 36.0, z)), lerp(y2, y, smoothstep(32.0, 36.0, z))
     else:
-        flare = 0.1 * (32.0 - z) * (0.5 + 0.5 * max(0.0, math.cos(phi))) + 0.05 * (32.0 - z) * max(0.0, -math.cos(phi))
+        flare = (0.1 * (32.0 - z) * (0.5 + 0.5 * max(0.0, math.cos(phi))) + 0.05 * (32.0 - z) * max(0.0, -math.cos(phi))) \
+            * (1.0 - 0.8 * hug)
         x, y = torso_point(32.0, phi, P_OFF + flare, bust=0.0)
     r = math.hypot(x, y) or 1.0
     x, y = x + x / r * extra, y + y / r * extra
@@ -431,8 +434,8 @@ def side_lock(s):
     # (shallow behind, so its back edge stays forward of the fall's side and the two round into one another)
     return loft([(7.4, 0.7, 1.4, s * 2.75 + wv(7.4), -0.05), (5.0, 0.95, 1.85, s * 3.2 + wv(5.0), 0.7),
                  (2.5, 1.0, 1.6, s * 3.2 + wv(2.5), 1.25), (0.0, 0.95, 1.4, s * 3.35 + wv(0.0), 1.65),
-                 (-1.6, 0.8, 1.15, s * 3.5 + wv(-1.6), 2.1), (-3.0, 0.6, 0.85, s * 3.5 + wv(-3.0), 2.6),
-                 (-4.5, 0.4, 0.55, s * 3.35, 3.1), (-6.0, 0.15, 0.2, s * 3.1, 3.5)])   # (its end sinks into the fall)
+                 (-1.6, 0.8, 1.15, s * 3.5 + wv(-1.6), 2.1), (-3.0, 0.6, 0.8, s * 3.5 + wv(-3.0), 2.4),
+                 (-4.2, 0.3, 0.35, s * 3.45, 2.6)])   # (it ends above the shoulder: lifted over it, it curled)
 
 
 def drape_fall(dg):
@@ -716,21 +719,25 @@ def lift_needed(bm, tree, gap=0.22, need=None):
     return need
 
 
-def apply_lift(bm, need, reach=0.55):
+def apply_lift(bm, need, reach=1.0):
     """Move the hair by the needed displacements, spread to everything within `reach` of a vertex that needed it
     (the whole thickness of the hair there, so it keeps its shape) and eased off beyond."""
     from mathutils.kdtree import KDTree
     if not need:
         return
     bm.verts.ensure_lookup_table()
-    pts = [(bm.verts[i].co.copy(), d) for i, d in need.items()]
+    # (measured with height counted at SQ of its length, so a lift spreads up and down the hair further than across
+    # it: over the collar's top or the shoulder it eases in over a hand's breadth instead of standing as a ring)
+    SQ = 0.4
+    sq = lambda c: Vector((c.x, c.y, c.z * SQ))     # noqa: E731
+    pts = [(sq(bm.verts[i].co), d) for i, d in need.items()]
     kd = KDTree(len(pts))
     for k, (p, _d) in enumerate(pts):
         kd.insert(p, k)
     kd.balance()
     moves = []
     for v in bm.verts:
-        near = kd.find_range(v.co, reach * 2.0)
+        near = kd.find_range(sq(v.co), reach * 2.0)
         if not near:
             continue
         acc, ws, wmax = Vector(), 0.0, 0.0
@@ -770,14 +777,14 @@ def hair_clearance(cols=range(10), gap=0.22):
     apply_lift(bm, need)
     # the lift bends the hair where it meets the shoulders and the collar; ease that bend into a roll, then lift
     # again wherever the easing let it back down
-    for _round in range(2):
-        moved = set(need)
+    ever = set(need)
+    for _round in range(3):
         bm.verts.ensure_lookup_table()
-        reg = {bm.verts[i] for i in moved}
-        for _ in range(3):
+        reg = {bm.verts[i] for i in ever}
+        for _ in range(8):
             reg |= {e.other_vert(v) for v in list(reg) for e in v.link_edges}
         reg = [v for v in reg if v.co.z < 1.0]
-        for _ in range(12):
+        for _ in range(16):
             bmesh.ops.smooth_laplacian_vert(bm, verts=reg, lambda_factor=0.5, lambda_border=0.0,
                                             use_x=True, use_y=True, use_z=True, preserve_volume=True)
         need = {}
@@ -788,6 +795,15 @@ def hair_clearance(cols=range(10), gap=0.22):
                 lift_needed(bm, tree, gap, need)
         sc.frame_set(1)
         apply_lift(bm, need)
+        ever |= set(need)
+    # a last light easing of what the final lift moved (the margin over the clothes allows for it)
+    bm.verts.ensure_lookup_table()
+    reg = {bm.verts[i] for i in need}
+    for _ in range(4):
+        reg |= {e.other_vert(v) for v in list(reg) for e in v.link_edges}
+    for _ in range(4):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=list(reg), lambda_factor=0.4, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
     bm.to_mesh(hair.data)
     bm.free()
     hair.data.update()
