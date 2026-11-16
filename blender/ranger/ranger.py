@@ -4612,6 +4612,9 @@ L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reach
 # the arms in the locked walk: the upper arm swings ARM_SWING either way; the forearm follows a little later and
 # folds more as it comes forward, so the swing travels down the arm instead of the arm swinging stiff from the shoulder
 L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
+# the feet in the locked walk: each turned out a little, as a relaxed walk sets them (pointing dead ahead they read as
+# turned in), and set nearly under the hips, so the legs do not lean in and the knees do not come together
+L_TOE_OUT, L_FOOT_X = 0.13, 0.97
 
 
 def _hermite(p0, p1, m0, m1, u):
@@ -4762,13 +4765,13 @@ def _euler_m(e):
     return rz @ ry @ rx
 
 
-def foot_level(pelvis, hip, knee, pitch):
+def foot_level(pelvis, hip, knee, pitch, toe=0.0):
     """The ankle's XYZ Euler that sets the foot pointing straight down the line of the walk, its sole level from
-    side to side and pitched only by `pitch` (toes up positive), whatever the pelvis's turn and list and the leg's
+    side to side, pitched only by `pitch` (toes up positive) and turned out by `toe`, whatever the pelvis's turn and list and the leg's
     roll above it. (Taking each of those out one angle at a time, as pose() does, leaves the foot turned and rolled
     by a few degrees once the shin leans far over, most at push-off, where it shows as the foot twisting on its toes.)"""
     parent = _euler_m(pelvis) @ _euler_m(hip) @ _euler_m(knee)
-    m = parent.T @ _euler_m((pitch, 0.0, 0.0))
+    m = parent.T @ _euler_m((pitch, 0.0, toe))
     return (math.atan2(m[2, 1], m[2, 2]), -math.asin(max(-1.0, min(1.0, m[2, 0]))), math.atan2(m[1, 0], m[0, 0]))
 
 
@@ -4798,13 +4801,13 @@ def pose_locked(col):
         hz = hips + s * LEG_X * math.sin(lst)           # (and its list lifts or drops it)
         # the leg leans in under the body so the foot keeps to its track; the lean lengthens the reach a little
         hip_x = sway - s * LEG_X * math.cos(lst)
-        roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * FOOT_X) / (hz - az)))) - lst
+        roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * L_FOOT_X) / (hz - az)))) - lst
         th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
         kb = th - shn
         hip.location = (-s * LEG_X, 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
-        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch)
+        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
