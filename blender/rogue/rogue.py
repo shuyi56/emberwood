@@ -535,7 +535,7 @@ def tail_clumps(head, path, lens):
             for k in range(n):
                 q = 2 * math.pi * k / n
                 ring.append(bm.verts.new(ctr + ax * (rx * math.cos(q)) + dp * (ry * math.sin(q))))
-                rest.append((c * 9.0 + q * 1.8, 0.0, -0.3 * (L0 + lens[i])))
+                rest.append((c * 9.0 + 1.8 * math.sin(q), 1.8 * math.cos(q), -0.3 * (L0 + lens[i])))
                 tone.append(tn)
             rings.append(ring)
         for ra, rb in zip(rings, rings[1:]):
