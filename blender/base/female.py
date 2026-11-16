@@ -1218,6 +1218,17 @@ CHEST_Z, NECK_Z = 41.0, 51.0
 GAIT, ARM_SWING = 1.0, 0.2
 
 
+# The face's shape, as the face creator's sliders (/mnt/project-files/face-creator): multipliers on face_relief's,
+# mouth_relief's and jaw_relief's forms, and offsets on the head's width and a few features' heights. These defaults
+# are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
+FACE = {
+    'jawWidth': 0.0, 'jawDef': 1.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
+    'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
+    'noseProj': 1.0, 'noseWidth': 1.0, 'noseLen': 0.0, 'tipBall': 1.0, 'nostrils': 1.0,
+    'browRidge': 1.0, 'sockets': 1.0, 'mouthWidth': 1.0, 'lipUpper': 1.0, 'lipLower': 1.0, 'smile': 1.0,
+}
+
+
 def gauss(x, z, x0, z0, sx, sz, amp):
     return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
 
@@ -1231,31 +1242,36 @@ def face_relief(x, z):
     proportions by FACE_WARP (sculpt round 2)."""
     z = FACE_WARP(z)
     d = 0.0
+    F = FACE
+    nw, nl, cb = F['noseWidth'], F['noseLen'], F['cbHeight']
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
-        d += gauss(x, z, s * 0.23, 0.415, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
-        d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
-        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032)      # the cheek filled out under the cheekbone, no hollow
-        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016)       # the soft fullness of the lower cheek
-        d += gauss(x, z, s * 0.05, 0.37, 0.021, 0.02, 0.018)    # wing of the nose (smaller: it read big from the game's camera)
-        d += gauss(x, z, s * 0.037, 0.378, 0.008, 0.02, -0.004)  # the groove between the wing and the tip
+        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03 * F['browRidge'])       # brow ridge
+        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
+        d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * F['cheekbones'])    # cheekbone, running back toward the ear
+        d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * F['apples'])    # the apple of the cheek, under the eye by the nose
+        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032 * F['cheekFull'])      # the cheek filled out under the cheekbone, no hollow
+        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016 * F['cheekFull'])       # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.05 * nw, 0.37 + nl, 0.021 * nw, 0.02, 0.018 * F['nostrils'])    # wing of the nose (smaller: it read big from the game's camera)
+        d += gauss(x, z, s * 0.037 * nw, 0.378 + nl, 0.008, 0.02, -0.004 * F['nostrils'])  # the groove between the wing and the tip
         d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
-    if z > 0.36:
-        t = min(1.0, max(0.0, (0.6 - z) / 0.24))
+    zt = 0.36 + nl
+    if z > zt:
+        t = min(1.0, max(0.0, (0.6 - z) / (0.6 - zt)))
         h = (0.012 + 0.04 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.05 * math.exp(-((0.36 - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
-    w = 0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - 0.37) / 0.06)
+        h = 0.05 * math.exp(-((zt - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
+    h *= F['noseProj']
+    w = (0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - (0.37 + nl)) / 0.06)) * nw
     d += h * math.exp(-(x / (1.15 * w)) ** 2)      # (a rounded ridge: steep sides cast a hard shadow line from above)
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.018)      # the muzzle: the teeth and jaw carry the mouth forward
-    d += mouth_relief(x, z)
-    d += gauss(x, z, 0, 0.088, 0.046, 0.044, 0.028)   # chin: the ball of it, set back behind the lower lip
+    d += mouth_relief(x / F['mouthWidth'], z)
+    ch = F['chinHeight']
+    d += gauss(x, z, 0, 0.088 * (0.6 + 0.4 * ch), 0.046 * F['chinWidth'], 0.044 * ch, 0.028 * F['chinProj'])   # chin: the ball of it, set back behind the lower lip
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.09, 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
+        d += gauss(x, z, s * 0.09 * F['chinWidth'], 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
@@ -1271,13 +1287,13 @@ def mouth_relief(x, z):
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     t = (z - 0.258) / max(0.01, top - 0.258)
     if 0.0 < t < 1.25:
-        d += 0.016 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
-    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
+        d += 0.016 * FACE['lipUpper'] * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005 * FACE['lipUpper'])          # the tubercle
     across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.017 * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
+    d += 0.017 * FACE['lipLower'] * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
     # the line between the lips, deepest at the corners where the lips tuck in
     # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
-    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    zl = 0.258 + 0.007 * FACE['smile'] * (ax / 0.082) ** 2
     d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
         # (shallow: deeper, each corner was a pit that the game's high camera saw as a dark wedge)
@@ -1290,7 +1306,7 @@ def mouth_relief(x, z):
             px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
-    d += gauss(x, z, 0, 0.385, 0.028, 0.024, 0.006)        # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.385 + FACE['noseLen'], 0.028 * FACE['noseWidth'], 0.024, 0.006 * FACE['tipBall'])        # the ball of the nose's tip
     d += gauss(x, z, 0, 0.19, 0.05, 0.014, -0.008)         # the crease under the lower lip
     return d
 
@@ -1389,11 +1405,21 @@ def jaw_relief(y, z):
     below = ss((z - zl + 0.03) / 0.1)        # above the lower edge of the jaw
     behind = ss((0.11 - y) / 0.11)             # in front of the back edge of the ramus
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
-    return 0.02 * below * behind * up
+    return 0.02 * FACE['jawDef'] * below * behind * up
+
+
+def _head_w(z):
+    """HEAD_W with the face creator's jaw and face width (FACE['jawWidth'], FACE['cheekWidth'])."""
+    def ss(e0, e1, v):
+        t = min(1.0, max(0.0, (v - e0) / (e1 - e0)))
+        return t * t * (3 - 2 * t)
+    jw = ss(-0.05, 0.08, z) * ss(0.42, 0.2, z)
+    cw = math.exp(-((z - 0.42) / 0.12) ** 2)
+    return HEAD_W(z) * (1 + FACE['jawWidth'] * jw + FACE['cheekWidth'] * cw)
 
 
 def _section(z, c, s):
-    w = _dome(HEAD_W, z, 0.7)
+    w = _dome(_head_w, z, 0.7)
     yw = HEAD_MID(z)
     front = _dome(HEAD_F, z, 0.62) + yw
     back = _dome(HEAD_B, z, 0.66) - yw
@@ -3244,7 +3270,7 @@ def lip_painting(W=576, H=336):
         t = np.clip((v - e0) / (e1 - e0), 0, 1)
         return t * t * (3 - 2 * t)
     # the forms, from mouth_relief: the line between the lips, the upper edge with its cupid's bow, the lower edge
-    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    zl = 0.258 + 0.007 * FACE['smile'] * (ax / 0.082) ** 2
     bow = 0.006 * np.exp(-((ax - 0.019) / 0.011) ** 2)
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read

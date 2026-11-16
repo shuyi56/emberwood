@@ -27,6 +27,20 @@ import bmesh  # noqa: E402
 from mathutils import Vector, Matrix  # noqa: E402
 from female import *  # noqa: E402,F401,F403  (the base figure: shapes, materials, rig, walk and sprite pipeline)
 from female import _profile, _gs, _torso_dims, _perlin2  # noqa: E402,F401
+import female  # noqa: E402
+
+# ---------------------------------------------------------------- her face
+# Designed in the face creator (/mnt/project-files/face-creator) on the base head: leaner than the ranger, with
+# high, sharp cheekbones over a hollow, a narrower jaw with a firmer edge, a neat pointed chin, a finer nose and a
+# thinner upper lip whose corners lift into a half-smile; the eyes a touch narrower and more tilted, a sly look.
+female.FACE.update({
+    'jawWidth': -0.07, 'jawDef': 1.5, 'chinProj': 1.2, 'chinWidth': 0.88,
+    'cheekWidth': -0.02, 'cheekbones': 1.6, 'cbHeight': 0.008, 'apples': 0.8, 'cheekFull': 0.55,
+    'noseProj': 1.05, 'noseWidth': 0.92, 'tipBall': 0.8, 'nostrils': 0.85,
+    'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 0.85, 'lipLower': 0.95, 'smile': 1.6,
+})
+female.EYE_OPEN = 0.68
+female.EYE_TILT = 0.105
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
