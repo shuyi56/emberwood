@@ -598,7 +598,9 @@ def lock_image(W=256, H=1024):
         end = min(0.97, (0.3 + 0.7 * mid ** 0.8) * (0.8 + 0.25 * rng.random()))
         tone = rng.random()
         wid = (2.0 + 2.5 * rng.random()) * SS
-        val = 255 * (0.45 + 0.4 * rng.random()) * (0.55 + 0.45 * mid)
+        # (each strand opaque: half-transparent strands let the skin through and tinted the lock pink; the lock
+        # thins out by the gaps between its strands instead)
+        val = 255 * (0.88 + 0.12 * rng.random())
         ph, fr = rng.random() * 6.28, 3.0 + 3.0 * rng.random()
         steps = 40
         prev = None
@@ -630,7 +632,7 @@ def lock_image(W=256, H=1024):
     root = np.clip(1.0 - vv / 0.12, 0, 1)[:, None]
     uu = (np.arange(W) + 0.5) / W
     root = root * np.clip(1.0 - np.abs(uu - 0.5) / 0.5, 0, 1)[None, :] ** 0.3
-    a = np.maximum(np.clip(a * 1.4, 0, 1), root)
+    a = np.maximum(np.clip(a * 1.8, 0, 1), root)
     w_ = np.clip(cov * 2.2, 0, 1)[..., None]
     col = (DARK + (col - DARK) * w_) / 255
     a[:, :1] = a[:, -1:] = 0.0
