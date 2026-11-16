@@ -1,0 +1,597 @@
+#!/usr/bin/env python3
+"""Render request reviewer: reads a render request before it reaches the render queue.
+
+The reviewer thread runs this on every request a thread sends. Nothing here renders. A request that passes is
+forwarded to the render-queue thread unchanged; one that does not is sent back to its thread with the findings
+below as concrete fixes, so no render time is spent on it.
+
+    review.py check --thread ID --request '{"branch": ..., "outputs": [...], ...}' [--no-smoke] [--json]
+    review.py pitfalls                      print the pitfalls file
+    review.py learn --title T --spot S --fix F [--pattern REGEX [--unless REGEX]] [--seen WHERE]
+                                            add a pitfall (after a rejection or a render that came out wrong)
+
+What `check` does, cheapest first:
+  shape     outputs, cells and view commands are well formed; the full sheet is never requestable (not as an
+            output, not as a character script run as a view, not as frames covering most of the sheet)
+  commit    the branch and commit exist on origin
+  before    a commit already on main is served from the cache only (the queue's own rule, asked early)
+  merge     the branch merged with main: code conflicts, names defined twice, names used but never defined
+  views     each view script exists in the commit and knows every flag it is given
+  pitfalls  every pitfall in PITFALLS.md that carries a pattern is matched against the lines the branch adds
+  smoke     each job is run for real, headless, up to its first render (smoke.py): imports, argument parsing
+            and the whole scene build. A crash here is a crash the queue would have hit minutes in.
+  cache     jobs the queue already holds are reported, so the requester knows the answer is immediate
+
+Findings are 'block' (send back), 'warn' (forward, and tell the requester) or 'info'. The verdict is 'fix' when
+anything blocks, otherwise 'pass'. The reviewer then reads the diff (saved beside the report) and may still
+send a request back for something no script can see.
+
+The queue's own helpers (rq.py, beside queue.json in the project folder) are imported, never copied, so the
+reviewer and the queue always agree on merges, cache keys and what counts as a duplicate definition. The
+reviewer only reads the queue's state; it never writes queue.json.
+"""
+import argparse
+import ast
+import concurrent.futures
+import datetime
+import hashlib
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import types
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RQ_DIR = os.environ.get("RQ_DIR", "/mnt/project-files/render-queue")
+os.environ.setdefault("RQ_WORK", "/tmp/rq-review-work")   # never the queue's own work folder
+sys.path.insert(0, RQ_DIR)
+import rq  # noqa: E402  (the render queue's own module)
+
+WORK = os.environ["RQ_WORK"]
+PITFALLS = os.environ.get("RQ_PITFALLS", os.path.join(HERE, "PITFALLS.md"))
+LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
+SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "900"))
+SHEET_ROWS, SHEET_COLS = 8, 10
+SHELL_META = re.compile(r"[;&|<>$`\\\n\r]")
+HAIR = re.compile(r"hair|bang|fringe|lock|pony|wisp|strand|braid|bun(?![a-z])", re.I)
+KEEP_AT_MAIN = ("blender/ranger/ranger-blender.png", "blender/ranger/ranger.blend", "public/models/ranger.glb")
+
+
+class Report:
+    def __init__(self):
+        self.findings = []
+
+    def add(self, level, check, text, fix=None, pitfall=None):
+        self.findings.append({"level": level, "check": check, "text": text, "fix": fix, "pitfall": pitfall})
+
+    def block(self, *a, **k): self.add("block", *a, **k)
+    def warn(self, *a, **k): self.add("warn", *a, **k)
+    def info(self, *a, **k): self.add("info", *a, **k)
+
+    @property
+    def blocked(self):
+        return any(f["level"] == "block" for f in self.findings)
+
+
+# ------------------------------------------------------------------ pitfalls file
+def read_pitfalls(path=None):
+    """PITFALLS.md as a list of {id, title, seen, spot, fix, pattern}. One '## P012 Title' section each."""
+    out = []
+    try:
+        text = open(path or PITFALLS).read()
+    except FileNotFoundError:
+        return out
+    for m in re.finditer(r"^## (P\d+) (.+?)\n(.*?)(?=^## |\Z)", text, re.M | re.S):
+        p = {"id": m[1], "title": m[2].strip()}
+        for key in ("seen", "spot", "fix", "pattern", "unless"):
+            f = re.search(rf"^- \*\*{key.capitalize()}:\*\* (.+?)(?=^- \*\*|\Z)", m[3], re.M | re.S)
+            p[key] = " ".join(f[1].split()) if f else None
+        for key in ("pattern", "unless"):
+            if p[key]:
+                p[key] = p[key].strip("`")
+        out.append(p)
+    return out
+
+
+def cmd_learn(a):
+    ps = read_pitfalls()
+    for rx in (a.pattern, a.unless):
+        if rx:
+            re.compile(rx)
+    if any(p["title"].lower() == a.title.lower() for p in ps):
+        sys.exit("a pitfall with this title already exists; edit PITFALLS.md to refine it")
+    pid = f"P{max([int(p['id'][1:]) for p in ps] or [0]) + 1:03d}"
+    seen = a.seen or datetime.date.today().isoformat()
+    entry = f"\n## {pid} {a.title}\n\n- **Seen:** {seen}\n- **Spot:** {a.spot}\n- **Fix:** {a.fix}\n"
+    if a.pattern:
+        entry += f"- **Pattern:** `{a.pattern}`\n"
+    if a.unless:
+        entry += f"- **Unless:** `{a.unless}`\n"
+    with open(PITFALLS, "a") as f:
+        f.write(entry)
+    print(f"added {pid} to {PITFALLS}; commit and push it so the next reviewer has it")
+
+
+def cmd_pitfalls(a):
+    for p in read_pitfalls():
+        print(f"{p['id']}  {p['title']}\n      spot: {p['spot']}\n      fix:  {p['fix']}"
+              + (f"\n      pattern: {p['pattern']}" if p["pattern"] else ""))
+
+
+# ------------------------------------------------------------------ small helpers
+def cells_of(spec):
+    """'0-7:2,4,6' -> (rows, cols), or raises ValueError."""
+    if not isinstance(spec, str) or spec.count(":") != 1:
+        raise ValueError("cells must be ROWS:COLS, e.g. 0-7:2,4,6")
+    out = []
+    for part, n, what in zip(spec.split(":"), (SHEET_ROWS, SHEET_COLS), ("row", "column")):
+        vals = set()
+        for x in part.split(","):
+            m = re.fullmatch(r"(\d+)(?:-(\d+))?", x.strip())
+            if not m:
+                raise ValueError(f"cannot read {x!r} in cells {spec!r}")
+            lo, hi = int(m[1]), int(m[2] or m[1])
+            if lo > hi or hi >= n:
+                raise ValueError(f"{what} {x} is outside the sheet ({what}s run 0-{n - 1})")
+            vals.update(range(lo, hi + 1))
+        out.append(sorted(vals))
+    return out
+
+
+def check_cells(rep, spec, where):
+    try:
+        rows, cols = cells_of(spec)
+    except ValueError as e:
+        rep.block("shape", f"{where}: {e}", "Use ROWS:COLS with rows 0-7 (the facings) and columns 0-9 "
+                  "(0-1 idle, 2-9 walk), for example 0-7:2,4,6.")
+        return
+    n = len(rows) * len(cols)
+    if n >= 0.75 * SHEET_ROWS * SHEET_COLS:
+        rep.block("shape", f"{where}: {spec} is {n} of the sheet's {SHEET_ROWS * SHEET_COLS} cells, which is the "
+                  "full sprite sheet under another name.",
+                  "Ask for the cells that show your change, for example 0-7:2,4,6 (24 cells). The full sheet "
+                  'runs only as the scheduled task; send {"branch": "...", "ready": true} to be included.', "P001")
+    elif n > 32:
+        rep.warn("shape", f"{where}: {spec} is {n} cells; recent requests needed 24 to 32.",
+                 "Drop the columns you will not look at.")
+    if len(rows) < SHEET_ROWS:
+        rep.warn("shape", f"{where}: only facings {','.join(map(str, rows))} are requested. Most problems show "
+                 "in the 3/4 and profile rows.", "Use rows 0-7 unless the change cannot be seen from the others.",
+                 "P013")
+
+
+def flags_known_to(src):
+    """Every '--flag' string literal in a script: what its argparse or hand-written argv parsing can read."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    return {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and re.fullmatch(r"--[A-Za-z][\w-]*", n.value)}
+
+
+def show(commit, path):
+    r = rq.git("show", f"{commit}:{path}", check=False)
+    return r.stdout if r.returncode == 0 else None
+
+
+def added_lines(base, tip):
+    """[(path, line number, text)] for every line the branch adds to a render input."""
+    out, path, ln = [], None, 0
+    d = rq.git("diff", "-U0", base, tip, "--", *rq.INPUTS, check=False).stdout
+    for line in d.splitlines():
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else None
+        elif line.startswith("@@"):
+            ln = int(re.search(r"\+(\d+)", line)[1])
+        elif line.startswith("+") and path and not rq.gen(path):
+            out.append((path, ln, line[1:])); ln += 1
+    return out
+
+
+def flake_names(commit, paths=None):
+    """{'name': 'path:line'} for names used but never defined (pyflakes), by name so line shifts do not matter."""
+    try:
+        from pyflakes.api import check
+        from pyflakes.reporter import Reporter
+        import io
+    except ImportError:
+        return None
+    hits = {}
+    for path in rq.git("ls-tree", "-r", "--name-only", commit, "--", "blender/").stdout.split():
+        if not path.endswith(".py"):
+            continue
+        buf = io.StringIO()
+        check(show(commit, path) or "", path, Reporter(buf, io.StringIO()))
+        for ln in buf.getvalue().splitlines():
+            m = re.match(r"(.+?):(\d+):\d+:? (undefined name '(.+)'|local variable '(.+)' .*referenced before assignment)", ln)
+            if m:
+                hits.setdefault(m[4] or m[5], f"{m[1]}:{m[2]}")
+    return hits
+
+
+def last_rendered(branch, tip):
+    """The newest commit of this branch the queue has already rendered and that `tip` builds on, or None."""
+    for r in reversed(rq.load()["requests"]):
+        t = r.get("tip")
+        if r["branch"] == branch and r["state"] == "done" and t and t != tip and \
+                rq.git("merge-base", "--is-ancestor", t, tip, check=False).returncode == 0:
+            return t
+    return None
+
+
+# ------------------------------------------------------------------ the smoke run
+def smoke_command(kind, param, out):
+    q = shlex.quote
+    runner = f"python3 {q(os.path.join(HERE, 'smoke.py'))}"
+    if kind == "frames":
+        return f"{runner} {q(os.path.join(RQ_DIR, 'rq_frames.py'))} --out {q(out)} --cells {q(param)}"
+    if kind == "glb":
+        return f"{runner} blender/ranger/export_glb.py --out {q(os.path.join(out, 'ranger.glb'))}"
+    return f"{runner} {param} --out {q(out)}"
+
+
+def smoke(commit, kind, param):
+    """Run one job up to its first render in a worktree of `commit`. Returns {ok, seconds, tail, cached}."""
+    key = rq.job_key(commit, "smoke-" + kind, param)
+    key += "-" + hashlib.sha1(open(os.path.join(HERE, "smoke.py"), "rb").read()).hexdigest()[:6]
+    memo = os.path.join(WORK, "smoke", key + ".json")
+    if os.path.exists(memo):
+        return {**json.load(open(memo)), "cached": True}
+    wt, out = os.path.join(WORK, "wt-" + key), os.path.join(WORK, "out-" + key)
+    os.makedirs(out, exist_ok=True)
+    rq.git("worktree", "remove", "--force", wt, check=False)
+    rq.git("worktree", "add", "--detach", wt, commit)
+    t0 = datetime.datetime.now()
+    cmd = smoke_command(kind, param, out)
+    try:
+        r = subprocess.run(cmd, shell=True, cwd=wt, capture_output=True, text=True, timeout=SMOKE_TIMEOUT)
+        rc, log = r.returncode, r.stdout + r.stderr
+    except subprocess.TimeoutExpired as e:
+        rc, log = -1, ((e.stdout or b"").decode(errors="replace") + (e.stderr or b"").decode(errors="replace")
+                       + f"\n[no render reached after {SMOKE_TIMEOUT}s]")
+    rq.git("worktree", "remove", "--force", wt, check=False)
+    subprocess.run(["rm", "-rf", out])
+    res = {"ok": rc in (0, 77), "reached_render": rc == 77, "exit": rc,
+           "seconds": round((datetime.datetime.now() - t0).total_seconds()),
+           "tail": "\n".join(log.strip().splitlines()[-8:]) if rc not in (0, 77) else ""}
+    os.makedirs(os.path.dirname(memo), exist_ok=True)
+    if rc != -1:
+        json.dump(res, open(memo, "w"))
+    return {**res, "cached": False}
+
+
+# ------------------------------------------------------------------ the review
+def review(req, thread, do_smoke=True):
+    rep = Report()
+    facts = {}
+    branch, sha = req.get("branch"), req.get("sha") or None
+    outs = req.get("outputs") or []
+    if isinstance(outs, str):
+        outs = [o for o in outs.split(",") if o]
+    views = req.get("views") or []
+    if isinstance(views, str):
+        views = [views]
+    cells = req.get("cells")
+
+    # ---- shape
+    if not branch or not isinstance(branch, str):
+        rep.block("shape", "The request names no branch.", 'Send {"branch": "claude/project-thread-xxxxxx", ...}.')
+        return rep, facts
+    if req.get("ready") and not outs:
+        rep.info("shape", "A 'ready' note for the scheduled sheet run: nothing to render now.")
+        facts["ready_only"] = True
+    if "sheet" in outs or any(re.search(r"full.?sheet|whole sheet", str(o), re.I) for o in outs):
+        rep.block("shape", "The full sprite sheet is not a requestable output.",
+                  'Ask for "frames" with the cells that show your change (for example "cells": "0-7:2,4,6"). The '
+                  'full sheet runs only as the scheduled task; send {"branch": "...", "ready": true} once the work '
+                  "is finished to be included in it.", "P001")
+    bad = [o for o in outs if o not in rq.REQUESTABLE and o != "sheet"]
+    if bad or (not outs and not req.get("ready")):
+        rep.block("shape", f"outputs must be some of {list(rq.REQUESTABLE)}" + (f"; got {bad}" if bad else "") + ".",
+                  'For example "outputs": ["frames", "views"].')
+    if "views" in outs and not views:
+        rep.block("shape", '"views" is requested but no view command is given.',
+                  'Add "views": ["blender/base/views.py --figure rogue --head --clay"] or drop "views".')
+    if views and "views" not in outs:
+        rep.warn("shape", 'View commands are given but "views" is not in outputs, so they will not run.',
+                 'Add "views" to outputs.')
+    if "frames" in outs:
+        if not cells:
+            rep.block("shape", '"frames" is requested without "cells".', 'Add "cells": "0-7:2,4,6".')
+        else:
+            check_cells(rep, cells, "cells")
+    if req.get("mode") == "isolated":
+        rep.info("shape", "mode: isolated is ignored; the queue combines every branch whose code does not overlap.")
+    note = str(req.get("note") or "")
+    if re.search(r"\bbefore\b|\bbaseline\b", note, re.I):
+        rep.warn("before", f"The note mentions a before or baseline ({note[:80]!r}). A before is never rendered, and "
+                 "must not be faked on the branch by hiding or switching off the new work.",
+                 "Ask only for the after views and compare them with a cached render of main "
+                 "(the queue lists them, or look under render-queue/results/).", "P002")
+
+    parsed = []
+    for v in views:
+        if not isinstance(v, str) or SHELL_META.search(v) or ".." in v:
+            rep.block("views", f"View command {v!r} holds shell characters or '..'. It is run by a shell as "
+                      "written.", "Give only a script path inside the repo and its arguments.", "P012")
+            continue
+        try:
+            tok = shlex.split(v)
+        except ValueError as e:
+            rep.block("views", f"View command {v!r} does not parse: {e}.", "Balance the quotes.")
+            continue
+        if not tok or not tok[0].endswith(".py") or os.path.isabs(tok[0]):
+            rep.block("views", f"View command {v!r} must start with a .py path relative to the repo root.",
+                      "For example blender/base/views.py --figure rogue --head.")
+            continue
+        m = re.fullmatch(r"blender/(\w+)/(\w+)\.py", tok[0])
+        if m and m[1] == m[2] and "--build-only" not in tok:
+            rep.block("views", f"{tok[0]} is a character script: run as a view it renders the full sprite sheet.",
+                      "Use a view script (blender/base/views.py, sculpt_views.py, face_views.py) or ask for "
+                      '"frames".', "P001")
+            continue
+        if "--out" in tok:
+            rep.block("views", f"View command {v!r} sets --out; the queue adds its own.", "Remove --out.")
+            continue
+        if "--cells" in tok and tok.index("--cells") + 1 < len(tok):
+            check_cells(rep, tok[tok.index("--cells") + 1], f"{tok[0]} --cells")
+        parsed.append((v, tok))
+
+    # ---- commit
+    rq.git("fetch", "--quiet", "--prune", "origin", check=False)
+    main = rq.git("rev-parse", "origin/main").stdout.strip()
+    tip_of_branch = rq.git("rev-parse", "--verify", "--quiet", f"origin/{branch}", check=False).stdout.strip() \
+        if branch != "main" else main
+    if not tip_of_branch:
+        rep.block("commit", f"Branch {branch} is not on origin.", "Push the branch, then send the request again.",
+                  "P006")
+        return rep, facts
+    tip = tip_of_branch
+    if sha:
+        tip = rq.git("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}", check=False).stdout.strip()
+        if not tip:
+            rep.block("commit", f"Commit {sha} is not on origin (it may not be pushed yet).",
+                      "Push it, or leave sha out to use the branch tip.", "P006")
+            return rep, facts
+        if rq.git("merge-base", "--is-ancestor", tip, tip_of_branch, check=False).returncode != 0:
+            rep.warn("commit", f"Commit {tip[:9]} is not on {branch} (tip {tip_of_branch[:9]}).",
+                     "Check the sha; a rebased branch leaves old commits behind.")
+        elif tip != tip_of_branch:
+            rep.info("commit", f"The request is pinned to {tip[:9]}; the branch tip is now {tip_of_branch[:9]}.")
+    facts.update(tip=tip, main=main)
+    if facts.get("ready_only") or (rep.blocked and not outs):
+        return rep, facts
+
+    # ---- before: main's own code is served from the cache only (the queue's rule, applied here first)
+    on_main = branch == "main" or rq.git("merge-base", "--is-ancestor", tip, main, check=False).returncode == 0
+    if on_main and all(o in rq.REQUESTABLE for o in outs):
+        try:
+            rq.before_only_from_cache(types.SimpleNamespace(branch=branch, sha=tip, view=views, cells=cells), outs)
+            rep.info("before", "This commit is already on main and every job is cached: answered at once.")
+        except SystemExit as e:
+            rep.block("before", str(e), "Compare against one of the cached renders listed above; do not ask for a "
+                      "new render of main.", "P002")
+            return rep, facts
+
+    # ---- merge with main
+    merged, conflicts = rq.onto_main(branch, tip, main)
+    if not merged:
+        semantic = [c for c in conflicts if ": " in c]
+        if semantic:
+            rep.block("merge", "After merging main, " + "; ".join(semantic) + ". Python keeps only the later "
+                      "definition, for every caller.", "Keep one definition (rename the other if both are needed), "
+                      "push, and send the request again.", "P005")
+        else:
+            t = rq.git("merge-tree", "--write-tree", "--no-messages", main, tip, check=False).stdout.splitlines()[0]
+            hunks = {p: (show(t, p) or "").count("\n<<<<<<<") for p in conflicts}
+            rep.block("merge", "The branch conflicts with main in " +
+                      ", ".join(f"{p} ({n} hunk{'s' if n != 1 else ''})" for p, n in hunks.items()) + ".",
+                      "Run git fetch origin main && git merge origin/main, resolve those hunks, push, and send the "
+                      "request again. If the right resolution depends only on the queue's judgment, say so in the "
+                      "note and the request is forwarded for the queue to resolve.", "P006")
+            facts["conflict"] = hunks
+        return rep, facts
+    facts["merged"] = merged
+    base = rq.git("merge-base", main, tip).stdout.strip()
+    behind = int(rq.git("rev-list", "--count", f"{tip}..{main}").stdout.strip() or 0)
+    if behind:
+        rep.info("merge", f"The branch is {behind} commit(s) behind main and merges cleanly; the render uses the "
+                 "merged code.")
+
+    unparsable = [h for h in rq.duplicate_defs_all(merged) if h.endswith("does not parse")]
+    for h in unparsable:
+        path = h.split(":")[0]
+        try:
+            ast.parse(show(merged, path) or "")
+            err = ""
+        except SyntaxError as e:
+            err = f" (line {e.lineno}: {e.msg})"
+        rep.block("merge", f"{path} does not parse{err}.", "Fix the syntax error and push.", "P003")
+    on_main_dups = [h for h in rq.duplicate_defs_all(main) if not h.endswith("does not parse")]
+    for h in on_main_dups:
+        rep.info("merge", f"main itself has {h} (not this branch's doing).")
+
+    new_names = {}
+    names, main_names = flake_names(merged), flake_names(main)
+    if names is None:
+        rep.info("merge", "pyflakes is not installed here: undefined names were not checked.")
+    else:
+        new_names = {n: w for n, w in names.items() if n not in main_names}
+
+    fp = rq.footprint(main, merged)
+    prev = last_rendered(branch, tip)
+    since = prev or base
+    fresh = rq.footprint(since, tip)          # what changed since this branch was last looked at
+    facts["changes"] = {p: sorted(d) for p, d in fp.items()}
+    if not fp:
+        rep.info("merge", "The branch changes no render input compared with main.")
+    carried = [p for p in KEEP_AT_MAIN
+               if rq.git("diff", "--quiet", main, tip, "--", p, check=False).returncode != 0]
+    if carried and tip != main:
+        rep.warn("merge", "The branch carries its own " + ", ".join(carried) + ".",
+                 "Keep them at main's version: git checkout origin/main -- " + " ".join(carried), "P007")
+
+    # ---- view scripts and their flags
+    for v, tok in parsed:
+        src = show(merged, tok[0])
+        if src is None:
+            near = [p for p in rq.git("ls-tree", "-r", "--name-only", merged, "--", "blender/").stdout.split()
+                    if p.endswith("views.py")]
+            rep.block("views", f"{tok[0]} is not in the commit.", "View scripts in this commit: " + ", ".join(near),
+                      "P010")
+            continue
+        known = flags_known_to(src)
+        if known:
+            unknown = [t for t in tok[1:] if t.startswith("--") and t.split("=")[0] not in known]
+            if unknown:
+                rep.block("views", f"{tok[0]} does not read {', '.join(unknown)}. A script that parses its own "
+                          "arguments ignores an unknown flag without a word and renders something else.",
+                          f"Flags it reads: {' '.join(sorted(known - {'--out'}))}", "P010")
+        hair = sorted({d for defs in fresh.values() for d in defs if HAIR.search(d)})
+        if hair and known and "--clay" in known and not any("--clay" in t for _, t in parsed):
+            rep.warn("views", "This commit changes hair code (" + ", ".join(hair[:6]) + ") but no view asks for "
+                     "--clay. Seams, ledges and ridges where hair meets the head only show in clay.",
+                     "Add --head --clay to the view command.", "P009")
+            break
+
+    # ---- pitfall patterns against the lines the branch adds
+    lines = added_lines(main, merged) if fp else []
+    for p in read_pitfalls():
+        if not p["pattern"]:
+            continue
+        hits = [(path, ln, t) for path, ln, t in lines if re.search(p["pattern"], t)
+                and not (p["unless"] and re.search(p["unless"], show(merged, path) or ""))]
+        if hits:
+            rep.warn("pitfalls", f"{p['id']} {p['title']}: " +
+                     "; ".join(f"{path}:{ln} `{t.strip()[:90]}`" for path, ln, t in hits[:4]) +
+                     (f" (+{len(hits) - 4} more)" if len(hits) > 4 else ""), p["fix"], p["id"])
+
+    # ---- jobs: cached already, or smoke-run
+    jobs = [(o, v) for o in outs if o in rq.REQUESTABLE
+            for v in ([t for t, _ in parsed] if o == "views" else [cells if o == "frames" else None])]
+    facts["jobs"] = []
+    todo = []
+    for kind, param in jobs:
+        key = rq.job_key(merged, kind, param)
+        j = {"key": key, "kind": kind, "param": param, "cached": rq.cached(key), "failed_before": rq.failed(key)}
+        facts["jobs"].append(j)
+        if j["cached"]:
+            rep.info("cache", f"{kind} {param or ''} is already rendered: results/{key}/ (answered at once).")
+        elif j["failed_before"]:
+            rep.block("cache", f"{kind} {param or ''} already failed for this exact code: results/{key}-failed/"
+                      "render.log.", "Fix what the log shows and push a new commit; the same code is not rendered "
+                      "again.", "P011")
+        elif not rep.blocked:
+            todo.append(j)
+    smoked_ok = False
+    if do_smoke and todo:
+        with concurrent.futures.ThreadPoolExecutor(3) as ex:
+            for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"]), todo)):
+                j["smoke"] = res
+                if res["ok"]:
+                    rep.info("smoke", f"{j['kind']} {j['param'] or ''}: built headless and "
+                             f"{'reached its first render' if res['reached_render'] else 'finished'} in "
+                             f"{res['seconds']}s" + (" (checked earlier)" if res["cached"] else "") + ".")
+                else:
+                    rep.block("smoke", f"{j['kind']} {j['param'] or ''} fails before its first render "
+                              f"(exit {res['exit']}, {res['seconds']}s):\n{res['tail']}",
+                              "Fix the error in the last lines above and push. Reproduce without rendering: "
+                              f"python3 tools/render-review/smoke.py {j['param'] or '<script> <args>'} --out /tmp/x",
+                              "P003")
+        smoked_ok = all(j["smoke"]["ok"] for j in todo)
+    elif todo:
+        rep.info("smoke", "Smoke run skipped.")
+    for n, where in sorted(new_names.items()):
+        text = f"{where}: {n} is used but never defined (main does not have this)."
+        fix = f"Define {n}, or restore what a merge or a move between files dropped."
+        if smoked_ok:
+            rep.warn("merge", text + " The build did not reach it this time.", fix, "P003")
+        else:
+            rep.block("merge", text + " The render stops with a NameError when it gets there.", fix, "P003")
+
+    # ---- what the reviewer should read: the change since this branch was last rendered
+    facts["read"] = {"since": since[:9], "since_is": "last rendered commit of this branch" if prev else "merge base with main",
+                     "stat": rq.git("diff", "--stat", since, tip, "--", *rq.INPUTS, check=False).stdout.strip().splitlines()[-1:],
+                     "diff_command": f"git -C {rq.REPO} diff {since[:9]} {tip[:9]} -- {' '.join(rq.INPUTS)}"}
+    same = [r["id"] for r in rq.load()["requests"] if r["state"] in ("pending", "rendering")
+            and r.get("tip") == tip and r["outputs"] == outs and r.get("views", []) == views and r.get("cells") == cells]
+    if same:
+        rep.block("cache", f"The queue is already working on this exact request (#{', #'.join(map(str, same))}).",
+                  "Wait for its reply; a second copy would only be merged into it.", "P011")
+    return rep, facts
+
+
+def cmd_check(a):
+    try:
+        req = json.loads(a.request if a.request != "-" else sys.stdin.read())
+        if not isinstance(req, dict):
+            raise ValueError("the request must be one JSON object")
+    except ValueError as e:
+        rep, facts, req = Report(), {}, {}
+        rep.block("shape", f"The request is not valid JSON: {e}.",
+                  'Send one JSON block: {"branch": ..., "outputs": [...], "cells": ..., "views": [...], "note": ...}')
+    else:
+        rep, facts = review(req, a.thread, do_smoke=not a.no_smoke)
+    verdict = "fix" if rep.blocked else "pass"
+    forward = None
+    if verdict == "pass":
+        forward = {k: v for k, v in req.items() if v not in (None, "", [])}
+        forward["sha"] = facts.get("tip", forward.get("sha"))     # the commit that was reviewed is the one rendered
+        forward["for_thread"] = a.thread
+        forward["reviewed"] = True
+    pitfalls = read_pitfalls()
+    result = {"verdict": verdict, "thread": a.thread, "request": req, "findings": rep.findings, "facts": facts,
+              "forward": forward, "pitfalls_read": len(pitfalls),
+              "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a") as f:
+            f.write(json.dumps({k: result[k] for k in ("at", "verdict", "thread", "request")}
+                               | {"findings": [f for f in rep.findings if f["level"] != "info"],
+                                  "tip": facts.get("tip")}) + "\n")
+    except OSError:
+        pass
+    if a.json:
+        print(json.dumps(result, indent=1)); return
+    print(f"VERDICT: {verdict.upper()}  ({'forward to the render queue' if verdict == 'pass' else 'send back with the fixes below'})")
+    for level in ("block", "warn", "info"):
+        for f in rep.findings:
+            if f["level"] == level:
+                print(f"\n[{level}] {f['check']}" + (f" ({f['pitfall']})" if f["pitfall"] else "") + f": {f['text']}")
+                if f["fix"]:
+                    print(f"    fix: {f['fix']}")
+    if facts.get("changes"):
+        print("\nchanges vs main:")
+        for p, d in facts["changes"].items():
+            print(f"  {p}: {', '.join(d[:12])}{' ...' if len(d) > 12 else ''}")
+    if facts.get("read"):
+        r = facts["read"]
+        print(f"\nread before deciding (since the {r['since_is']}, {r['since']}): {' '.join(r['stat'])}\n  {r['diff_command']}")
+    print(f"\npitfalls to keep in mind ({len(pitfalls)}, from {PITFALLS}):")
+    for p in pitfalls:
+        print(f"  {p['id']} {p['title']}")
+    if forward:
+        print("\nforward to the render-queue thread:\n" + json.dumps(forward, indent=2))
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("check")
+    c.add_argument("--thread", required=True, help="the requesting thread's id")
+    c.add_argument("--request", required=True, help="the request's JSON, or - to read it from stdin")
+    c.add_argument("--no-smoke", action="store_true"); c.add_argument("--json", action="store_true")
+    sub.add_parser("pitfalls")
+    q = sub.add_parser("learn")
+    q.add_argument("--title", required=True); q.add_argument("--spot", required=True)
+    q.add_argument("--fix", required=True); q.add_argument("--pattern"); q.add_argument("--unless")
+    q.add_argument("--seen")
+    a = p.parse_args()
+    globals()["cmd_" + a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()
