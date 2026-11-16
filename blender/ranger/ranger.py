@@ -977,16 +977,17 @@ def mouth_relief(x, z):
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     t = (z - 0.258) / max(0.01, top - 0.258)
     if 0.0 < t < 1.25:
-        d += 0.022 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+        d += 0.016 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
     d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
     across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.024 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
+    d += 0.017 * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
     # the line between the lips, deepest at the corners where the lips tuck in
     # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
     zl = 0.258 + 0.007 * (ax / 0.082) ** 2
-    d -= (0.008 + 0.006 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
-        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.004)    # the corners, lifted
+        # (shallow: deeper, each corner was a pit that the game's high camera saw as a dark wedge)
+        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.002)    # the corners, lifted
         d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
@@ -3550,13 +3551,15 @@ def lip_painting(W=576, H=336):
     zl = 0.258 + 0.007 * (ax / 0.082) ** 2
     bow = 0.006 * np.exp(-((ax - 0.019) / 0.011) ** 2)
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
-    pinch = np.sqrt(np.clip(1 - (ax / 0.092) ** 2, 0, 1))  # each lip tapers to nothing at the corner
-    top = zl + (top - zl) * pinch ** 0.8
-    bot = zl - 0.04 * pinch ** 1.4
+    # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read
+    # too full and the colour ran out past the corners as dark wedges)
+    pinch = np.sqrt(np.clip(1 - (ax / 0.081) ** 2, 0, 1))  # each lip tapers to nothing at the corner
+    top = zl + 0.75 * (top - zl) * pinch ** 0.8
+    bot = zl - 0.028 * pinch ** 1.4
     upper = sm(top + 0.0022, top - 0.0022, w) * sm(zl - 0.002, zl + 0.001, w)
     lower = sm(bot - 0.007, bot + 0.005, w) * sm(zl + 0.002, zl - 0.001, w)
     # (past the corners both edges meet the line, which would leave a thin band of each running on out)
-    upper, lower = upper * sm(0.095, 0.086, ax), lower * sm(0.095, 0.086, ax)
+    upper, lower = upper * sm(0.084, 0.076, ax), lower * sm(0.084, 0.076, ax)
     lip = np.maximum(upper, lower)
     # how far down each lip lies, 0 at the line between them, 1 at its outer edge
     tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
@@ -3573,21 +3576,21 @@ def lip_painting(W=576, H=336):
     col = col + (HI - col) * (0.35 * tub)[..., None]
     # into the line between them and the corners
     inner = np.where(upper > lower, sm(0.35, 0.0, tu), sm(0.3, 0.0, tl))
-    corner = sm(0.05, 0.088, ax)
-    col = col + (DEEP - col) * np.clip(0.4 * inner + 0.45 * corner, 0, 1)[..., None]
+    corner = sm(0.045, 0.078, ax)
+    col = col + (DEEP - col) * np.clip(0.4 * inner + 0.25 * corner, 0, 1)[..., None]
     # the line itself: a dark, soft parting, deepest at the corners
     # (narrow: wider, it read as the lips parted on a dark mouth)
-    part = np.exp(-((w - zl) / 0.0019) ** 2) * sm(0.094, 0.078, ax)
-    col = col + (np.array([84, 42, 42], dtype=np.float32) - col) * np.clip(part * (0.75 + 0.25 * corner), 0, 1)[..., None]
+    part = np.exp(-((w - zl) / 0.0019) ** 2) * sm(0.08, 0.06, ax)
+    col = col + (np.array([84, 42, 42], dtype=np.float32) - col) * np.clip(0.8 * part, 0, 1)[..., None]
     # the fine vertical creases across the lips (fanning a little outward toward the corners)
     # (irregular: their spacing wanders and each one fades in and out, so they read as texture, not stripes)
     cr = np.sin((x + 0.18 * x * np.abs(w - zl) / 0.04) / 0.0055 * np.pi + 5.0 * _fbm2(x * 30, w * 8, 31, 3))
     cr = np.clip(cr, 0, 1) ** 4 * np.clip(0.5 + 1.5 * _fbm2(x * 18, w * 30, 37, 3), 0, 1)
     col = col * (1 - 0.045 * np.clip(cr, 0, 1) * np.maximum(sm(0.1, 0.6, tu), sm(0.1, 0.6, tl)))[..., None]
-    a = lip * (0.88 - 0.4 * corner) + 0.0 * x
-    a = np.maximum(a, part * 0.9)
+    a = lip * (0.88 - 0.5 * corner) + 0.0 * x
+    a = np.maximum(a, part * 0.75)
     # the pale rim of skin just over the upper lip's edge
-    rim = np.exp(-((w - top - 0.0045) / 0.0028) ** 2) * sm(0.075, 0.035, ax) * (1 - upper)
+    rim = np.exp(-((w - top - 0.0045) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
     col = col + (np.array([232, 200, 180], dtype=np.float32) - col) * rim[..., None] * (1 - lip[..., None])
     a = np.maximum(a, 0.28 * rim)
     a *= sm(LIP_X0, LIP_X0 + 0.01, x) * sm(LIP_X1, LIP_X1 - 0.01, x)
