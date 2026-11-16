@@ -301,6 +301,15 @@ def robe_pt(z, phi, lift=0.0):
         x, y = torso_point(32.0, phi, P_OFF + flare, bust=0.0)
     r = math.hypot(x, y) or 1.0
     x, y = x + x / r * extra, y + y / r * extra
+    # (and tucked in behind the forearms hanging at her sides, so the steel vambraces stand clear of it)
+    fz = smoothstep(24.0, 27.0, z) * smoothstep(41.0, 38.0, z)
+    if fz > 0.0:
+        cx, cy_ = x, y
+        for _ in range(20):
+            if min(math.hypot(cx - ax, cy_ - 0.2) for ax in (-SH_X, SH_X)) >= 2.15:
+                break
+            cx, cy_ = cx * 0.97, cy_ * 0.97
+        x, y = lerp(x, cx, fz), lerp(y, cy_, fz)
     if math.cos(phi) > 0.0:
         hw = tab_hw(z)
         w = smoothstep(hw + 1.2, hw - 0.2, abs(x))
@@ -1260,8 +1269,8 @@ def cheek_scar(head):
 # The gambeson's sleeve: a quilted sleeve fitted to the arm (local height from the shoulder joint, radius), a
 # little full above the bracer, which takes it from below the elbow to the wrist.
 SLEEVE_R = [(1.6, 0.3), (1.35, 1.33), (0.85, 1.99), (0.0, 2.2), (-2.0, 2.16), (-5.5, 1.93), (-UPPER, 1.72),
-            (-UPPER - 1.0, 1.8), (-UPPER - 2.2, 1.6), (-UPPER - 5.0, 1.42), (-UPPER - FORE + 0.4, 1.26),
-            (-UPPER - FORE - 0.4, 1.24)]
+            (-UPPER - 1.0, 1.8), (-UPPER - 2.2, 1.5), (-UPPER - 5.0, 1.3), (-UPPER - FORE + 0.4, 1.16),
+            (-UPPER - FORE - 0.4, 1.14)]   # (slim under the vambrace, so it stays inside it as the elbow bends)
 BR_TOP, BR_BOT = -UPPER - 1.6, -UPPER - FORE - 0.55
 BRACER_R = [(BR_TOP, 2.0), (BR_TOP - 0.5, 1.92), (-UPPER - 5.0, 1.72), (-UPPER - FORE + 0.8, 1.54), (BR_BOT, 1.62)]
 BR_STRAPS = (BR_TOP - 1.4, -UPPER - 5.6, -UPPER - FORE + 1.3)
@@ -1516,7 +1525,7 @@ def build():
             r = _profile(VAMB_R, z) + 0.12 * math.exp(-(wrap(phi - s * math.pi / 2) / 0.3) ** 2) + out
             ze = z if edge is None else edge
             dz = 0.9 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(BR_TOP - 1.6, BR_TOP, ze)
-            return -r * math.sin(phi), -r * 0.95 * math.cos(phi), dz
+            return -r * math.sin(phi), -r * 1.0 * math.cos(phi), dz
         bzs = [BR_TOP - 0.2 * i for i in range(int((BR_TOP - BR_BOT) / 0.2) + 1)] + [BR_BOT]
         mesh_obj(f'Bracer.{side}', loft_fn(bzs, vam_pt, n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0.2, SH_Z),
                  skin=fore, solid=0.14)
@@ -1618,7 +1627,9 @@ def build():
             rx, ry, cy = ring_r(rings, z)
             flare = 0.14 * (smoothstep(GT - 0.7, GT, z) + smoothstep(GB + 0.7, GB, z))
             ridge = 0.22 * math.exp(-(wrap(phi) / 0.32) ** 2)
-            ex = 0.3 + flare + out
+            # (shaped to the leg: swelling over the calf behind, drawn in toward its foot)
+            calf = 0.32 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
+            ex = 0.22 + flare + out + calf - 0.1 * smoothstep(-3.5, GB, z)
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
         gz = [GT - (GT - GB) * i / 48 for i in range(49)]
         mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0, kz),
@@ -1719,10 +1730,15 @@ def build():
                  loc=(x - (rx + 0.2) * math.sin(ph), cy - (ry + 0.2) * math.cos(ph), kz + za), skin=w, subdiv=0)
         # the boot below the greave, fitted to the calf and ankle as the reference's: buckled straps up the outside of
         # the calf, a seam stitched up the back, a strap over the instep, and a stacked heel
-        def boot_band(zc, out, h=0.22):
-            return loft_fn([zc + h, zc, zc - h], lambda z, p: (lambda r: (-(r[0] + out) * math.sin(p),
-                                                                          r[2] - (r[1] + out) * math.cos(p)))(ring_r(rings, zc)),
-                           n=48, cap_top=False, cap_bot=False)
+        def boot_band(zc, out, h=0.22, span=1.15, c=None):
+            # (a strap across the outside of the boot only: from the shin round to the back of the calf)
+            rx, ry, cy = ring_r(rings, zc)
+
+            def pt(i, j):
+                ph = (s * math.pi / 2 if c is None else c) + lerp(-span, span, j / 23)
+                z = zc + lerp(h, -h, i / 2)
+                return (-(rx + out) * math.sin(ph), cy - (ry + out) * math.cos(ph), z)
+            return face_out(grid(3, 24, pt), axis_y=0.0)
         for j_, zc in enumerate((GB - 1.0, GB - 2.7, GB - 4.4)):
             mesh_obj(f'Boot strap {j_}.{side}', boot_band(zc, 0.07), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
             ph = s * math.pi / 2
@@ -1737,7 +1753,7 @@ def build():
                 seam.append((-(rx + 0.06) * math.sin(math.pi + dp), cy - (ry + 0.06) * math.cos(math.pi + dp), zz))
         mesh_obj(f'Boot seam.{side}', dots(seam, 0.08), M_STITCH, loc=(x, 0, kz), skin=w, subdiv=0)
         zi = -SHIN - 1.25
-        mesh_obj(f'Instep strap.{side}', boot_band(zi, 0.07, 0.2), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
+        mesh_obj(f'Instep strap.{side}', boot_band(zi, 0.07, 0.2, 1.75, 0.0), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
         rx, ry, cy = ring_r(rings, zi)
         ph = s * math.pi / 2
         mesh_obj(f'Instep buckle.{side}', turned(frame_bm(0.48, 0.44, 0.11, 0.12), ph), M_STEEL,
