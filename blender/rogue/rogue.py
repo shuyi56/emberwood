@@ -42,6 +42,7 @@ female.FACE.update({
 female.EYE_OPEN = 0.68
 female.EYE_TILT = 0.105
 female.EARS = True       # (her hair is drawn back into the tail, so they show)
+female.UNDER_JAW_SHADE = (0.0, 1.6, 0.75)   # (spread over the whole soft turn under her jaw: kept to the edge, it drew a line there)
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)

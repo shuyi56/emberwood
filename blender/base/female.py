@@ -1035,7 +1035,9 @@ def skin_tones():
                              + 0.8 * _g(u, w, 0, 0.35, 0.05, 0.045) + 0.35 * _g(u, w, 0, 0.085, 0.07, 0.05)
                              + 0.3 * _g(u, w, 0, 0.66, 0.12, 0.05))
             cold = front * 0.8 * (_g(u, w, -0.14, 0.47, 0.065, 0.025) + _g(u, w, 0.14, 0.47, 0.065, 0.025))
-            cold += np.clip(-nr[:, 2] - 0.25, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * 1.1   # under the jaw
+            # under the jaw (UNDER_JAW_SHADE: where it starts on the turn under, over how much of it, and how cool)
+            j0, jr, ja = UNDER_JAW_SHADE
+            cold += np.clip((-nr[:, 2] - j0) / jr, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * ja
             cold += np.clip((0.02 - w) / 0.1, 0, 1) * 0.7        # and down the throat, in the head's shade
             gloss = front * (_g(u, w, 0, 0.43, 0.04, 0.15) + 0.7 * _g(u, w, 0, 0.085, 0.06, 0.05)
                              + 0.5 * _g(u, w, 0, 0.66, 0.15, 0.06))
@@ -1233,6 +1235,10 @@ GAIT, ARM_SWING = 1.0, 0.2
 # The face's shape, as the face creator's sliders (/mnt/project-files/face-creator): multipliers on face_relief's,
 # mouth_relief's and jaw_relief's forms, and offsets on the head's width and a few features' heights. These defaults
 # are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
+# the cool shade on the underside of the jaw (skin_tones): it begins where the surface turns down past j0 (the
+# normal's downward part), reaches full over jr more of the turn, and goes ja cool. A figure with a softly turned jaw
+# spreads it, so it does not draw a line along the jaw's edge.
+UNDER_JAW_SHADE = (0.25, 1.0, 1.1)
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
 FACE = {
     'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'jawUnder': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
