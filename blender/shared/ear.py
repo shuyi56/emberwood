@@ -26,7 +26,7 @@ import numpy as np
 EAR_TOP, EAR_BOTTOM = 0.60, 0.365     # the top of the helix just under the brow, the lobe at the nose's base
 EAR_SU, EAR_SV = 0.92, 0.78            # the layout below is drawn large; this is its size on the head (a compact ear)
 EAR_TILT = math.radians(15)            # the long axis leans back
-EAR_FLARE = math.radians(20)           # how far the back edge stands off the skull
+EAR_FLARE = math.radians(10)           # how far the back edge stands off the skull
 EAR_Y = 0.035                          # where the opening sits front to back (head heights; 0 is the head's middle)
 
 # the outline, round from the top of the front edge (where the helix leaves the head), back over the top, down
@@ -91,13 +91,16 @@ def ear_relief(u, v, edge, outline_t):
     rimmed = (1 - front) * (1 - lobe)
     h = np.zeros_like(u)
     h += 0.016 * _g(edge - 0.010, 0.010) * rimmed                    # the helix's rolled rim
-    h -= 0.008 * _g(edge - 0.026, 0.009) * rimmed                    # the scapha, just inside it
+    h -= 0.006 * _g(edge - 0.028, 0.012) * rimmed                    # the scapha, just inside it
     a = _seg_dist(P, *_poly(ANTIHELIX))
     c1 = _seg_dist(P, *_poly(CRUS_UPPER))
     c2 = _seg_dist(P, *_poly(CRUS_LOWER))
-    h += 0.008 * _g(np.minimum(a, np.minimum(c1 * 1.15, c2 * 1.3)), 0.016) * (1 - lobe)
+    # (the crura soft and low, fading up into the rim: drawn as firm as the stem they read as grooves cut round
+    # separate lumps)
+    h += 0.007 * _g(a, 0.017) * (1 - lobe)
+    h += 0.0045 * _g(np.minimum(c1, c2 * 1.2), 0.016) * (1 - lobe)
     fossa = _g(np.hypot(u - 0.070, v - 0.088), 0.018)
-    h -= 0.005 * fossa                                                # the triangular fossa between the crura
+    h -= 0.003 * fossa                                                # the triangular fossa between the crura
     concha = _g(np.hypot((u - 0.040) / 1.1, (v + 0.02) / 1.25), 0.042)
     h -= 0.024 * concha * (1 - lobe)                                  # the bowl
     h -= 0.012 * _g(np.hypot(u - 0.006, v + 0.005), 0.012)            # the opening, deep in the bowl
@@ -135,12 +138,12 @@ def ear_grids(head_point, H, NT=220, NF=48, NB=16):
             # the flap stands off the skull toward its back edge, the rim rounding over onto the rear face
             # (and the whole flap a little proud of it, back from where the front edge joins the cheek, so the bowl
             # stays a bowl and only the opening goes into the head)
-            w_front = np.maximum(0.0, u + 0.01) * math.tan(EAR_FLARE) + h + 0.004 + 0.016 * _sm(-0.015, 0.04, u)
+            w_front = np.maximum(0.0, u + 0.01) * math.tan(EAR_FLARE) + h + 0.004 + 0.011 * _sm(-0.015, 0.04, u)
             ub, vb = C[0] + sb * (O[0] - C[0]), C[1] + sb * (O[1] - C[1])
             thick = 0.010 + 0.010 * _sm(-0.10, -0.15, vb)     # (the lobe is thicker)
             # (the back of the flap comes in to the skull in a smooth fold over the concha's bulge, no gap)
-            w_back = ((np.maximum(0.0, ub + 0.01) * math.tan(EAR_FLARE) + 0.016 - thick) * sb ** 0.6
-                      - 0.012 * (1 - sb) ** 2)
+            w_back = ((np.maximum(0.0, ub + 0.01) * math.tan(EAR_FLARE) + 0.011 - thick) * sb ** 0.6
+                      - 0.004 * (1 - sb) ** 2)
             uu, vv, ww = np.concatenate([u, ub]), np.concatenate([v, vb]), np.concatenate([w_front, w_back])
             # the ear's plane, tilted back about the opening, set on the head's side
             y = EAR_Y + EAR_SU * uu * ct + EAR_SV * vv * st
@@ -168,7 +171,7 @@ def ear_tones(e):
     rim = np.exp(-(e['edge'] / 0.02) ** 2) * (1 - e['rear'])
     # (fading to the head's own colour where the ear joins it, so no seam shows)
     flush = np.clip(0.18 + 0.35 * rim + 0.25 * e['lobe'], 0, 1) * (1 - e['attach']) * (1 - _sm(0.4, 1.0, e['rear']))
-    shade = (np.clip(-e['h'] / 0.03, 0, 1) + 0.6 * _sm(0.5, 1.0, e['rear'])) * (1 - 0.7 * e['attach'])
+    shade = (np.clip(-e['h'] / 0.03, 0, 1) + 0.2 * _sm(0.6, 1.0, e['rear'])) * (1 - 0.7 * e['attach'])
     return flush, np.clip(shade, 0, 1)
 
 

@@ -1245,7 +1245,9 @@ def face_relief(x, z):
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
         h = (0.012 + 0.04 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.05 * math.exp(-((0.36 - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
+        # (turning under softly, so no hard shadow under the tip, but tucked in above the lip: drawn out further,
+        # the underside ran on down into the philtrum as a ridge)
+        h = 0.05 * math.exp(-((0.36 - z) / 0.022) ** 2)
     w = 0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - 0.37) / 0.06)
     d += h * math.exp(-(x / (1.15 * w)) ** 2)      # (a rounded ridge: steep sides cast a hard shadow line from above)
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
@@ -1276,11 +1278,14 @@ def mouth_relief(x, z):
     # the line between the lips, deepest at the corners where the lips tuck in
     # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
     zl = 0.258 + 0.007 * (ax / 0.082) ** 2
-    d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    # (it ends where the lips do: run on past them, it drew a dark line out beyond the lips' colour)
+    d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.079) ** 6)
     for sx in (-1, 1):
         # (shallow: deeper, each corner was a pit that the game's high camera saw as a dark wedge)
-        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.002)    # the corners, lifted
-        d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
+        d += gauss(x, z, sx * 0.079, 0.262, 0.012, 0.011, -0.002)    # the corners, lifted
+        # philtrum ridges: low and soft, rising from the bow's peaks and fading out well under the nose (taller,
+        # with the nose's underside they ran together into one ridge from the tip down into the lip)
+        d += gauss(x, z, sx * 0.02, 0.31, 0.009, 0.018, 0.0035)
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
         for k in range(6):
@@ -1288,6 +1293,7 @@ def mouth_relief(x, z):
             px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
+    d += gauss(x, z, 0, 0.312, 0.012, 0.02, -0.0015)       # the philtrum's groove between them
     d += gauss(x, z, 0, 0.385, 0.028, 0.024, 0.006)        # the ball of the nose's tip
     d += gauss(x, z, 0, 0.19, 0.05, 0.014, -0.008)         # the crease under the lower lip
     return d
