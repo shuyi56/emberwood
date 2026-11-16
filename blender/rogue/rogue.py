@@ -326,8 +326,12 @@ FUSE = True       # melt the hair's pieces into one (views.py --set FUSE=False s
 # a little higher at the temples, down in front of the ears, behind them, and across the nape)
 # (combed back over the ears, which the base head does not model: down past where they would be, so the side of
 # the head behind the jaw does not show as bare skin)
-HAIRLINE = smooth_curve([(0.0, 0.53), (0.3, 0.5), (0.7, 0.34), (1.0, 0.1), (1.25, -0.2), (1.5, -0.52), (1.8, -0.76),
-                         (2.1, -0.82), (2.6, -0.82), (math.pi, -0.8)])
+HAIRLINE = smooth_curve([(0.0, 0.47), (0.2, 0.5), (0.48, 0.57), (0.72, 0.36), (1.0, 0.08), (1.25, -0.2), (1.5, -0.52),
+                         (1.8, -0.76), (2.1, -0.82), (2.6, -0.82), (math.pi, -0.8)])
+# (a natural hairline, not a rim: a little lower at the middle of the brow, receding at the temple corners, then
+# down in front of the ear. The hair is parted off-centre, at PART round from the front, and swept back from it:
+# the larger side rises a little over the parting as it turns back, which is what tells pulled-back hair from a cap)
+PART = -0.34
 
 
 def _dir(th, el):
@@ -396,19 +400,30 @@ def hair_cap(head_tree):
         row, wr = [], []
         for k in range(NU):
             th = 2 * math.pi * k / NU
-            el0 = HAIRLINE(abs(wrap(th)))
+            dp_ = wrap(th - PART)
+            near_part = math.exp(-(dp_ / 0.06) ** 2)
+            el0 = HAIRLINE(abs(wrap(th))) + 0.04 * near_part
             el = lerp(el0, 1.5, t)
             d = _dir(th, el)
             rs = skull(d)
-            # thickness: nothing at the hairline, easing up over the first finger's breadth, fuller toward the
-            # crown; the gathered mound round the tie
-            edge = smoothstep(0.0, 0.14, t)
+            # thickness: nothing at the hairline, easing up over a finger's breadth so the edge feathers onto the
+            # skin rather than standing off it as a rim, fuller toward the crown; the gathered mound round the tie
+            edge = smoothstep(0.0, 0.2, t)
             ang = math.acos(max(-1.0, min(1.0, d.dot(A))))
             mound = MOUND * math.exp(-(ang / 0.36) ** 2)
-            combed = 0.04 * math.sin(5.0 * cap_flow(HC + d)[0] / 3.6 + 0.6) * edge * (1.0 - mound)
-            r = rs + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed
+            front = 1.0 - smoothstep(0.15, 0.55, t)
+            # the parting: a narrow groove back from the hairline, and the swell of the larger side lifting off it
+            part = -0.13 * near_part * front * edge
+            big = smoothstep(0.0, 0.12, dp_) * math.exp(-((dp_ - 0.45) / 0.6) ** 2)
+            swell = 0.16 * big * front * smoothstep(0.02, 0.25, t)
+            # combed sections running back to the tie: a few broad ones and finer grooves between, strongest at the
+            # front and sides where the comb has drawn them, easing out into the mound
+            fa = cap_flow(HC + d)[0] / 3.6
+            combed = (0.055 * math.sin(6.0 * fa + 0.6) + 0.03 * math.sin(15.0 * fa + 1.3)
+                      + 0.015 * math.sin(31.0 * fa + 0.2)) * edge * (1.0 - mound / MOUND)
+            r = rs + 0.02 + edge * (0.12 + 0.12 * max(0.0, d.z)) + mound * edge + combed + part + swell
             row.append(bm.verts.new(HC + d * r))
-            wr.append(0.25 + 0.75 * edge)
+            wr.append(edge)
         rows.append(row)
         weights.append(wr)
     pole = bm.verts.new(HC + Vector((0, 0, 1)) * (skull(Vector((0, 0, 1))) + 0.26))
@@ -475,8 +490,100 @@ def tail_radius(s):
     return r, 0.62 * r
 
 
+# The tail is not one tube: it is a bundle of clumps over a slimmer body, each clump its own lock with its own tone,
+# twisting a little round the tail as it falls, and parting from the others toward the end, where each tapers to
+# its own point at its own length. (clump: angle round the tail, how far out from its middle, size, length, tone)
+CLUMPS = [(0.15, 0.52, 1.0, 1.0, 1.0), (0.95, 0.56, 0.9, 0.93, 0.84), (1.75, 0.5, 1.05, 0.97, 1.12),
+          (2.45, 0.55, 0.85, 0.88, 0.92), (3.2, 0.52, 1.0, 0.99, 1.06), (3.95, 0.56, 0.9, 0.91, 0.86),
+          (4.7, 0.5, 1.05, 0.96, 1.14), (5.5, 0.55, 0.9, 0.9, 0.95), (0.0, 0.0, 0.95, 0.94, 1.02)]
+
+
+def tail_clumps(head, path, lens):
+    """The tail's clumps, one mesh (so each shades the creases between it and the next), from the tie down."""
+    from mathutils import noise
+    N = len(path)
+    k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
+    n = 12
+    bm = bmesh.new()
+    rest, tone = [], []
+    L0 = math.pi * 4.0
+    for c, (a0, f0, size, end, tn) in enumerate(CLUMPS):
+        i_end = int(end * (N - 1))
+        ids = list(range(k_tie - 1, i_end + 1))
+        rings = []
+        for j, i in enumerate(ids):
+            s_ = i / (N - 1)
+            u = (i - ids[0]) / max(1, len(ids) - 1)          # along this clump, 0 at the tie to 1 at its point
+            r, rd = tail_radius(s_)
+            t = (path[min(i + 1, N - 1)] - path[max(i - 1, 0)]).normalized()
+            ax = Vector((1, 0, 0))
+            ax = (ax - t * ax.dot(t)).normalized()
+            dp = t.cross(ax).normalized()
+            # a slow twist round the tail; toward the end the clumps part and wander, each its own way
+            th = a0 + 0.7 * s_
+            part = smoothstep(0.6, 1.0, s_)
+            f = f0 + (0.28 + 0.1 * math.sin(3.1 * c)) * part
+            wob = 0.35 * part * noise.noise(Vector((c * 3.7, s_ * 4.0, 0.5)))
+            ctr = path[i] + ax * (r * f * math.cos(th) + wob) + dp * (rd * f * math.sin(th))
+            # its size: bound in at the tie, full through the fall, tapering to its own point
+            cr = 0.46 * size * smoothstep(0.0, 0.06, u + 0.02) * (1.0 - u) ** 0.35 + 0.02
+            if f0 == 0.0:
+                cr *= 0.85
+            rx, ry = r * cr, rd * cr * 1.1
+            ring = []
+            for k in range(n):
+                q = 2 * math.pi * k / n
+                ring.append(bm.verts.new(ctr + ax * (rx * math.cos(q)) + dp * (ry * math.sin(q))))
+                rest.append((c * 9.0 + q * 0.8, 0.0, -0.3 * (L0 + lens[i])))
+                tone.append(tn)
+            rings.append(ring)
+        for ra, rb in zip(rings, rings[1:]):
+            for k in range(n):
+                bm.faces.new((ra[k], ra[(k + 1) % n], rb[(k + 1) % n], rb[k]))
+        for ring, i in ((rings[0], ids[0]), (rings[-1], ids[-1])):
+            cv = bm.verts.new(sum((v.co for v in ring), Vector()) / n)
+            rest.append(rest[-1])
+            tone.append(tn)
+            for k in range(n):
+                bm.faces.new((ring[k], ring[(k + 1) % n], cv))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    o = mesh_obj('Hair clumps', bm, M_HAIR, head, subdiv=1)
+    o.data.attributes['rest'].data.foreach_set('vector', [x for r_ in rest for x in r_])
+    strand_colours(o)
+    sc = o.data.color_attributes['strands']
+    cols = [0.0] * (4 * len(sc.data))
+    sc.data.foreach_get('color', cols)
+    for v_, tn in enumerate(tone):
+        for ch in range(3):
+            cols[4 * v_ + ch] *= tn
+    sc.data.foreach_set('color', cols)
+    return o
+
+
+def temple_wisp(head_tree, side):
+    """A loose lock at the temple: it slips out of the combed-back hair at the temple corner and falls down in front
+    of the ear to the jaw, curling forward at its end; flat, lying just off the side of the face."""
+    def on(th, el, lift):
+        d = _dir(th, el)
+        hit = head_tree.ray_cast(HC + d * 20.0, -d, 20.0)
+        r = (hit[0] - HC).length if hit[0] is not None else 4.0
+        return HC + d * (r + lift)
+    th = lambda x: side * x   # noqa: E731
+    pts = [on(th(0.62), 0.62, 0.1), on(th(0.7), 0.38, 0.2), on(th(0.86), 0.05, 0.22), on(th(0.92), -0.32, 0.2),
+           on(th(0.86), -0.62, 0.18), on(th(0.74), -0.8, 0.16)]
+    path = catmull(pts, 40)
+    n_ = len(path)
+
+    def rad(i, a):
+        u = i / (n_ - 1)
+        w = 0.36 * (1.0 - u) ** 0.6 + 0.03
+        return w * 0.4, w
+    return sweep(path, rad, n=12)
+
+
 def build_hair(head, head_tree):
-    """The cap, the ponytail and its end locks, fused into one surface (as the ranger's hair is), then the tie."""
+    """The cap and the tail's body fused into one surface (as the ranger's hair is), the tail's clumps over it, the
+    loose wisps at the temples, then the tie."""
     from mathutils.kdtree import KDTree
     cap, w = hair_cap(head_tree)
     cap_o = mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.42, rest=lambda co: Vector((*cap_flow(co), 0.0)).xzy)
@@ -484,7 +591,7 @@ def build_hair(head, head_tree):
     for i_, w_ in enumerate(w):
         vg.add([i_], w_, 'REPLACE')
     cap_o.modifiers['thickness'].vertex_group = 'thick'
-    cap_o.modifiers['thickness'].thickness_vertex_group = 0.3
+    cap_o.modifiers['thickness'].thickness_vertex_group = 0.06
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     tree = body_tree(dg, ('Head shape', 'Hair cap'), Vector((0, 0, HEAD_Z)))
@@ -498,27 +605,17 @@ def build_hair(head, head_tree):
     N = len(path)
 
     def tail_r(i, a):
-        s = i / (N - 1)
-        r, rd = tail_radius(s)
-        # a few broad clumps, twisting a little down the tail and parting deeper toward the end
-        clump = 1.0 + (0.05 + 0.16 * s) * math.cos(3 * a + 1.6 * s + 0.4) + 0.04 * math.cos(7 * a + 0.5)
-        return r * clump, rd * clump
+        # the tail's body, under its clumps: a little slimmer than the tail, so the clumps make its outline
+        r, rd = tail_radius(i / (N - 1))
+        return r * 0.78, rd * 0.72
     mesh_obj('Hair tail', sweep(path, tail_r, n=28), M_HAIR, head, subdiv=0)
-    # the end breaks into locks: two finer ones peel off either side, each to its own point
-    names = ['Hair cap', 'Hair tail']
-    for j, (k0, side, reach, drop) in enumerate(((0.68, 1, 0.9, 1.1), (0.74, -1, 0.75, 0.4))):
-        i0 = int(k0 * (N - 1))
-        p0 = path[i0]
-        end = path[-1] + Vector((side * reach, -0.15, drop))
-        mid_ = p0.lerp(end, 0.5) + Vector((side * 0.35, 0.1, 0.0))
-        lp = catmull([p0, mid_, end], 30)
-        mesh_obj(f'Hair lock {j}', sweep(lp, lambda i, a, n_=len(lp): ((0.62 * (1 - i / (n_ - 1)) ** 0.8 + 0.04),
-                                                                        0.5 * (1 - i / (n_ - 1)) ** 0.8 + 0.04), n=16),
-                 M_HAIR, head, subdiv=0)
-        names.append(f'Hair lock {j}')
     if not FUSE:          # (for checking the pieces before they are melted together)
         return None
-    hair = fuse_parts(head, names)
+    hair = fuse_parts(head, ['Hair cap', 'Hair tail'])
+    tail_clumps(head, path, lens)
+    # (the wisps stay their own pieces: their fine ends are thinner than the fusing grid and would melt away)
+    for side in (1, -1):
+        strand_colours(mesh_obj(f'Hair wisp {side}', temple_wisp(head_tree, side), M_HAIR, head, rest=hair_rest))
     # the tie: a leather thong wound round the root of the tail, in three turns
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
     seg = path[max(0, k_tie - 4):k_tie + 6]
