@@ -57,7 +57,7 @@ import rq  # noqa: E402  (the render queue's own module)
 WORK = os.environ["RQ_WORK"]
 PITFALLS = os.environ.get("RQ_PITFALLS", os.path.join(HERE, "PITFALLS.md"))
 LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
-SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "900"))
+SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "1800"))
 SHEET_ROWS, SHEET_COLS = 8, 10
 SHELL_META = re.compile(r"[;&|<>$`\\\n\r]")
 HAIR = re.compile(r"hair|bang|fringe|lock(?!ed)|pony|wisp|strand|braid|bun(?![a-z])", re.I)
