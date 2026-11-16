@@ -34,7 +34,7 @@ import female  # noqa: E402
 # high, sharp cheekbones over a hollow, a narrower jaw with a firmer edge, a neat pointed chin, a finer nose and a
 # thinner upper lip whose corners lift into a half-smile; the eyes a touch narrower and more tilted, a sly look.
 female.FACE.update({
-    'jawWidth': -0.05, 'jawDef': 2.0, 'jawSharp': 1.6, 'jawAngle': 0.8, 'chinProj': 1.2, 'chinWidth': 0.88,
+    'jawWidth': -0.07, 'jawDef': 1.5, 'jawSharp': 0.6, 'jawAngle': 0.3, 'chinProj': 1.2, 'chinWidth': 0.88,
     'cheekWidth': -0.02, 'cheekbones': 1.6, 'cbHeight': 0.008, 'apples': 0.8, 'cheekFull': 0.55,
     'noseProj': 1.05, 'noseWidth': 0.92, 'tipBall': 0.8, 'nostrils': 0.85,
     'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 0.85, 'lipLower': 0.95, 'smile': 1.6,
