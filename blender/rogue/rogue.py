@@ -324,8 +324,10 @@ FUSE = True       # melt the hair's pieces into one (views.py --set FUSE=False s
 
 # the hairline: its height round the head, as an elevation seen from HC (|angle| from the front: the forehead,
 # a little higher at the temples, down in front of the ears, behind them, and across the nape)
-HAIRLINE = smooth_curve([(0.0, 0.55), (0.38, 0.5), (0.75, 0.3), (1.1, 0.0), (1.45, -0.36), (1.75, -0.56),
-                         (2.05, -0.62), (2.5, -0.7), (math.pi, -0.72)])
+# (combed back over the ears, which the base head does not model: down past where they would be, so the side of
+# the head behind the jaw does not show as bare skin)
+HAIRLINE = smooth_curve([(0.0, 0.53), (0.3, 0.5), (0.7, 0.34), (1.0, 0.1), (1.25, -0.2), (1.5, -0.52), (1.8, -0.76),
+                         (2.1, -0.82), (2.6, -0.82), (math.pi, -0.8)])
 
 
 def _dir(th, el):
@@ -435,7 +437,7 @@ def ponytail_path(tree):
     into them, so the line is eased and never let in closer than the hair's own thickness."""
     A = tie_axis()
     T = TIE['point']
-    knots = [T - A * 0.5, T + A * 0.7, T + A * 1.6 + Vector((0, 0.3, -0.8)), Vector((0.0, T.y + 1.1, T.z - 3.4)),
+    knots = [T - A * 0.5, T + A * 0.7, T + A * 1.2 + Vector((0, 0.55, -1.2)), Vector((0.0, T.y + 1.1, T.z - 3.4)),
              Vector((0.05, 4.4, 0.3)), Vector((0.2, 4.4, -4.2)), Vector((0.35, 4.2, -8.6)), Vector((0.5, 4.0, -12.4))]
     path = catmull(knots, 110)
     N = len(path)
