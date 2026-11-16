@@ -1443,11 +1443,15 @@ void main() {
   // timeline holds a walk cycle (frames 1-25, at 24 fps) and the idle stance (frame 40): the walk's phase
   // follows the hero's stride, so the feet keep pace with the ground they cover.
   const MODEL_SCALE = 2.2 / 80 * 1.2, WALK_SECONDS = 24 / 24, IDLE_SECONDS = 39 / 24;
-  // The ground one walk cycle of a model covers: two steps, the planted foot carried back 27.0 model units in each
-  // (the stance of the world model's gait, with the pelvis's turn; see the walk cycle in blender/ranger/ranger.py),
-  // let out by 30% so the cadence stays a brisk walk at the party's pace rather than a scurry. A model's walk phase
-  // advances with the ground it covers, so its legs keep up with it.
-  const WORLD_CYCLE = 2 * 27.0 * MODEL_SCALE * 1.3;
+  // The ground one walk cycle of a model covers: STRIDE in blender/ranger/ranger.py (46 model units, two steps),
+  // the distance the planted foot is carried back under the body while it bears weight. A model's walk phase
+  // advances with the ground it covers, exactly, so its planted feet stay put on the ground.
+  const WORLD_CYCLE = 46.0 * MODEL_SCALE;
+  // The party's pace: a brisk walk for figures this tall (about a body height a second, near 2.8 steps a second
+  // for the ranger). Followers keep a little under it, and close a long gap a little faster.
+  const PACE = 2.2, FOLLOW_PACE = 2.1, CATCH_UP_PACE = 2.7;
+  // a card (painted sprite) steps through its 8 walk frames once every SPRITE_CYCLE of ground
+  const SPRITE_CYCLE = 2.5;
   const gltf = new GLTFLoader();
   function loadModel(file, g) {
     const anim = { mixer: null, actions: [] };
@@ -1560,8 +1564,8 @@ void main() {
     leader.moving = false;
     if (order) {
       const wp = order.pts[order.i], lastLeg = order.i === order.pts.length - 1;
-      const intended = Math.min(5.6 * dt, Math.hypot(wp.x - leader.x, wp.z - leader.z));
-      const moved = stepHero(leader, wp.x, wp.z, 5.6, dt);
+      const intended = Math.min(PACE * dt, Math.hypot(wp.x - leader.x, wp.z - leader.z));
+      const moved = stepHero(leader, wp.x, wp.z, PACE, dt);
       if (moved < 0) { order = null; say('The water is too deep to cross here.'); }
       else {
         leader.moving = true;
@@ -1582,12 +1586,12 @@ void main() {
       if (idx < 0) { f.moving = false; return; }
       const spot = trail[idx];
       const gap = Math.hypot(spot.x - f.x, spot.z - f.z);
-      f.moving = gap > 0.2 && stepHero(f, spot.x, spot.z, gap > 3 ? 6.6 : 5.4, dt) > 0.0005;
+      f.moving = gap > 0.2 && stepHero(f, spot.x, spot.z, gap > 3 ? CATCH_UP_PACE : FOLLOW_PACE, dt) > 0.0005;
     });
     [leader].concat(followers).forEach((h) => {
       const ran = Math.hypot(h.x - (h.lastX ?? h.x), h.z - (h.lastZ ?? h.z));
       h.lastX = h.x; h.lastZ = h.z;
-      if (h.moving) h.stride += h.anim ? ran / WORLD_CYCLE * Math.PI * 2 : dt * 14;
+      if (h.moving) h.stride += ran / (h.anim ? WORLD_CYCLE : SPRITE_CYCLE) * Math.PI * 2;
       h.g.position.set(h.x, height(h.x, h.z), h.z);
       // pick one of eight facings from the heading relative to the camera; a margin keeps it from flickering
       let rel = h.g.rotation.y - cam.yaw;
@@ -1817,6 +1821,67 @@ void main() {
     say(cam.follow ? 'Camera is following the party.' : 'Camera is free. Pan with W A S D.');
   });
 
+  // ---------- Capture hook (only with ?capture in the URL) ----------
+  // tools/world-capture/capture.mjs drives the page through this: it places the leader, points the camera,
+  // sends her walking in a straight line and steps the clock itself, so frames are evenly spaced in game time.
+  if (new URLSearchParams(location.search).has('capture')) {
+    let lockCam = false;
+    window.__ember = {
+      place(x, z, heading) {
+        order = null; marker.visible = false;
+        leader.x = x; leader.z = z; leader.lastX = x; leader.lastZ = z;
+        if (heading !== undefined) leader.g.rotation.y = heading;
+        trail = [{ x, z }];
+        leader.g.position.set(x, height(x, z), z);
+        return { y: height(x, z), clear: !obstacles.some((o) => Math.hypot(o.x - x, o.z - z) < o.r + 1.5) };
+      },
+      // the nearest point to (x0, z0) from which a straight walk of `len` along `heading` stays on dry, gentle
+      // ground well away from every obstacle (trees, rocks, the camp), so nothing stands in the shot
+      findSpot(x0, z0, heading, len, clear = 4) {
+        const sx = Math.sin(heading), sz = Math.cos(heading);
+        const ok = (x, z) => {
+          for (let u = -2; u <= len + 2; u += 0.5) {
+            const px = x + sx * u, pz = z + sz * u;
+            if (Math.abs(px) > LIMIT - 4 || Math.abs(pz) > LIMIT - 4) return false;
+            if (height(px, pz) < WATER + 0.6 || tooSteep(px, pz)) return false;
+            if (Math.abs(height(px, pz) - height(x, z)) > 1.2) return false;
+            if (obstacles.some((o) => Math.hypot(o.x - px, o.z - pz) < o.r + clear)) return false;
+          }
+          return true;
+        };
+        for (let r = 0; r < 70; r += 1) {
+          for (let k = 0; k < Math.max(1, r * 6); k++) {
+            const a = k / Math.max(1, r * 6) * Math.PI * 2, x = x0 + Math.cos(a) * r, z = z0 + Math.sin(a) * r;
+            if (ok(x, z)) return { x, z };
+          }
+        }
+        return null;
+      },
+      // walk `len` along world heading `heading` (radians, as rotation.y: 0 is +z)
+      walk(heading, len) {
+        const end = { x: leader.x + Math.sin(heading) * len, z: leader.z + Math.cos(heading) * len };
+        leader.g.rotation.y = heading;
+        order = { pts: [end], i: 0 }; stuck = 0;
+      },
+      camera(yaw, dist, lock) {
+        cam.yaw = cam.yawGoal = yaw;
+        cam.dist = cam.distGoal = clamp(dist, MIN_DIST, MAX_DIST);
+        lockCam = !!lock;
+        setFollow(true);
+        updateCamera(0, true);
+      },
+      // where the leader stands on screen (CSS pixels), to centre a clip on her
+      leaderOnScreen() {
+        const p = new THREE.Vector3(leader.x, height(leader.x, leader.z) + 1.3, leader.z).project(camera);
+        const r = canvas.getBoundingClientRect();
+        return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+      },
+      state: () => ({ x: leader.x, z: leader.z, moving: leader.moving, stride: leader.stride, yaw: cam.yaw, dist: cam.dist, loaded: !!(leader.anim && leader.anim.mixer) }),
+      skipRender: false,
+      afterUpdate() { if (lockCam) updateCamera(0, true); },
+    };
+  }
+
   // ---------- Loop ----------
   const altEl = document.getElementById('alt');
   let last = performance.now(), tick = 0;
@@ -1828,6 +1893,7 @@ void main() {
 
     updateParty(dt, now);
     updateCamera(dt, false);
+    if (window.__ember) window.__ember.afterUpdate();
 
     // the shadow-casting light travels with the camera focus
     sun.position.copy(cam.focus).addScaledVector(sunDir, 80);
@@ -1846,7 +1912,7 @@ void main() {
       if (altEl.textContent !== alt) altEl.textContent = alt;
     }
 
-    renderer.render(scene, camera);
+    if (!(window.__ember && window.__ember.skipRender)) renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
