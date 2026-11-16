@@ -569,9 +569,9 @@ def tail_clumps(head, path, lens):
 # strands at its edges and tip instead of reading as one thick strand. (th, el, lift) knots for each lock, its
 # root tucked up under the hair; th is mirrored for her other side.
 SIDE_LOCKS = [
-    ([(0.6, 0.6, 0.02), (0.68, 0.32, 0.07), (0.77, 0.02, 0.08), (0.8, -0.3, 0.07), (0.77, -0.52, 0.06)], 0.42),
-    ([(0.7, 0.52, 0.02), (0.8, 0.24, 0.08), (0.88, -0.08, 0.09), (0.9, -0.42, 0.08), (0.86, -0.7, 0.07)], 0.48),
-    ([(0.8, 0.44, 0.02), (0.9, 0.16, 0.08), (0.97, -0.12, 0.08), (0.98, -0.36, 0.07)], 0.36),
+    ([(0.58, 0.6, 0.02), (0.67, 0.32, 0.07), (0.76, 0.02, 0.08), (0.79, -0.3, 0.07), (0.76, -0.52, 0.06)], 0.62),
+    ([(0.68, 0.54, 0.02), (0.78, 0.26, 0.09), (0.86, -0.06, 0.1), (0.89, -0.4, 0.09), (0.85, -0.68, 0.08)], 0.72),
+    ([(0.78, 0.46, 0.02), (0.88, 0.18, 0.08), (0.95, -0.1, 0.08), (0.97, -0.36, 0.07)], 0.58),
 ]
 LOCK_TEX = {}
 
@@ -598,7 +598,7 @@ def lock_image(W=256, H=1024):
         end = min(0.99, (0.45 + 0.55 * mid ** 0.6) * (0.85 + 0.2 * rng.random()))
         tone = rng.random()
         wid = (2.0 + 2.5 * rng.random()) * SS
-        val = 255 * (0.7 + 0.3 * rng.random())
+        val = 255 * (0.45 + 0.4 * rng.random()) * (0.55 + 0.45 * mid)
         ph, fr = rng.random() * 6.28, 3.0 + 3.0 * rng.random()
         steps = 40
         prev = None
@@ -609,8 +609,10 @@ def lock_image(W=256, H=1024):
             u = u0 + (0.5 - u0) * 0.25 * v + 0.012 * math.sin(fr * v * 6.28 + ph)
             q = (u * W * SS, v * H * SS)
             if prev is not None:
-                c = DARK + (MID - DARK) * min(1.0, 0.6 + 1.0 * t) * (0.8 + 0.5 * tone)
-                c = c + (LIGHT - c) * 0.5 * math.exp(-((t - 0.55) / 0.22) ** 2) * tone
+                # (the tones of the hair it comes from: dark only at the root, under the hair's edge)
+                base = MID + (LIGHT - MID) * (0.15 + 0.55 * tone)
+                c = DARK + (base - DARK) * min(1.0, 0.25 + 2.5 * t)
+                c = c + (LIGHT - c) * 0.4 * math.exp(-((t - 0.55) / 0.22) ** 2) * tone
                 w = max(1, int(wid * (1.0 - 0.7 * t ** 2)))
                 dc.line([prev, q], fill=255, width=w)
                 da.line([prev, q], fill=int(val * (1.0 - 0.5 * t ** 3)), width=w)
@@ -1140,13 +1142,17 @@ def build():
     root, body, pelvis, chest = begin_figure('Rogue')
 
     # ---- torso: the body in its linen shirt; the leggings' seat over the hips, under the bodice
-    torso_mesh('Shirt', M_SHIRT, body)
+    # (the shirt ends under the leggings' seat: lower, it showed through where the seat narrows into the crotch)
+    torso_mesh('Shirt', M_SHIRT, body, zs=[53.0 - 0.5 * i for i in range(37)])
     # (below the hips it narrows into the crotch, a rounded gusset between the tops of the legs, so the legs grow
     # out of it rather than meeting a flat underside at a corner)
     def seat_pt(z, p):
         x, y = torso_point(z, p, 0.12, bust=0.0)
-        k = smoothstep(29.6, 26.9, z)
-        return x * (1.0 - 0.8 * k ** 0.8), y * (1.0 - 0.38 * k)
+        # (from the hip joint down it draws in, both across and front to back, so it lies inside the tops of
+        # the legs and shows only between them, as the shadowed curve of the crotch: drawn in lower, its own
+        # front stood level with the legs' and they cut each other in a hard outline like a pair of briefs)
+        k = smoothstep(31.8, 27.0, z)
+        return x * (1.0 - 0.84 * k ** 0.9), y * (1.0 - 0.3 * k ** 0.7)
     mesh_obj('Leggings seat', loft_fn([37.0 - 0.3 * i for i in range(35)], seat_pt), M_LEGS, body)
 
     # ---- the bodice, its binding, seams and buckled straps
