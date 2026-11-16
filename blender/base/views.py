@@ -13,6 +13,17 @@
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
+
+Rendering pieces on their own (any of the views above):
+--only     PREFIXES: render only the meshes whose names start with one of these (comma separated), e.g.
+           --only 'Gorget,Cape' or --only Bracer; everything else is hidden, so the pieces show with nothing in front
+           of them or under them. Matching is case-sensitive and a prefix that matches nothing is an error.
+--hide     PREFIXES: hide these meshes and render the rest
+--no-body  hide the base figure itself (the body, head, face, eyes and hair: every mesh in a base material, below
+           FIGURE_MATS), leaving the clothes and gear standing as if on a dress form
+--fit      frame --turn and --head on what is left showing instead of the whole figure (the default with --only);
+           --no-fit keeps the usual framing
+--list     print every mesh's name, material and vertex count after the build, and stop
 """
 import importlib
 import math
@@ -166,6 +177,62 @@ def clay(on, saved):
         saved.clear()
 
 
+FIGURE_MATS = 30   # (the base figure's own materials have ids below this; every outfit's start at it)
+
+
+def prefixes(flag):
+    v = opt(flag)
+    return tuple(p.strip() for p in v.split(',') if p.strip()) if v else ()
+
+
+def isolate():
+    """Hide what --only, --hide and --no-body leave out (hide_render: it neither shows nor casts shadows).
+    Returns the meshes still showing."""
+    only, hide = prefixes('--only'), prefixes('--hide')
+    ids = {d['name']: mid for mid, d in female.MATERIALS.items()}
+    meshes = [o for o in bpy.data.objects if o.type == 'MESH']
+    for p in only + hide:
+        if not any(o.name.startswith(p) for o in meshes):
+            sys.exit(f'views.py: no mesh starts with {p!r} (see --list)')
+    shown = []
+    for o in meshes:
+        m = o.active_material
+        base = m is not None and ids.get(m.name.split('.')[0], FIGURE_MATS) < FIGURE_MATS
+        off = (only and not o.name.startswith(only)) or (hide and o.name.startswith(hide)) or \
+            ('--no-body' in argv and base)
+        o.hide_render = bool(off) or o.hide_render
+        if not o.hide_render:
+            shown.append(o)
+    if not shown:
+        sys.exit('views.py: nothing left to render')
+    print('showing', len(shown), 'meshes:', ', '.join(sorted(o.name for o in shown)[:40]), flush=True)
+    return shown
+
+
+def fit(shown, aspect):
+    """(centre, ortho height) that frame the shown meshes from every angle the views turn the figure through:
+    the figure turns about its own vertical axis, so the width needed is twice the farthest any point lies from it."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    zs, rr = [], 0.0
+    for o in shown:
+        me = o.evaluated_get(dg).to_mesh()
+        mw = o.matrix_world
+        for v in me.vertices:
+            c = mw @ v.co
+            zs.append(c.z)
+            rr = max(rr, math.hypot(c.x, c.y))
+        o.evaluated_get(dg).to_mesh_clear()
+    z0, z1 = min(zs), max(zs)
+    h = max((z1 - z0) * 1.12, 2.0 * rr * 1.12 / aspect, 4.0)
+    return (0, 0, (z0 + z1) / 2), h
+
+
+def list_meshes():
+    for o in sorted((o for o in bpy.data.objects if o.type == 'MESH'), key=lambda o: o.name):
+        m = o.active_material
+        print(f'{o.name:40s} {m.name if m else "-":24s} {len(o.data.vertices)}')
+
+
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), f'{FIGURE}-views'))
     os.makedirs(out, exist_ok=True)
@@ -176,6 +243,12 @@ def main():
     F.build()
     sc = bpy.context.scene
     sc.frame_set(1)
+    if '--list' in argv:
+        list_meshes()
+        return
+    isolating = bool(opt('--only') or opt('--hide') or '--no-body' in argv)
+    shown = isolate() if isolating else None
+    framed = shown is not None and '--no-fit' not in argv and ('--fit' in argv or opt('--only'))
     if opt('--cells'):
         sc.render.use_persistent_data = True
         cells(out, opt('--cells'))
@@ -188,9 +261,11 @@ def main():
             for look in ('', '-clay') if '--clay' in argv else ('',):
                 clay(look == '-clay', saved)
                 if '--turn' in argv:
-                    row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), (0, 0, 32.5), 68.0)
+                    centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
+                    row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), centre, h)
                 if '--head' in argv:
-                    row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), (0, 0, 55.5), 17.0)
+                    centre, h = fit(shown, 1.0) if framed else ((0, 0, 55.5), 17.0)
+                    row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), centre, h)
             clay(False, saved)
 
 
