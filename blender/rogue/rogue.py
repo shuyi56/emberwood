@@ -49,6 +49,8 @@ female.UNDER_JAW_SHADE = (0.0, 1.6, 0.75)   # (spread over the whole soft turn u
 female.BLUSH = (0.7, (212, 112, 111))
 female.LIP_COLOURS = {'MID': [170, 82, 84], 'UP': [166, 77, 82], 'HI': [177, 90, 91], 'DEEP': [153, 65, 72]}
 female.LIP_GLOSS = 0.35
+female.SKIN_FRECKLES = 0.3      # (a light dusting, and the skin's colour much more even than the ranger's)
+female.SKIN_NOISE = 0.35
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
