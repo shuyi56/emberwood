@@ -1280,7 +1280,7 @@ def mouth_relief(x, z):
     # thin ends, drawn as a dark outline round the lips)
     fall = 0.0095 * max(0.4, pinch)
     if 0.0 < t and z < top + fall:
-        d += 0.016 * pinch ** 1.6 * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else 0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
+        d += 0.016 * pinch ** 1.6 * math.sin(min(1.0, t) * math.pi * 0.96) ** 0.8 * (1.0 if t <= 1.0 else 0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
     d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
     low = 0.034 * pinch ** 1.4                             # the lower lip's height (less full: it read pouty)
     # (both thinning out fast toward the corners: a lip's worth of swelling left past the colour there read as
@@ -3861,6 +3861,50 @@ LIP_TEX = {}
 LIP_X0, LIP_X1, LIP_Z0, LIP_Z1 = -0.12, 0.12, 0.165, 0.305     # the lip patch's extent, in head heights (real z)
 
 
+def _lip_params(xs, zr):
+    """Where on the unsculpted head each point of the lip patch comes from: (x, z) parameters for a grid of real
+    (x, z). The sculpt pushes each point of the head out along its normal, which over the muzzle leans down and
+    sideways, so the lips land a little lower and wider than the heights mouth_relief gives them (about 0.003 of
+    a head, a tenth of a lip). Painted at those heights, the colour and its dark line sat above the sculpted lips
+    and the line between them. Returns (x, z) arrays, zr down the rows and xs across."""
+    gz = np.linspace(LIP_Z0 - 0.015, LIP_Z1 + 0.015, 86)
+    gx = np.linspace(LIP_X0 - 0.015, LIP_X1 + 0.015, 131)
+    ths = np.linspace(-0.8, 0.8, 121)
+    SX, SZ = np.zeros((len(gz), len(gx))), np.zeros((len(gz), len(gx)))
+    e = 1e-3
+    for i, z0 in enumerate(gz):
+        x0s, dxs, dzs = [], [], []
+        for th in ths:
+            c, sn = math.cos(th), math.sin(th)
+            x, y = head_section(z0, c, sn)
+            xa, ya = head_section(z0, math.cos(th + e), math.sin(th + e))
+            xz, yz = head_section(z0 + e, c, sn)
+            xb, yb = head_section(z0 - e, c, sn)
+            t1, t2 = (xa - x, ya - y, 0.0), (xz - xb, yz - yb, 2 * e)
+            n = (t1[1] * t2[2], -t1[0] * t2[2], t1[0] * t2[1] - t1[1] * t2[0])
+            nl = math.sqrt(n[0] ** 2 + n[1] ** 2 + n[2] ** 2) or 1.0
+            n = (n[0] / nl, n[1] / nl, n[2] / nl)
+            if n[0] * x + n[1] * (y - 0.04) < 0:
+                n = (-n[0], -n[1], -n[2])
+            u = min(1.0, max(0.0, (z0 - 0.005) / 0.04))
+            d = face_relief(x, z0) * max(0.0, -n[1]) * u * u * (3 - 2 * u) + jaw_relief(y, z0)
+            x0s.append(x); dxs.append(n[0] * d); dzs.append(n[2] * d)
+        SX[i], SZ[i] = np.interp(gx, x0s, dxs), np.interp(gx, x0s, dzs)
+
+    def at(S, x, z):
+        fx = np.clip((x - gx[0]) / (gx[1] - gx[0]), 0, len(gx) - 1.001)
+        fz = np.clip((z - gz[0]) / (gz[1] - gz[0]), 0, len(gz) - 1.001)
+        ix, iz = fx.astype(int), fz.astype(int)
+        tx, tz = fx - ix, fz - iz
+        return ((S[iz, ix] * (1 - tx) + S[iz, ix + 1] * tx) * (1 - tz)
+                + (S[iz + 1, ix] * (1 - tx) + S[iz + 1, ix + 1] * tx) * tz)
+    X, Z = np.meshgrid(xs, zr)
+    px, pz = X, Z
+    for _ in range(4):       # (the point whose sculpted position is (X, Z))
+        px, pz = X - at(SX, px, pz), Z - at(SZ, px, pz)
+    return px, pz
+
+
 def lip_painting(W=576, H=336):
     """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
     (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
@@ -3871,10 +3915,15 @@ def lip_painting(W=576, H=336):
     the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
     across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
     a hard point."""
+    if ('px', W, H) in LIP_TEX:
+        return LIP_TEX[('px', W, H)]
     xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
     zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
-    zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
-    x, w = np.meshgrid(xs, zw)
+    # (each point of the patch is coloured by where it came from on the unsculpted head, see _lip_params, and
+    # mouth_relief is laid out in the warped heights)
+    x, zp = _lip_params(xs, zr)
+    wz = np.linspace(LIP_Z0 - 0.02, LIP_Z1 + 0.02, 400)
+    w = np.interp(zp, wz, [FACE_WARP(z) for z in wz])
     ax = np.abs(x)
 
     def sm(e0, e1, v):
@@ -3928,9 +3977,10 @@ def lip_painting(W=576, H=336):
     # the pale rim of skin just over the upper lip's edge
     rim = np.exp(-((w - top - 0.005) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
     col = col + (np.array([232, 200, 180], dtype=np.float32) - col) * rim[..., None] * (1 - lip[..., None])
-    a = np.maximum(a, 0.28 * rim)
+    a = np.maximum(a, 0.16 * rim)       # (faint: stronger, it drew a pale outline round the upper lip)
     a *= sm(LIP_X0, LIP_X0 + 0.01, x) * sm(LIP_X1, LIP_X1 - 0.01, x)
-    return np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
+    LIP_TEX[('px', W, H)] = np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
+    return LIP_TEX[('px', W, H)]
 
 
 def lip_image():

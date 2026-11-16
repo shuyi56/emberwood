@@ -41,7 +41,7 @@ def shaped(S, FACE_WARP, HEAD_W):
         t = (z - zl) / max(0.004, top - zl)
         fall = 0.0095 * max(0.4, pinch)
         if 0.0 < t and z < top + fall:
-            d += 0.016 * S['lipUpper'] * pinch ** 1.6 * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (
+            d += 0.016 * S['lipUpper'] * pinch ** 1.6 * math.sin(min(1.0, t) * math.pi * 0.96) ** 0.8 * (
                 1.0 if t <= 1.0 else 0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
         d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005 * S['lipUpper'])
         low = 0.034 * hl[1] * pinch ** 1.4

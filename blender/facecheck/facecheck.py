@@ -715,14 +715,15 @@ def measure(face):
         j = int(np.argmin(np.abs(face['zs'] - zh0)))
         return round(float(np.max(np.abs(P[j, :, 0]))), 3)
     out['widths'] = {'cheekbones': half_width(0.42), 'mouth': half_width(0.25), 'jaw': half_width(0.15)}
-    # ---- lips: paint against sculpt (in the warped heights mouth_relief is laid out in)
-    xs = np.linspace(F.LIP_X0, F.LIP_X1, 240)
-    zr = np.linspace(F.LIP_Z1, F.LIP_Z0, 140)
-    lp = F.lip_painting()
-    a = sample(lp, (xs[None, :] - F.LIP_X0) / (F.LIP_X1 - F.LIP_X0) + 0 * zr[:, None], (zr[:, None] - F.LIP_Z0) / (F.LIP_Z1 - F.LIP_Z0) + 0 * xs[None, :])[..., 3]
-    fw = np.array([F.FACE_WARP(z) for z in zr]) if 'FACE_WARP' in F.g else zr
-    rel = np.array([[F.mouth_relief(x, w) for x in xs] for w in fw])
-    paint_m, sculpt_m = a > 0.5, rel > 0.006
+    # ---- lips: paint against sculpt, point by point on the sculpted head: each point's colour (laid on where
+    # the point ends up) against the lips' relief where the point came from on the unsculpted head. (Comparing
+    # both at the same (x, z) hid the sculpt's own shift of the lips, down and outward along the normals.)
+    u, w = P[..., 0] / H, P[..., 2] / H
+    ii, jj = np.nonzero((P[..., 1] < 0) & (u > F.LIP_X0) & (u < F.LIP_X1) & (w > F.LIP_Z0) & (w < F.LIP_Z1))
+    warp = F.FACE_WARP if 'FACE_WARP' in F.g else (lambda z: z)
+    rel = np.array([F.mouth_relief(F.head_section(face['zs'][i], math.cos(face['ths'][j]), math.sin(face['ths'][j]))[0],
+                                   warp(face['zs'][i])) for i, j in zip(ii, jj)])
+    paint_m, sculpt_m = face['lip_alpha'][ii, jj] > 0.5, rel > 0.006
     out['lips'] = {'paint_on_sculpt': round(float(np.sum(paint_m & sculpt_m) / max(1, paint_m.sum())), 3),
                    'sculpt_painted': round(float(np.sum(paint_m & sculpt_m) / max(1, sculpt_m.sum())), 3)}
     # ---- brows: the lower edge over the crease
