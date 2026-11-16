@@ -411,7 +411,7 @@ def under_table(skip=('Hair',)):
         ps += [[b + i for i in pl.vertices] for pl in me.polygons]
         o.evaluated_get(dg).to_mesh_clear()
     T = BVHTree.FromPolygons(vs, ps)
-    z0, dz, nz, nph = 18.0, 0.25, 147, 360
+    z0, dz, nz, nph = 18.0, 0.5, 74, 180
     R = np.zeros((nz, nph))
     for i in range(nz):
         z = z0 + dz * i
@@ -428,13 +428,12 @@ def under_table(skip=('Hair',)):
                 far = t
                 org = hit[0] + d * 1e-3
             R[i, j] = far
-    # spread (a running max over +-0.75 in height and +-6 degrees round), then soften
+    # spread (a running max over +-1 in height and +-6 degrees round), then soften
     M = R.copy()
-    for di in range(-3, 4):
-        for dj in range(-6, 7):
-            M = np.maximum(M, np.roll(np.roll(R, dj, axis=1), di, axis=0) if di == 0 else
-                           np.roll(np.pad(R, ((3, 3), (0, 0)), mode='edge'), dj, axis=1)[3 + di:3 + di + nz])
-    for _ in range(3):
+    for di in range(-2, 3):
+        for dj in range(-3, 4):
+            M = np.maximum(M, np.roll(np.pad(R, ((2, 2), (0, 0)), mode='edge'), dj, axis=1)[2 + di:2 + di + nz])
+    for _ in range(2):
         M = (M + np.roll(M, 1, 1) + np.roll(M, -1, 1) + np.roll(M, 2, 1) + np.roll(M, -2, 1)) / 5
         P = np.pad(M, ((2, 2), (0, 0)), mode='edge')
         M = (P[:-4] + P[1:-3] + P[2:-2] + P[3:-1] + P[4:]) / 5
@@ -972,9 +971,23 @@ def apply_lift(bm, need, reach=1.6):
     # it: over the collar's top or the shoulder it eases in over a hand's breadth instead of standing as a ring)
     SQ = 0.4
     sq = lambda c: Vector((c.x, c.y, c.z * SQ))     # noqa: E731
-    pts = [(sq(bm.verts[i].co), d) for i, d in need.items()]
+    # (the displacements are pooled in small cells first: neighbouring ones barely differ, and summing every pair
+    # over this reach cost most of the build)
+    CELL = 0.3
+    cells = {}
+    for i, d in need.items():
+        c = sq(bm.verts[i].co)
+        key = (math.floor(c.x / CELL), math.floor(c.y / CELL), math.floor(c.z / CELL))
+        e = cells.get(key)
+        if e is None:
+            cells[key] = [c.copy(), d.copy(), 1]
+        else:
+            e[0] += c
+            e[1] += d
+            e[2] += 1
+    pts = [(c / n, d / n, n) for c, d, n in cells.values()]
     kd = KDTree(len(pts))
-    for k, (p, _d) in enumerate(pts):
+    for k, (p, _d, _n) in enumerate(pts):
         kd.insert(p, k)
     kd.balance()
     moves = []
@@ -985,8 +998,8 @@ def apply_lift(bm, need, reach=1.6):
         acc, ws, wmax = Vector(), 0.0, 0.0
         for _co, k, dist in near:
             w = math.exp(-(dist / reach) ** 2)
-            acc += pts[k][1] * w
-            ws += w
+            acc += pts[k][1] * (w * pts[k][2])
+            ws += w * pts[k][2]
             wmax = max(wmax, w)
         moves.append((v, acc / ws * min(1.0, wmax * 1.6)))
     for v, m in moves:
