@@ -564,27 +564,143 @@ def tail_clumps(head, path, lens):
     return o
 
 
-def temple_wisp(head_tree, side):
-    """A loose lock at the temple: it slips out of the combed-back hair at the temple corner and falls down in front
-    of the ear to the cheekbone; flat, lying on the side of the face, and melted into the hair at its root."""
+# The side locks: at each temple a few thin locks slip out from under the combed-back hair and fall past the
+# cheek, each a ribbon carrying painted strands (lock_image) that thin out toward its end, so it breaks up into
+# strands at its edges and tip instead of reading as one thick strand. (th, el, lift) knots for each lock, its
+# root tucked up under the hair; th is mirrored for her other side.
+SIDE_LOCKS = [
+    ([(0.6, 0.6, 0.02), (0.68, 0.32, 0.07), (0.77, 0.02, 0.08), (0.8, -0.3, 0.07), (0.77, -0.52, 0.06)], 0.42),
+    ([(0.7, 0.52, 0.02), (0.8, 0.24, 0.08), (0.88, -0.08, 0.09), (0.9, -0.42, 0.08), (0.86, -0.7, 0.07)], 0.48),
+    ([(0.8, 0.44, 0.02), (0.9, 0.16, 0.08), (0.97, -0.12, 0.08), (0.98, -0.36, 0.07)], 0.36),
+]
+LOCK_TEX = {}
+
+
+def lock_image(W=256, H=1024):
+    """The strands of a side lock, painted along it (u across, v from the root): full and dark at the root, where
+    the hair above shades it; strands of their own lengths, the middle ones the longest, so the lock tapers to a
+    few fine ends; each strand its own tone, wavering a little, lighter along its middle where it catches the
+    light, and the coverage thinning toward the edges so the lock's sides are separate strands."""
+    if 'img' in LOCK_TEX:
+        return LOCK_TEX['img']
+    from PIL import Image, ImageDraw, ImageFilter
+    SS = 2
+    rng = np.random.default_rng(5)
+    rmp = MATERIALS[M_HAIR]['ramp'].astype(np.float32)
+    DARK, MID, LIGHT = rmp[1], rmp[2], rmp[3]
+    cover = Image.new('L', (W * SS, H * SS), 0)
+    alpha = Image.new('L', (W * SS, H * SS), 0)
+    paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))
+    dc, da, dp = ImageDraw.Draw(cover), ImageDraw.Draw(alpha), ImageDraw.Draw(paint)
+    for _ in range(170):
+        u0 = float(np.clip(rng.normal(0.5, 0.2), 0.04, 0.96))
+        mid = 1.0 - abs(u0 - 0.5) * 2
+        end = min(0.99, (0.45 + 0.55 * mid ** 0.6) * (0.85 + 0.2 * rng.random()))
+        tone = rng.random()
+        wid = (2.0 + 2.5 * rng.random()) * SS
+        val = 255 * (0.7 + 0.3 * rng.random())
+        ph, fr = rng.random() * 6.28, 3.0 + 3.0 * rng.random()
+        steps = 40
+        prev = None
+        for k in range(steps + 1):
+            t = k / steps
+            v = t * end
+            # (they converge a little toward the lock's middle as it falls, and waver)
+            u = u0 + (0.5 - u0) * 0.25 * v + 0.012 * math.sin(fr * v * 6.28 + ph)
+            q = (u * W * SS, v * H * SS)
+            if prev is not None:
+                c = DARK + (MID - DARK) * min(1.0, 0.6 + 1.0 * t) * (0.8 + 0.5 * tone)
+                c = c + (LIGHT - c) * 0.5 * math.exp(-((t - 0.55) / 0.22) ** 2) * tone
+                w = max(1, int(wid * (1.0 - 0.7 * t ** 2)))
+                dc.line([prev, q], fill=255, width=w)
+                da.line([prev, q], fill=int(val * (1.0 - 0.5 * t ** 3)), width=w)
+                dp.line([prev, q], fill=tuple(int(max(0, min(255, x))) for x in c), width=w)
+            prev = q
+    a = np.asarray(alpha.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
+    cov = np.asarray(cover.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
+    pnt = np.asarray(paint.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32)
+    col = np.clip(pnt / np.maximum(cov, 1e-3)[..., None], 0, 255)
+    # (at the root, under the hair, it is solid and dark, so where it slips out from under the hair there is no seam)
+    vv = (np.arange(H) + 0.5) / H
+    root = np.clip(1.0 - vv / 0.12, 0, 1)[:, None]
+    uu = (np.arange(W) + 0.5) / W
+    root = root * np.clip(1.0 - np.abs(uu - 0.5) / 0.5, 0, 1)[None, :] ** 0.3
+    a = np.maximum(np.clip(a * 1.4, 0, 1), root)
+    w_ = np.clip(cov * 2.2, 0, 1)[..., None]
+    col = (DARK + (col - DARK) * w_) / 255
+    a[:, :1] = a[:, -1:] = 0.0
+    img = bpy.data.images.new('side lock strands', W, H, alpha=True)
+    # (the first row of the array is the root, at v = 0: Blender's rows run from the bottom)
+    img.pixels.foreach_set(np.concatenate([col, a[..., None]], axis=2).ravel().astype(np.float32))
+    img.pack()
+    LOCK_TEX['img'] = img
+    return img
+
+
+def side_locks(head, head_tree):
+    """The side locks, as ribbons lying just off the side of the face, each with lock_image painted along it."""
+    m = bpy.data.materials.new('hair lock paint')
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    b = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = lock_image()
+    tex.interpolation = 'Cubic'
+    tex.extension = 'CLIP'
+    nt.links.new(tex.outputs['Color'], b.inputs['Base Color'])
+    nt.links.new(tex.outputs['Alpha'], b.inputs['Alpha'])
+    b.inputs['Roughness'].default_value = 0.6
+    b.inputs['Specular IOR Level'].default_value = 0.22
+    b.inputs['Sheen Weight'].default_value = 0.3
+    nt.links.new(b.outputs['BSDF'], out.inputs['Surface'])
+    m.surface_render_method = 'BLENDED'
+
     def on(th, el, lift):
         d = _dir(th, el)
         hit = head_tree.ray_cast(HC + d * 20.0, -d, 20.0)
-        r = (hit[0] - HC).length if hit[0] is not None else 4.0
-        return HC + d * (r + lift)
-    th = lambda x: side * x   # noqa: E731
-    # (lying on the skin: lifted by its own half-thickness and a hair, so no slit of shadow opens under it)
-    pts = [on(th(0.5), 0.8, 0.1), on(th(0.66), 0.48, 0.2), on(th(0.76), 0.25, 0.2), on(th(0.86), -0.05, 0.18),
-           on(th(0.88), -0.3, 0.15), on(th(0.82), -0.5, 0.12)]
-    path = catmull(pts, 40)
-    n_ = len(path)
-
-    def rad(i, a):
-        u = i / (n_ - 1)
-        # (never thinner than two cells of the fusing grid, so it melts into the hair at its root and keeps its end)
-        w = 0.26 * (1.0 - u) ** 0.7 + 0.17
-        return w * 0.45, w
-    return sweep(path, rad, n=12)
+        r = (hit[0] - HC).length if hit[0] is not None else 3.3
+        return HC + d * (r + lift), d
+    for side in (1, -1):
+        for j, (knots, width) in enumerate(SIDE_LOCKS):
+            pts = [on(side * th, el, lift) for th, el, lift in knots]
+            path = catmull([p for p, _ in pts], 48)
+            N = len(path)
+            bm = bmesh.new()
+            uvl = bm.loops.layers.uv.new('UVMap')
+            NA = 6
+            rows = []
+            for i, p in enumerate(path):
+                t = (path[min(i + 1, N - 1)] - path[max(i - 1, 0)]).normalized()
+                nrm = (p - HC).normalized()
+                ax = t.cross(nrm).normalized()
+                u_ = i / (N - 1)
+                w = width * (1.0 - 0.45 * u_)
+                row = []
+                for k in range(NA + 1):
+                    a_ = k / NA - 0.5
+                    # (curved a little round the lock, its edges nearer the skin)
+                    row.append(bm.verts.new(p + ax * (a_ * w) - nrm * (0.05 * (2 * a_) ** 2)))
+                rows.append(row)
+            for i in range(N - 1):
+                for k in range(NA):
+                    vs = [rows[i][k], rows[i][k + 1], rows[i + 1][k + 1], rows[i + 1][k]]
+                    f = bm.faces.new(vs)
+                    for lp in f.loops:
+                        ii = i + (1 if lp.vert in (rows[i + 1][k], rows[i + 1][k + 1]) else 0)
+                        kk = k + (1 if lp.vert in (rows[i][k + 1], rows[i + 1][k + 1]) else 0)
+                        lp[uvl].uv = (kk / NA, ii / (N - 1))
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            me = bpy.data.meshes.new(f'Hair paint lock {j} {side}')
+            bm.to_mesh(me)
+            bm.free()
+            for pl in me.polygons:
+                pl.use_smooth = True
+            me.materials.append(m)
+            o = bpy.data.objects.new(f'Hair paint lock {j} {side}', me)
+            link(o, head)
 
 
 # The front of the hair, painted strand by strand: a texture over the band from just below the hairline to a
@@ -849,12 +965,11 @@ def build_hair(head, head_tree):
     mesh_obj('Hair tail', sweep(path, tail_r, n=28), M_HAIR, head, subdiv=0)
     if not FUSE:          # (for checking the pieces before they are melted together)
         return None
-    for side in (1, -1):
-        mesh_obj(f'Hair wisp {side}', temple_wisp(head_tree, side), M_HAIR, head, subdiv=0)
-    hair = fuse_parts(head, ['Hair cap', 'Hair tail', 'Hair wisp 1', 'Hair wisp -1'])
+    hair = fuse_parts(head, ['Hair cap', 'Hair tail'])
     fine_streaks(hair)
     paint_hair(hair)
     scalp_paint(head, head_tree)
+    side_locks(head, head_tree)
     tail_clumps(head, path, lens)
     # the tie: a leather thong wound round the root of the tail, in three turns
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
@@ -1026,8 +1141,13 @@ def build():
 
     # ---- torso: the body in its linen shirt; the leggings' seat over the hips, under the bodice
     torso_mesh('Shirt', M_SHIRT, body)
-    mesh_obj('Leggings seat', loft_fn([37.0 - 0.5 * i for i in range(18)], lambda z, p: torso_point(z, p, 0.12, bust=0.0)),
-             M_LEGS, body)
+    # (below the hips it narrows into the crotch, a rounded gusset between the tops of the legs, so the legs grow
+    # out of it rather than meeting a flat underside at a corner)
+    def seat_pt(z, p):
+        x, y = torso_point(z, p, 0.12, bust=0.0)
+        k = smoothstep(29.6, 26.9, z)
+        return x * (1.0 - 0.8 * k ** 0.8), y * (1.0 - 0.38 * k)
+    mesh_obj('Leggings seat', loft_fn([37.0 - 0.3 * i for i in range(35)], seat_pt), M_LEGS, body)
 
     # ---- the bodice, its binding, seams and buckled straps
     bz = [B_ZT - (B_ZT - B_ZB) * i / 59 for i in range(60)]
@@ -1070,10 +1190,11 @@ def build():
         sx_ = [(*bod_xy(z + dz, 0.31, 0.32), z + dz) for dz in (-0.14, 0.14)]
         mesh_obj(f'Strap stitching {i}', dots(sx_, 0.16), M_STITCH, body, subdiv=0)
 
-    # ---- the hip belt, slung low across the leggings, higher over her right hip; a round steel buckle a little to
+    # ---- the hip belt, round the top of her hips, higher over her right hip; a round steel buckle a little to
     # her left of the middle, its end hanging free below it; a pouch on her right hip; a dagger across her back
+    # (at the top of the hips, just under the bodice's hem, dipping a little in front under its point)
     def belt_z(p):
-        return 31.75 + 0.55 * math.sin(p)
+        return 33.55 + 0.4 * math.sin(p) - 0.7 * math.exp(-(wrap(p) / 0.7) ** 2)
     BELT_OFF = 0.5
 
     def belt_pt(zr, p):
@@ -1131,7 +1252,7 @@ def build():
     xs, ys = torso_point(zp - 0.1, PP, BELT_OFF + 1.78, bust=0.0)
     mesh_obj('Pouch stud', ellipsoid(0.18, 0.12, 0.18, 10, 6), M_STEEL, body, loc=(xs, ys, zp - 0.1), subdiv=0)
     # the dagger across the small of her back, tucked through the belt, its grip to her right hand
-    dz_ = 32.9
+    dz_ = 34.55
     # (clear of her back and of the belt where it crosses it, the hips' fullness included)
     yb = max(torso_point(dz_ + dz, math.pi + a, BELT_OFF + 0.3, bust=0.0)[1] for dz in (-0.7, 0.0, 0.7)
              for a in [-0.75 + 0.05 * i for i in range(31)]) + 0.34
