@@ -1073,6 +1073,44 @@ def hair_clearance(cols=range(10), gap=0.22):
     hair.data.update()
 
 
+def velvet_closeup(name):
+    """The robe up close as velvet rather than felted wool: a dense, short pile that is dark where it faces you and
+    glows along every turn away (Principled sheen at full weight and a tight sheen roughness, the base deepened under
+    it), its nap smooth instead of fuzzy, with faint crushed patches where the pile lies a different way."""
+    m = bpy.data.materials.get(name)
+    if m is None or 'close bsdf' not in m.node_tree.nodes:
+        return
+    nt = m.node_tree
+    b = nt.nodes['close bsdf']
+    b.inputs['Sheen Weight'].default_value = 1.0
+    b.inputs['Sheen Roughness'].default_value = 0.3
+    b.inputs['Sheen Tint'].default_value = (0.95, 0.72, 0.6, 1.0)
+    b.inputs['Roughness'].default_value = 0.85
+    b.inputs['Specular IOR Level'].default_value = 0.05
+    # the base deepened (the sheen supplies the light) and patchily crushed
+    src = b.inputs['Base Color'].links[0].from_socket if b.inputs['Base Color'].is_linked else None
+    rest = nt.nodes.new('ShaderNodeAttribute')
+    rest.attribute_name = 'rest'
+    crush = nt.nodes.new('ShaderNodeTexNoise')
+    crush.inputs['Scale'].default_value = 0.9
+    crush.inputs['Detail'].default_value = 2.0
+    nt.links.new(rest.outputs['Vector'], crush.inputs['Vector'])
+    k = nt.nodes.new('ShaderNodeMapRange')
+    k.inputs['To Min'].default_value = 0.6
+    k.inputs['To Max'].default_value = 0.85
+    nt.links.new(crush.outputs['Fac'], k.inputs['Value'])
+    if src is not None:
+        sc_ = nt.nodes.new('ShaderNodeVectorMath')
+        sc_.operation = 'SCALE'
+        nt.links.new(src, sc_.inputs['Vector'])
+        nt.links.new(k.outputs['Result'], sc_.inputs['Scale'])
+        nt.links.new(sc_.outputs['Vector'], b.inputs['Base Color'])
+    if b.inputs['Normal'].is_linked:
+        bn = b.inputs['Normal'].links[0].from_node
+        if bn.type == 'BUMP':
+            bn.inputs['Strength'].default_value = 0.12
+
+
 def steel_closeup(name):
     """The greaves and the breastplate up close (the sprites keep the plain diffuse surface: see sprite_mode):
     hammered steel, a little worn. Shallow overlapping dents from the hammer break up the light; the tone drifts
@@ -1276,8 +1314,9 @@ BRACER_R = [(BR_TOP, 2.0), (BR_TOP - 0.5, 1.92), (-UPPER - 5.0, 1.72), (-UPPER -
 BR_STRAPS = (BR_TOP - 1.4, -UPPER - 5.6, -UPPER - FORE + 1.3)
 # the steel vambrace over the sleeve (height from the shoulder joint, radius): flared at the elbow, full over the
 # forearm's muscle, drawn in to the wrist, then flared a little over it
-VAMB_R = [(BR_TOP, 1.86), (BR_TOP - 0.6, 1.78), (-UPPER - 3.8, 1.72), (-UPPER - 6.2, 1.5), (-UPPER - FORE + 0.9, 1.28),
-          (BR_BOT + 0.25, 1.34), (BR_BOT, 1.46)]
+VAMB_R = [(BR_TOP, 1.62), (BR_TOP - 0.5, 1.58), (-UPPER - 3.0, 1.55), (-UPPER - 4.5, 1.46), (-UPPER - 6.5, 1.3),
+          (-UPPER - FORE + 1.0, 1.2), (-UPPER - FORE + 0.2, 1.2), (BR_BOT + 0.2, 1.24), (BR_BOT, 1.34)]
+# (fitted: the bare arm's own shape (BARE_ARM_R) and a leather's thickness off it, flaring only at the wrist)
 
 SLEEVE_CREASES = [
     (-1.4, -1.05, 0.6, -0.9, 0.0, 0.1), (-2.4, -2.2, 0.55, 0.8, 0.0, 0.08),
@@ -1507,15 +1546,29 @@ def build():
         # a little above the elbow, widening a touch to a soft bell, its end trimmed in the ochre band
         SE = -UPPER + 3.6
 
+        # knife pleats, as a tailor lays them: each one a broad face that turns under in a narrow return at a crisp
+        # fold, all lying the same way round the arm; stitched flat into the shoulder seam and opening toward the
+        # hem, so the sleeve flares a little as they open (a sawtooth round the sleeve, deepening as it falls)
+        NP = 14
+
+        def pleat(z, phi):
+            t = (NP * (phi + 0.13) / (2 * math.pi)) % 1.0
+            f = t / 0.8 if t < 0.8 else (1.0 - t) / 0.2      # the face rises to the fold, then the return drops away
+            return f, smoothstep(0.9, SE, z), t >= 0.8
+
         def robe_sleeve_pt(z, phi, out=0.0):
-            r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + 0.24 + 0.45 * smoothstep(SE + 3.0, SE, z) + out
-            r *= 1.0 + 0.05 * pinch(5.0 * phi + 0.4) * smoothstep(SE + 3.5, SE, z)
+            f, k, _ = pleat(z, phi)
+            r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + 0.24 + 0.38 * smoothstep(SE + 3.0, SE, z) + out
+            r += 0.26 * k * (f - 0.5)
             return -r * math.sin(phi), -r * 1.03 * math.cos(phi)
         rzs = [1.6 - 0.2 * i for i in range(int((1.6 - SE) / 0.2) + 1)] + [SE]
-        mesh_obj(f'Robe sleeve.{side}', loft_fn(rzs, robe_sleeve_pt, n=48, cap_bot=False), M_ROBE, loc=(x, 0.2, SH_Z),
-                 skin=w, solid=0.12)
+        rs_ = mesh_obj(f'Robe sleeve.{side}', loft_fn(rzs, robe_sleeve_pt, n=NP * 10, cap_bot=False), M_ROBE,
+                       loc=(x, 0.2, SH_Z), skin=w, solid=0.12)
+        # (each pleat's return lies in the shadow of the fold over it)
+        crease_attr(rs_, lambda co: (lambda f, k, ret: k * (0.9 if ret else 0.25 * max(0.0, 0.3 - f) / 0.3))(
+            *pleat(co.z, math.atan2(-co.x, -co.y / 1.03))))
         mesh_obj(f'Robe sleeve hem.{side}', loft_fn([SE + 0.55, SE + 0.25, SE - 0.02], lambda z, p: robe_sleeve_pt(z, p, 0.07),
-                                                   n=48, cap_top=False, cap_bot=False),
+                                                   n=NP * 10, cap_top=False, cap_bot=False),
                  M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
         # the vambrace: hardened leather, bronze-brown, moulded to the forearm as the reference's: flat across like the
         # arm itself, full over the muscle below the elbow and drawn in hard to the wrist, a raised spine down the
@@ -1523,11 +1576,11 @@ def build():
         # over the wrist and runs on in a tongue over the back of the hand.
         def vam_pt(z, phi, out=0.0, edge=None):
             d = wrap(phi - s * math.pi / 2)
-            r = _profile(VAMB_R, z) + 0.16 * math.exp(-(d / 0.24) ** 2) \
-                + 0.07 * (math.exp(-((abs(d) - 0.75) / 0.28) ** 2)) + out
+            r = _profile(VAMB_R, z) + 0.09 * math.exp(-(d / 0.22) ** 2) \
+                + 0.04 * (math.exp(-((abs(d) - 0.7) / 0.25) ** 2)) + out
             ze = z if edge is None else edge
             dz = 0.0 * ze
-            return -r * math.sin(phi), -r * 0.86 * math.cos(phi), dz
+            return -r * math.sin(phi), -r * 0.92 * math.cos(phi), dz
         bzs = [BR_TOP - 0.2 * i for i in range(int((BR_TOP - BR_BOT) / 0.2) + 1)] + [BR_BOT]
         mesh_obj(f'Bracer.{side}', loft_fn(bzs, vam_pt, n=56, cap_top=False, cap_bot=False), M_BRACER, loc=(x, 0.2, SH_Z),
                  skin=fore, solid=0.14)
@@ -1783,6 +1836,7 @@ def build():
     # the rig, the camera and light, and the keyframes; then the hair kept clear of the clothes in every pose
     res = finish_figure(lambda: cape_on_arms(['Cape', 'Cape lining', 'Cape front -1', 'Cape front 1']))
     steel_closeup('plate')
+    velvet_closeup('robe')
     if not os.environ.get('WARDEN_NO_CLEARANCE'):
         hair_clearance()
     return res
