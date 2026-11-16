@@ -41,6 +41,7 @@ female.FACE.update({
 })
 female.EYE_OPEN = 0.68
 female.EYE_TILT = 0.105
+female.EARS = True       # (her hair is drawn back into the tail, so they show)
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
