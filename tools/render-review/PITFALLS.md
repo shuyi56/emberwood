@@ -92,3 +92,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** CLAUDE.md: one good front view proves nothing; most problems show up in the 3/4 and profile rows.
 - **Spot:** `cells` or `--cells` with fewer than all 8 facing rows, for a change that alters the silhouette, hair, shoulders or clothing.
 - **Fix:** Use rows `0-7` with a few columns (`0-7:2,4,6`, or `0-7:0,3,6` to include the idle).
+
+## P014 A face check sent to the render queue
+
+- **Seen:** John's rule since 2026-11-16: every figure face check goes through the face check API, not a render. Of the first 41 requests, 17 were face views of a face-only change (eyes, brows, lips, nose, jaw), each costing minutes of render time.
+- **Spot:** The change since the branch was last rendered touches only face sculpt or face paint (`face_relief`, `mouth_relief`, `jaw_relief`, lids, `eye_relief`, iris, sclera, eyeshadow, lashes, brows, lips) and the request asks only for face views (`face_views.py`, `sculpt_views.py`, or `views.py --head` without `--cells` or `--turn`).
+- **Fix:** Run `python blender/facecheck/facecheck.py <figure> --before origin/main` (no Blender, about 17 s, and a before is free there). Ask the queue only for what it cannot show: hair, cloth, final lighting, subsurface scattering and the sprite palette; say which in `"needs_render"`.

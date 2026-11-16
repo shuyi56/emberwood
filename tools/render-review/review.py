@@ -20,10 +20,12 @@ What `check` does, cheapest first:
   pitfalls  every pitfall in PITFALLS.md that carries a pattern is matched against the lines the branch adds
   smoke     each job is run for real, headless, up to its first render (smoke.py): imports, argument parsing
             and the whole scene build. A crash here is a crash the queue would have hit minutes in.
+  facecheck a request that only checks a face (face sculpt or face paint changed, face views asked) is not
+            forwarded: blender/facecheck/facecheck.py draws and measures it here, without Blender, in seconds
   cache     jobs the queue already holds are reported, so the requester knows the answer is immediate
 
 Findings are 'block' (send back), 'warn' (forward, and tell the requester) or 'info'. The verdict is 'fix' when
-anything blocks, otherwise 'pass'. The reviewer then reads the diff (saved beside the report) and may still
+anything blocks, 'facecheck' when the face check API answered the request, otherwise 'pass'. The reviewer then reads the diff (saved beside the report) and may still
 send a request back for something no script can see.
 
 The queue's own helpers (rq.py, beside queue.json in the project folder) are imported, never copied, so the
@@ -56,6 +58,14 @@ SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "900"))
 SHEET_ROWS, SHEET_COLS = 8, 10
 SHELL_META = re.compile(r"[;&|<>$`\\\n\r]")
 HAIR = re.compile(r"hair|bang|fringe|lock|pony|wisp|strand|braid|bun(?![a-z])", re.I)
+# what blender/facecheck/facecheck.py draws and measures without Blender: the sculpted face and its paintings
+FACE = re.compile(r"face|mouth|jaw|lid|eye|iris|sclera|brow|lash|lip|nose|nostril|chin|cheek|philtrum|"
+                  r"head_section|head_front|sculpted_head|build_head", re.I)
+NOT_FACE = re.compile(r"skin|tone|sss|scatter|mat(erial)?_|shader|light|sprite|palette|pixel|cloth|" + HAIR.pattern, re.I)
+FACE_VIEW_SCRIPTS = ("face_views.py", "sculpt_views.py")
+FACECHECK = "blender/facecheck/facecheck.py"
+FACECHECK_REFS = ("origin/main", "origin/claude/project-thread-k27az6")   # the second only until PR #26 merges
+FACECHECK_OUT = os.path.join(RQ_DIR, "facechecks")
 KEEP_AT_MAIN = ("blender/ranger/ranger-blender.png", "blender/ranger/ranger.blend", "public/models/ranger.glb")
 
 
@@ -222,6 +232,62 @@ def last_rendered(branch, tip):
     return None
 
 
+# ------------------------------------------------------------------ face checks: no render at all
+def face_only(fresh, outs, parsed):
+    """(figure, why) when the request only checks a face: every changed definition is face sculpt or face
+    paint, and every view is a face view. Such a request goes to facecheck.py, not to the render queue."""
+    if outs != ["views"] or not parsed:
+        return None, None
+    figure = None
+    for _, tok in parsed:
+        name = os.path.basename(tok[0])
+        if name in FACE_VIEW_SCRIPTS:
+            fig = "ranger"
+        elif name == "views.py" and "--head" in tok and "--cells" not in tok and "--turn" not in tok:
+            fig = tok[tok.index("--figure") + 1] if "--figure" in tok and tok.index("--figure") + 1 < len(tok) else "ranger"
+        else:
+            return None, None
+        if figure and fig != figure:
+            return None, None
+        figure = fig
+    defs = sorted({d for p, ds in fresh.items() if p.endswith(".py") and not p.startswith("blender/facecheck/")
+                   for d in ds if d not in ("<module>", "Expr", "Import", "ImportFrom")})
+    if any(not p.endswith(".py") for p in fresh if not p.startswith("blender/facecheck/")) or not defs:
+        return None, None
+    other = [d for d in defs if not FACE.search(d) or NOT_FACE.search(d)]
+    if other:
+        return None, None
+    return figure, defs
+
+
+def facecheck(commit, figure, before="origin/main"):
+    """Run the face check API on `commit` (compared with main) and keep its images and report in the project
+    folder. Returns {ok, out, seconds, changed, notes, tail}."""
+    wt = os.path.join(WORK, "fc-" + commit[:12])
+    rq.git("worktree", "remove", "--force", wt, check=False)
+    rq.git("worktree", "add", "--detach", wt, commit)
+    try:
+        if not os.path.exists(os.path.join(wt, FACECHECK)):          # the commit predates the API: borrow it
+            src = next((r for r in FACECHECK_REFS if show(r, FACECHECK)), None)
+            if not src:
+                return {"ok": False, "tail": f"{FACECHECK} is not on any of {FACECHECK_REFS}"}
+            os.makedirs(os.path.join(wt, os.path.dirname(FACECHECK)), exist_ok=True)
+            open(os.path.join(wt, FACECHECK), "w").write(show(src, FACECHECK))
+        out = os.path.join(FACECHECK_OUT, f"{figure}-{commit[:9]}")
+        t0 = datetime.datetime.now()
+        r = subprocess.run([sys.executable, os.path.join(wt, FACECHECK), figure, "--before", before, "--out", out],
+                           capture_output=True, text=True, timeout=SMOKE_TIMEOUT)
+        res = {"ok": r.returncode == 0, "out": out, "seconds": round((datetime.datetime.now() - t0).total_seconds()),
+               "tail": "\n".join((r.stdout + r.stderr).strip().splitlines()[-8:]) if r.returncode else ""}
+        if res["ok"]:
+            rpt = json.load(open(os.path.join(out, "report.json")))
+            res["changed"] = rpt.get("changed", [])
+            res["notes"] = rpt["reports"]["now"].get("notes")
+        return res
+    finally:
+        rq.git("worktree", "remove", "--force", wt, check=False)
+
+
 # ------------------------------------------------------------------ the smoke run
 def smoke_command(kind, param, out):
     q = shlex.quote
@@ -373,7 +439,8 @@ def review(req, thread, do_smoke=True):
             rep.info("before", "This commit is already on main and every job is cached: answered at once.")
         except SystemExit as e:
             rep.block("before", str(e), "Compare against one of the cached renders listed above; do not ask for a "
-                      "new render of main.", "P002")
+                      "new render of main. For a face, the face check API draws a before for free: "
+                      f"python {FACECHECK} <figure> --before origin/main", "P002")
             return rep, facts
 
     # ---- merge with main
@@ -469,6 +536,28 @@ def review(req, thread, do_smoke=True):
                      "; ".join(f"{path}:{ln} `{t.strip()[:90]}`" for path, ln, t in hits[:4]) +
                      (f" (+{len(hits) - 4} more)" if len(hits) > 4 else ""), p["fix"], p["id"])
 
+    # ---- a face-only request never reaches the queue: the face check API answers it here
+    figure, face_defs = face_only(fresh, outs, parsed)
+    if figure and req.get("needs_render"):
+        rep.info("facecheck", f"Face-only change, forwarded to the queue because the request says a render is "
+                 f"needed: {str(req['needs_render'])[:120]}")
+    elif figure and not rep.blocked:
+        res = facecheck(merged, figure) if do_smoke else {"ok": None}
+        facts["facecheck"] = {"figure": figure, "defs": face_defs, **res}
+        if res["ok"] is False:
+            rep.block("facecheck", f"The face check of {figure} fails on this commit:\n{res['tail']}",
+                      f"Fix the error and push. Reproduce: python {FACECHECK} {figure} --before origin/main", "P014")
+        else:
+            rep.add("facecheck", "facecheck", f"This request only checks the face of {figure} (changed: "
+                    + ", ".join(face_defs[:8]) + ("..." if len(face_defs) > 8 else "") + "). Face checks are not "
+                    "rendered: the face check API drew and measured it instead"
+                    + (f", in {res['seconds']}s: {res['out']}/ (sheet.png, one PNG per view, report.json)."
+                       if res["ok"] else "."),
+                    f"Next time run it yourself: python {FACECHECK} {figure} --before origin/main. If you need "
+                    'what it cannot show (hair, cloth, final lighting, subsurface scattering, the sprite palette), '
+                    'send the request again with "needs_render": "<what you need to see>".', "P014")
+        return rep, facts
+
     # ---- jobs: cached already, or smoke-run
     jobs = [(o, v) for o in outs if o in rq.REQUESTABLE
             for v in ([t for t, _ in parsed] if o == "views" else [cells if o == "frames" else None])]
@@ -535,7 +624,7 @@ def cmd_check(a):
                   'Send one JSON block: {"branch": ..., "outputs": [...], "cells": ..., "views": [...], "note": ...}')
     else:
         rep, facts = review(req, a.thread, do_smoke=not a.no_smoke)
-    verdict = "fix" if rep.blocked else "pass"
+    verdict = "fix" if rep.blocked else "facecheck" if any(f["level"] == "facecheck" for f in rep.findings) else "pass"
     forward = None
     if verdict == "pass":
         forward = {k: v for k, v in req.items() if v not in (None, "", [])}
@@ -556,8 +645,14 @@ def cmd_check(a):
         pass
     if a.json:
         print(json.dumps(result, indent=1)); return
-    print(f"VERDICT: {verdict.upper()}  ({'forward to the render queue' if verdict == 'pass' else 'send back with the fixes below'})")
-    for level in ("block", "warn", "info"):
+    what = {"pass": "forward to the render queue", "fix": "send back with the fixes below",
+            "facecheck": "do not forward: answer the requester with the face check below"}[verdict]
+    print(f"VERDICT: {verdict.upper()}  ({what})")
+    fc = facts.get("facecheck") or {}
+    if fc.get("ok"):
+        print("\nface check: measurements changed since main:\n  " + ("\n  ".join(fc["changed"]) or "nothing measured changed")
+              + (f"\n  notes: {fc['notes']}" if fc.get("notes") else ""))
+    for level in ("block", "facecheck", "warn", "info"):
         for f in rep.findings:
             if f["level"] == level:
                 print(f"\n[{level}] {f['check']}" + (f" ({f['pitfall']})" if f["pitfall"] else "") + f": {f['text']}")
