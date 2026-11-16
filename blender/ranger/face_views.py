@@ -1,6 +1,6 @@
 """Close-ups of the ranger's face and the whole figure in the 3-D look (sprite_mode off), for checking eye, brow
 and face work. Run as python3 face_views.py --out DIR [--angles 0,1] [--zoom 3.4] [--hz 0.6]
-[--full] [--game] [--hide Eyeshadow,Lashes]. Angles are in eighths of a turn (0 faces the camera, 1 is the 3/4 view)."""
+[--full] [--game] [--hide Eyeshadow,Lashes] [--on mouth]. Angles are in eighths of a turn (0 faces the camera, 1 is the 3/4 view)."""
 import argparse
 import math
 import os
@@ -20,6 +20,7 @@ ap.add_argument('--zoom', type=float, default=3.4)
 ap.add_argument('--hz', type=float, default=0.6)
 ap.add_argument('--full', action='store_true')
 ap.add_argument('--game', action='store_true', help='also the world\'s close follow camera: perspective, 38 degree field, 27 degrees down')
+ap.add_argument('--on', default='eye', choices=('eye', 'mouth'), help='what the turned close-ups centre on: the nearer eye, or the mouth')
 ap.add_argument('--hide', default='', help='comma-separated object name prefixes to leave out, e.g. Eyeshadow,Lashes')
 args = ap.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:])
 os.makedirs(args.out, exist_ok=True)
@@ -62,8 +63,12 @@ def shoot(name, scale, z, rx, ry):
             bpy.context.view_layer.update()
             def centre(o):
                 return o.matrix_world @ (sum((Vector(c) for c in o.bound_box), Vector()) / 8)
-            near = min((centre(o) for o in bpy.data.objects if o.name.startswith('Eye white')), key=lambda c: c.y)
-            cx = near.x
+            if args.on == 'mouth':
+                # (the lip paint, not the solid mouth line: that is hidden up close, so its transform is never updated)
+                cx = centre(bpy.data.objects.get('Lip paint') or bpy.data.objects['Mouth']).x
+            else:
+                near = min((centre(o) for o in bpy.data.objects if o.name.startswith('Eye white')), key=lambda c: c.y)
+                cx = near.x
         cam.location = (cx, cam.location.y, z)
         sc.render.filepath = os.path.join(args.out, f'_{name}_{a:g}.png')
         bpy.ops.render.render(write_still=True)

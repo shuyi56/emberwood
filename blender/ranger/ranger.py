@@ -1258,16 +1258,17 @@ def mouth_relief(x, z):
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     t = (z - 0.258) / max(0.01, top - 0.258)
     if 0.0 < t < 1.25:
-        d += 0.022 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+        d += 0.016 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
     d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
     across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.024 * across_l * math.exp(-((z - 0.237) / 0.019) ** 2)    # lower lip
+    d += 0.017 * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
     # the line between the lips, deepest at the corners where the lips tuck in
     # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
     zl = 0.258 + 0.007 * (ax / 0.082) ** 2
-    d -= (0.008 + 0.006 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
-        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.004)    # the corners, lifted
+        # (shallow: deeper, each corner was a pit that the game's high camera saw as a dark wedge)
+        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.002)    # the corners, lifted
         d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
@@ -3804,6 +3805,142 @@ def eye_makeup(head, tree, eyes):
         patch('Brow paint', ex, ez, s, 0.02, brow_m, NU=90, NV=32, ext=(BR_U0, BR_U1, BR_V0, BR_V1))
 
 
+LIP_TEX = {}
+LIP_X0, LIP_X1, LIP_Z0, LIP_Z1 = -0.12, 0.12, 0.165, 0.305     # the lip patch's extent, in head heights (real z)
+
+
+def lip_painting(W=576, H=336):
+    """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
+    (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
+    lip: a dusty rose a few shades deeper and redder than the skin, never a pink. The upper lip, turned down away
+    from the light, a shade deeper than the lower; the lower lip fuller and a little lighter across its middle,
+    where it catches the light; both darkening into the line between them and the corners, where they tuck in.
+    The upper lip's edge (the vermilion border) is crisp, with the faint pale rim of skin just above it that gives
+    the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
+    across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
+    a hard point."""
+    xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
+    zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
+    zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
+    x, w = np.meshgrid(xs, zw)
+    ax = np.abs(x)
+
+    def sm(e0, e1, v):
+        t = np.clip((v - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    # the forms, from mouth_relief: the line between the lips, the upper edge with its cupid's bow, the lower edge
+    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    bow = 0.006 * np.exp(-((ax - 0.019) / 0.011) ** 2)
+    top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
+    # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read
+    # too full and the colour ran out past the corners as dark wedges)
+    pinch = np.sqrt(np.clip(1 - (ax / 0.081) ** 2, 0, 1))  # each lip tapers to nothing at the corner
+    top = zl + 0.75 * (top - zl) * pinch ** 0.8
+    bot = zl - 0.028 * pinch ** 1.4
+    upper = sm(top + 0.0022, top - 0.0022, w) * sm(zl - 0.002, zl + 0.001, w)
+    lower = sm(bot - 0.007, bot + 0.005, w) * sm(zl + 0.002, zl - 0.001, w)
+    # (past the corners both edges meet the line, which would leave a thin band of each running on out)
+    upper, lower = upper * sm(0.084, 0.076, ax), lower * sm(0.084, 0.076, ax)
+    lip = np.maximum(upper, lower)
+    # how far down each lip lies, 0 at the line between them, 1 at its outer edge
+    tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
+    tl = np.clip((zl - w) / np.maximum(zl - bot, 1e-4), 0, 1)
+    MID = np.array([178, 104, 96], dtype=np.float32)        # the lip's own tone: a dusty rose on her warm skin
+    UP = np.array([162, 90, 84], dtype=np.float32)          # the upper lip, a shade deeper
+    HI = np.array([194, 124, 114], dtype=np.float32)        # the fullest part of the lower lip
+    DEEP = np.array([112, 58, 56], dtype=np.float32)        # into the line and the corners
+    col = MID + (UP - MID) * (upper > lower)[..., None] * sm(0.0, 0.35, tu)[..., None]
+    full = np.exp(-((tl - 0.5) / 0.28) ** 2) * np.exp(-(x / 0.045) ** 2) * (lower >= upper)
+    col = col + (HI - col) * (0.75 * full)[..., None]
+    # (the upper lip's own middle, the tubercle, catches a little light too)
+    tub = np.exp(-((tu - 0.4) / 0.25) ** 2) * np.exp(-(x / 0.02) ** 2) * (upper > lower)
+    col = col + (HI - col) * (0.35 * tub)[..., None]
+    # into the line between them and the corners
+    inner = np.where(upper > lower, sm(0.35, 0.0, tu), sm(0.3, 0.0, tl))
+    corner = sm(0.045, 0.078, ax)
+    col = col + (DEEP - col) * np.clip(0.4 * inner + 0.25 * corner, 0, 1)[..., None]
+    # the line itself: a dark, soft parting, deepest at the corners
+    # (narrow: wider, it read as the lips parted on a dark mouth)
+    part = np.exp(-((w - zl) / 0.0019) ** 2) * sm(0.08, 0.06, ax)
+    col = col + (np.array([84, 42, 42], dtype=np.float32) - col) * np.clip(0.8 * part, 0, 1)[..., None]
+    # the fine vertical creases across the lips (fanning a little outward toward the corners)
+    # (irregular: their spacing wanders and each one fades in and out, so they read as texture, not stripes)
+    cr = np.sin((x + 0.18 * x * np.abs(w - zl) / 0.04) / 0.0055 * np.pi + 5.0 * _fbm2(x * 30, w * 8, 31, 3))
+    cr = np.clip(cr, 0, 1) ** 4 * np.clip(0.5 + 1.5 * _fbm2(x * 18, w * 30, 37, 3), 0, 1)
+    col = col * (1 - 0.045 * np.clip(cr, 0, 1) * np.maximum(sm(0.1, 0.6, tu), sm(0.1, 0.6, tl)))[..., None]
+    a = lip * (0.88 - 0.5 * corner) + 0.0 * x
+    a = np.maximum(a, part * 0.75)
+    # the pale rim of skin just over the upper lip's edge
+    rim = np.exp(-((w - top - 0.0045) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
+    col = col + (np.array([232, 200, 180], dtype=np.float32) - col) * rim[..., None] * (1 - lip[..., None])
+    a = np.maximum(a, 0.28 * rim)
+    a *= sm(LIP_X0, LIP_X0 + 0.01, x) * sm(LIP_X1, LIP_X1 - 0.01, x)
+    return np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
+
+
+def lip_image():
+    if 'img' in LIP_TEX:
+        return LIP_TEX['img']
+    px = lip_painting()
+    H, W = px.shape[:2]
+    img = bpy.data.images.new('lips', W, H, alpha=True)
+    img.pixels.foreach_set(px[::-1].ravel())
+    img.pack()
+    LIP_TEX['img'] = img
+    return img
+
+
+def lip_paint(head, tree, NU=120, NV=70, off=0.018):
+    """The lips' colour (lip_painting) on a thin skin of the face over the mouth: a grid of the patch, each point
+    cast straight back onto the finished head and lifted a hair off it, like the eyeshadow. A touch glossier than
+    the skin round it, as lips are, but not wet."""
+    m = bpy.data.materials.new('lip paint')
+    m.use_nodes = True
+    nt = m.node_tree
+    for n in list(nt.nodes):
+        nt.nodes.remove(n)
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = lip_image()
+    tex.interpolation = 'Cubic'
+    tex.extension = 'EXTEND'
+    nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+    nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
+    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
+    p.inputs['Specular IOR Level'].default_value = 0.3
+    nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    m.surface_render_method = 'BLENDED'
+    bm = bmesh.new()
+    uvl = bm.loops.layers.uv.new('UVMap')
+    grid = []
+    for j in range(NV + 1):
+        row = []
+        for i in range(NU + 1):
+            px = (LIP_X0 + (LIP_X1 - LIP_X0) * i / NU) * HEAD_H
+            pz = (LIP_Z0 + (LIP_Z1 - LIP_Z0) * j / NV) * HEAD_H
+            h = tree.ray_cast(Vector((px, -50, pz)), Vector((0, 1, 0)))
+            row.append(bm.verts.new((px, (h[0].y if h[0] is not None else 0.0) - off, pz)))
+        grid.append(row)
+    for j in range(NV):
+        for i in range(NU):
+            vs = [grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]]
+            f = bm.faces.new(vs)
+            for lp in f.loops:
+                k = vs.index(lp.vert)
+                lp[uvl].uv = ((i + (1 if k in (1, 2) else 0)) / NU, (j + (1 if k in (2, 3) else 0)) / NV)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    me = bpy.data.meshes.new('Lip paint')
+    bm.to_mesh(me)
+    bm.free()
+    for pl in me.polygons:
+        pl.use_smooth = True
+    me.materials.append(m)
+    o = bpy.data.objects.new('Lip paint', me)
+    link(o, head)
+    o.visible_shadow = False
+
+
 def build():
     reset()
     sc = bpy.context.scene
@@ -3931,6 +4068,7 @@ def build():
     final_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     eye_makeup(head, final_tree, eyes)
+    lip_paint(head, final_tree)
     # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)
     mesh_obj('Mouth', ellipsoid(0.66, 0.1, 0.06, 12, 6), M_LIPS, head, loc=(0, mouth_y + 0.1, MOUTH_Z * HEAD_H), subdiv=0)
 
@@ -4646,10 +4784,15 @@ def sprite_mode(on):
     for o in bpy.data.objects:
         if o.name.startswith('Wool fuzz'):
             o.hide_render = on
-        if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint')):
+        if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint', 'Lip paint')):
             o.hide_render = on         # (finer than a sprite pixel: nothing to draw there)
             o.hide_viewport = on
         if o.name.startswith('Brow tube'):
+            o.hide_render = not on
+            o.hide_viewport = not on
+        if o.name == 'Mouth':
+            # (the line between the lips is the sprites' mouth; up close the lip paint draws it, and the solid
+            # line stood forward of the paint in the corners as a pale sliver with a hard shadow under it)
             o.hide_render = not on
             o.hide_viewport = not on
         if o.name.startswith('Iris'):
