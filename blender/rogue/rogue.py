@@ -27,6 +27,21 @@ import bmesh  # noqa: E402
 from mathutils import Vector, Matrix  # noqa: E402
 from female import *  # noqa: E402,F401,F403  (the base figure: shapes, materials, rig, walk and sprite pipeline)
 from female import _profile, _gs, _torso_dims, _perlin2  # noqa: E402,F401
+import female  # noqa: E402
+
+# ---------------------------------------------------------------- her face
+# Designed in the face creator (/mnt/project-files/face-creator) on the base head: leaner than the ranger, with
+# high, sharp cheekbones over a hollow, a narrower jaw with a firmer edge, a neat pointed chin, a finer nose and a
+# thinner upper lip whose corners lift into a half-smile; the eyes a touch narrower and more tilted, a sly look.
+female.FACE.update({
+    'jawWidth': -0.07, 'jawDef': 1.5, 'jawSharp': 0.6, 'jawAngle': 0.3, 'chinProj': 1.2, 'chinWidth': 0.88,
+    'cheekWidth': -0.02, 'cheekbones': 1.6, 'cbHeight': 0.008, 'apples': 0.8, 'cheekFull': 0.55,
+    'noseProj': 1.05, 'noseWidth': 0.92, 'tipBall': 0.8, 'nostrils': 0.85,
+    'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 0.85, 'lipLower': 0.95, 'smile': 1.6,
+})
+female.EYE_OPEN = 0.68
+female.EYE_TILT = 0.105
+female.EARS = True       # (her hair is drawn back into the tail, so they show)
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
@@ -324,10 +339,11 @@ FUSE = True       # melt the hair's pieces into one (views.py --set FUSE=False s
 
 # the hairline: its height round the head, as an elevation seen from HC (|angle| from the front: the forehead,
 # a little higher at the temples, down in front of the ears, behind them, and across the nape)
-# (combed back over the ears, which the base head does not model: down past where they would be, so the side of
-# the head behind the jaw does not show as bare skin)
-HAIRLINE = smooth_curve([(0.0, 0.47), (0.2, 0.5), (0.48, 0.57), (0.72, 0.36), (1.0, 0.08), (1.25, -0.2), (1.5, -0.52),
-                         (1.8, -0.76), (2.1, -0.82), (2.6, -0.82), (math.pi, -0.8)])
+# (down in front of the ear as a short sideburn, arching up over the ear (th 1.45 to 1.95, el -0.5 to 0.12 from
+# HC) with a little clearance, and down again behind it to the nape)
+HAIRLINE = smooth_curve([(0.0, 0.47), (0.2, 0.5), (0.48, 0.57), (0.72, 0.36), (1.0, 0.08), (1.2, -0.2), (1.32, -0.38),
+                         (1.42, -0.12), (1.55, 0.18), (1.75, 0.27), (1.97, 0.2), (2.12, -0.2), (2.32, -0.66),
+                         (2.6, -0.82), (math.pi, -0.8)])
 # (a natural hairline, not a rim: a little lower at the middle of the brow, receding at the temple corners, then
 # down in front of the ear. The hair is parted off-centre, at PART round from the front, and swept back from it:
 # the larger side rises a little over the parting as it turns back, which is what tells pulled-back hair from a cap)
@@ -369,6 +385,18 @@ def hair_rest(co):
         q = co - p
         across = math.atan2(q.dot(ax), -q.dot(dp)) * 2.4
         return Vector((across, 0.0, -0.3 * (L0 + lens[k])))
+    # a side lock: its strands run down it (carrying on from the cap's at its root), not round the head
+    best = None
+    for wsp in TIE.get('wisps', ()):
+        _, k, dist = wsp['kd'].find(co)
+        u = k / (len(wsp['path']) - 1)
+        w = wisp_width(wsp['j'], u)[0]
+        if u > 0.3 and dist < w * 1.3 + 0.06 and (best is None or dist < best[0]):
+            best = (dist, wsp, k)
+    if best:
+        _, wsp, k = best
+        off = (co - wsp['path'][k]).dot(wsp['ax'][k])
+        return Vector((wsp['across0'] + off * 1.1, 0.0, -0.3 * (wsp['along0'] + 1.2 * wsp['lens'][k])))
     across, along = cap_flow(co)
     return Vector((across, 0.0, -0.3 * along))
 
@@ -564,27 +592,73 @@ def tail_clumps(head, path, lens):
     return o
 
 
-def temple_wisp(head_tree, side):
-    """A loose lock at the temple: it slips out of the combed-back hair at the temple corner and falls down in front
-    of the ear to the cheekbone; flat, lying on the side of the face, and melted into the hair at its root."""
+# The side locks: at each temple a lock slips out from under the combed-back hair at the temple corner and falls
+# in front of the ear to the cheekbone, with a thinner strand splitting off either side of it (one shorter, in
+# front; one behind, nearer the ear), so it reads as a lock of hair coming apart into strands rather than one thick
+# strand. Each: (th, el) knots (th mirrored for her other side), its half-width at the root and at the tip.
+WISPS = [
+    ([(0.5, 0.8), (0.66, 0.48), (0.76, 0.25), (0.86, -0.05), (0.88, -0.3), (0.82, -0.5)], 0.27, 0.1),
+    ([(0.46, 0.78), (0.6, 0.5), (0.68, 0.3), (0.74, 0.08), (0.75, -0.14)], 0.14, 0.085),
+    ([(0.56, 0.76), (0.72, 0.44), (0.84, 0.2), (0.95, -0.08), (0.99, -0.3), (0.96, -0.44)], 0.15, 0.085),
+]
+
+
+def wisp_width(j, u):
+    """A side lock's half-width across and half-thickness through, at u along it. (Never thinner than two cells
+    of the fusing grid, so it melts into the hair at its root and keeps its end.)"""
+    w0, w1 = WISPS[j][1], WISPS[j][2]
+    w = w1 + (w0 - w1) * (1.0 - u) ** 0.8
+    return w, max(0.08, 0.42 * w)
+
+
+def temple_wisps(head_tree, side):
+    """The side locks of one side, as flat tubes lying on the side of the face: each is sunk a little into the
+    skin (so no slit of shadow opens under it) and rooted up under the hair. Their lines are kept (TIE['wisps'])
+    so the strands painted on the fused hair can run down them (see hair_rest)."""
+    from mathutils.kdtree import KDTree
+
     def on(th, el, lift):
         d = _dir(th, el)
         hit = head_tree.ray_cast(HC + d * 20.0, -d, 20.0)
         r = (hit[0] - HC).length if hit[0] is not None else 4.0
         return HC + d * (r + lift)
-    th = lambda x: side * x   # noqa: E731
-    # (lying on the skin: lifted by its own half-thickness and a hair, so no slit of shadow opens under it)
-    pts = [on(th(0.5), 0.8, 0.1), on(th(0.66), 0.48, 0.2), on(th(0.76), 0.25, 0.2), on(th(0.86), -0.05, 0.18),
-           on(th(0.88), -0.3, 0.15), on(th(0.82), -0.5, 0.12)]
-    path = catmull(pts, 40)
-    n_ = len(path)
-
-    def rad(i, a):
-        u = i / (n_ - 1)
-        # (never thinner than two cells of the fusing grid, so it melts into the hair at its root and keeps its end)
-        w = 0.26 * (1.0 - u) ** 0.7 + 0.17
-        return w * 0.45, w
-    return sweep(path, rad, n=12)
+    out = []
+    for j, (knots, _w0, _w1) in enumerate(WISPS):
+        path = catmull([on(side * th, el, 0.07) for th, el in knots], 40)
+        n_ = len(path)
+        bm = bmesh.new()
+        rings = []
+        frames = []
+        for i, p in enumerate(path):
+            t = (path[min(i + 1, n_ - 1)] - path[max(i - 1, 0)]).normalized()
+            nrm = (p - HC).normalized()
+            ax = t.cross(nrm).normalized()            # across the lock, along the skin
+            nrm = ax.cross(t).normalized()
+            w, th_ = wisp_width(j, i / (n_ - 1))
+            rings.append([bm.verts.new(p + ax * (w * math.cos(2 * math.pi * k / 12)) + nrm * (th_ * math.sin(2 * math.pi * k / 12)))
+                          for k in range(12)])
+            frames.append(ax)
+        for ra, rb in zip(rings, rings[1:]):
+            for k in range(12):
+                bm.faces.new((ra[k], ra[(k + 1) % 12], rb[(k + 1) % 12], rb[k]))
+        for ring, p in ((rings[0], path[0]), (rings[-1], path[-1])):
+            c = bm.verts.new(p)
+            for k in range(12):
+                bm.faces.new((ring[k], ring[(k + 1) % 12], c))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        name = f'Hair wisp {j} {side}'
+        mesh_obj(name, bm, M_HAIR, bpy.data.objects['Head'], subdiv=0)
+        kd = KDTree(n_)
+        lens = [0.0]
+        for i, p in enumerate(path):
+            kd.insert(p, i)
+            if i:
+                lens.append(lens[-1] + (p - path[i - 1]).length)
+        kd.balance()
+        across0, along0 = cap_flow(path[0])
+        TIE.setdefault('wisps', []).append(dict(j=j, path=path, kd=kd, lens=lens, ax=frames, across0=across0, along0=along0))
+        out.append(name)
+    return out
 
 
 # The front of the hair, painted strand by strand: a texture over the band from just below the hairline to a
@@ -849,9 +923,9 @@ def build_hair(head, head_tree):
     mesh_obj('Hair tail', sweep(path, tail_r, n=28), M_HAIR, head, subdiv=0)
     if not FUSE:          # (for checking the pieces before they are melted together)
         return None
-    for side in (1, -1):
-        mesh_obj(f'Hair wisp {side}', temple_wisp(head_tree, side), M_HAIR, head, subdiv=0)
-    hair = fuse_parts(head, ['Hair cap', 'Hair tail', 'Hair wisp 1', 'Hair wisp -1'])
+    TIE.pop('wisps', None)
+    wisps = temple_wisps(head_tree, 1) + temple_wisps(head_tree, -1)
+    hair = fuse_parts(head, ['Hair cap', 'Hair tail'] + wisps)
     fine_streaks(hair)
     paint_hair(hair)
     scalp_paint(head, head_tree)
@@ -1021,13 +1095,128 @@ def ring_r(rings, z):
 
 
 # ---------------------------------------------------------------- the rogue
+LEG_TOP_Z = HIP_Z - 11.0      # the leggings' top (the seat and both thighs, in one piece) ends here, inside the boots
+
+
+def leggings_top(body):
+    """The leggings from under the bodice down into the boots as one surface: the seat over the hips and both
+    thighs, melted together (remeshed as one volume and relaxed), so the legs grow out of the seat, the seat
+    runs down into the backs of the thighs without a shelf, and the crotch is one soft valley between the legs.
+    Below the hips it rides on the thighs (see leggings_on_legs); the legs' own tubes carry on from inside its
+    lower edge, out of sight in the boots."""
+    def seat_pt(z, p):
+        x, y = torso_point(z, p, 0.12, bust=0.0)
+        # below the hip joints the seat draws in between the legs, which take over its width; its front and back
+        # stay level with the thighs' down to the crotch (drawn back higher up, they left a hollow there), and
+        # only then sink away between them, so the valley between the thighs opens gradually
+        kx = smoothstep(31.6, 28.6, z)
+        # (the back draws in from higher up, so the seat doesn't hang between the legs as a keel)
+        ky = 0.85 * smoothstep(29.4, 27.7, z) if y < 0 else 0.4 * smoothstep(30.2, 28.0, z) + 0.5 * smoothstep(28.6, 27.6, z)
+        # the front centre lies flat across the lower belly into the crotch instead of rounding forward (a full
+        # front there read as a bulge); the sides stay level with the thighs so no hollow opens beside them
+        if y < 0:
+            ky += 0.32 * smoothstep(31.8, 29.4, z) * (1.0 - smoothstep(0.6, 2.2, abs(x * (1.0 - 0.8 * kx))))
+        return x * (1.0 - 0.8 * kx), y * (1.0 - min(ky, 0.92))
+    parts = [loft_fn([37.0 - 0.3 * i for i in range(32)], seat_pt, n=96)]
+    lo = LEG_TOP_Z - HIP_Z
+    for s_ in (1, -1):
+        x0 = -s_ * LEG_X
+        zs = [2.0 - 0.2 * i for i in range(int((2.0 - lo) / 0.2) + 1)]
+
+        def leg_pt(z, phi, s_=s_, x0=x0):
+            r = _profile(LEG_R, z) + leg_form(z, phi, s_)[0]
+            # (a hair proud of the leg's own tube, easing in under it at the lower edge, so the two never fight)
+            r += 0.03 - 0.13 * smoothstep(lo + 0.6, lo, z)
+            # the seat's fullness carries on down the back of the thigh and eases out, so the two meet level
+            # (the bare tube was shallower than the seat there, which left the seat standing over it as a shelf)
+            full = 0.8 * smoothstep(-6.0, -0.5, z) * max(0.0, -math.cos(phi)) ** 1.5
+            # and the insides of the thighs meet at the crotch and part gradually below it, so the gap between the
+            # legs closes in a soft pointed arch (the seat's flat underside closed it square); they stop just short
+            # of the midline and swell only on the very inside, so the join adds no volume of its own
+            inner = max(0.0, -s_ * math.sin(phi)) ** 2
+            rx = r + (LEG_X - r - 0.08) * smoothstep(-5.2, -2.8, z) * inner ** 1.5
+            # the filled inside sits back from the thigh's front, so the web falls to the seat's depth at the
+            # midline instead of standing as a lobe on each side of it (at the back the seat draws in instead)
+            web = smoothstep(-5.2, -2.8, z) * inner
+            yk = 1.0 - 0.5 * web if math.cos(phi) > 0 else 1.0
+            return x0 - rx * math.sin(phi), -(r * 1.04) * math.cos(phi) * yk + full
+        bm_ = loft_fn(zs, leg_pt, n=56)
+        bmesh.ops.translate(bm_, vec=(0, 0, HIP_Z), verts=bm_.verts)
+        parts.append(bm_)
+    me = bpy.data.meshes.new('legs-union')
+    allbm = bmesh.new()
+    for bm_ in parts:
+        tmp = bpy.data.meshes.new('part')
+        bm_.to_mesh(tmp)
+        bm_.free()
+        allbm.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
+    allbm.to_mesh(me)
+    allbm.free()
+    ob = bpy.data.objects.new('legs-union', me)
+    link(ob)
+    rm = ob.modifiers.new('fuse', 'REMESH')
+    rm.mode = 'VOXEL'
+    rm.voxel_size = 0.08
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    fused = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob)
+    bpy.data.meshes.remove(me)
+    bm = bmesh.new()
+    bm.from_mesh(fused)
+    bpy.data.meshes.remove(fused)
+    # relaxed in stages: most where the parts meet (between the legs, front and back), less round it, so the join
+    # is a broad fillet and the relaxed part runs out into the rest without an edge; then the grid's own steps
+    for lim, n_it in ((3.0, 24), (4.4, 8)):
+        join = [v for v in bm.verts if 24.6 < v.co.z < 32.6 and abs(v.co.x) < lim]
+        for _ in range(n_it):
+            bmesh.ops.smooth_vert(bm, verts=join, factor=0.5, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    for _ in range(4):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.5, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    o = mesh_obj('Leggings seat', bm, M_LEGS, body, subdiv=0)
+
+    def crease(co):          # the thighs' creases, for the form shading (as the legs' own)
+        s_ = 1 if co.x < 0 else -1
+        phi = math.atan2(-(co.x + s_ * LEG_X), -co.y)
+        return leg_form(co.z - HIP_Z, phi, s_)[1] * smoothstep(31.5, 30.5, co.z)
+    crease_attr(o, crease)
+    return o
+
+
+def leggings_on_legs():
+    """The leggings' top below the hip joints rides on the thighs, each side on its own, blended over a few
+    fingers' height and across the middle, so it swings with the legs in the walk instead of the legs swinging
+    out through it."""
+    o = bpy.data.objects['Leggings seat']
+    mw = o.matrix_world
+    gs = {g.name: g for g in o.vertex_groups}
+    for side in ('R', 'L'):
+        gs[f'Thigh.{side}'] = gs.get(f'Thigh.{side}') or o.vertex_groups.new(name=f'Thigh.{side}')
+    trunk = [g for n, g in gs.items() if not n.startswith('Thigh.')]
+    for v in o.data.vertices:
+        co = mw @ v.co
+        w = smoothstep(32.2, 29.4, co.z)
+        if w <= 0.0:
+            continue
+        right = smoothstep(0.7, -0.7, co.x)       # (her right is -x)
+        for g in trunk:
+            try:
+                g.add([v.index], g.weight(v.index) * (1.0 - w), 'REPLACE')
+            except RuntimeError:
+                pass
+        gs['Thigh.R'].add([v.index], w * right, 'REPLACE')
+        gs['Thigh.L'].add([v.index], w * (1.0 - right), 'REPLACE')
+
+
 def build():
     root, body, pelvis, chest = begin_figure('Rogue')
 
     # ---- torso: the body in its linen shirt; the leggings' seat over the hips, under the bodice
-    torso_mesh('Shirt', M_SHIRT, body)
-    mesh_obj('Leggings seat', loft_fn([37.0 - 0.5 * i for i in range(18)], lambda z, p: torso_point(z, p, 0.12, bust=0.0)),
-             M_LEGS, body)
+    # (the shirt ends under the leggings' seat: lower, it showed through where the seat narrows into the crotch)
+    torso_mesh('Shirt', M_SHIRT, body, zs=[53.0 - 0.5 * i for i in range(37)])
+    leggings_top(body)
 
     # ---- the bodice, its binding, seams and buckled straps
     bz = [B_ZT - (B_ZT - B_ZB) * i / 59 for i in range(60)]
@@ -1070,10 +1259,11 @@ def build():
         sx_ = [(*bod_xy(z + dz, 0.31, 0.32), z + dz) for dz in (-0.14, 0.14)]
         mesh_obj(f'Strap stitching {i}', dots(sx_, 0.16), M_STITCH, body, subdiv=0)
 
-    # ---- the hip belt, slung low across the leggings, higher over her right hip; a round steel buckle a little to
+    # ---- the hip belt, round the top of her hips, higher over her right hip; a round steel buckle a little to
     # her left of the middle, its end hanging free below it; a pouch on her right hip; a dagger across her back
+    # (at the top of the hips, just under the bodice's hem, dipping a little in front under its point)
     def belt_z(p):
-        return 31.75 + 0.55 * math.sin(p)
+        return 33.55 + 0.4 * math.sin(p) - 0.7 * math.exp(-(wrap(p) / 0.7) ** 2)
     BELT_OFF = 0.5
 
     def belt_pt(zr, p):
@@ -1131,7 +1321,7 @@ def build():
     xs, ys = torso_point(zp - 0.1, PP, BELT_OFF + 1.78, bust=0.0)
     mesh_obj('Pouch stud', ellipsoid(0.18, 0.12, 0.18, 10, 6), M_STEEL, body, loc=(xs, ys, zp - 0.1), subdiv=0)
     # the dagger across the small of her back, tucked through the belt, its grip to her right hand
-    dz_ = 32.9
+    dz_ = 34.55
     # (clear of her back and of the belt where it crosses it, the hips' fullness included)
     yb = max(torso_point(dz_ + dz, math.pi + a, BELT_OFF + 0.3, bust=0.0)[1] for dz in (-0.7, 0.0, 0.7)
              for a in [-0.75 + 0.05 * i for i in range(31)]) + 0.34
@@ -1232,7 +1422,9 @@ def build():
     # ---- legs: the leggings, and the thigh boots over them
     def leg(side, s, x, w):
         # (the leggings end inside the boot, well above the ankle, so they never show through as the foot bends)
-        zs = [2.0 - 0.2 * i for i in range(int((2.0 + THIGH + SHIN - 3.5) / 0.2) + 1)]
+        # (it starts inside the lower edge of the leggings' top, which carries the seat into the legs)
+        z0 = LEG_TOP_Z - HIP_Z + 1.0
+        zs = [z0 - 0.2 * i for i in range(int((z0 + THIGH + SHIN - 3.5) / 0.2) + 1)]
 
         def leg_pt(z, phi):
             r = _profile(LEG_R, z) + leg_form(z, phi, s)[0]
@@ -1286,7 +1478,7 @@ def build():
                                        (-ANKLE_Z, 1.85, 3.38, 0, -1.7)], n=40), M_SOLE, loc=(x, 0, az), subdiv=1, skin=w)
     build_legs(pelvis, leg)
     # the cowl rides on the arms where it lies over them; then the rig, the camera and light, and the keyframes
-    return finish_figure(lambda: mantle_on_arms(['Cowl']))
+    return finish_figure(lambda: (mantle_on_arms(['Cowl']), leggings_on_legs()))
 
 
 if __name__ == '__main__':

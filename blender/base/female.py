@@ -34,6 +34,9 @@ import bmesh
 import numpy as np
 from mathutils import Vector, Euler  # noqa: F401  (Euler: for the characters)
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shared'))
+from ear import ear_grids, ear_tones, side_x_finder  # noqa: E402  (the ears, sculpted as their own surface)
+
 FW, FH, RES, COLS, ROWS, WALK = 64, 80, 2, 10, 8, 8
 PW, PH = FW * RES, FH * RES
 GY = 77  # ground row in design pixels from the top of the frame
@@ -1043,6 +1046,15 @@ def skin_tones():
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(head_parts))
+        elif o.name in EAR_TONES:
+            # the ears: rosier than the face, most of all round the rim and in the lobe, and dark in the bowl,
+            # the groove inside the rim and the fold behind (see ear_tones); a faint crease along the rim's roll
+            flush, shut = EAR_TONES[o.name]
+            gloss = 0.15 * (1 - shut)
+            crease = 0.3 * shut
+            occ = np.maximum(shut, _occlusion([o.matrix_world @ Vector(c) for c in co],
+                                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
+                                              world_tree(head_parts), dist=0.8))
         elif o.name == 'Neck':
             t = np.clip((co[:, 2] - 51.0) / 2.5, 0, 1)        # 0 at the collar, 1 where it meets the head's throat
             cold = 0.35 + 0.5 * t ** 2       # the neck sits in the head's shade: cooler than the face throughout
@@ -1218,6 +1230,18 @@ CHEST_Z, NECK_Z = 41.0, 51.0
 GAIT, ARM_SWING = 1.0, 0.2
 
 
+# The face's shape, as the face creator's sliders (/mnt/project-files/face-creator): multipliers on face_relief's,
+# mouth_relief's and jaw_relief's forms, and offsets on the head's width and a few features' heights. These defaults
+# are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
+EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
+FACE = {
+    'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
+    'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
+    'noseProj': 1.0, 'noseWidth': 1.0, 'noseLen': 0.0, 'tipBall': 1.0, 'nostrils': 1.0,
+    'browRidge': 1.0, 'sockets': 1.0, 'mouthWidth': 1.0, 'lipUpper': 1.0, 'lipLower': 1.0, 'smile': 1.0,
+}
+
+
 def gauss(x, z, x0, z0, sx, sz, amp):
     return amp * math.exp(-((x - x0) / sx) ** 2 - ((z - z0) / sz) ** 2)
 
@@ -1231,31 +1255,36 @@ def face_relief(x, z):
     proportions by FACE_WARP (sculpt round 2)."""
     z = FACE_WARP(z)
     d = 0.0
+    F = FACE
+    nw, nl, cb = F['noseWidth'], F['noseLen'], F['cbHeight']
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03)       # brow ridge
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06)     # eye socket
-        d += gauss(x, z, s * 0.23, 0.415, 0.09, 0.06, 0.028)    # cheekbone, running back toward the ear
-        d += gauss(x, z, s * 0.145, 0.375, 0.07, 0.06, 0.04)    # the apple of the cheek, under the eye by the nose
-        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032)      # the cheek filled out under the cheekbone, no hollow
-        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016)       # the soft fullness of the lower cheek
-        d += gauss(x, z, s * 0.05, 0.37, 0.021, 0.02, 0.018)    # wing of the nose (smaller: it read big from the game's camera)
-        d += gauss(x, z, s * 0.037, 0.378, 0.008, 0.02, -0.004)  # the groove between the wing and the tip
+        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03 * F['browRidge'])       # brow ridge
+        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
+        d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * F['cheekbones'])    # cheekbone, running back toward the ear
+        d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * F['apples'])    # the apple of the cheek, under the eye by the nose
+        d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032 * F['cheekFull'])      # the cheek filled out under the cheekbone, no hollow
+        d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016 * F['cheekFull'])       # the soft fullness of the lower cheek
+        d += gauss(x, z, s * 0.05 * nw, 0.37 + nl, 0.021 * nw, 0.02, 0.018 * F['nostrils'])    # wing of the nose (smaller: it read big from the game's camera)
+        d += gauss(x, z, s * 0.037 * nw, 0.378 + nl, 0.008, 0.02, -0.004 * F['nostrils'])  # the groove between the wing and the tip
         d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
-    if z > 0.36:
-        t = min(1.0, max(0.0, (0.6 - z) / 0.24))
+    zt = 0.36 + nl
+    if z > zt:
+        t = min(1.0, max(0.0, (0.6 - z) / (0.6 - zt)))
         h = (0.012 + 0.04 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.05 * math.exp(-((0.36 - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
-    w = 0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - 0.37) / 0.06)
+        h = 0.05 * math.exp(-((zt - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
+    h *= F['noseProj']
+    w = (0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - (0.37 + nl)) / 0.06)) * nw
     d += h * math.exp(-(x / (1.15 * w)) ** 2)      # (a rounded ridge: steep sides cast a hard shadow line from above)
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
     d += gauss(x, z, 0, 0.27, 0.16, 0.1, 0.018)      # the muzzle: the teeth and jaw carry the mouth forward
-    d += mouth_relief(x, z)
-    d += gauss(x, z, 0, 0.088, 0.046, 0.044, 0.028)   # chin: the ball of it, set back behind the lower lip
+    d += mouth_relief(x / F['mouthWidth'], z)
+    ch = F['chinHeight']
+    d += gauss(x, z, 0, 0.088 * (0.6 + 0.4 * ch), 0.046 * F['chinWidth'], 0.044 * ch, 0.028 * F['chinProj'])   # chin: the ball of it, set back behind the lower lip
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.09, 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
+        d += gauss(x, z, s * 0.09 * F['chinWidth'], 0.11, 0.045, 0.06, -0.003)    # a soft dip either side, setting the chin off the jaw
     return d
 
 
@@ -1271,13 +1300,13 @@ def mouth_relief(x, z):
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     t = (z - 0.258) / max(0.01, top - 0.258)
     if 0.0 < t < 1.25:
-        d += 0.016 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
-    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
+        d += 0.016 * FACE['lipUpper'] * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005 * FACE['lipUpper'])          # the tubercle
     across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.017 * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
+    d += 0.017 * FACE['lipLower'] * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
     # the line between the lips, deepest at the corners where the lips tuck in
     # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
-    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    zl = 0.258 + 0.007 * FACE['smile'] * (ax / 0.082) ** 2
     d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
     for sx in (-1, 1):
         # (shallow: deeper, each corner was a pit that the game's high camera saw as a dark wedge)
@@ -1290,7 +1319,7 @@ def mouth_relief(x, z):
             px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
-    d += gauss(x, z, 0, 0.385, 0.028, 0.024, 0.006)        # the ball of the nose's tip
+    d += gauss(x, z, 0, 0.385 + FACE['noseLen'], 0.028 * FACE['noseWidth'], 0.024, 0.006 * FACE['tipBall'])        # the ball of the nose's tip
     d += gauss(x, z, 0, 0.19, 0.05, 0.014, -0.008)         # the crease under the lower lip
     return d
 
@@ -1386,14 +1415,28 @@ def jaw_relief(y, z):
     def ss(t):
         t = min(1.0, max(0.0, t))
         return t * t * (3 - 2 * t)
-    below = ss((z - zl + 0.03) / 0.1)        # above the lower edge of the jaw
-    behind = ss((0.11 - y) / 0.11)             # in front of the back edge of the ramus
+    js = FACE['jawSharp']                      # (narrows the turn over the lower and back edges: a crisper jawline)
+    below = ss((z - zl + 0.03 / js) / (0.1 / js))        # above the lower edge of the jaw
+    behind = ss((0.11 - y) / (0.11 / (1 + 0.3 * (js - 1))))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
-    return 0.02 * below * behind * up
+    # the angle of the jaw under the ear, where the lower edge turns up into the ramus: a firm corner on a
+    # defined jaw (the masseter over it), set inside both edges so they stay clean
+    angle = FACE['jawAngle'] * math.exp(-((y - 0.06) / 0.065) ** 2 - ((z - 0.19) / 0.07) ** 2) * below * behind
+    return 0.02 * FACE['jawDef'] * below * behind * up + 0.016 * angle
+
+
+def _head_w(z):
+    """HEAD_W with the face creator's jaw and face width (FACE['jawWidth'], FACE['cheekWidth'])."""
+    def ss(e0, e1, v):
+        t = min(1.0, max(0.0, (v - e0) / (e1 - e0)))
+        return t * t * (3 - 2 * t)
+    jw = ss(-0.05, 0.08, z) * ss(0.42, 0.2, z)
+    cw = math.exp(-((z - 0.42) / 0.12) ** 2)
+    return HEAD_W(z) * (1 + FACE['jawWidth'] * jw + FACE['cheekWidth'] * cw)
 
 
 def _section(z, c, s):
-    w = _dome(HEAD_W, z, 0.7)
+    w = _dome(_head_w, z, 0.7)
     yw = HEAD_MID(z)
     front = _dome(HEAD_F, z, 0.62) + yw
     back = _dome(HEAD_B, z, 0.66) - yw
@@ -1404,6 +1447,32 @@ def _section(z, c, s):
     x = w * sp(s)
     y = yw - front * sp(c) if c >= 0 else yw + back * sp(-c)
     return x, y
+
+
+EAR_TONES = {}     # each ear's (flush, shade) per point, for skin_tones (see ear_mesh)
+
+
+def ear_mesh(e, name):
+    """An ear's grid (ear_grids) as a mesh: rows round the outline joined end to end, the bowl's centre one point,
+    the rear face left open where it runs into the skull. Its colour per point goes to EAR_TONES[name]."""
+    P = e['P']
+    NT, NC = P.shape[:2]
+    bm = bmesh.new()
+    pole = bm.verts.new(tuple(P[:, 0].mean(0)))
+    vs = [[bm.verts.new(tuple(p)) for p in row[1:]] for row in P]
+    for i in range(NT):
+        a, b = vs[i], vs[(i + 1) % NT]
+        bm.faces.new((pole, a[0], b[0]))
+        for j in range(NC - 2):
+            bm.faces.new((a[j], b[j], b[j + 1], a[j + 1]))
+    # (outward: the outer face looks away from the head; the faces' winding, row to row then out along a row)
+    j = NC // 4
+    wind = np.cross(np.roll(P, -1, axis=0)[:, j] - P[:, j], P[:, j + 1] - P[:, j])[:, 0].sum()
+    if wind * e['side'] < 0:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    flush, shade = ear_tones(e)
+    EAR_TONES[name] = tuple(np.concatenate([[t[:, 0].mean()], t[:, 1:].ravel()]) for t in (flush, shade))
+    return bm
 
 
 def sculpted_head():
@@ -1829,7 +1898,19 @@ def trunk_weights(co):
     the waist, so the body twists there in one piece), and the neck following the head at the top."""
     chest = 1.0 - _smooth(CHEST_Z + 2.5, CHEST_Z - 5.5, co.z)
     neck = 1.0 - _smooth(NECK_Z + 4.5, NECK_Z + 0.5, co.z)
-    return {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    w = {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    if LOCKED_WALK:
+        # (the world model) the jerkin's short skirt is carried part of the way by the thigh under it, more toward
+        # the hem, so the leg lifting forward lifts the skirt over it instead of pushing out past its front edge.
+        # Each side follows its own thigh, blended across the middle, where the two legs' swings cancel.
+        share = SKIRT_ON_THIGH * _smooth(HIP_Z + 2.0, HIP_Z - 2.5, co.z)
+        if share > 0:
+            right = min(1.0, max(0.0, 0.5 - co.x / 3.0))      # (her right is -x)
+            p = w.pop('Pelvis')
+            w['Pelvis'] = p * (1.0 - share)
+            w['Thigh.R'] = p * share * right
+            w['Thigh.L'] = p * share * (1.0 - right)
+    return w
 
 
 def skin_trunk(body):
@@ -3237,14 +3318,14 @@ def lip_painting(W=576, H=336):
     xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
     zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
     zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
-    x, w = np.meshgrid(xs, zw)
+    x, w = np.meshgrid(xs / FACE['mouthWidth'], zw)     # (in mouth_relief's own across, like the sculpt)
     ax = np.abs(x)
 
     def sm(e0, e1, v):
         t = np.clip((v - e0) / (e1 - e0), 0, 1)
         return t * t * (3 - 2 * t)
     # the forms, from mouth_relief: the line between the lips, the upper edge with its cupid's bow, the lower edge
-    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    zl = 0.258 + 0.007 * FACE['smile'] * (ax / 0.082) ** 2
     bow = 0.006 * np.exp(-((ax - 0.019) / 0.011) ** 2)
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
     # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read
@@ -3408,6 +3489,11 @@ def build_head(body):
     sculpt_eyes(hb, eyes)
     final_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    # the ears, each sculpted as its own surface (blender/shared/ear.py) and set on the head's side
+    if EARS:
+        for e in ear_grids(side_x_finder(head_section, jaw_relief), HEAD_H):
+            name = 'Ear ' + ('L' if e['side'] > 0 else 'R')
+            mesh_obj(name, ear_mesh(e, name), M_SKIN, head, subdiv=0)
     eye_makeup(head, final_tree, eyes)
     lip_paint(head, final_tree)
     # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)
@@ -3673,9 +3759,106 @@ def walk_drop(t):
     return best if best is not None else 0.0
 
 
+# ---- the world model's walk: planted feet
+# The sheet's walk above drives each joint from its curve, which is right for a cycle seen one frame at a time, but
+# its standing foot does not move back at an even pace (it slides forward in mid-stance and again before toe-off),
+# which shows as skating the moment the model covers real ground. The world's walk is built the other way round:
+# each ankle follows a path on the ground (still while it bears weight, carried back under the body at exactly the
+# pace the body moves forward, then swung through on a smooth arc), the hips ride as high as the standing legs
+# allow, smoothed into an easy rise and fall, and the thigh and knee are solved to reach the ankle. One cycle then
+# covers exactly STRIDE of ground (WORLD_CYCLE in src/world/main.js), so the feet stay put in the world.
+LOCKED_WALK = False     # export_glb.py turns it on for the world model; the sheet keeps the walk above
+SKIRT_ON_THIGH = 0.45   # (with LOCKED_WALK) how much of the jerkin's hem each thigh carries: see trunk_weights
+STRIDE = 46.0           # ground covered by one cycle (two steps), in model units
+STANCE_L = 0.6          # the part of a leg's cycle its foot is on the ground (heel strike at 0, toe-off here)
+AHEAD = 0.46            # how much of the stance's travel lies ahead of the hip at the heel strike
+SWING_LIFT = 4.0        # how high the ankle is lifted as the foot is carried through (early in the swing)
+BOB_RANGE = 2.4         # the most the hips rise and fall through a step
+BOB_SOFT, BOB_BLUR = 0.06, 0.03  # how far round the cycle the hips' path is widened into each trough, and smoothed
+L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reaching forward carried with it)
+# the arms in the locked walk: the upper arm swings ARM_SWING either way; the forearm follows a little later and
+# folds more as it comes forward, so the swing travels down the arm instead of the arm swinging stiff from the shoulder
+L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
+# the feet in the locked walk: each turned out a little, as a relaxed walk sets them (pointing dead ahead they read as
+# turned in), and set nearly under the hips, so the legs do not lean in and the knees do not come together
+L_TOE_OUT, L_FOOT_X = 0.13, 0.97
+
+
+def _hermite(p0, p1, m0, m1, u):
+    return ((2 * u ** 3 - 3 * u ** 2 + 1) * p0 + (u ** 3 - 2 * u ** 2 + u) * m0 + (-2 * u ** 3 + 3 * u ** 2) * p1
+            + (u ** 3 - u ** 2) * m1)
+
+
+def locked_foot(t):
+    """(forward of the hip's ground point, ankle height, foot pitch toes-up, on the ground) for a leg at point t of
+    its cycle. On the ground the ankle moves back at the body's pace; in the swing it is carried forward on a smooth
+    curve that leaves and lands moving a little backward (the foot is drawn back just before the heel strikes), and
+    lifted most early on, as the toes leave the ground."""
+    t %= 1.0
+    a = AHEAD * STANCE_L * STRIDE
+    pitch = math.radians(cyclic(GAIT_FOOT, t))
+    if t < STANCE_L:
+        return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+    u = (t - STANCE_L) / (1 - STANCE_L)
+    span = STRIDE * (1 - STANCE_L)
+    off = toe_roll(math.radians(cyclic(GAIT_FOOT, STANCE_L)))
+    fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
+    return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+
+
+def toe_roll(pitch):
+    """How far forward the ankle moves as the heel lifts and the foot rolls over the ball of the foot (3 ahead of
+    the ankle, as in foot_lift), so the ball stays where it was planted instead of sliding back under her."""
+    return 3.0 * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
+
+
+def locked_turn(tr):
+    """The pelvis's turn at walk phase tr (of the right leg): the right hip furthest forward as its heel strikes."""
+    return L_PELVIS_TURN * math.cos(2 * math.pi * (tr + 0.03))
+
+
+_LOCKED_HIPS = {}
+
+
+def locked_hips(tr):
+    """The hip joints' height at walk phase tr. As high as both standing legs reach with the knee just off straight,
+    then smoothed (the step's own rhythm, twice a cycle, and its first two overtones) and kept under that reach by a
+    soft minimum, and held to BOB_RANGE of rise above the lowest point, so the body rises and falls in one easy wave."""
+    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_RANGE, BOB_SOFT, BOB_BLUR, L_PELVIS_TURN, PELVIS_LIST)
+    if key not in _LOCKED_HIPS:
+        n = 96
+        reach = np.zeros(n)
+        for i in range(n):
+            t = i / n
+            lst, turn, best = pelvis_list(t), locked_turn(t), 1e9
+            for s, off in ((1, 0.0), (-1, 0.5)):
+                fwd, az, _, ground = locked_foot(t + off)
+                if ground:
+                    f = fwd - s * LEG_X * math.sin(turn)
+                    leg = (THIGH + SHIN) * 0.997
+                    best = min(best, az + math.sqrt(max(0.0, leg * leg - f * f)) - s * LEG_X * math.sin(lst))
+            reach[i] = best
+        # (capped at the top of the rise, then each point lowered to the least reach around it, so the sharp dip
+        # as the leading heel lands is widened into a trough, then blurred round the cycle, and lowered by whatever
+        # the blur lifted above the reach)
+        h = np.minimum(reach, reach.min() + BOB_RANGE)
+        w = max(1, int(round(BOB_SOFT * n)))
+        h = np.min([np.roll(h, j) for j in range(-w, w + 1)], axis=0)
+        g = np.exp(-0.5 * (np.minimum(np.arange(n), n - np.arange(n)) / (BOB_BLUR * n)) ** 2)
+        h = np.real(np.fft.ifft(np.fft.fft(h) * np.fft.fft(g / g.sum())))
+        h -= max(0.0, float((h - reach).max()))
+        _LOCKED_HIPS[key] = h
+    h = _LOCKED_HIPS[key]
+    x = (tr % 1.0) * len(h)
+    i = int(x)
+    return float(h[i % len(h)] + (h[(i + 1) % len(h)] - h[i % len(h)]) * (x - i))
+
+
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
+    if walking and LOCKED_WALK:
+        return pose_locked(col)
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
     # (the right leg's point in its cycle: its heel strikes when its foot is furthest forward)
@@ -3737,6 +3920,66 @@ def pose(col):
         # (held a little off the body, so the waist shows, and a little further out as it swings back, past the hip)
         sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-bend, 0, 0)
+        wr.rotation_euler = (flick, 0, 0)
+
+
+def _euler_m(e):
+    """The matrix of a Blender XYZ Euler (X applied first)."""
+    (ca, sa), (cb, sb), (cc, sc) = [(math.cos(v), math.sin(v)) for v in e]
+    rx = np.array([[1, 0, 0], [0, ca, -sa], [0, sa, ca]])
+    ry = np.array([[cb, 0, sb], [0, 1, 0], [-sb, 0, cb]])
+    rz = np.array([[cc, -sc, 0], [sc, cc, 0], [0, 0, 1]])
+    return rz @ ry @ rx
+
+
+def foot_level(pelvis, hip, knee, pitch, toe=0.0):
+    """The ankle's XYZ Euler that sets the foot pointing straight down the line of the walk, its sole level from
+    side to side, pitched only by `pitch` (toes up positive) and turned out by `toe`, whatever the pelvis's turn and list and the leg's
+    roll above it. (Taking each of those out one angle at a time, as pose() does, leaves the foot turned and rolled
+    by a few degrees once the shin leans far over, most at push-off, where it shows as the foot twisting on its toes.)"""
+    parent = _euler_m(pelvis) @ _euler_m(hip) @ _euler_m(knee)
+    m = parent.T @ _euler_m((pitch, 0.0, toe))
+    return (math.atan2(m[2, 1], m[2, 2]), -math.asin(max(-1.0, min(1.0, m[2, 0]))), math.atan2(m[1, 0], m[0, 0]))
+
+
+def pose_locked(col):
+    """The world model's walk (LOCKED_WALK) at sheet column col: feet planted on their paths (locked_foot), the
+    hips at locked_hips, the legs solved to reach, and the arms swinging against the legs with the forearm following
+    through. Same rig and the same trunk motion as pose()."""
+    ob = bpy.data.objects
+    ph = (col - 2 + 0.5) / WALK * 2 * math.pi
+    tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
+    hips = locked_hips(tr)
+    bob = HIP_Z - hips
+    turn, lst = locked_turn(tr), pelvis_list(tr)
+    sway = -SWAY * math.sin(2 * math.pi * (tr - 0.06))
+    ob['Body'].location = (sway, 0, -bob)
+    ob['Body'].rotation_euler = (0, 0, 0)
+    ob['Pelvis'].rotation_euler = (0, lst, turn)
+    # (a touch more lean as each foot pushes off, easing back as the body rides up over the standing leg)
+    lean = LEAN + 0.012 * math.cos(4 * math.pi * (tr + 0.08))
+    ob['Chest'].rotation_euler = (lean, -CHEST_TILT * lst, -CHEST_TURN * turn)
+    for side, s in (('R', 1), ('L', -1)):
+        hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
+        sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
+        t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
+        fwd, az, pitch, _ = locked_foot(t)
+        f = fwd - s * LEG_X * math.sin(turn)            # (the pelvis's turn carries the hip forward or back)
+        hz = hips + s * LEG_X * math.sin(lst)           # (and its list lifts or drops it)
+        # the leg leans in under the body so the foot keeps to its track; the lean lengthens the reach a little
+        hip_x = sway - s * LEG_X * math.cos(lst)
+        roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * L_FOOT_X) / (hz - az)))) - lst
+        th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
+        kb = th - shn
+        hip.location = (-s * LEG_X, 0, 0)
+        hip.rotation_euler = (-th, roll, 0)
+        kn.rotation_euler = (kb, 0, 0)
+        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
+        a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
+        fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
+        flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
+        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
+        el.rotation_euler = (-(L_BEND + L_FOLD * fold), 0, 0)
         wr.rotation_euler = (flick, 0, 0)
 
 

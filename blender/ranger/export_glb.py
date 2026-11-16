@@ -472,9 +472,10 @@ def main():
 
     # (the walk's settings belong to the base figure, whose pose() reads them)
     female.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
-    # in the world she covers ground at a good pace, so the walk takes a longer stride than the sprite sheet's and
-    # keeps the arm swing small (it has to read from the zoomed-out game camera). WORLD_CYCLE in src/world/main.js is the ground one cycle covers (see stride_length).
-    female.GAIT, female.ARM_SWING = 1.3, 0.24
+    # in the world she covers real ground, so she walks with her feet planted (female.LOCKED_WALK: one cycle covers
+    # female.STRIDE, which is WORLD_CYCLE in src/world/main.js) and keeps the arm swing small (it has to read from
+    # the zoomed-out game camera)
+    female.LOCKED_WALK, female.ARM_SWING = True, 0.24
     ranger.build()
     sc = bpy.context.scene
     for o in sc.objects:
