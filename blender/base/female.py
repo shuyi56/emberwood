@@ -3263,7 +3263,7 @@ def lip_painting(W=576, H=336):
     xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
     zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
     zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
-    x, w = np.meshgrid(xs, zw)
+    x, w = np.meshgrid(xs / FACE['mouthWidth'], zw)     # (in mouth_relief's own across, like the sculpt)
     ax = np.abs(x)
 
     def sm(e0, e1, v):
