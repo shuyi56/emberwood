@@ -1035,6 +1035,9 @@ def skin_tones():
                              + 0.8 * _g(u, w, 0, 0.35, 0.05, 0.045) + 0.35 * _g(u, w, 0, 0.085, 0.07, 0.05)
                              + 0.3 * _g(u, w, 0, 0.66, 0.12, 0.05))
             cold = front * 0.8 * (_g(u, w, -0.14, 0.47, 0.065, 0.025) + _g(u, w, 0.14, 0.47, 0.065, 0.025))
+            # blush (makeup, BLUSH): a soft wash over the apples of the cheeks, where the face creator lays it
+            blush = np.clip(0.55 * BLUSH[0] * front * (_g(u, w, -0.2, 0.375, 0.085, 0.055)
+                                                       + _g(u, w, 0.2, 0.375, 0.085, 0.055)), 0, 1)
             # under the jaw (UNDER_JAW_SHADE: where it starts on the turn under, over how much of it, and how cool)
             j0, jr, ja = UNDER_JAW_SHADE
             cold += np.clip((-nr[:, 2] - j0) / jr, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * ja
@@ -1086,6 +1089,9 @@ def skin_tones():
         flush, cold, gloss = np.clip(flush, 0, 1), np.clip(cold, 0, 1), np.clip(gloss, 0, 1)
         c = base[None, :] * np.ones((n, 1))
         c = c + (flushc - base)[None, :] * (0.6 * flush)[:, None]
+        if o.name == 'Head shape' and BLUSH[0] > 0:
+            c = c + (np.array(_srgb_lin(BLUSH[1])) - c) * blush[:, None]
+            flush = np.clip(flush + blush, 0, 1)      # (and the sprite's rosier ramp)
         c = c + (cool - c) * (0.5 * cold)[:, None]
         # shut in: darker and warmer (a reddened shade rather than a grey one)
         k = np.clip(occ * 1.3, 0, 1)[:, None]
@@ -1239,6 +1245,12 @@ GAIT, ARM_SWING = 1.0, 0.2
 # normal's downward part), reaches full over jr more of the turn, and goes ja cool. A figure with a softly turned jaw
 # spreads it, so it does not draw a line along the jaw's edge.
 UNDER_JAW_SHADE = (0.25, 1.0, 1.1)
+# makeup, as the face creator sets it (all off for the ranger): BLUSH is the creator's (blush, blushTone), a rosy
+# wash over the apples of the cheeks; LIP_COLOURS its exported MID/UP/HI/DEEP lip tones (lipstick mixed in), over
+# the natural lip in lip_painting; LIP_GLOSS its lipGloss, which takes the lip paint's roughness down
+BLUSH = (0.0, (215, 122, 124))
+LIP_COLOURS = {}
+LIP_GLOSS = 0.0
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
 FACE = {
     'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'jawUnder': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
@@ -3350,10 +3362,11 @@ def lip_painting(W=576, H=336):
     # how far down each lip lies, 0 at the line between them, 1 at its outer edge
     tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
     tl = np.clip((zl - w) / np.maximum(zl - bot, 1e-4), 0, 1)
-    MID = np.array([178, 104, 96], dtype=np.float32)        # the lip's own tone: a dusty rose on her warm skin
-    UP = np.array([162, 90, 84], dtype=np.float32)          # the upper lip, a shade deeper
-    HI = np.array([194, 124, 114], dtype=np.float32)        # the fullest part of the lower lip
-    DEEP = np.array([112, 58, 56], dtype=np.float32)        # into the line and the corners
+    L = LIP_COLOURS
+    MID = np.array(L.get('MID', [178, 104, 96]), dtype=np.float32)      # the lip's own tone: a dusty rose on her warm skin
+    UP = np.array(L.get('UP', [162, 90, 84]), dtype=np.float32)         # the upper lip, a shade deeper
+    HI = np.array(L.get('HI', [194, 124, 114]), dtype=np.float32)       # the fullest part of the lower lip
+    DEEP = np.array(L.get('DEEP', [112, 58, 56]), dtype=np.float32)     # into the line and the corners
     col = MID + (UP - MID) * (upper > lower)[..., None] * sm(0.0, 0.35, tu)[..., None]
     full = np.exp(-((tl - 0.5) / 0.28) ** 2) * np.exp(-(x / 0.045) ** 2) * (lower >= upper)
     col = col + (HI - col) * (0.75 * full)[..., None]
@@ -3412,7 +3425,7 @@ def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     tex.extension = 'EXTEND'
     nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
     nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
-    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
+    p.inputs['Roughness'].default_value = 0.55 - 0.2 * LIP_GLOSS      # (0.42 read as wet lipstick)
     p.inputs['Specular IOR Level'].default_value = 0.3
     nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
     m.surface_render_method = 'BLENDED'

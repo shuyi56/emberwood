@@ -37,7 +37,7 @@ female.FACE.update({
     'jawWidth': -0.07, 'jawDef': 1.5, 'jawSharp': 0.6, 'jawAngle': 0.3, 'jawUnder': 0.1, 'chinProj': 1.2, 'chinWidth': 0.88,
     'cheekWidth': -0.02, 'cheekbones': 1.6, 'cbHeight': 0.008, 'apples': 0.8, 'cheekFull': 0.55,
     'noseProj': 1.05, 'noseWidth': 0.92, 'tipBall': 0.8, 'nostrils': 0.85,
-    'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 0.85, 'lipLower': 0.95, 'smile': 1.6,
+    'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 1.05, 'lipLower': 1.15, 'smile': 1.6,
 })
 female.EYE_OPEN = 0.68
 female.EYE_TILT = 0.105
@@ -45,6 +45,10 @@ female.EARS = True       # (her hair is drawn back into the tail, so they show)
 import ear  # noqa: E402
 ear.EAR_SU, ear.EAR_SV = 0.92 * 0.8, 0.78 * 0.8   # her ears a fifth smaller than the shared layout
 female.UNDER_JAW_SHADE = (0.0, 1.6, 0.75)   # (spread over the whole soft turn under her jaw: kept to the edge, it drew a line there)
+# makeup, from the face creator (Rogue preset + blush 0.7 '#d4706f', lipstick 0.6 '#a5434c', gloss 0.35)
+female.BLUSH = (0.7, (212, 112, 111))
+female.LIP_COLOURS = {'MID': [170, 82, 84], 'UP': [166, 77, 82], 'HI': [177, 90, 91], 'DEEP': [153, 65, 72]}
+female.LIP_GLOSS = 0.35
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
