@@ -1094,14 +1094,12 @@ def leggings_top(body):
         # stay level with the thighs' down to the crotch (drawn back higher up, they left a hollow there), and
         # only then sink away between them, so the valley between the thighs opens gradually
         kx = smoothstep(31.6, 28.6, z)
-        ky = 0.85 * smoothstep(29.4, 27.7, z) if y < 0 else 0.7 * smoothstep(28.8, 27.7, z)
+        # (the back draws in from higher up, so the seat doesn't hang between the legs as a keel)
+        ky = 0.85 * smoothstep(29.4, 27.7, z) if y < 0 else 0.4 * smoothstep(30.2, 28.0, z) + 0.5 * smoothstep(28.6, 27.6, z)
         # the front centre lies flat across the lower belly into the crotch instead of rounding forward (a full
         # front there read as a bulge); the sides stay level with the thighs so no hollow opens beside them
         if y < 0:
-            ky += 0.22 * smoothstep(31.8, 29.4, z) * (1.0 - smoothstep(0.6, 2.2, abs(x * (1.0 - 0.8 * kx))))
-        else:
-            # and at the back the centre tucks in under the buttocks a little sooner, so they part into the thighs
-            ky += 0.15 * smoothstep(30.6, 28.8, z) * (1.0 - smoothstep(0.5, 1.8, abs(x * (1.0 - 0.8 * kx))))
+            ky += 0.32 * smoothstep(31.8, 29.4, z) * (1.0 - smoothstep(0.6, 2.2, abs(x * (1.0 - 0.8 * kx))))
         return x * (1.0 - 0.8 * kx), y * (1.0 - min(ky, 0.92))
     parts = [loft_fn([37.0 - 0.3 * i for i in range(32)], seat_pt, n=96)]
     lo = LEG_TOP_Z - HIP_Z
@@ -1121,13 +1119,11 @@ def leggings_top(body):
             # of the midline and swell only on the very inside, so the join adds no volume of its own
             inner = max(0.0, -s_ * math.sin(phi)) ** 2
             rx = r + (LEG_X - r - 0.08) * smoothstep(-5.2, -2.8, z) * inner ** 1.5
-            # the filled inside sits back from the thigh's front and back, so the web falls to the seat's depth at
-            # the midline instead of standing as a lobe on each side of it (cubed, so it stays off the thigh)
-            # (front and back alike; at the back the seat's fullness eases off there too, so the buttocks run
-            # into the backs of the thighs without a rounded lobe between the legs)
-            web = smoothstep(-5.6, -2.6, z) * max(0.0, -s_ * math.sin(phi)) ** 3
-            yk = 1.0 - (0.55 if math.cos(phi) > 0 else 0.45) * web
-            return x0 - rx * math.sin(phi), (-(r * 1.04) * math.cos(phi) + full * (1.0 - 0.7 * web)) * yk
+            # the filled inside sits back from the thigh's front, so the web falls to the seat's depth at the
+            # midline instead of standing as a lobe on each side of it (at the back the seat draws in instead)
+            web = smoothstep(-5.2, -2.8, z) * inner
+            yk = 1.0 - 0.5 * web if math.cos(phi) > 0 else 1.0
+            return x0 - rx * math.sin(phi), -(r * 1.04) * math.cos(phi) * yk + full
         bm_ = loft_fn(zs, leg_pt, n=56)
         bmesh.ops.translate(bm_, vec=(0, 0, HIP_Z), verts=bm_.verts)
         parts.append(bm_)
