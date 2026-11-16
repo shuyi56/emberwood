@@ -129,3 +129,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Warden with the cape, db7668d (2026-11-16): the scene took 12 to 13 minutes to build on the requester's machine and 21 minutes in the review with the hair check (bb142f7, before the cape: 8 minutes; the rogue: 3). The review's limit was 15 minutes and reported a crash that was not one. The queue pays the same build before every render of that figure.
 - **Spot:** The smoke line in the review: 'reached its first render in N s' above 600, or 'no render reached' with no Python error in the log. In the diff: a dense grid built more than once (an outside and a lining), a per-vertex Python loop over every mesh for weights or clearance, a lookup table rebuilt per piece.
 - **Fix:** Profile one build (python3 -X importtime is no help; time each build step) and cut the slow step: build the sheet once and offset it for the lining, halve grid resolution where a subdivision follows, cache tables. A real crash shows a traceback; a timeout does not, so rerun with RQ_SMOKE_TIMEOUT raised before sending the request back as broken.
+
+## P020 A new skin mesh that falls into another part's tone branch
+
+- **Seen:** Warden bare arms, 02a9e43 (2026-11-16): skin_tones picks its colouring by object name (head, ears, neck, then everything else as a hand). The new Arm.R and Arm.L took the hand's branch and its fingertip flush turned the whole arm pink. It cost one render to see.
+- **Spot:** A commit adds a mesh in M_SKIN (mesh_obj(..., M_SKIN, ...)) under a name skin_tones has no branch for. Read the if and elif chain on o.name in skin_tones at that commit: an unnamed mesh lands in the last branch.
+- **Fix:** Add the new name's own branch to skin_tones in the same commit, and match its tone to the neighbours where they meet (wrist, shoulder, neck).
