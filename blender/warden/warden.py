@@ -1271,13 +1271,13 @@ def cheek_scar(head):
 SLEEVE_R = [(1.6, 0.3), (1.35, 1.33), (0.85, 1.99), (0.0, 2.2), (-2.0, 2.16), (-5.5, 1.93), (-UPPER, 1.72),
             (-UPPER - 1.0, 1.5), (-UPPER - 2.2, 1.4), (-UPPER - 5.0, 1.2), (-UPPER - FORE + 0.4, 1.06),
             (-UPPER - FORE - 0.4, 1.04)]   # (slim under the vambrace, so it stays inside it as the elbow bends)
-BR_TOP, BR_BOT = -UPPER - 0.4, -UPPER - FORE - 0.55
+BR_TOP, BR_BOT = -UPPER - 1.7, -UPPER - FORE - 0.55
 BRACER_R = [(BR_TOP, 2.0), (BR_TOP - 0.5, 1.92), (-UPPER - 5.0, 1.72), (-UPPER - FORE + 0.8, 1.54), (BR_BOT, 1.62)]
 BR_STRAPS = (BR_TOP - 1.4, -UPPER - 5.6, -UPPER - FORE + 1.3)
 # the steel vambrace over the sleeve (height from the shoulder joint, radius): flared at the elbow, full over the
 # forearm's muscle, drawn in to the wrist, then flared a little over it
-VAMB_R = [(BR_TOP, 2.08), (BR_TOP - 0.7, 1.96), (-UPPER - 3.2, 1.92), (-UPPER - 6.2, 1.62), (-UPPER - FORE + 0.9, 1.4),
-          (BR_BOT + 0.25, 1.46), (BR_BOT, 1.58)]
+VAMB_R = [(BR_TOP, 1.86), (BR_TOP - 0.6, 1.78), (-UPPER - 3.8, 1.72), (-UPPER - 6.2, 1.5), (-UPPER - FORE + 0.9, 1.28),
+          (BR_BOT + 0.25, 1.34), (BR_BOT, 1.46)]
 
 SLEEVE_CREASES = [
     (-1.4, -1.05, 0.6, -0.9, 0.0, 0.1), (-2.4, -2.2, 0.55, 0.8, 0.0, 0.08),
@@ -1501,14 +1501,11 @@ def build():
         def arm_pt(z, phi):
             r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + sleeve_form(z, phi, s)[0]
             return -r * math.sin(phi), -r * 1.03 * math.cos(phi)
-        # (all but hidden now, under the robe's sleeve and the vambrace: dark, so the glimpses at the bent elbow read
-        # as the shadowed join)
-        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_BIND, loc=(x, 0.2, SH_Z), skin=fore,
-                      solid=0.12)
-        crease_attr(so, lambda co: sleeve_form(co.z, math.atan2(-co.x, -co.y), s)[1])
+        # (bare arms under the robe's short sleeves: the base figure's)
+        bare_arm(side, s, x, w)
         # the robe's own sleeve over it, short: from the shoulder (its top rounded over the arm, full width there) to
         # a little above the elbow, widening a touch to a soft bell, its end trimmed in the ochre band
-        SE = -UPPER + 0.3
+        SE = -UPPER + 3.6
 
         def robe_sleeve_pt(z, phi, out=0.0):
             r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + 0.24 + 0.45 * smoothstep(SE + 3.0, SE, z) + out
@@ -1522,14 +1519,14 @@ def build():
                  M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
         # the vambrace: hardened leather, bronze-brown, moulded to the forearm as the reference's: flat across like the
         # arm itself, full over the muscle below the elbow and drawn in hard to the wrist, a raised spine down the
-        # outside between two tooled panels, laced up the inside; its top rises to a point over the elbow, its foot
-        # flares a little over the wrist and runs on in a tongue over the back of the hand.
+        # outside between two tooled panels, laced up the inside; it starts below the elbow, its foot flares a little
+        # over the wrist and runs on in a tongue over the back of the hand.
         def vam_pt(z, phi, out=0.0, edge=None):
             d = wrap(phi - s * math.pi / 2)
             r = _profile(VAMB_R, z) + 0.16 * math.exp(-(d / 0.24) ** 2) \
                 + 0.07 * (math.exp(-((abs(d) - 0.75) / 0.28) ** 2)) + out
             ze = z if edge is None else edge
-            dz = 1.0 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(BR_TOP - 1.6, BR_TOP, ze)
+            dz = 0.0 * ze
             return -r * math.sin(phi), -r * 0.86 * math.cos(phi), dz
         bzs = [BR_TOP - 0.2 * i for i in range(int((BR_TOP - BR_BOT) / 0.2) + 1)] + [BR_BOT]
         mesh_obj(f'Bracer.{side}', loft_fn(bzs, vam_pt, n=56, cap_top=False, cap_bot=False), M_BRACER, loc=(x, 0.2, SH_Z),

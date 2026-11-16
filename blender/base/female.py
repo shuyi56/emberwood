@@ -3501,6 +3501,26 @@ def build_head(body):
     return head, head_tree
 
 
+# the bare arm's radius (local height from the shoulder joint, radius), before the deltoid: the round of the
+# shoulder, the upper arm slimming to the elbow, the forearm full just below it and drawn in to a slender wrist
+BARE_ARM_R = [(1.5, 0.3), (1.25, 1.2), (0.8, 1.72), (0.0, 1.82), (-2.0, 1.72), (-4.5, 1.56), (-UPPER + 1.2, 1.34),
+              (-UPPER, 1.3), (-UPPER - 1.6, 1.42), (-UPPER - 4.0, 1.3), (-UPPER - FORE + 1.0, 1.0), (-UPPER - FORE, 0.95),
+              (-UPPER - FORE - 0.4, 0.93)]
+
+
+def bare_arm(side, s, x, w, top=1.5):
+    """A bare arm in skin, from the shoulder (local height top) to just past the wrist, for clothes with short
+    sleeves or none: placed at (x, 0.2, SH_Z) like a sleeve, flatter front to back than across, with the deltoid
+    and a soft hollow inside the elbow."""
+    zs = [top - 0.2 * i for i in range(int((top + UPPER + FORE + 0.4) / 0.2) + 1)]
+
+    def pt(z, phi):
+        r = _profile(BARE_ARM_R, z) + deltoid(z, phi, s)
+        r -= 0.08 * math.exp(-((z + UPPER) / 0.8) ** 2) * max(0.0, math.cos(phi)) ** 2    # (the inside of the elbow)
+        return -r * math.sin(phi), -r * 0.92 * math.cos(phi)
+    return mesh_obj(f'Arm.{side}', loft_fn(zs, pt, n=40, cap_bot=False), M_SKIN, loc=(x, 0.2, SH_Z), skin=w)
+
+
 def build_arms(chest, sleeve):
     """Each arm's pivots (shoulder, elbow, wrist, hung from the chest), its clothes (sleeve(side, s, x, w), where
     side is 'R' or 'L', s is 1 for her right arm and -1 for her left, x the shoulder's X and w the arm's bone
