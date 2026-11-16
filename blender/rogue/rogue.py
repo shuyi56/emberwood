@@ -339,10 +339,11 @@ FUSE = True       # melt the hair's pieces into one (views.py --set FUSE=False s
 
 # the hairline: its height round the head, as an elevation seen from HC (|angle| from the front: the forehead,
 # a little higher at the temples, down in front of the ears, behind them, and across the nape)
-# (combed back over the ears, which the base head does not model: down past where they would be, so the side of
-# the head behind the jaw does not show as bare skin)
-HAIRLINE = smooth_curve([(0.0, 0.47), (0.2, 0.5), (0.48, 0.57), (0.72, 0.36), (1.0, 0.08), (1.25, -0.2), (1.5, -0.52),
-                         (1.8, -0.76), (2.1, -0.82), (2.6, -0.82), (math.pi, -0.8)])
+# (down in front of the ear as a short sideburn, arching up over the ear (th 1.45 to 1.95, el -0.5 to 0.12 from
+# HC) with a little clearance, and down again behind it to the nape)
+HAIRLINE = smooth_curve([(0.0, 0.47), (0.2, 0.5), (0.48, 0.57), (0.72, 0.36), (1.0, 0.08), (1.2, -0.2), (1.32, -0.38),
+                         (1.42, -0.12), (1.55, 0.18), (1.75, 0.27), (1.97, 0.2), (2.12, -0.2), (2.32, -0.66),
+                         (2.6, -0.82), (math.pi, -0.8)])
 # (a natural hairline, not a rim: a little lower at the middle of the brow, receding at the temple corners, then
 # down in front of the ear. The hair is parted off-centre, at PART round from the front, and swept back from it:
 # the larger side rises a little over the parting as it turns back, which is what tells pulled-back hair from a cap)
