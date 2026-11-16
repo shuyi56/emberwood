@@ -1073,6 +1073,7 @@ def skin_tones():
             flush = 0.15 * outside + 0.35 * np.exp(-((z + UPPER) / 0.9) ** 2) * np.clip(nr[:, 1], 0, 1)
             cold = 0.3 * inside + 0.3 * np.clip((-z - UPPER - FORE + 2.0) / 2.0, 0, 1)
             crease = 0.2 * np.exp(-((z + UPPER) / 0.4) ** 2) * np.clip(-nr[:, 1], 0, 1)   # inside the elbow
+            pores = np.full(n, 0.08)     # (fine-grained skin: the face's pores read as red grain on an arm)
             local = BVHTree.FromPolygons([v.co for v in me.vertices], [list(p.vertices) for p in me.polygons])
             occ = _occlusion(co, nr, local, dist=0.9)
         else:      # a hand: the wrist at the origin, the fingers down; the back of the hand faces away from her
