@@ -42,8 +42,8 @@ M_BIND = mat_def(33, 'binding', ramp(0x38291f, 0.08), 0.18, surface='leather')
 M_SLEEVE = mat_def(34, 'gambeson', ramp(0x4f3c2e, 0.1), 0.07, surface='twill', closeup='cloth', form=True)
 M_BRACER = mat_def(35, 'bracers', ramp(0x7a5337, 0.1), 0.22, surface='leather', closeup='suede', form=True)
 M_LEGS = mat_def(36, 'trousers', ramp(0x463d33, 0.1), 0.05, surface='twill', closeup='cloth', form=True)
-M_BOOTS = mat_def(37, 'boots', ramp(0x6a4630, 0.1), 0.24, surface='leather', closeup='leather')
-M_CUFF = mat_def(38, 'boot cuff', ramp(0x7c5639, 0.1), 0.2, surface='leather', closeup='suede')
+M_BOOTS = mat_def(37, 'boots', ramp(0x5a3321, 0.1), 0.24, surface='leather', closeup='leather')
+M_CUFF = mat_def(38, 'boot cuff', ramp(0x6c4029, 0.1), 0.2, surface='leather', closeup='suede')
 M_SOLE = mat_def(39, 'sole', ramp(0x221c19, 0.08), 0.0)
 M_BELT = mat_def(40, 'belt', ramp(0x4b3123, 0.1), 0.2, surface='leather')
 M_GOLD = mat_def(41, 'gold', ramp(0xb08f4f, 0.09), 0.0, closeup='gold', shadow_on=(M_TABARD, M_BELT))
@@ -1265,6 +1265,10 @@ SLEEVE_R = [(1.6, 0.3), (1.35, 1.33), (0.85, 1.99), (0.0, 2.2), (-2.0, 2.16), (-
 BR_TOP, BR_BOT = -UPPER - 1.6, -UPPER - FORE - 0.55
 BRACER_R = [(BR_TOP, 2.0), (BR_TOP - 0.5, 1.92), (-UPPER - 5.0, 1.72), (-UPPER - FORE + 0.8, 1.54), (BR_BOT, 1.62)]
 BR_STRAPS = (BR_TOP - 1.4, -UPPER - 5.6, -UPPER - FORE + 1.3)
+# the steel vambrace over the sleeve (height from the shoulder joint, radius): flared at the elbow, full over the
+# forearm's muscle, drawn in to the wrist, then flared a little over it
+VAMB_R = [(BR_TOP, 1.98), (BR_TOP - 0.6, 1.86), (-UPPER - 3.6, 1.8), (-UPPER - 6.2, 1.62), (-UPPER - FORE + 0.9, 1.42),
+          (BR_BOT + 0.25, 1.47), (BR_BOT, 1.6)]
 
 SLEEVE_CREASES = [
     (-1.4, -1.05, 0.6, -0.9, 0.0, 0.1), (-2.4, -2.2, 0.55, 0.8, 0.0, 0.08),
@@ -1505,29 +1509,54 @@ def build():
         mesh_obj(f'Robe sleeve hem.{side}', loft_fn([SE + 0.55, SE + 0.25, SE - 0.02], lambda z, p: robe_sleeve_pt(z, p, 0.07),
                                                    n=48, cap_top=False, cap_bot=False),
                  M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
+        # the vambrace: a steel shell fitted to the forearm, full over the muscle below the elbow and drawn in to the
+        # wrist, oval across like the arm itself, a ridge down the outside; its top rises to a point behind over the
+        # elbow, its foot flares a little over the wrist. Rolled edges, steel rivets, one leather strap.
+        def vam_pt(z, phi, out=0.0, edge=None):
+            r = _profile(VAMB_R, z) + 0.12 * math.exp(-(wrap(phi - s * math.pi / 2) / 0.3) ** 2) + out
+            ze = z if edge is None else edge
+            dz = 0.9 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(BR_TOP - 1.6, BR_TOP, ze)
+            return -r * math.sin(phi), -r * 0.95 * math.cos(phi), dz
         bzs = [BR_TOP - 0.2 * i for i in range(int((BR_TOP - BR_BOT) / 0.2) + 1)] + [BR_BOT]
-        bo_ = mesh_obj(f'Bracer.{side}', loft_fn(bzs, lambda z, p: bracer_pt(z, p, s), n=56, cap_top=False, cap_bot=False),
-                       M_BRACER, loc=(x, 0.2, SH_Z), skin=fore, solid=0.16)
-        crease_attr(bo_, lambda co: bracer_form(co.z, math.atan2(-co.x, -co.y), s)[1])
-        for nm, z0, z1 in (('top', BR_TOP + 0.05, BR_TOP - 0.42), ('bottom', BR_BOT + 0.42, BR_BOT - 0.05)):
-            mesh_obj(f'Bracer {nm} binding.{side}', loft_fn([z0, (z0 + z1) / 2, z1], lambda z, p: bracer_pt(z, p, s, 0.12), n=56,
-                                                           cap_top=False, cap_bot=False),
-                     M_BIND, loc=(x, 0.2, SH_Z), skin=fore, solid=0.12, subdiv=0)
-        bst_ = []
-        for k in range(40):
-            p = 2 * math.pi * k / 40
-            for z in (BR_TOP - 0.62, BR_BOT + 0.62):
-                bst_.append((*bracer_pt(z, p, s, 0.18), z))
-        mesh_obj(f'Bracer stitching.{side}', dots(bst_, 0.15), M_STITCH, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
-        # three straps round it, each buckled on the outside of the forearm
-        for j, zs_ in enumerate(BR_STRAPS):
-            mesh_obj(f'Bracer strap {j}.{side}', loft_fn([zs_ + 0.28, zs_, zs_ - 0.28], lambda z, p: bracer_pt(z, p, s, 0.1),
-                                                         n=56, cap_top=False, cap_bot=False),
-                     M_BELT, loc=(x, 0.2, SH_Z), skin=fore, solid=0.12, subdiv=0)
-            ph = s * math.pi / 2
-            bx, by2 = bracer_pt(zs_, ph, s, 0.3)
-            mesh_obj(f'Bracer buckle {j}.{side}', turned(frame_bm(0.62, 0.7, 0.13, 0.14), ph), M_STEEL,
-                     loc=(x + bx, 0.2 + by2, SH_Z + zs_), skin=fore, subdiv=0)
+        mesh_obj(f'Bracer.{side}', loft_fn(bzs, vam_pt, n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0.2, SH_Z),
+                 skin=fore, solid=0.14)
+        for nm, z_ in (('top', BR_TOP), ('bottom', BR_BOT)):
+            rz = [z_ + 0.15 * math.cos(math.pi * k / 4) for k in range(5)]
+            mesh_obj(f'Bracer {nm} roll.{side}',
+                     loft_fn(rz, lambda z, p, z_=z_: vam_pt(z_, p, 0.03 + 0.12 * max(0.0, 1 - ((z - z_) / 0.15) ** 2) ** 0.5, z_)[:2]
+                             + (vam_pt(z_, p, 0.0, z_)[2],), n=56, cap_top=False, cap_bot=False),
+                     M_PLATE, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
+        brv = []
+        for z_, dzr in ((BR_TOP - 0.45, 0.0), (BR_BOT + 0.45, 0.0)):
+            for ph in (s * math.pi / 2 - 0.55, s * math.pi / 2 + 0.55, 0.35 * s, -0.35 * s):
+                vx, vy, vdz = vam_pt(z_, ph, 0.07)
+                brv.append((vx, vy, z_ + vdz))
+        mesh_obj(f'Bracer rivets.{side}', dots(brv, 0.15), M_STEEL, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
+        zs_ = -UPPER - 5.4
+        mesh_obj(f'Bracer strap.{side}', loft_fn([zs_ + 0.26, zs_, zs_ - 0.26], lambda z, p: vam_pt(zs_, p, 0.06)[:2], n=56,
+                                                cap_top=False, cap_bot=False),
+                 M_BELT, loc=(x, 0.2, SH_Z), skin=fore, solid=0.1, subdiv=0)
+        ph = -s * 0.6
+        bx, by2, _ = vam_pt(zs_, ph, 0.22)
+        mesh_obj(f'Bracer buckle.{side}', turned(frame_bm(0.55, 0.6, 0.12, 0.12), ph), M_STEEL,
+                 loc=(x + bx, 0.2 + by2, SH_Z + zs_), skin=fore, subdiv=0)
+        # the gauntlet's hand: a plate curved over the back of the hand from under the vambrace's cuff to the
+        # knuckles, narrowing toward them, with a second, shorter lame lapped over its foot
+        hz0 = -UPPER - FORE
+
+        def hand_plate(z0, z1, wide0, wide1, lift, rows=10, cols=14):
+            def pt(i, j):
+                v = i / (rows - 1)
+                z = lerp(z0, z1, v)
+                hw = lerp(wide0, wide1, v)
+                u = lerp(-1.0, 1.0, j / (cols - 1))
+                bulge = 0.66 + lift - 0.38 * u * u
+                return (s * 0.23 - s * bulge, -0.03 + hw * u, z)
+            return face_out(grid(rows, cols, pt), axis_y=0.0)
+        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.9, 1.2, 1.05, 0.22), M_PLATE, loc=(x, 0.2, SH_Z),
+                 skin=w, solid=0.1, subdiv=1)
+        mesh_obj(f'Gauntlet lame.{side}', hand_plate(hz0 - 1.7, hz0 - 2.5, 1.08, 1.0, 0.32), M_PLATE, loc=(x, 0.2, SH_Z),
+                 skin=w, solid=0.1, subdiv=1)
     build_arms(chest, sleeve)   # (the hands are the base figure's)
 
     # ---- the cape over it all: the dark wool, its red lining just inside, an ochre band down each front, and the
@@ -1581,9 +1610,9 @@ def build():
         crease_attr(lo_, lambda co: leg_form(co.z, math.atan2(-co.x, -co.y), s)[1])
         rings = boot_rings()
         mesh_obj(f'Boot.{side}', loft(rings, n=40, cap_top=False), M_BOOTS, loc=(x, 0, kz), skin=w, solid=0.12)
-        # the greave: a steel shell round the shin over the boot, from under the knee to the ankle, shaped to the calf,
-        # with a ridge down the front of the shin; its top and bottom edges turned out a little
-        GT, GB = -0.75, -SHIN + 0.75
+        # the greave: a short steel shell round the shin over the boot, from under the knee to halfway down the shin,
+        # shaped to the calf, with a ridge down the front; its top and bottom edges turned out a little
+        GT, GB = -0.75, -6.6
 
         def greave_pt(z, phi, out=0.0):
             rx, ry, cy = ring_r(rings, z)
@@ -1624,36 +1653,32 @@ def build():
                      solid=0.13, subdiv=1)
         rv = [knee_pt(0.05, s * 1.55, 0.3), knee_pt(1.55, -1.05, 0.2), knee_pt(1.55, 1.05, 0.2),
               knee_pt(0.0, -1.05, cop(0.0, 0.75) + 0.12), knee_pt(0.0, 1.05, cop(0.0, 0.75) + 0.12)]
-        mesh_obj(f'Knee rivets.{side}', dots(rv, 0.17), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Knee rivets.{side}', dots(rv, 0.17), M_STEEL, loc=(x, 0, kz), skin=w, subdiv=0)
         # the leather straps holding the greave on, round the calf behind
-        for j_, zs_ in enumerate((-2.4, -SHIN + 2.4)):
+        for j_, zs_ in enumerate((-2.2, GB + 1.2)):
             def strap_pt(z, phi, zs_=zs_):
                 gx, gy = greave_pt(zs_, phi, 0.1)
                 return gx, gy
             mesh_obj(f'Greave strap {j_}.{side}', loft_fn([zs_ + 0.28, zs_, zs_ - 0.28], strap_pt, n=56, cap_top=False,
                                                          cap_bot=False), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
-        # the greave's top and bottom edges rolled outward, a gilt border etched just inside each, and gold rivets
-        # down the front either side of the ridge and at each strap's ends
+        # the greave's top and bottom edges rolled outward, and steel rivets down the front either side of the ridge
+        # and at each strap's ends
         for z_, sg in ((GT, -1), (GB, 1)):
             rz = [z_ + 0.17 * math.cos(math.pi * k / 4) for k in range(5)]
             mesh_obj(f'Greave roll {"top" if sg < 0 else "foot"}.{side}',
                      loft_fn(rz, lambda z, p, z_=z_: greave_pt(z_, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
                              n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0, kz), skin=w, subdiv=0)
-            zb = z_ - sg * 0.55
-            mesh_obj(f'Greave border {"top" if sg < 0 else "foot"}.{side}',
-                     loft_fn([zb + 0.1, zb, zb - 0.1], lambda z, p, zb=zb: greave_pt(zb, p, 0.03), n=56, cap_top=False,
-                             cap_bot=False), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0, solid=0.03)
         grv = []
-        for k in range(6):
-            zr_ = lerp(GT - 0.95, GB + 0.95, k / 5)
+        for k in range(3):
+            zr_ = lerp(GT - 0.95, GB + 0.95, k / 2)
             for ph in (-0.62, 0.62):
                 gx, gy = greave_pt(zr_, ph, 0.06)
                 grv.append((gx, gy, zr_))
-        for zs_ in (-2.4, -SHIN + 2.4):
+        for zs_ in (-2.2, GB + 1.2):
             for ph in (-1.35, 1.35):
                 gx, gy = greave_pt(zs_, ph, 0.14)
                 grv.append((gx, gy, zs_))
-        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_STEEL, loc=(x, 0, kz), skin=w, subdiv=0)
         # the shoe: a toe cap of paler leather sewn over the front of the foot, its seam stitched in a double row,
         # and a strap round the ankle buckled on the outside
         YC = -3.85
@@ -1692,6 +1717,34 @@ def build():
         rx, ry, cy = ring_r(rings, za)
         mesh_obj(f'Ankle buckle.{side}', turned(frame_bm(0.55, 0.52, 0.12, 0.12), ph), M_STEEL,
                  loc=(x - (rx + 0.2) * math.sin(ph), cy - (ry + 0.2) * math.cos(ph), kz + za), skin=w, subdiv=0)
+        # the boot below the greave, fitted to the calf and ankle as the reference's: buckled straps up the outside of
+        # the calf, a seam stitched up the back, a strap over the instep, and a stacked heel
+        def boot_band(zc, out, h=0.22):
+            return loft_fn([zc + h, zc, zc - h], lambda z, p: (lambda r: (-(r[0] + out) * math.sin(p),
+                                                                          r[2] - (r[1] + out) * math.cos(p)))(ring_r(rings, zc)),
+                           n=48, cap_top=False, cap_bot=False)
+        for j_, zc in enumerate((GB - 1.0, GB - 2.7, GB - 4.4)):
+            mesh_obj(f'Boot strap {j_}.{side}', boot_band(zc, 0.07), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
+            ph = s * math.pi / 2
+            rx, ry, cy = ring_r(rings, zc)
+            mesh_obj(f'Boot buckle {j_}.{side}', turned(frame_bm(0.5, 0.48, 0.11, 0.12), ph), M_STEEL,
+                     loc=(x - (rx + 0.2) * math.sin(ph), cy - (ry + 0.2) * math.cos(ph), kz + zc), skin=w, subdiv=0)
+        seam = []
+        for k in range(26):
+            zz = lerp(GB - 0.3, -SHIN - 0.2, k / 25)
+            rx, ry, cy = ring_r(rings, zz)
+            for dp in (-0.07, 0.07):
+                seam.append((-(rx + 0.06) * math.sin(math.pi + dp), cy - (ry + 0.06) * math.cos(math.pi + dp), zz))
+        mesh_obj(f'Boot seam.{side}', dots(seam, 0.08), M_STITCH, loc=(x, 0, kz), skin=w, subdiv=0)
+        zi = -SHIN - 1.25
+        mesh_obj(f'Instep strap.{side}', boot_band(zi, 0.07, 0.2), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
+        rx, ry, cy = ring_r(rings, zi)
+        ph = s * math.pi / 2
+        mesh_obj(f'Instep buckle.{side}', turned(frame_bm(0.48, 0.44, 0.11, 0.12), ph), M_STEEL,
+                 loc=(x - (rx + 0.2) * math.sin(ph), cy - (ry + 0.2) * math.cos(ph), kz + zi), skin=w, subdiv=0)
+        mesh_obj(f'Heel.{side}', loft_fn([-SHIN - 2.88, -SHIN - 2.93, -SHIN - ANKLE_Z + 0.05, -SHIN - ANKLE_Z],
+                                         lambda z, p: (-1.3 * math.sin(p), 0.95 - 0.9 * math.cos(p)), n=32),
+                 M_BIND, loc=(x, 0, kz), skin=w, subdiv=1)
         az = kz - SHIN
         mesh_obj(f'Welt.{side}', loft([(-2.25, 1.86, 3.36, 0, -1.65), (-2.4, 1.97, 3.5, 0, -1.7), (-2.8, 2.0, 3.53, 0, -1.7),
                                        (-2.86, 1.92, 3.45, 0, -1.7)], n=40, cap_top=False, cap_bot=False),
