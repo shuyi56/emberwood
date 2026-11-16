@@ -40,7 +40,7 @@ M_TRIM = mat_def(31, 'embroidery', ramp(0x9b2f25, 0.09), 0.0, closeup='canvas')
 M_PLATE = mat_def(32, 'plate', ramp(0x8e9196, 0.13), 0.0, closeup='steel')   # (steel_closeup)
 M_BIND = mat_def(33, 'binding', ramp(0x38291f, 0.08), 0.18, surface='leather')
 M_SLEEVE = mat_def(34, 'gambeson', ramp(0x4f3c2e, 0.1), 0.07, surface='twill', closeup='cloth', form=True)
-M_BRACER = mat_def(35, 'bracers', ramp(0x7a5337, 0.1), 0.22, surface='leather', closeup='suede', form=True)
+M_BRACER = mat_def(35, 'bracers', ramp(0x8a5a30, 0.1), 0.26, surface='leather', closeup='leather', form=True)   # (hardened leather, bronze-brown)
 M_LEGS = mat_def(36, 'trousers', ramp(0x463d33, 0.1), 0.05, surface='twill', closeup='cloth', form=True)
 M_BOOTS = mat_def(37, 'boots', ramp(0x5a3321, 0.1), 0.24, surface='leather', closeup='leather')
 M_CUFF = mat_def(38, 'boot cuff', ramp(0x6c4029, 0.1), 0.2, surface='leather', closeup='suede')
@@ -1269,15 +1269,15 @@ def cheek_scar(head):
 # The gambeson's sleeve: a quilted sleeve fitted to the arm (local height from the shoulder joint, radius), a
 # little full above the bracer, which takes it from below the elbow to the wrist.
 SLEEVE_R = [(1.6, 0.3), (1.35, 1.33), (0.85, 1.99), (0.0, 2.2), (-2.0, 2.16), (-5.5, 1.93), (-UPPER, 1.72),
-            (-UPPER - 1.0, 1.8), (-UPPER - 2.2, 1.5), (-UPPER - 5.0, 1.3), (-UPPER - FORE + 0.4, 1.16),
-            (-UPPER - FORE - 0.4, 1.14)]   # (slim under the vambrace, so it stays inside it as the elbow bends)
-BR_TOP, BR_BOT = -UPPER - 1.6, -UPPER - FORE - 0.55
+            (-UPPER - 1.0, 1.5), (-UPPER - 2.2, 1.4), (-UPPER - 5.0, 1.2), (-UPPER - FORE + 0.4, 1.06),
+            (-UPPER - FORE - 0.4, 1.04)]   # (slim under the vambrace, so it stays inside it as the elbow bends)
+BR_TOP, BR_BOT = -UPPER - 0.4, -UPPER - FORE - 0.55
 BRACER_R = [(BR_TOP, 2.0), (BR_TOP - 0.5, 1.92), (-UPPER - 5.0, 1.72), (-UPPER - FORE + 0.8, 1.54), (BR_BOT, 1.62)]
 BR_STRAPS = (BR_TOP - 1.4, -UPPER - 5.6, -UPPER - FORE + 1.3)
 # the steel vambrace over the sleeve (height from the shoulder joint, radius): flared at the elbow, full over the
 # forearm's muscle, drawn in to the wrist, then flared a little over it
-VAMB_R = [(BR_TOP, 1.98), (BR_TOP - 0.6, 1.86), (-UPPER - 3.6, 1.8), (-UPPER - 6.2, 1.62), (-UPPER - FORE + 0.9, 1.42),
-          (BR_BOT + 0.25, 1.47), (BR_BOT, 1.6)]
+VAMB_R = [(BR_TOP, 2.08), (BR_TOP - 0.7, 1.96), (-UPPER - 3.2, 1.92), (-UPPER - 6.2, 1.62), (-UPPER - FORE + 0.9, 1.4),
+          (BR_BOT + 0.25, 1.46), (BR_BOT, 1.58)]
 
 SLEEVE_CREASES = [
     (-1.4, -1.05, 0.6, -0.9, 0.0, 0.1), (-2.4, -2.2, 0.55, 0.8, 0.0, 0.08),
@@ -1501,12 +1501,14 @@ def build():
         def arm_pt(z, phi):
             r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + sleeve_form(z, phi, s)[0]
             return -r * math.sin(phi), -r * 1.03 * math.cos(phi)
-        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_SLEEVE, loc=(x, 0.2, SH_Z), skin=fore,
+        # (all but hidden now, under the robe's sleeve and the vambrace: dark, so the glimpses at the bent elbow read
+        # as the shadowed join)
+        so = mesh_obj(f'Sleeve.{side}', loft_fn(zs, arm_pt, n=48, cap_bot=False), M_BIND, loc=(x, 0.2, SH_Z), skin=fore,
                       solid=0.12)
         crease_attr(so, lambda co: sleeve_form(co.z, math.atan2(-co.x, -co.y), s)[1])
         # the robe's own sleeve over it, short: from the shoulder (its top rounded over the arm, full width there) to
         # a little above the elbow, widening a touch to a soft bell, its end trimmed in the ochre band
-        SE = -UPPER + 3.6
+        SE = -UPPER + 0.3
 
         def robe_sleeve_pt(z, phi, out=0.0):
             r = _profile(SLEEVE_R, z) + deltoid(z, phi, s) + 0.24 + 0.45 * smoothstep(SE + 3.0, SE, z) + out
@@ -1518,29 +1520,40 @@ def build():
         mesh_obj(f'Robe sleeve hem.{side}', loft_fn([SE + 0.55, SE + 0.25, SE - 0.02], lambda z, p: robe_sleeve_pt(z, p, 0.07),
                                                    n=48, cap_top=False, cap_bot=False),
                  M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
-        # the vambrace: a steel shell fitted to the forearm, full over the muscle below the elbow and drawn in to the
-        # wrist, oval across like the arm itself, a ridge down the outside; its top rises to a point behind over the
-        # elbow, its foot flares a little over the wrist. Rolled edges, steel rivets, one leather strap.
+        # the vambrace: hardened leather, bronze-brown, moulded to the forearm as the reference's: flat across like the
+        # arm itself, full over the muscle below the elbow and drawn in hard to the wrist, a raised spine down the
+        # outside between two tooled panels, laced up the inside; its top rises to a point over the elbow, its foot
+        # flares a little over the wrist and runs on in a tongue over the back of the hand.
         def vam_pt(z, phi, out=0.0, edge=None):
-            r = _profile(VAMB_R, z) + 0.12 * math.exp(-(wrap(phi - s * math.pi / 2) / 0.3) ** 2) + out
+            d = wrap(phi - s * math.pi / 2)
+            r = _profile(VAMB_R, z) + 0.16 * math.exp(-(d / 0.24) ** 2) \
+                + 0.07 * (math.exp(-((abs(d) - 0.75) / 0.28) ** 2)) + out
             ze = z if edge is None else edge
-            dz = 0.9 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(BR_TOP - 1.6, BR_TOP, ze)
-            return -r * math.sin(phi), -r * 1.0 * math.cos(phi), dz
+            dz = 1.0 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(BR_TOP - 1.6, BR_TOP, ze)
+            return -r * math.sin(phi), -r * 0.86 * math.cos(phi), dz
         bzs = [BR_TOP - 0.2 * i for i in range(int((BR_TOP - BR_BOT) / 0.2) + 1)] + [BR_BOT]
-        mesh_obj(f'Bracer.{side}', loft_fn(bzs, vam_pt, n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0.2, SH_Z),
+        mesh_obj(f'Bracer.{side}', loft_fn(bzs, vam_pt, n=56, cap_top=False, cap_bot=False), M_BRACER, loc=(x, 0.2, SH_Z),
                  skin=fore, solid=0.14)
         for nm, z_ in (('top', BR_TOP), ('bottom', BR_BOT)):
             rz = [z_ + 0.15 * math.cos(math.pi * k / 4) for k in range(5)]
             mesh_obj(f'Bracer {nm} roll.{side}',
                      loft_fn(rz, lambda z, p, z_=z_: vam_pt(z_, p, 0.03 + 0.12 * max(0.0, 1 - ((z - z_) / 0.15) ** 2) ** 0.5, z_)[:2]
                              + (vam_pt(z_, p, 0.0, z_)[2],), n=56, cap_top=False, cap_bot=False),
-                     M_PLATE, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
+                     M_BIND, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         brv = []
         for z_, dzr in ((BR_TOP - 0.45, 0.0), (BR_BOT + 0.45, 0.0)):
             for ph in (s * math.pi / 2 - 0.55, s * math.pi / 2 + 0.55, 0.35 * s, -0.35 * s):
                 vx, vy, vdz = vam_pt(z_, ph, 0.07)
                 brv.append((vx, vy, z_ + vdz))
-        mesh_obj(f'Bracer rivets.{side}', dots(brv, 0.15), M_STEEL, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
+        # (and the lacing up the inside: crossed thongs between two rows of eyelets)
+        lace = []
+        for k in range(22):
+            zz = lerp(BR_TOP - 0.6, BR_BOT + 0.6, k / 21)
+            for dp in (-0.22, 0.22):
+                vx, vy, vdz = vam_pt(zz, -s * math.pi / 2 + dp * (1 if k % 2 else -1) * 0.6 + dp * 0.4, 0.05)
+                lace.append((vx, vy, zz + vdz))
+        mesh_obj(f'Bracer lacing.{side}', dots(lace, 0.11), M_BELT, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
+        mesh_obj(f'Bracer rivets.{side}', dots(brv, 0.15), M_GOLD, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         zs_ = -UPPER - 5.4
         mesh_obj(f'Bracer strap.{side}', loft_fn([zs_ + 0.26, zs_, zs_ - 0.26], lambda z, p: vam_pt(zs_, p, 0.06)[:2], n=56,
                                                 cap_top=False, cap_bot=False),
@@ -1549,8 +1562,7 @@ def build():
         bx, by2, _ = vam_pt(zs_, ph, 0.22)
         mesh_obj(f'Bracer buckle.{side}', turned(frame_bm(0.55, 0.6, 0.12, 0.12), ph), M_STEEL,
                  loc=(x + bx, 0.2 + by2, SH_Z + zs_), skin=fore, subdiv=0)
-        # the gauntlet's hand: a plate curved over the back of the hand from under the vambrace's cuff to the
-        # knuckles, narrowing toward them, with a second, shorter lame lapped over its foot
+        # the vambrace's tongue over the back of the hand, from under its cuff toward the knuckles, narrowing
         hz0 = -UPPER - FORE
 
         def hand_plate(z0, z1, wide0, wide1, lift, rows=10, cols=14):
@@ -1562,10 +1574,8 @@ def build():
                 bulge = 0.66 + lift - 0.38 * u * u
                 return (s * 0.23 - s * bulge, -0.03 + hw * u, z)
             return face_out(grid(rows, cols, pt), axis_y=0.0)
-        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.9, 1.2, 1.05, 0.22), M_PLATE, loc=(x, 0.2, SH_Z),
-                 skin=w, solid=0.1, subdiv=1)
-        mesh_obj(f'Gauntlet lame.{side}', hand_plate(hz0 - 1.7, hz0 - 2.5, 1.08, 1.0, 0.32), M_PLATE, loc=(x, 0.2, SH_Z),
-                 skin=w, solid=0.1, subdiv=1)
+        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.8, 1.15, 0.85, 0.22), M_BRACER,
+                 loc=(x, 0.2, SH_Z), skin=w, solid=0.1, subdiv=1)
     build_arms(chest, sleeve)   # (the hands are the base figure's)
 
     # ---- the cape over it all: the dark wool, its red lining just inside, an ochre band down each front, and the
@@ -1632,7 +1642,7 @@ def build():
             ex = 0.22 + flare + out + calf - 0.1 * smoothstep(-3.5, GB, z)
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
         gz = [GT - (GT - GB) * i / 48 for i in range(49)]
-        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0, kz),
+        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_BRACER, loc=(x, 0, kz),
                  skin=w, solid=0.14)
         # the knee: a domed oval cop over the kneecap, its foot lapping over the greave's top; a fan-shaped wing on
         # the outside tucked under the cop's edge; a curved lame above, tucked under the cop's top. Each is a shell
@@ -1660,11 +1670,11 @@ def build():
         for nm, args in (('Knee wing', (0.95, -0.85, s * 1.5, 0.55, lambda u, v: 0.16 + 0.08 * (1 - v * v))),
                          ('Knee lame', (2.05, 1.05, 0.0, 1.3, lambda u, v: 0.13 + 0.05 * (1 - v * v))),
                          ('Knee cop', (1.35, -1.1, 0.0, 1.4, cop))):
-            mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_PLATE, loc=(x, 0, kz), skin=w,
+            mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_BRACER, loc=(x, 0, kz), skin=w,
                      solid=0.13, subdiv=1)
         rv = [knee_pt(0.05, s * 1.55, 0.3), knee_pt(1.55, -1.05, 0.2), knee_pt(1.55, 1.05, 0.2),
               knee_pt(0.0, -1.05, cop(0.0, 0.75) + 0.12), knee_pt(0.0, 1.05, cop(0.0, 0.75) + 0.12)]
-        mesh_obj(f'Knee rivets.{side}', dots(rv, 0.17), M_STEEL, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Knee rivets.{side}', dots(rv, 0.17), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the leather straps holding the greave on, round the calf behind
         for j_, zs_ in enumerate((-2.2, GB + 1.2)):
             def strap_pt(z, phi, zs_=zs_):
@@ -1678,7 +1688,7 @@ def build():
             rz = [z_ + 0.17 * math.cos(math.pi * k / 4) for k in range(5)]
             mesh_obj(f'Greave roll {"top" if sg < 0 else "foot"}.{side}',
                      loft_fn(rz, lambda z, p, z_=z_: greave_pt(z_, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
-                             n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0, kz), skin=w, subdiv=0)
+                             n=56, cap_top=False, cap_bot=False), M_BIND, loc=(x, 0, kz), skin=w, subdiv=0)
         grv = []
         for k in range(3):
             zr_ = lerp(GT - 0.95, GB + 0.95, k / 2)
@@ -1689,7 +1699,7 @@ def build():
             for ph in (-1.35, 1.35):
                 gx, gy = greave_pt(zs_, ph, 0.14)
                 grv.append((gx, gy, zs_))
-        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_STEEL, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the shoe: a toe cap of paler leather sewn over the front of the foot, its seam stitched in a double row,
         # and a strap round the ankle buckled on the outside
         YC = -3.85
