@@ -595,7 +595,7 @@ def lock_image(W=256, H=1024):
     for _ in range(170):
         u0 = float(np.clip(rng.normal(0.5, 0.26), 0.04, 0.96))
         mid = 1.0 - abs(u0 - 0.5) * 2
-        end = min(0.99, (0.45 + 0.55 * mid ** 0.6) * (0.85 + 0.2 * rng.random()))
+        end = min(0.97, (0.3 + 0.7 * mid ** 0.8) * (0.8 + 0.25 * rng.random()))
         tone = rng.random()
         wid = (2.0 + 2.5 * rng.random()) * SS
         val = 255 * (0.45 + 0.4 * rng.random()) * (0.55 + 0.45 * mid)
@@ -616,7 +616,7 @@ def lock_image(W=256, H=1024):
                 c = c + (LIGHT - c) * 0.4 * math.exp(-((t - 0.55) / 0.22) ** 2) * tone
                 w = max(1, int(wid * (1.0 - 0.7 * t ** 2)))
                 dc.line([prev, q], fill=255, width=w)
-                da.line([prev, q], fill=int(val * (1.0 - 0.5 * t ** 3)), width=w)
+                da.line([prev, q], fill=int(val * (1.0 - 0.85 * t ** 2)), width=w)
                 dp.line([prev, q], fill=tuple(int(max(0, min(255, x))) for x in c), width=w)
             prev = q
     a = np.asarray(alpha.resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(0.6)), dtype=np.float32) / 255
@@ -680,7 +680,7 @@ def side_locks(head, head_tree):
                 nrm = (p - HC).normalized()
                 ax = t.cross(nrm).normalized()
                 u_ = i / (N - 1)
-                w = width * (1.0 - 0.45 * u_)
+                w = width * (1.0 - 0.7 * u_ ** 1.3)
                 row = []
                 for k in range(NA + 1):
                     a_ = k / NA - 0.5
@@ -1150,8 +1150,11 @@ def leggings_top(body):
     inside its lower edge."""
     def seat_pt(z, p):
         x, y = torso_point(z, p, 0.12, bust=0.0)
-        k = smoothstep(31.5, 28.0, z)
-        return x * (1.0 - 0.78 * k), y * (1.0 - 0.15 * k)
+        # (and front to back too, most in front, so the crotch is a shallow curve set back between the legs
+        # rather than a rounded lobe standing forward of them)
+        k = smoothstep(31.5, 28.4, z)
+        yk = 0.5 if y < 0 else 0.3
+        return x * (1.0 - 0.78 * k), y * (1.0 - yk * k)
     parts = [loft_fn([37.0 - 0.3 * i for i in range(31)], seat_pt, n=96)]
     for s_ in (1, -1):
         x0 = -s_ * LEG_X
