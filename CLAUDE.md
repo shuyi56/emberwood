@@ -45,3 +45,10 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   one lit band and one dark crease. Many fine dots turn into noise.
 - A piece added to the head (bun, ponytail) needs a joining shape where it meets the skull, so it
   grows out of the head instead of sitting on it.
+
+## Face checks: no renders
+
+Check a face with `python blender/facecheck/facecheck.py <figure> --before origin/main`, not with a render. It
+runs the figure's own face code without Blender (about 17 s), draws front, 3/4, profile, eyes, lips and the
+game-scale view, and measures the eyes, features, lip paint and symmetry. See `blender/facecheck/README.md`.
+Ask the render queue only for what it cannot show: hair, cloth, final lighting and the sprite palette.
