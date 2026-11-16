@@ -53,8 +53,8 @@ M_STITCH = mat_def(43, 'stitching', ramp(0xa8927a, 0.08), 0.0, flat=2)
 M_ROBE = mat_def(46, 'robe', ramp(0x4a3227, 0.1), 0.1, surface='wool', closeup='wool', form=True)
 M_ROBE_TRIM = mat_def(47, 'robe trim', ramp(0x9c7c45, 0.09), 0.0, closeup='canvas')
 M_CAPE = mat_def(48, 'cape', ramp(0x3b2a21, 0.1), 0.12, surface='wool', closeup='wool', form=True)
-M_COLLAR = mat_def(50, 'collar', ramp(0x5b5f66, 0.12), 0.0, closeup='steel')   # (blackened steel: steel_closeup)
 M_LINING = mat_def(49, 'cape lining', ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
+M_COLLAR = mat_def(50, 'collar', ramp(0x3b3e45, 0.12), 0.0, closeup='steel')   # (blackened steel: steel_closeup)
 M_SCAR = mat_def(44, 'scar', [[178, 114, 100], [202, 142, 124], [216, 164, 144], [226, 182, 164], [236, 202, 186]], 0.0)
 
 
@@ -384,40 +384,46 @@ def _rings(R, z):
     return R[0][1:] if z > R[0][0] else R[-1][1:]
 
 
-CAPE_PLEATS = 10     # knife pleats round the whole cape (about five across the back)
-CAPE_PLEAT_FACE = 0.78   # (the broad face of each pleat; the rest of its width is the return folded under it)
+CAPE_PLEATS = 14     # knife pleats round the whole cape (about six across the back)
+CAPE_PLEAT_FACE = 0.74   # (the broad face of each pleat; the rest of its width is the return folded under it)
 
 
 def _pleat_t(phi):
     return (CAPE_PLEATS * (phi + 0.17) / (2 * math.pi)) % 1.0
 
 
-def cape_fold(z, phi):
-    """The cape's pleats: knife pleats laid in at the collar and pressed, stitched flat over the shoulders and
-    opening as they fall, each a broad face that leans out to a rounded crest and turns sharply back under the
-    next (a sawtooth round the cape, its corners eased), over a slow swing of three deep folds that wander a
-    little off true. (offset in -1..1, depth)"""
-    f = smoothstep(48.5, 30.0, z)
+def pleat_w(z):
+    """How far the pleats stand open at height z: laid in at the collar, pressed and stitched over the shoulders
+    (where they still stand as ridges radiating from the neck), opening as they fall."""
+    return smoothstep(53.4, 52.7, z) * (0.5 + 0.5 * smoothstep(49.0, 38.0, z))
+
+
+def pleat_pl(phi):
+    """One pleat across (-1..1): a broad face leaning out to a rounded crest, then turning sharply back under."""
     t = _pleat_t(phi)
     a = CAPE_PLEAT_FACE
-    pl = -1.0 + 2.0 * t / a if t < a else math.cos(math.pi * (t - a) / (1.0 - a))
+    return -1.0 + 2.0 * t / a if t < a else math.cos(math.pi * (t - a) / (1.0 - a))
+
+
+def cape_fold(z, phi):
+    """The cape's pleats: knife pleats from the collar, over the shoulders and down to the hem (a sawtooth round
+    the cape, its corners eased), over a slow swing of three deep folds that wander a little off true.
+    (offset in -1..1, depth)"""
+    f = smoothstep(48.5, 30.0, z)
     sw = pinch(3.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z))
     g = smoothstep(46.0, 24.0, z)
-    return f * (0.75 * pl) + 0.45 * g * sw, f
+    return pleat_w(z) * 0.75 * pleat_pl(phi) + 0.4 * g * sw, f
 
 
 def cape_crease(z, phi):
     """(where the cape folds into shadow: the return under each pleat, deepest just under its crest, and the
     valleys of the slow folds)"""
-    f = smoothstep(48.5, 30.0, z)
     t = _pleat_t(phi)
     a = CAPE_PLEAT_FACE
-    r = math.sin(math.pi * (t - a) / (1.0 - a)) ** 0.7 if t >= a else 0.25 * smoothstep(0.12, 0.0, t)
+    r = math.sin(math.pi * (t - a) / (1.0 - a)) ** 0.7 if t >= a else 0.3 * smoothstep(0.14, 0.0, t)
     g = smoothstep(46.0, 24.0, z)
     sw = pinch(3.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z))
-    # (stitched down over the shoulders, each pleat still shows as a pressed line)
-    st = 0.35 * smoothstep(51.5, 49.5, z) * (1.0 - f) * (smoothstep(a - 0.05, a, t) if t < a + 0.06 else 0.0)
-    return min(1.0, max(f * 0.85 * r, 0.6 * g * max(0.0, -sw), st))
+    return min(1.0, max((0.3 + 0.7 * pleat_w(z)) * smoothstep(53.4, 52.7, z) * 0.9 * r, 0.6 * g * max(0.0, -sw)))
 
 
 def cape_hem(phi):
@@ -524,7 +530,8 @@ def cape_pt(z, phi, off=0.0):
     rd = max(lerp(rr, hull, dw), hull)
     if CAPE_UNDER is not None:
         rd = max(rd, under_r(z, a) + 0.32 + 0.12 * f + 0.25 * f * side)
-    k = (rd + off) / rr * (1.0 + 0.075 * fv * (1.0 - 0.5 * w))
+    # (the pleats stand out from what the cape lies on: their valleys rest on it, their crests are proud of it)
+    k = (rd + off) / rr * (1.0 + 0.1 * (fv + 0.6 * pleat_w(z)) * (1.0 - 0.4 * w))
     return xr * k, cy + yr * k
 
 
@@ -544,7 +551,9 @@ def cape_sheet(off=0.0, rows=96, cols=260):
         z = lerp(53.4, cape_hem(phi), v ** 1.15)
         x, y = cape_pt(z, phi, off)
         CAPE_CREASE.append(cape_crease(z, phi))
-        return (x, y, z)
+        # (over the shoulders the cloth lies nearly flat, so there the pleats rise up off it instead of outward)
+        up = 0.2 * pleat_w(z) * (pleat_pl(phi) + 0.6) * smoothstep(45.0, 48.5, z)
+        return (x, y, z + up)
     return face_out(grid(rows, cols, pt), axis_y=0.0)
 
 
@@ -630,15 +639,15 @@ def medallion():
 
 
 # ---------------------------------------------------------------- the collar
-# A gorget of blackened steel over the cape's shoulders, made as a gorget is: two neck lames standing round the
-# throat and a plate of two lames lying on the shoulders below them, every outer edge turned outward over a wire
-# into a rolled bead and the lames riveted together at the sides. The plate is a crescent, deep over the breastbone,
-# narrow over the shoulders (where the arms move under the cape), a little deeper behind; brass on the outermost
-# beads and a boss at the front.
-GC = Vector((0.0, 0.35, 51.5))    # (the plate is laid out along rays from here, up over the shoulders, down the chest)
-G_TOP = 36.0                      # (its top edge, in degrees of elevation from GC: tucked under the neck lames)
-G_NECK_R = [(0.0, 2.72), (45.0, 2.95), (90.0, 2.82), (135.0, 2.55), (180.0, 2.45)]   # (the neck lames' radius round
-# from the front, in degrees: just over the robe's standing collar, which is fullest over the collarbones)
+# A stand collar in blackened steel, shaped as a tailor cuts one: a single band standing up from the neckline (its
+# foot inside the cape's neck, just over the robe's own collar), leaning in toward the neck as it rises (the band's
+# top edge is shorter than its foot), higher behind than in front, open at the throat with its top corners rounded
+# off; its top and front edges rolled in brass, and a brass bar hooking the two fronts together.
+GC_Y = 0.35
+COLLAR_OPEN = 0.2     # (the half-angle of the opening at the throat)
+COLLAR_FOOT = 52.9
+G_NECK_R = [(0.0, 2.72), (45.0, 2.95), (90.0, 2.82), (135.0, 2.55), (180.0, 2.45)]   # (the foot's radius round from
+# the front, in degrees: just over the robe's standing collar, which is fullest over the collarbones)
 
 
 def g_neck(a):
@@ -649,139 +658,38 @@ def g_neck(a):
     return G_NECK_R[-1][1]
 
 
-def gorget_hem(a):
-    """The plate's lower edge (degrees of elevation from GC) at a, round from the front."""
-    c = math.cos(a)
-    return 14.0 - 29.0 * max(0.0, c) ** 8 - 12.0 * max(0.0, -c) ** 2
+def collar_top(a):
+    """The band's top edge: under the chin in front, rising to the nape, the corners at the throat rounded."""
+    z = 54.3 + 0.6 * ((1.0 - math.cos(a)) / 2) ** 1.2
+    d = (abs(wrap(a)) - COLLAR_OPEN) / 0.32
+    if d < 1.0:
+        z -= 0.4 * (1.0 - math.sqrt(max(0.0, 1.0 - (1.0 - max(0.0, d)) ** 2)))
+    return z
 
 
-def gorget_dir(e, a):
-    e = math.radians(e)
-    return Vector((-math.sin(a) * math.cos(e), -math.cos(a) * math.cos(e), math.sin(e)))
+def collar_pt(a, v, out=0.0):
+    z = lerp(COLLAR_FOOT, collar_top(a), v)
+    r = g_neck(a) + 0.14 - 0.14 * (z - COLLAR_FOOT) + 0.05 * smoothstep(0.75, 1.0, v) + out
+    return Vector((-r * math.sin(a), GC_Y - r * math.cos(a), z))
 
 
-def gorget_table():
-    """How far out along each ray from GC the clothes reach (the cape over the shoulders, the tabard and robe
-    over the chest): the farthest surface, spread a little and softened, as under_table."""
-    import numpy as np
-    T = clothes_bvh(('Hair', 'Medallion', 'Clasp'))
-    e0, de, ne, na = -24.0, 2.0, 34, 180
-    R = np.zeros((ne, na))
-    for i in range(ne):
-        for j in range(na):
-            d = gorget_dir(e0 + de * i, 2 * math.pi * j / na)
-            org, far, t = GC.copy(), 0.0, 0.0
-            for _ in range(16):
-                hit = T.ray_cast(org, d, 12.0 - t)
-                if hit[0] is None:
-                    break
-                t += hit[3] + 1e-3
-                far = t
-                org = hit[0] + d * 1e-3
-            R[i, j] = far or 3.0
-    M = R.copy()
-    for di in (-1, 0, 1):
-        for dj in range(-2, 3):
-            M = np.maximum(M, np.roll(np.pad(R, ((1, 1), (0, 0)), mode='edge'), dj, axis=1)[1 + di:1 + di + ne])
-    for _ in range(2):
-        M = (M + np.roll(M, 1, 1) + np.roll(M, -1, 1)) / 3
-        P = np.pad(M, ((1, 1), (0, 0)), mode='edge')
-        M = (P[:-2] + P[1:-1] + P[2:]) / 3
-    return e0, de, na, M
-
-
-def gorget_pt(G, e, a, gap):
-    t = _under(G, e, a) + gap
-    p = GC + gorget_dir(e, a) * t
-    # (never inside the neck lames: the plate's top runs up under them)
-    h = math.hypot(p.x, p.y - GC.y)
-    lim = g_neck(a) + 0.2 + gap * 0.3
-    if h < lim:
-        k = lim / max(h, 1e-3)
-        p.x, p.y = p.x * k, GC.y + (p.y - GC.y) * k
-    return p
-
-
-def loop_tube(pts, r, n=8, axis_y=0.0):
-    """A closed bead round a loop of points about the vertical axis through (0, axis_y): a rolled edge."""
-    bm = bmesh.new()
-    rings = []
-    for p in pts:
-        p = Vector(p)
-        o = Vector((p.x, p.y - axis_y, 0.0)).normalized()
-        rings.append([bm.verts.new(p + o * (r * math.cos(2 * math.pi * k / n)) + Vector((0, 0, r * math.sin(2 * math.pi * k / n))))
-                      for k in range(n)])
-    m = len(rings)
-    for i in range(m):
-        ra, rb = rings[i], rings[(i + 1) % m]
-        for k in range(n):
-            bm.faces.new((ra[k], ra[(k + 1) % n], rb[(k + 1) % n], rb[k]))
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    return bm
-
-
-def build_gorget(body):
-    G = gorget_table()
-    n = 180
-
-    def plate(v0, v1, gap, rows):
-        bm = bmesh.new()
-        loops = []
-        for i in range(rows):
-            v = lerp(v0, v1, i / (rows - 1))
-            loops.append([bm.verts.new(gorget_pt(G, lerp(G_TOP, gorget_hem(a), v), a, gap))
-                          for a in (2 * math.pi * k / n for k in range(n))])
-        for A, B in zip(loops, loops[1:]):
-            for k in range(n):
-                bm.faces.new((A[k], A[(k + 1) % n], B[(k + 1) % n], B[k]))
-        return face_out(bm, axis_y=GC.y)
-
-    def bead(v, gap, r=0.1):
-        pts = [gorget_pt(G, lerp(G_TOP, gorget_hem(a), v), a, gap + 0.04) for a in (2 * math.pi * k / n for k in range(n))]
-        return loop_tube(pts, r, axis_y=GC.y)
-
-    # the plate's two lames, the upper lying over the lower, each ending in its rolled edge
-    mesh_obj('Gorget lame 2', plate(0.48, 1.0, 0.2, 14), M_COLLAR, body, solid=0.08, subdiv=1)
-    mesh_obj('Gorget lame 2 roll', bead(1.0, 0.2, 0.12), M_GOLD, body, subdiv=0)
-    mesh_obj('Gorget lame 1', plate(0.0, 0.56, 0.34, 14), M_COLLAR, body, solid=0.08, subdiv=1)
-    mesh_obj('Gorget lame 1 roll', bead(0.56, 0.34, 0.1), M_COLLAR, body, subdiv=0)
-    # (riveted together at the sides and behind, and down the front either side of the boss)
-    riv = []
-    for a in (0.5, 1.2, 1.9, 2.6, math.pi):
-        for sa in ((1, -1) if a < math.pi else (1,)):
-            aa = sa * a
-            riv.append(gorget_pt(G, lerp(G_TOP, gorget_hem(aa), 0.5), aa, 0.42))
-    mesh_obj('Gorget rivets', dots(riv, 0.17), M_GOLD, body, subdiv=0)
-    # the boss at the front, on the lower lame over the breastbone
-    pb = gorget_pt(G, lerp(G_TOP, gorget_hem(0.0), 0.8), 0.0, 0.3)
-    bm = medallion()
-    bmesh.ops.scale(bm, vec=(0.62, 0.62, 0.62), verts=bm.verts)
-    bmesh.ops.rotate(bm, cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(-18.0), 3, 'X'), verts=bm.verts)
-    mesh_obj('Gorget boss', bm, M_GOLD, body, loc=tuple(pb), subdiv=1)
-
-    # the neck lames: standing round the throat, higher behind than in front, the upper inside the lower
-    def ztop(a):
-        return 53.95 + 0.5 * (1.0 - math.cos(a)) / 2
-
-    def neck_lame(z0f, z1f, r, rows=6):
-        def pt(z, phi):
-            u = z    # (0 at the bottom of the lame, 1 at its top)
-            zz = lerp(z0f(phi), z1f(phi), u)
-            rr = g_neck(phi) + r + 0.12 * smoothstep(0.7, 1.0, u)    # (flaring out a little to its rolled edge)
-            return -rr * math.sin(phi), GC.y - rr * math.cos(phi), zz - u
-        return loft_fn([i / (rows - 1) for i in range(rows)], pt, n=96, cap_top=False, cap_bot=False)
-
-    def ring(zf, r):
-        pts = [Vector((-(g_neck(a) + r) * math.sin(a), GC.y - (g_neck(a) + r) * math.cos(a), zf(a))) for a in (2 * math.pi * k / 96 for k in range(96))]
-        return loop_tube(pts, 0.1, axis_y=GC.y)
-
-    mid = lambda a: lerp(52.85, ztop(a), 0.5)
-    mesh_obj('Gorget neck 1', neck_lame(lambda a: 52.85, lambda a: mid(a) + 0.15, 0.14), M_COLLAR, body, solid=0.07,
-             subdiv=1)
-    mesh_obj('Gorget neck 1 roll', ring(lambda a: mid(a) + 0.15, 0.31), M_COLLAR, body, subdiv=0)
-    mesh_obj('Gorget neck 2', neck_lame(lambda a: mid(a) - 0.2, ztop, 0.0), M_COLLAR, body, solid=0.07,
-             subdiv=1)
-    mesh_obj('Gorget neck 2 roll', ring(ztop, 0.17), M_GOLD, body, subdiv=0)
+def build_collar(body):
+    n, rows = 120, 10
+    ang = [lerp(COLLAR_OPEN, 2 * math.pi - COLLAR_OPEN, j / (n - 1)) for j in range(n)]
+    sheet = grid(rows, n, lambda i, j: collar_pt(ang[j], 1.0 - i / (rows - 1)))
+    mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
+    # the rolled edge: up one front, round the top and down the other
+    path = [collar_pt(ang[0], v, 0.03) for v in (0.42, 0.56, 0.7, 0.84, 0.95)]
+    path += [collar_pt(a, 1.0, 0.03) for a in ang]
+    path += [collar_pt(ang[-1], v, 0.03) for v in (0.95, 0.84, 0.7, 0.56, 0.42)]
+    mesh_obj('Collar edge', tube(path, [0.09] * len(path), flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    # (a line tooled round it, a third of the way down from the top)
+    line = [collar_pt(a, 0.68 + 0.0 * a, 0.035) for a in ang[3:-3]]
+    mesh_obj('Collar line', tube(line, [0.045] * len(line), flat=1.0, n=6), M_GOLD, body, subdiv=0)
+    # the hook and bar across the throat
+    zc = 0.5
+    bar = [collar_pt(lerp(-COLLAR_OPEN - 0.12, COLLAR_OPEN + 0.12, k / 6), zc, 0.1) for k in range(7)]
+    mesh_obj('Collar clasp', tube(bar, [0.1] * 7, flat=1.0, n=8), M_GOLD, body, subdiv=0)
 
 
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
@@ -1112,7 +1020,7 @@ def hair_join_weight(co):
     return smoothstep(6.0, 4.0, z) * smoothstep(-8.0, -5.0, z) * smoothstep(1.0, 2.0, abs(x)) * smoothstep(0.6, 1.6, y)
 
 
-CLOTHES = ('Robe', 'Breastplate', 'Belt', 'Neck', 'Gambeson', 'Tabard', 'Cape', 'Medallion', 'Clasp', 'Gorget')   # (not the swinging arms)
+CLOTHES = ('Robe', 'Breastplate', 'Belt', 'Neck', 'Gambeson', 'Tabard', 'Cape', 'Medallion', 'Clasp', 'Collar')   # (not the swinging arms)
 
 
 def clothes_tree(space, dg):
@@ -1809,18 +1717,28 @@ def build():
         P0, P1 = -s * math.pi / 2 + GAP, -s * math.pi / 2 + 2 * math.pi - GAP
 
         def vam_pt(z, phi, out=0.0):
+            """(x, y, z) of the vambrace at its nominal height z and phi: the arm's own surface (arm_xy) a leather's
+            thickness off it, so it is full where the forearm's muscle is and an oval at the wrist as the arm is;
+            its elbow edge is cut to the arm, rising to a point over the elbow behind and dipping in the crook in
+            front so the arm can bend, and its wrist edge runs a little down over the back of the hand."""
             d = wrap(phi - s * math.pi / 2)
             # (the plait: two strands swinging across the panel and crossing every 0.85 down it)
             y1 = 0.42 * math.sin(2 * math.pi * (z - BR_TOP) / 1.7)
             tool = math.exp(-((d - y1) / 0.11) ** 2) + math.exp(-((d + y1) / 0.11) ** 2)
             tool *= smoothstep(BR_TOP - 0.25, BR_TOP - 0.7, z) * smoothstep(BR_BOT + 0.25, BR_BOT + 0.7, z)
             frame = math.exp(-((abs(d) - 0.82) / 0.07) ** 2)
-            r = _profile(VAMB_R, z) + 0.035 * min(1.0, tool) + 0.045 * frame + out
-            return -r * math.sin(phi), -r * 0.92 * math.cos(phi)
+            t = (z - BR_BOT) / (BR_TOP - BR_BOT)
+            c = math.cos(phi)
+            zz = z + t * (0.8 * max(0.0, -c) ** 2 - 0.5 * max(0.0, c) ** 2) - (1.0 - t) * 0.12 * max(0.0, s * math.sin(phi)) ** 2
+            lip = 0.05 * smoothstep(BR_BOT + 0.5, BR_BOT, z) + 0.03 * smoothstep(BR_TOP - 0.4, BR_TOP, z)
+            x_, y_ = arm_xy(zz, phi, s, 0.15 + lip + 0.035 * min(1.0, tool) + 0.045 * frame + out)
+            return x_, y_, zz
 
         def vam_n(z, phi):
-            x_, y_ = vam_pt(z, phi)
-            return Vector((x_, y_ / 0.92 ** 2, 0.0)).normalized()
+            a_, b_ = vam_pt(z, phi - 0.02), vam_pt(z, phi + 0.02)
+            n_ = Vector((b_[1] - a_[1], a_[0] - b_[0], 0.0)).normalized()
+            p_ = vam_pt(z, phi)
+            return n_ if n_.x * p_[0] + n_.y * p_[1] > 0 else -n_
 
         rows = int((BR_TOP - BR_BOT) / 0.08) + 1
         cols = 150
@@ -1828,7 +1746,7 @@ def build():
         def vam_grid(i, j):
             z = lerp(BR_TOP, BR_BOT, i / (rows - 1))
             ph = lerp(P0, P1, j / (cols - 1))
-            return (*vam_pt(z, ph), z)
+            return vam_pt(z, ph)
         mesh_obj(f'Bracer.{side}', face_out(grid(rows, cols, vam_grid), axis_y=0.0), M_BRACER, loc=(x, 0.2, SH_Z),
                       skin=fore, solid=0.12)
         # (the rolled border all round its edge: a rounded rectangle in (phi, z), the corners eased)
@@ -1859,8 +1777,8 @@ def build():
         m_ = len(border)
         for k, (ph, z) in enumerate(border):
             pa, pb_ = border[(k - 1) % m_], border[(k + 1) % m_]
-            c = Vector((*vam_pt(z, ph, 0.04), z))
-            tg = Vector((*vam_pt(pb_[1], pb_[0], 0.04), pb_[1])) - Vector((*vam_pt(pa[1], pa[0], 0.04), pa[1]))
+            c = Vector(vam_pt(z, ph, 0.04))
+            tg = Vector(vam_pt(pb_[1], pb_[0], 0.04)) - Vector(vam_pt(pa[1], pa[0], 0.04))
             nn = vam_n(z, ph)
             bb = tg.cross(nn).normalized()
             rings_.append([bm.verts.new(c + nn * (0.11 * math.cos(2 * math.pi * q / 8)) + bb * (0.13 * math.sin(2 * math.pi * q / 8)))
@@ -1876,15 +1794,15 @@ def build():
         grom, gz = [], [lerp(BR_TOP - 0.75, BR_BOT + 0.75, k / (NG - 1)) for k in range(NG)]
         for z in gz:
             for ph in (P0 + 0.17, P1 - 0.17):
-                grom.append((*vam_pt(z, ph, 0.05), z))
+                grom.append(vam_pt(z, ph, 0.05))
         mesh_obj(f'Bracer grommets.{side}', dots(grom, 0.17), M_GOLD, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
-        hole = [(*vam_pt(z, ph, 0.09), z) for z, ph in ((z, ph) for z in gz for ph in (P0 + 0.17, P1 - 0.17))]
+        hole = [vam_pt(z, ph, 0.09) for z, ph in ((z, ph) for z in gz for ph in (P0 + 0.17, P1 - 0.17))]
         mesh_obj(f'Bracer grommet holes.{side}', dots(hole, 0.08), M_BELT, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         # (what shows through the opening: the dark lining of the vambrace, just inside it)
         def lin_pt(i, j):
             z = lerp(BR_TOP - 0.1, BR_BOT + 0.1, i / 19)
             ph = lerp(P1 - 0.06 - 2 * math.pi, P0 + 0.06, j / 5)
-            return (*vam_pt(z, ph, -0.1), z)
+            return vam_pt(z, ph, -0.1)
         mesh_obj(f'Bracer gap.{side}', face_out(grid(20, 6, lin_pt), axis_y=0.0), M_BELT, loc=(x, 0.2, SH_Z),
                  skin=fore, subdiv=0)
         lace = bmesh.new()
@@ -1896,7 +1814,7 @@ def build():
                     t_ = q / 8
                     z = lerp(pa_[0], pb2[0], t_)
                     ph = lerp(pa_[1], pb2[1], t_)
-                    pts.append((*vam_pt(z, ph, 0.08 + 0.04 * math.sin(math.pi * t_)), z))
+                    pts.append(vam_pt(z, ph, 0.08 + 0.04 * math.sin(math.pi * t_)))
                 seg = tube(pts, [0.055] * 9, flat=1.0, n=6)
                 tmp = bpy.data.meshes.new('lace')
                 seg.to_mesh(tmp)
@@ -1956,8 +1874,8 @@ def build():
         p_.y = min(p_.y, tab_y(p_.x, p_.z) - 0.25)
         chain.append(p_)
     mesh_obj('Clasp chain', tube(chain, [0.1] * len(chain), n=6), M_GOLD, skin=cape_weights, subdiv=0)
-    # ---- the steel gorget over the cape's shoulders (laid on what is built so far)
-    build_gorget(body)
+    # ---- the steel stand collar at the neck
+    build_collar(body)
 
 
     # ---- legs: the trousers, and the tall boots over them

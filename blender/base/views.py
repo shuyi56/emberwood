@@ -23,6 +23,8 @@ Rendering pieces on their own (any of the views above):
            FIGURE_MATS), leaving the clothes and gear standing as if on a dress form
 --fit      frame --turn and --head on what is left showing instead of the whole figure (the default with --only);
            --no-fit keeps the usual framing
+--pieces   PREFIXES: after the other views, from the same build, the same five-angle turn of just these meshes
+           framed on them (DIR/pieces.png): the full figure and its pieces alone for the cost of one build
 --list     print every mesh's name, material and vertex count after the build, and stop
 """
 import importlib
@@ -185,10 +187,10 @@ def prefixes(flag):
     return tuple(p.strip() for p in v.split(',') if p.strip()) if v else ()
 
 
-def isolate():
+def isolate(only=None):
     """Hide what --only, --hide and --no-body leave out (hide_render: it neither shows nor casts shadows).
     Returns the meshes still showing."""
-    only, hide = prefixes('--only'), prefixes('--hide')
+    only, hide = (prefixes('--only') if only is None else only), prefixes('--hide')
     ids = {d['name']: mid for mid, d in female.MATERIALS.items()}
     meshes = [o for o in bpy.data.objects if o.type == 'MESH']
     for p in only + hide:
@@ -267,6 +269,15 @@ def main():
                     centre, h = fit(shown, 1.0) if framed else ((0, 0, 55.5), 17.0)
                     row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), centre, h)
             clay(False, saved)
+    if opt('--pieces'):
+        if not ('--turn' in argv or '--head' in argv):
+            cam = look_3d(int(opt('--samples', 32)))
+            sc.frame_set(int(opt('--frame', 0)) + 1)
+        size = int(opt('--size', 360))
+        shown = isolate(prefixes('--pieces'))
+        centre, h = fit(shown, 1 / 1.75)
+        with tempfile.TemporaryDirectory() as tmp:
+            row(cam, os.path.join(out, 'pieces.png'), tmp, (size, int(size * 1.75)), centre, h)
 
 
 main()

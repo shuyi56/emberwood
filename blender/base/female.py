@@ -3522,17 +3522,25 @@ BARE_ARM_R = [(1.5, 0.3), (1.25, 1.2), (0.8, 1.72), (0.0, 1.82), (-2.0, 1.72), (
               (-UPPER - FORE - 0.4, 0.93)]
 
 
+def arm_xy(z, phi, s, out=0.0):
+    """The bare arm's surface at local height z (from the shoulder joint) and phi, pushed out by `out` (for what is
+    worn close on it): flatter front to back than across above the elbow, the deltoid, a soft hollow inside the
+    elbow, the forearm's muscle full over its outside and back just below the elbow, and the wrist an oval lying the
+    other way (wide front to back, as the hand hangs with its palm to the thigh, and thin across)."""
+    r = _profile(BARE_ARM_R, z) + deltoid(z, phi, s)
+    r -= 0.08 * math.exp(-((z + UPPER) / 0.8) ** 2) * max(0.0, math.cos(phi)) ** 2    # (the inside of the elbow)
+    r += 0.1 * math.exp(-((z + UPPER + 2.4) / 1.8) ** 2) * max(0.0, 0.5 + 0.5 * s * math.sin(phi))
+    t = _smooth(-UPPER - 4.0, -UPPER - FORE, z)
+    r += out
+    return -r * (1.0 - 0.12 * t) * math.sin(phi), -r * (0.92 + 0.12 * t) * math.cos(phi)
+
+
 def bare_arm(side, s, x, w, top=1.5):
     """A bare arm in skin, from the shoulder (local height top) to just past the wrist, for clothes with short
-    sleeves or none: placed at (x, 0.2, SH_Z) like a sleeve, flatter front to back than across, with the deltoid
-    and a soft hollow inside the elbow."""
+    sleeves or none: placed at (x, 0.2, SH_Z) like a sleeve (its shape: arm_xy)."""
     zs = [top - 0.2 * i for i in range(int((top + UPPER + FORE + 0.4) / 0.2) + 1)]
-
-    def pt(z, phi):
-        r = _profile(BARE_ARM_R, z) + deltoid(z, phi, s)
-        r -= 0.08 * math.exp(-((z + UPPER) / 0.8) ** 2) * max(0.0, math.cos(phi)) ** 2    # (the inside of the elbow)
-        return -r * math.sin(phi), -r * 0.92 * math.cos(phi)
-    return mesh_obj(f'Arm.{side}', loft_fn(zs, pt, n=40, cap_bot=False), M_SKIN, loc=(x, 0.2, SH_Z), skin=w)
+    return mesh_obj(f'Arm.{side}', loft_fn(zs, lambda z, phi: arm_xy(z, phi, s), n=40, cap_bot=False), M_SKIN,
+                    loc=(x, 0.2, SH_Z), skin=w)
 
 
 def build_arms(chest, sleeve):
