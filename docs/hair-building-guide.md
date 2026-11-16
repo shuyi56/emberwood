@@ -88,4 +88,10 @@ shaped bangs and hair cards are built, which led to real locks.
 2. For a debug pass, colour each layer flat (one colour for clumps, another for hooked locks) to see which layer
    causes a problem before you change anything.
 3. Rebuild the test page from the built file before every render. A stale page shows no change and wastes a round.
-4. Compare against the reference photo side by side.
+4. Syntax-check the source (`node --check main.js`) and fail the render on any page error. A broken page leaves the
+   previous images on disk, and they look like a real result.
+5. To round the top of a curtain parting, shape the cap's edge as a broad arch there (a wide bump, not a narrow
+   peak). Moving the inner locks outward early does not do it: they then hang straight down and the opening turns
+   into a box.
+6. Volume comes from lift: raise the inner locks' C (more lift at the root and over the brow, tip still turning in).
+7. Compare against the reference photo side by side.
