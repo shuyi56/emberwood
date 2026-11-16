@@ -1138,22 +1138,101 @@ def ring_r(rings, z):
 
 
 # ---------------------------------------------------------------- the rogue
+LEG_TOP_Z = HIP_Z - 6.0       # the leggings' top (the seat and the tops of both legs, in one piece) ends here
+
+
+def leggings_top(body):
+    """The leggings from under the bodice down to the upper thighs as one surface: the seat over the hips, drawn
+    in below them into the crotch, and the tops of both legs, melted together (remeshed as one volume and
+    relaxed) so the legs grow out of the seat and the crotch is one soft curve between them, not tubes meeting a
+    seat at a corner. Its lower part rides on the thighs (see leggings_on_legs); the legs' own tubes carry on from
+    inside its lower edge."""
+    def seat_pt(z, p):
+        x, y = torso_point(z, p, 0.12, bust=0.0)
+        k = smoothstep(31.5, 28.0, z)
+        return x * (1.0 - 0.78 * k), y * (1.0 - 0.15 * k)
+    parts = [loft_fn([37.0 - 0.3 * i for i in range(31)], seat_pt, n=96)]
+    for s_ in (1, -1):
+        x0 = -s_ * LEG_X
+        zs = [2.0 - 0.2 * i for i in range(int((2.0 - (LEG_TOP_Z - HIP_Z) + 0.6) / 0.2) + 1)]
+        bm_ = bmesh.new()
+
+        def leg_pt(z, phi, s_=s_):
+            r = _profile(LEG_R, z) + leg_form(z, phi, s_)[0]
+            # (a hair proud of the leg's own tube, easing in under it at the lower edge, so the two never fight)
+            r += 0.03 - 0.13 * smoothstep(LEG_TOP_Z - HIP_Z + 0.6, LEG_TOP_Z - HIP_Z, z)
+            return x0 - r * math.sin(phi), -(r * 1.04) * math.cos(phi)
+        bm_ = loft_fn(zs, leg_pt, n=56)
+        bmesh.ops.translate(bm_, vec=(0, 0, HIP_Z), verts=bm_.verts)
+        parts.append(bm_)
+    me = bpy.data.meshes.new('legs-union')
+    allbm = bmesh.new()
+    for bm_ in parts:
+        tmp = bpy.data.meshes.new('part')
+        bm_.to_mesh(tmp)
+        bm_.free()
+        allbm.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
+    allbm.to_mesh(me)
+    allbm.free()
+    ob = bpy.data.objects.new('legs-union', me)
+    link(ob)
+    rm = ob.modifiers.new('fuse', 'REMESH')
+    rm.mode = 'VOXEL'
+    rm.voxel_size = 0.07
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    fused = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    bpy.data.objects.remove(ob)
+    bpy.data.meshes.remove(me)
+    bm = bmesh.new()
+    bm.from_mesh(fused)
+    bpy.data.meshes.remove(fused)
+    # (relaxed most where the parts meet, round the crotch and the tops of the thighs)
+    for _ in range(4):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=bm.verts, lambda_factor=0.5, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    join = [v for v in bm.verts if 26.5 < v.co.z < 32.5 and abs(v.co.x) < 3.2]
+    for _ in range(8):
+        bmesh.ops.smooth_laplacian_vert(bm, verts=join, lambda_factor=0.5, lambda_border=0.0,
+                                        use_x=True, use_y=True, use_z=True, preserve_volume=True)
+    o = mesh_obj('Leggings seat', bm, M_LEGS, body, subdiv=0)
+    crease_attr(o, lambda co: 0.0)
+    return o
+
+
+def leggings_on_legs():
+    """The leggings' top below the hip joints rides on the thighs, each side on its own, blended over a few
+    fingers' height and across the middle, so it swings with the legs in the walk instead of the legs swinging
+    out through it."""
+    o = bpy.data.objects['Leggings seat']
+    mw = o.matrix_world
+    gs = {g.name: g for g in o.vertex_groups}
+    for side in ('R', 'L'):
+        gs[f'Thigh.{side}'] = gs.get(f'Thigh.{side}') or o.vertex_groups.new(name=f'Thigh.{side}')
+    trunk = [g for n, g in gs.items() if not n.startswith('Thigh.')]
+    for v in o.data.vertices:
+        co = mw @ v.co
+        w = smoothstep(32.2, 29.4, co.z)
+        if w <= 0.0:
+            continue
+        right = smoothstep(0.7, -0.7, co.x)       # (her right is -x)
+        for g in trunk:
+            try:
+                g.add([v.index], g.weight(v.index) * (1.0 - w), 'REPLACE')
+            except RuntimeError:
+                pass
+        gs['Thigh.R'].add([v.index], w * right, 'REPLACE')
+        gs['Thigh.L'].add([v.index], w * (1.0 - right), 'REPLACE')
+
+
 def build():
     root, body, pelvis, chest = begin_figure('Rogue')
 
     # ---- torso: the body in its linen shirt; the leggings' seat over the hips, under the bodice
     # (the shirt ends under the leggings' seat: lower, it showed through where the seat narrows into the crotch)
     torso_mesh('Shirt', M_SHIRT, body, zs=[53.0 - 0.5 * i for i in range(37)])
-    # (below the hips it narrows into the crotch, a rounded gusset between the tops of the legs, so the legs grow
-    # out of it rather than meeting a flat underside at a corner)
-    def seat_pt(z, p):
-        x, y = torso_point(z, p, 0.12, bust=0.0)
-        # (from the hip joint down it draws in, both across and front to back, so it lies inside the tops of
-        # the legs and shows only between them, as the shadowed curve of the crotch: drawn in lower, its own
-        # front stood level with the legs' and they cut each other in a hard outline like a pair of briefs)
-        k = smoothstep(31.8, 27.0, z)
-        return x * (1.0 - 0.84 * k ** 0.9), y * (1.0 - 0.3 * k ** 0.7)
-    mesh_obj('Leggings seat', loft_fn([37.0 - 0.3 * i for i in range(35)], seat_pt), M_LEGS, body)
+    leggings_top(body)
 
     # ---- the bodice, its binding, seams and buckled straps
     bz = [B_ZT - (B_ZT - B_ZB) * i / 59 for i in range(60)]
@@ -1359,7 +1438,9 @@ def build():
     # ---- legs: the leggings, and the thigh boots over them
     def leg(side, s, x, w):
         # (the leggings end inside the boot, well above the ankle, so they never show through as the foot bends)
-        zs = [2.0 - 0.2 * i for i in range(int((2.0 + THIGH + SHIN - 3.5) / 0.2) + 1)]
+        # (it starts inside the lower edge of the leggings' top, which carries the seat into the legs)
+        z0 = LEG_TOP_Z - HIP_Z + 1.0
+        zs = [z0 - 0.2 * i for i in range(int((z0 + THIGH + SHIN - 3.5) / 0.2) + 1)]
 
         def leg_pt(z, phi):
             r = _profile(LEG_R, z) + leg_form(z, phi, s)[0]
@@ -1413,7 +1494,7 @@ def build():
                                        (-ANKLE_Z, 1.85, 3.38, 0, -1.7)], n=40), M_SOLE, loc=(x, 0, az), subdiv=1, skin=w)
     build_legs(pelvis, leg)
     # the cowl rides on the arms where it lies over them; then the rig, the camera and light, and the keyframes
-    return finish_figure(lambda: mantle_on_arms(['Cowl']))
+    return finish_figure(lambda: (mantle_on_arms(['Cowl']), leggings_on_legs()))
 
 
 if __name__ == '__main__':
