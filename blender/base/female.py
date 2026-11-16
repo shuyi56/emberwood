@@ -1235,7 +1235,7 @@ GAIT, ARM_SWING = 1.0, 0.2
 # are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
 FACE = {
-    'jawWidth': 0.0, 'jawDef': 1.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
+    'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
     'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
     'noseProj': 1.0, 'noseWidth': 1.0, 'noseLen': 0.0, 'tipBall': 1.0, 'nostrils': 1.0,
     'browRidge': 1.0, 'sockets': 1.0, 'mouthWidth': 1.0, 'lipUpper': 1.0, 'lipLower': 1.0, 'smile': 1.0,
@@ -1415,10 +1415,14 @@ def jaw_relief(y, z):
     def ss(t):
         t = min(1.0, max(0.0, t))
         return t * t * (3 - 2 * t)
-    below = ss((z - zl + 0.03) / 0.1)        # above the lower edge of the jaw
-    behind = ss((0.11 - y) / 0.11)             # in front of the back edge of the ramus
+    js = FACE['jawSharp']                      # (narrows the turn over the lower and back edges: a crisper jawline)
+    below = ss((z - zl + 0.03 / js) / (0.1 / js))        # above the lower edge of the jaw
+    behind = ss((0.11 - y) / (0.11 / (1 + 0.3 * (js - 1))))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
-    return 0.02 * FACE['jawDef'] * below * behind * up
+    # the angle of the jaw under the ear, where the lower edge turns up into the ramus: a firm corner on a
+    # defined jaw (the masseter over it), set inside both edges so they stay clean
+    angle = FACE['jawAngle'] * math.exp(-((y - 0.06) / 0.065) ** 2 - ((z - 0.19) / 0.07) ** 2) * below * behind
+    return 0.02 * FACE['jawDef'] * below * behind * up + 0.016 * angle
 
 
 def _head_w(z):
