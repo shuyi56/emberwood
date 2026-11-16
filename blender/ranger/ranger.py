@@ -215,25 +215,6 @@ def wool_closeup(nt, bsdf, out, rmp):
     nt.links.new(wb.outputs['BSDF'], out.inputs['Surface'])
 
 
-def skin_closeup(nt, bsdf, out, lin):
-    """The skin up close: a soft contact shadow where the hair lies against it or hangs just off it (and in the
-    other shut-in places: under the jaw, round the nose), deepening toward a warmer, redder tone the way skin does
-    in shade, so the hair sits on the face instead of being cut out against it."""
-    bsdf.name = 'sprite bsdf'
-    ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.9)
-    ao.samples = 16
-    k = _node(nt, 'ShaderNodeMapRange', Value=ao.outputs['AO'], **{'From Min': 0.25, 'From Max': 1.0})
-    col = _node(nt, 'ShaderNodeMix', Factor=k.outputs['Result'])
-    col.data_type = 'RGBA'
-    col.inputs['A'].default_value = (lin[0] * 0.42, lin[1] * 0.26, lin[2] * 0.22, 1)
-    col.inputs['B'].default_value = (*lin, 1)
-    sb = _node(nt, 'ShaderNodeBsdfPrincipled', **{'Base Color': col.outputs['Result']})
-    sb.name = 'close bsdf'
-    sb.inputs['Roughness'].default_value = 0.6
-    sb.inputs['Specular IOR Level'].default_value = 0.25
-    nt.links.new(sb.outputs['BSDF'], out.inputs['Surface'])
-
-
 def gold_closeup(nt, bsdf, out):
     """The brooch up close: worn gold, brighter on its raised midrib and rim than down in the hollows, where the
     tarnish and the shadow of the wool collect."""
@@ -746,6 +727,7 @@ def make_material(mid):
         sh = nt.nodes.new('ShaderNodeAttribute')
         sh.attribute_name = 'iris_shade'
         nt.links.new(sh.outputs['Fac'], adet.inputs['Value'])
+        return m
     elif mid == M_SKIN:
         # the sprite: the baked shade (under the jaw and the eyes, between the fingers) darkens the light before
         # it is banded, and the flushed parts take the rosier ramp (the 'flush' pass; see to_pixels)
@@ -927,8 +909,22 @@ def skin_surface(nt, bsdf, out):
     some = math_('MULTIPLY', ramp_(rnd.outputs['Red'], 0.3, 0.4), math_('MULTIPLY_ADD', rnd.outputs['Blue'], 0.6, 0.4))
     freckle = math_('MULTIPLY', math_('MULTIPLY', fleck, some), freckly)
     c = tint(sc_.outputs['Vector'], [150, 96, 66], freckle)
+    # a soft contact shadow where the hair lies against the skin or hangs just off it, and in the other shut-in
+    # places (under the jaw, round the nose), deepening toward a warmer, redder tone the way skin does in shade,
+    # so the hair sits on the face instead of being cut out against it
+    ao = node('ShaderNodeAmbientOcclusion')
+    ao.inputs['Distance'].default_value = 0.9
+    ao.samples = 16
+    deep = node('ShaderNodeVectorMath', operation='MULTIPLY')
+    L(c, deep.inputs[0])
+    deep.inputs[1].default_value = (0.42, 0.26, 0.22)
+    shut = node('ShaderNodeMix', data_type='RGBA')
+    L(ramp_(ao.outputs['AO'], 0.25, 1.0, 0.0, 1.0, smooth=False), shut.inputs['Factor'])
+    L(deep.outputs['Vector'], shut.inputs['A'])
+    L(c, shut.inputs['B'])
+    c = shut.outputs['Result']
 
-    sb = node('ShaderNodeBsdfPrincipled', name='skin bsdf')
+    sb = node('ShaderNodeBsdfPrincipled', name='close bsdf')
     L(c, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
     sb.inputs['Subsurface Weight'].default_value = 1.0
@@ -1019,22 +1015,23 @@ def skin_tones():
         if o.name == 'Head shape':
             u, w = co[:, 0] / HEAD_H, co[:, 2] / HEAD_H
             front = np.clip(-nr[:, 1] * 1.5, 0, 1)
-            flush = front * (0.95 * (_g(u, w, -0.21, 0.385, 0.105, 0.06) + _g(u, w, 0.21, 0.385, 0.105, 0.06))
-                             + 0.8 * _g(u, w, 0, 0.37, 0.05, 0.045) + 0.35 * _g(u, w, 0, 0.1, 0.07, 0.05)
+            flush = front * (0.95 * (_g(u, w, -0.2, 0.365, 0.105, 0.06) + _g(u, w, 0.2, 0.365, 0.105, 0.06))
+                             + 0.8 * _g(u, w, 0, 0.35, 0.05, 0.045) + 0.35 * _g(u, w, 0, 0.085, 0.07, 0.05)
                              + 0.3 * _g(u, w, 0, 0.66, 0.12, 0.05))
             cold = front * 0.8 * (_g(u, w, -0.14, 0.47, 0.065, 0.025) + _g(u, w, 0.14, 0.47, 0.065, 0.025))
             cold += np.clip(-nr[:, 2] - 0.25, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * 1.1   # under the jaw
-            gloss = front * (_g(u, w, 0, 0.45, 0.04, 0.15) + 0.7 * _g(u, w, 0, 0.1, 0.06, 0.05)
+            cold += np.clip((0.02 - w) / 0.1, 0, 1) * 0.7        # and down the throat, in the head's shade
+            gloss = front * (_g(u, w, 0, 0.43, 0.04, 0.15) + 0.7 * _g(u, w, 0, 0.085, 0.06, 0.05)
                              + 0.5 * _g(u, w, 0, 0.66, 0.15, 0.06))
             # texture: freckles in a band over the nose and the tops of the cheeks, a few on the brow; pores on
             # the nose, the cheeks beside it, the chin and the brow
-            freck = front * np.clip(_g(u, w, 0, 0.44, 0.3, 0.075) + 0.3 * _g(u, w, 0, 0.68, 0.2, 0.06), 0, 1)
-            pores = np.clip(0.3 + front * (gloss + 0.7 * (_g(u, w, -0.1, 0.41, 0.09, 0.07) + _g(u, w, 0.1, 0.41, 0.09, 0.07))), 0, 1)
+            freck = front * np.clip(_g(u, w, 0, 0.42, 0.3, 0.075) + 0.3 * _g(u, w, 0, 0.68, 0.2, 0.06), 0, 1)
+            pores = np.clip(0.3 + front * (gloss + 0.7 * (_g(u, w, -0.1, 0.39, 0.09, 0.07) + _g(u, w, 0.1, 0.39, 0.09, 0.07))), 0, 1)
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(head_parts))
         elif o.name == 'Neck':
-            t = np.clip((co[:, 2] - 51.0) / 6.0, 0, 1)        # 0 at the collar, 1 under the jaw
+            t = np.clip((co[:, 2] - 51.0) / 2.5, 0, 1)        # 0 at the collar, 1 where it meets the head's throat
             cold = 0.35 + 0.5 * t ** 2       # the neck sits in the head's shade: cooler than the face throughout
             crease = np.full(n, 0.22)        # the faint rings round a neck
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
