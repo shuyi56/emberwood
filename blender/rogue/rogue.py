@@ -1098,7 +1098,7 @@ def leggings_top(body):
         # the front centre lies flat across the lower belly into the crotch instead of rounding forward (a full
         # front there read as a bulge); the sides stay level with the thighs so no hollow opens beside them
         if y < 0:
-            ky += 0.22 * smoothstep(31.8, 29.4, z) * (1.0 - smoothstep(0.6, 2.2, abs(x * (1.0 - 0.8 * kx))))
+            ky += 0.42 * smoothstep(32.0, 29.2, z) * (1.0 - smoothstep(0.8, 2.6, abs(x * (1.0 - 0.8 * kx))))
         return x * (1.0 - 0.8 * kx), y * (1.0 - min(ky, 0.92))
     parts = [loft_fn([37.0 - 0.3 * i for i in range(32)], seat_pt, n=96)]
     lo = LEG_TOP_Z - HIP_Z
