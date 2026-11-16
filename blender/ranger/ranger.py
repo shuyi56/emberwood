@@ -1266,18 +1266,27 @@ def mouth_relief(x, z):
     nose's wing toward the corner of the mouth, and the crease under the lower lip."""
     ax = abs(x)
     d = 0.0
-    across_u = math.exp(-(x / 0.07) ** 4)                 # the upper lip runs nearly full height to its corners
+    # the line between the lips (it lifts a touch toward the corners, a relaxed half-smile: level, from above, it
+    # read as a frown), and how each lip tapers into the corner. The lips' outline is the one lip_painting colours:
+    # each lip narrows to nothing at the corner along the same curve (full height to the corners, the sculpted lips
+    # ran on past the colour as bulges of skin)
+    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    pinch = math.sqrt(max(0.0, 1 - (ax / 0.081) ** 2))
     bow = 0.006 * math.exp(-((ax - 0.019) / 0.011) ** 2)   # the peaks of the cupid's bow
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
-    t = (z - 0.258) / max(0.01, top - 0.258)
-    if 0.0 < t < 1.25:
-        d += 0.016 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    top = zl + (top - zl) * pinch ** 0.8
+    t = (z - zl) / max(0.004, top - zl)
+    # (past its edge the roll falls away over a fixed distance: scaled to the lip's height it was a cliff at the
+    # thin ends, drawn as a dark outline round the lips)
+    fall = 0.0095 * max(0.4, pinch)
+    if 0.0 < t and z < top + fall:
+        d += 0.016 * pinch ** 1.6 * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else 0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
     d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
-    across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.017 * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
+    low = 0.034 * pinch ** 1.4                             # the lower lip's height (less full: it read pouty)
+    # (both thinning out fast toward the corners: a lip's worth of swelling left past the colour there read as
+    # a pale ring round the mouth)
+    d += 0.017 * pinch ** 2 * math.exp(-((z - (zl - 0.56 * low)) / max(0.004, 0.47 * low)) ** 2)
     # the line between the lips, deepest at the corners where the lips tuck in
-    # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
-    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
     # (it ends where the lips do: run on past them, it drew a dark line out beyond the lips' colour)
     d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.079) ** 6)
     for sx in (-1, 1):
@@ -3882,7 +3891,7 @@ def lip_painting(W=576, H=336):
     # pale rim drawn across the middle of the lip)
     pinch = np.sqrt(np.clip(1 - (ax / 0.081) ** 2, 0, 1))  # each lip tapers to nothing at the corner
     top = zl + (top - zl) * pinch ** 0.8
-    bot = zl - 0.034 * pinch ** 1.4
+    bot = zl - 0.039 * pinch ** 1.4      # (to where the lower lip turns under: stopped short, its lit underside showed as a pale band of skin)
     upper = sm(top + 0.0022, top - 0.0022, w) * sm(zl - 0.002, zl + 0.001, w)
     lower = sm(bot - 0.007, bot + 0.005, w) * sm(zl + 0.002, zl - 0.001, w)
     # (past the corners both edges meet the line, which would leave a thin band of each running on out)

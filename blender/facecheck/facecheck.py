@@ -171,8 +171,40 @@ class Figure:
         return default
 
 
-def load(name_or_path, root=REPO):
-    return Figure(figure_path(name_or_path, root))
+def load(name_or_path, root=REPO, preset=None):
+    F = Figure(figure_path(name_or_path, root))
+    if preset:
+        apply_preset(F, preset)
+    return F
+
+
+PRESET_KEYS = ('EYE_OPEN', 'EYE_TILT', 'EYE_TOP_PEAK', 'EYE_BOT_LOW', 'EYE_INNER_ANGLES', 'EYE_OUTER_ANGLES',
+               'EYE_INNER_RUN', 'EYE_PEAK_FULL', 'SKIN')
+
+
+def apply_preset(F, path):
+    """Put a face made in the face creator onto the figure: path is the creator's Python export, saved to a file.
+    Its FACE_SHAPE reshapes face_relief, mouth_relief, jaw_relief and the head's width (blender/shared/
+    face_shape.py), and its lids (EYE_*) and skin tone (SKIN) replace the figure's. The colours that live inside
+    the figure's painting functions (lips, brows, eyeshadow, iris) are not read: judge those in the creator."""
+    sys.path.insert(0, os.path.join(REPO, 'blender', 'shared'))
+    try:
+        import face_shape
+    finally:
+        sys.path.pop(0)
+    ns = {'np': np, 'mat_def': lambda *a, **k: None, '_srgb_lin': lambda c: c}
+    exec(compile(open(path).read(), path, 'exec'), ns)
+    fr, mr, jr, hw = face_shape.shaped(ns.get('FACE_SHAPE', {}), F.FACE_WARP, F.HEAD_W)
+    new = dict(face_relief=fr, mouth_relief=mr, jaw_relief=jr, HEAD_W=hw)
+    for k in PRESET_KEYS:
+        if k in ns:
+            new[k] = ns[k]
+    for k, v in new.items():
+        F.g[k] = v
+        if k in F.ns:
+            F.ns[k] = v
+    F.notes.append('preset ' + os.path.basename(path) + ': ' + ', '.join(sorted(new)))
+    F.name += '+' + os.path.splitext(os.path.basename(path))[0]
 
 
 # ------------------------------------------------------------------------------------------------ helpers
@@ -509,8 +541,9 @@ LIGHT = np.array([-0.45, -0.75, 0.55])     # the key, from her right, in front a
 def _camera(view, H):
     az, el, dist, ty = VIEWS[view][:4]
     tdepth = VIEWS[view][4] if len(VIEWS[view]) > 4 else 0.0
+    tx = VIEWS[view][5] if len(VIEWS[view]) > 5 else 0.0
     az, el = math.radians(az), math.radians(el)
-    tgt = np.array([0, tdepth * H, ty * H])
+    tgt = np.array([tx * H, tdepth * H, ty * H])
     eye = tgt + dist * np.array([math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el)])
     fwd = (tgt - eye) / np.linalg.norm(tgt - eye)
     right = np.cross(fwd, [0, 0, 1.0])
@@ -548,7 +581,7 @@ def draw(face, view='front', size=640, ss=2):
         parts.append((b['P'], b['n'], b['col'], np.ones(b['P'].shape[:2]) * 0.8, 0.1))
     for e in face.get('ears', []):
         parts.append((e['P'], e['n'], e['col'], e['gloss'], 0.6))
-    xs, ys, ds, cs, rs = [], [], [], [], []
+    xs, ys, ds, cs, rs, gx, gy = [], [], [], [], [], [], []
     for P, n, col, gloss, rough in parts:
         p = P.reshape(-1, 3)
         nn = n.reshape(-1, 3)
@@ -563,7 +596,14 @@ def draw(face, view='front', size=640, ss=2):
         k = facing & (d > 0)
         c = _shade(p[k], nn[k], col.reshape(-1, 3)[k], eye, gloss.ravel()[k], rough)
         xs.append(x[k]); ys.append(y[k]); ds.append(d[k]); cs.append(c); rs.append(r[k])
-    x, y, d, c, r = (np.concatenate(a) for a in (xs, ys, ds, cs, rs))
+        # each splat is a small disc lying in the surface, not facing the camera: its depth changes across it
+        # with the surface's slope (per screen pixel), so where two surfaces cross the nearer one wins pixel by
+        # pixel along a clean line, instead of in a saw-tooth the size of the discs
+        nr, nu, nf = nn[k] @ right, nn[k] @ up, nn[k] @ fwd
+        nf = np.where(np.abs(nf) < 0.25, np.copysign(0.25, nf + 1e-12), nf)
+        px = d[k] / f
+        gx.append(-nr / nf * px); gy.append(nu / nf * px)
+    x, y, d, c, r, gx, gy = (np.concatenate(a) for a in (xs, ys, ds, cs, rs, gx, gy))
     R = int(math.ceil(r.max()))
     zb = np.full(W * W, np.inf)
     idx_all, d_all, c_all = [], [], []
@@ -574,7 +614,7 @@ def draw(face, view='front', size=640, ss=2):
             py = np.round(y[k] + oy).astype(int)
             ok = (px >= 0) & (px < W) & (py >= 0) & (py < W)
             idx_all.append(py[ok] * W + px[ok])
-            d_all.append(d[k][ok])
+            d_all.append((d[k] + gx[k] * ox + gy[k] * oy)[ok])
             c_all.append(c[k][ok])
     idx, dd, cc = np.concatenate(idx_all), np.concatenate(d_all), np.concatenate(c_all)
     order = np.lexsort((dd, idx))
@@ -750,6 +790,7 @@ def main(argv=None):
     ap.add_argument('--views', default='front,three,profile,eyes,lips,ear,game', help='any of ' + ','.join(VIEWS))
     ap.add_argument('--size', type=int, default=480)
     ap.add_argument('--quality', default='normal', choices=list(QUALITY))
+    ap.add_argument('--preset', help="a face from the face creator: its Python export saved to a file")
     ap.add_argument('--before', help='a git ref to compare with (e.g. origin/main): drawn and measured the same way')
     ap.add_argument('--out', default=None, help='folder for the images and report (default: /tmp/facecheck-<figure>)')
     ap.add_argument('--procs', type=int, default=None)
@@ -761,8 +802,8 @@ def main(argv=None):
     runs = []
     if a.before:
         root = checkout(a.before)
-        runs.append(('before', load(a.figure if a.figure.endswith('.py') else a.figure, root)))
-    runs.append(('now' if a.before else '', load(a.figure)))
+        runs.append(('before', load(a.figure, root)))
+    runs.append(('now' if a.before else '', load(a.figure, preset=a.preset)))
     reports, rows = {}, []
     for tag, F in runs:
         face = build(F, a.quality, a.procs)

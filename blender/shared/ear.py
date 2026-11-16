@@ -102,9 +102,9 @@ def ear_relief(u, v, edge, outline_t):
     fossa = _g(np.hypot(u - 0.070, v - 0.088), 0.018)
     h -= 0.003 * fossa                                                # the triangular fossa between the crura
     concha = _g(np.hypot((u - 0.040) / 1.1, (v + 0.02) / 1.25), 0.042)
-    h -= 0.024 * concha * (1 - lobe)                                  # the bowl
-    h -= 0.012 * _g(np.hypot(u - 0.006, v + 0.005), 0.012)            # the opening, deep in the bowl
-    h += 0.008 * _g(_seg_dist(P, *_poly(HELIX_CRUS)), 0.008)          # the helix's root crossing the bowl
+    h -= 0.019 * concha * (1 - lobe)                                  # the bowl
+    h -= 0.008 * _g(np.hypot(u - 0.006, v + 0.005), 0.016)            # the opening, deep in the bowl
+    h += 0.004 * _g(_seg_dist(P, *_poly(HELIX_CRUS)), 0.013)          # the helix's root, a soft swell across the bowl
     h += 0.012 * _g(np.hypot((u + 0.006) / 0.8, v + 0.012), 0.016)    # the tragus
     h += 0.009 * _g(np.hypot(u - 0.052, v + 0.078), 0.015)            # the antitragus
     h += 0.006 * lobe * _g(edge - 0.03, 0.04)                         # the lobe's soft fullness
@@ -136,14 +136,19 @@ def ear_grids(head_point, H, NT=220, NF=48, NB=16):
             edge = (1 - sf) * L
             h = ear_relief(u, v, edge, np.full(NF, ts[i]))
             # the flap stands off the skull toward its back edge, the rim rounding over onto the rear face
-            # (and the whole flap a little proud of it, back from where the front edge joins the cheek, so the bowl
-            # stays a bowl and only the opening goes into the head)
+            # (and the whole flap a little proud of it, back from where the front edge joins the cheek; the bowl and
+            # the opening stay just above the skin, which would show through them in specks: the opening's depth is
+            # its shade, see ear_tones)
             w_front = np.maximum(0.0, u + 0.01) * math.tan(EAR_FLARE) + h + 0.004 + 0.011 * _sm(-0.015, 0.04, u)
+            w_front = 0.003 + np.log1p(np.exp((w_front - 0.003) / 0.003)) * 0.003     # (a soft floor at 0.003)
             ub, vb = C[0] + sb * (O[0] - C[0]), C[1] + sb * (O[1] - C[1])
             thick = 0.010 + 0.010 * _sm(-0.10, -0.15, vb)     # (the lobe is thicker)
             # (the back of the flap comes in to the skull in a smooth fold over the concha's bulge, no gap)
             w_back = ((np.maximum(0.0, ub + 0.01) * math.tan(EAR_FLARE) + 0.011 - thick) * sb ** 0.6
-                      - 0.004 * (1 - sb) ** 2)
+                      - 0.014 * (1 - sb) ** 3)
+            # (and always under the outer face by the flap's thickness: where the bowl is shallow and the flap thin,
+            # the back came up through the front in slivers)
+            w_back = np.minimum(w_back, np.interp(sb, sf, w_front) - thick)
             uu, vv, ww = np.concatenate([u, ub]), np.concatenate([v, vb]), np.concatenate([w_front, w_back])
             # the ear's plane, tilted back about the opening, set on the head's side
             y = EAR_Y + EAR_SU * uu * ct + EAR_SV * vv * st
@@ -151,8 +156,10 @@ def ear_grids(head_point, H, NT=220, NF=48, NB=16):
             xs = np.array([head_point(zz, side, yy) for zz, yy in zip(z, y)])
             # where the front edge joins the cheek the outer face comes down onto the skin, so the ear grows out
             # of the head there instead of ending in an edge
-            att = (_sm(0.80, 0.92, ts[i]) + _sm(0.07, 0.0, ts[i])) * np.concatenate([_sm(0.45, 1.0, sf), np.ones(NB)])
-            ww = ww * (1 - 0.85 * att) - 0.02 * att * np.concatenate([np.zeros(NF), np.ones(NB)])
+            # (it goes on under the skin there, steeply enough to cross it along a clean line: brought down only
+            # level with it, the two surfaces lay so close that the head showed through the ear in a saw-tooth)
+            att = (_sm(0.74, 0.88, ts[i]) + _sm(0.07, 0.0, ts[i])) * np.concatenate([_sm(0.86, 1.0, sf), np.ones(NB)])
+            ww = ww * (1 - att) - 0.02 * att
             P.append(np.stack([side * (xs + ww), y, z], -1) * H)
             A.append(att)
             Hr.append(np.concatenate([h, np.zeros(NB)]))
