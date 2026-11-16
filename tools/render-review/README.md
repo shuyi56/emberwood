@@ -9,6 +9,7 @@ folder renders.
 | `review.py` | The checks. `check` reviews one request, `learn` adds a pitfall, `pitfalls` lists them. |
 | `smoke.py` | Runs a render script for real, headless, and stops it the moment its first render would start. |
 | `hair_check.py` | The hair check, from the warden thread: creases, ridges and ledges in the hair, clothes through it, and the strand paint. |
+| `profile.py` | Ray-casts one object's front and back surface from the built scene, to compare two commits' geometry in numbers. |
 | `PITFALLS.md` | What has gone wrong before and how to fix it. Read on every review, added to after every rejection or bad render. |
 
 The queue itself (`rq.py`, `queue.json`, results) lives in the project folder under `render-queue/` and belongs to
@@ -73,6 +74,18 @@ Run it yourself before asking (needs `pip install bpy`, about 3 minutes):
 
 or on a saved figure: `python3 tools/render-review/hair_check.py DIR/figure.blend --out DIR`. For the strand paint
 alone, without Blender, the rogue thread's preview is in the project folder under `tools/hair-paint-preview/`.
+
+## Measuring a shape change
+
+When a request reshapes a surface (a mound to flatten, a lobe to remove), the reviewer builds the commit and the
+branch's last rendered commit headless and compares where the surface lies:
+
+    RQ_PROFILE='Leggings seat|0,0.6,1.2,2,3.2|25:33:0.5|/tmp/new.json' \
+        python3 tools/render-review/smoke.py blender/base/views.py --figure rogue --turn --out /tmp/x
+    python3 tools/render-review/profile.py /tmp/old.json /tmp/new.json
+
+The spec is the object, the x positions, the heights (from:to:step) and the output file. A request is sent back
+when the numbers show the change does not move the surface it is meant to, or digs a trough beside it (P017).
 
 ## For the reviewer: each request
 

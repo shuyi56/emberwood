@@ -9,6 +9,9 @@ parsing, the whole scene build. The first render never starts: a render_init han
 With RQ_HAIRCHECK=DIR in the environment, the hair is checked at that moment too (hair_check.py: creases,
 ridges, ledges, clothes through the hair, the strand paint) and the result is written to DIR.
 
+With RQ_PROFILE='OBJECT|xs|z0:z1:step|FILE', one object's front and back surface is ray-cast there too
+(profile.py), to compare two commits' geometry in numbers.
+
 Exit codes: 77 the script reached its first render (good); 0 it finished without rendering (good, e.g. the glb
 export); anything else is the script's own failure, with its traceback on stderr.
 """
@@ -28,6 +31,13 @@ def _stop_at_first_render(*_):
             import hair_check
             hair_check.check_scene(os.environ["RQ_HAIRCHECK"])
         except Exception:                               # a failed measurement must not fail the build check
+            import traceback
+            traceback.print_exc()
+    if os.environ.get("RQ_PROFILE"):                   # and, when asked, where one object's surface lies
+        try:
+            import profile as surface_profile
+            surface_profile.measure(os.environ["RQ_PROFILE"])
+        except Exception:
             import traceback
             traceback.print_exc()
     sys.stdout.flush(); sys.stderr.flush()
