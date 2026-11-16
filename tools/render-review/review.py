@@ -60,7 +60,7 @@ LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
 SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "900"))
 SHEET_ROWS, SHEET_COLS = 8, 10
 SHELL_META = re.compile(r"[;&|<>$`\\\n\r]")
-HAIR = re.compile(r"hair|bang|fringe|lock|pony|wisp|strand|braid|bun(?![a-z])", re.I)
+HAIR = re.compile(r"hair|bang|fringe|lock(?!ed)|pony|wisp|strand|braid|bun(?![a-z])", re.I)
 # what blender/facecheck/facecheck.py draws and measures without Blender: the sculpted face and its paintings
 FACE = re.compile(r"face|mouth|jaw|lid|eye|iris|sclera|brow|lash|lip|nose|nostril|chin|cheek|philtrum|"
                   r"head_section|head_front|sculpted_head|build_head", re.I)
