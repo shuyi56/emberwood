@@ -95,3 +95,36 @@ shaped bangs and hair cards are built, which led to real locks.
    into a box.
 6. Volume comes from lift: raise the inner locks' C (more lift at the root and over the brow, tip still turning in).
 7. Compare against the reference photo side by side.
+
+## Wavy hair
+
+Researched for the Warden's long waves (`HAIR_STYLES.wavy.extras`), from how wavy hair is painted (the ribbon
+method: Gurney's "hair ribbon secret", value-mapping guides) and how it is built for games (hair cards in layers,
+stylized sculpts built lock by lock).
+
+1. A wavy lock is a ribbon, not a wiggly line. Move the guide from side to side in an S and, a quarter turn behind
+   it, out and in from the head, so the lock winds down. Turn the ribbon's face toward the side it is travelling to.
+   A side-to-side wiggle alone is flat and reads as crimped straight hair.
+2. No wave over the skull. The hair's weight pulls the roots straight, so the wave comes in below the ears, grows
+   down the length, and the waves sit a little closer together toward the ends.
+3. Few large waves. About 0.6 of a head per wave at this scale. A wave of 0.45 or less with locks this narrow reads
+   as curls or a plait.
+4. Neighbouring locks are a little out of step (about a tenth of a wave from one to the next, plus a small random
+   part), so the waves travel across the hair as one body and the locks still cross and part. Locks fully out of
+   step weave into a braid pattern; locks in step ripple as one corrugated sheet.
+5. Layers: the cap is the opaque base. Over it a darker under layer of broad locks (tone about 0.75), then a top
+   layer of narrower locks sitting in the under layer's gaps and out of step with it. The dark layer showing between
+   the top locks is what gives the waves depth.
+6. Light and shade run across the lock, not along it. Lighten each strand over a crest (where the ribbon faces out),
+   darken it in the trough and where it turns under, and darken the troughs more than you lighten the crests
+   (`WAVY.bandUp`, `WAVY.bandDown`). The highlight then breaks into a patch on every wave, which is what reads as
+   wavy from a distance.
+7. A wavy lock gathers to a point. Keep the strands together (spread about 0.12, against 0.6 for a straight fringe),
+   narrow the clump over its last third and stagger the strand lengths, so each lock ends in a soft point and the
+   outline is a row of points at different heights.
+8. End the cap above the locks' ends so the outline is made by the locks.
+9. Over hair, make the sheer layer under a clump darker than the hair (tone about 0.5) and no wider than the clump.
+   The warm, wide veil used over skin shows as pale patches and a halo round long hair.
+10. Ride every lock on the cap's own surface: find the cap's radius down the lock's column the way `buildHair` does
+    (scalp, ear clearance, depth, the hang rule) and add the lock's lift. Locks placed by their own estimate cut
+    through the cap.
