@@ -22,6 +22,9 @@ What `check` does, cheapest first:
             and the whole scene build. A crash here is a crash the queue would have hit minutes in.
   facecheck a request that only checks a face (face sculpt or face paint changed, face views asked) is not
             forwarded: blender/facecheck/facecheck.py draws and measures it here, without Blender, in seconds
+  hair      when the commit touches hair code, hair_check.py runs inside that same build: creases, ridges and
+            ledges in the hair in all 8 facings, clothes coming through it in the walk, and the strand paint.
+            New flags since the branch's last measured commit send the request back; old ones are listed.
   cache     jobs the queue already holds are reported, so the requester knows the answer is immediate
 
 Findings are 'block' (send back), 'warn' (forward, and tell the requester) or 'info'. The verdict is 'fix' when
@@ -66,6 +69,10 @@ FACE_VIEW_SCRIPTS = ("face_views.py", "sculpt_views.py")
 FACECHECK = "blender/facecheck/facecheck.py"
 FACECHECK_REFS = ("origin/main", "origin/claude/project-thread-k27az6")   # the second only until PR #26 merges
 FACECHECK_OUT = os.path.join(RQ_DIR, "facechecks")
+HAIR_DIR = os.path.join(RQ_DIR, "review", "hair")       # hair-check results, one folder per commit measured
+HAIR_NEW_PX = 25           # a flag this big that the branch's last measured commit did not have sends it back
+HAIR_SEMI = 0.45           # share of a strand texture's painted texels that are half-transparent
+HAIR_TONE = 0.045          # chromaticity distance between the strand paint and the hair's ramp
 KEEP_AT_MAIN = ("blender/ranger/ranger-blender.png", "blender/ranger/ranger.blend", "public/models/ranger.glb")
 
 
@@ -299,12 +306,99 @@ def smoke_command(kind, param, out):
     return f"{runner} {param} --out {q(out)}"
 
 
-def smoke(commit, kind, param):
-    """Run one job up to its first render in a worktree of `commit`. Returns {ok, seconds, tail, cached}."""
+def hair_findings(rep, now, before, before_tip, override):
+    """Turn a hair-check result into findings: clothes through the hair and flags the branch's last measured
+    commit did not have send the request back; flags that were already there are listed as warnings."""
+    def same(p, q):
+        return p["kind"] == q["kind"] and p["facing"] == q["facing"] and abs(p["height"] - q["height"]) < 0.7 \
+            and abs(p["x"] - q["x"]) < 0.9
+
+    def line(p):
+        return f"{p['kind']} in the {p['facing']} view, {p['pixels']} px at height {p['height']}, {p['side']} (x {p['x']:+.1f})"
+    level = rep.warn if override else rep.block
+    pic = f" Marked in {now['picture']} (red crease, blue ridge, yellow ledge)." if now.get("picture") else ""
+    if now.get("note"):
+        rep.info("hair", f"Hair check: {now['note']}.")
+        return
+    for c in now["clashes"]:
+        level("hair", f"In walk column {c['walk_column']}, {c['object']} comes out through the hair "
+              f"({c['faces']} faces, height {c['height'][0]} to {c['height'][1]}).",
+              "Move the hair clear of it in that pose, or weight the hair there to follow the body.", "P015")
+    probs = now["problems"]
+    old = (before or {}).get("problems")
+    if old is None:
+        if probs:
+            rep.warn("hair", f"Hair check, first measurement of this branch: {len(probs)} flag(s). "
+                     + "; ".join(line(p) for p in probs[:6]) + ("; ..." if len(probs) > 6 else "") + "." + pic,
+                     "A crease is a seam where two hair pieces meet: widen their overlap and relax the join after "
+                     "fusing. A ridge is a piece's corner: round it or sink it. A ledge is hair lying on hair: "
+                     "root it inside the mass it grows from.", "P015")
+    else:
+        new = [p for p in probs if p["pixels"] >= HAIR_NEW_PX and not any(same(p, q) for q in old)]
+        grown = [(p, q) for p in probs for q in old if same(p, q) and p["pixels"] >= max(HAIR_NEW_PX, 1.6 * q["pixels"])]
+        kept = [p for p in probs if p not in new and not any(p is g for g, _ in grown)]
+        if new or grown:
+            level("hair", f"This commit adds hair problems that {before_tip[:9]} (the last commit of this branch "
+                  "measured) did not have: " + "; ".join([line(p) for p in new[:6]] +
+                  [f"{line(p)}, up from {q['pixels']} px" for p, q in grown[:4]]) + "." + pic,
+                  "A crease is a seam where two hair pieces meet: widen their overlap and relax the join after "
+                  "fusing. A ridge is a piece's corner: round it or sink it. A ledge is hair lying on hair: root "
+                  "it inside the mass it grows from. Check with RQ_HAIRCHECK=/tmp/h python3 "
+                  "tools/render-review/smoke.py <view script> <args> --out /tmp/x before asking again.", "P015")
+        if kept:
+            rep.warn("hair", f"Hair check: {len(kept)} other flag(s), already there at {before_tip[:9]} or small: "
+                     + "; ".join(line(p) for p in kept[:5]) + ("; ..." if len(kept) > 5 else "") + "." + pic, None, "P015")
+        gone = [q for q in old if not any(same(p, q) for p in probs)]
+        if gone:
+            rep.info("hair", f"Hair check: {len(gone)} flag(s) from {before_tip[:9]} are gone.")
+    if not probs and not now["clashes"]:
+        rep.info("hair", "Hair check: no creases, ridges, ledges or clothes through the hair in any of the 8 facings.")
+    for name, p in (now.get("paint") or {}).items():
+        if p.get("half_transparent", 0) > HAIR_SEMI:
+            rep.warn("hair", f"Strand texture '{name}': {p['half_transparent']:.0%} of its painted texels are "
+                     "half-transparent, so the skin shows through and tints the strands.",
+                     "Paint each strand opaque and thin the lock by the gaps between strands.", "P016")
+        if p.get("tone_distance", 0) > HAIR_TONE:
+            rep.warn("hair", f"Strand texture '{name}': its colour {p['mean_rgb']} sits away from the hair's ramp "
+                     f"{p['hair_ramp_rgb']}, so the painted strands will not match the hair they grow from.",
+                     "Take the strand tones from MATERIALS[M_HAIR]['ramp'] unchanged.", "P016")
+
+
+def hair_before(branch, tip):
+    """(result, tip) of the newest hair check of this branch on a commit `tip` builds on, or (None, None)."""
+    try:
+        index = json.load(open(os.path.join(HAIR_DIR, "index.json")))
+    except (OSError, ValueError):
+        return None, None
+    for e in reversed(index.get(branch, [])):
+        if e["tip"] != tip and rq.git("merge-base", "--is-ancestor", e["tip"], tip, check=False).returncode == 0:
+            try:
+                return json.load(open(os.path.join(e["dir"], "hair-check.json"))), e["tip"]
+            except (OSError, ValueError):
+                continue
+    return None, None
+
+
+def hair_record(branch, tip, folder):
+    os.makedirs(HAIR_DIR, exist_ok=True)
+    p = os.path.join(HAIR_DIR, "index.json")
+    try:
+        index = json.load(open(p))
+    except (OSError, ValueError):
+        index = {}
+    rows = [e for e in index.get(branch, []) if e["tip"] != tip] + [{"tip": tip, "dir": folder}]
+    index[branch] = rows
+    json.dump(index, open(p, "w"), indent=1)
+
+
+def smoke(commit, kind, param, hair_dir=None):
+    """Run one job up to its first render in a worktree of `commit`. Returns {ok, seconds, tail, cached}.
+    With hair_dir, the hair is checked in the same run (hair_check.py) and its result left there."""
     key = rq.job_key(commit, "smoke-" + kind, param)
     key += "-" + hashlib.sha1(open(os.path.join(HERE, "smoke.py"), "rb").read()).hexdigest()[:6]
     memo = os.path.join(WORK, "smoke", key + ".json")
-    if os.path.exists(memo):
+    need_hair = hair_dir and not os.path.exists(os.path.join(hair_dir, "hair-check.json"))
+    if os.path.exists(memo) and not need_hair:
         return {**json.load(open(memo)), "cached": True}
     wt, out = os.path.join(WORK, "wt-" + key), os.path.join(WORK, "out-" + key)
     os.makedirs(out, exist_ok=True)
@@ -313,7 +407,8 @@ def smoke(commit, kind, param):
     t0 = datetime.datetime.now()
     cmd = smoke_command(kind, param, out)
     try:
-        r = subprocess.run(cmd, shell=True, cwd=wt, capture_output=True, text=True, timeout=SMOKE_TIMEOUT)
+        env = dict(os.environ, RQ_HAIRCHECK=hair_dir) if need_hair else None
+        r = subprocess.run(cmd, shell=True, cwd=wt, capture_output=True, text=True, timeout=SMOKE_TIMEOUT, env=env)
         rc, log = r.returncode, r.stdout + r.stderr
     except subprocess.TimeoutExpired as e:
         rc, log = -1, ((e.stdout or b"").decode(errors="replace") + (e.stderr or b"").decode(errors="replace")
@@ -578,9 +673,16 @@ def review(req, thread, do_smoke=True):
         elif not rep.blocked:
             todo.append(j)
     smoked_ok = False
+    # the hair check rides on the first job's build, for every request whose commit touches hair code
+    hair_defs = sorted({d for defs in fresh.values() for d in defs if HAIR.search(d)})
+    hair_dir = os.path.join(HAIR_DIR, f"{tip[:9]}-{merged[:9]}") if hair_defs else None
+    if hair_dir and not todo and not rep.blocked and do_smoke and not os.path.exists(os.path.join(hair_dir, "hair-check.json")) \
+            and facts["jobs"]:
+        todo.append(facts["jobs"][0])          # the renders are cached, but this hair was never measured
     if do_smoke and todo:
         with concurrent.futures.ThreadPoolExecutor(3) as ex:
-            for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"]), todo)):
+            for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"],
+                                                           hair_dir if j is todo[0] else None), todo)):
                 j["smoke"] = res
                 if res["ok"]:
                     rep.info("smoke", f"{j['kind']} {j['param'] or ''}: built headless and "
@@ -593,6 +695,17 @@ def review(req, thread, do_smoke=True):
                               f"python3 tools/render-review/smoke.py {j['param'] or '<script> <args>'} --out /tmp/x",
                               "P003")
         smoked_ok = all(j["smoke"]["ok"] for j in todo)
+        if hair_dir and os.path.exists(os.path.join(hair_dir, "hair-check.json")):
+            now = json.load(open(os.path.join(hair_dir, "hair-check.json")))
+            before, before_tip = hair_before(branch, tip)
+            facts["hair"] = {"dir": hair_dir, "changed": hair_defs, "problems": len(now.get("problems", [])),
+                             "clashes": len(now.get("clashes", [])), "compared_with": before_tip}
+            hair_findings(rep, now, before, before_tip, bool(req.get("needs_render")))
+            hair_record(branch, tip, hair_dir)
+        elif hair_dir and smoked_ok:
+            rep.warn("hair", "This commit changes hair code (" + ", ".join(hair_defs[:6]) + ") but the hair check "
+                     "left no result.", "Look at the build log; run RQ_HAIRCHECK=/tmp/h python3 "
+                     "tools/render-review/smoke.py <view script> <args> --out /tmp/x.")
     elif todo:
         rep.info("smoke", "Smoke run skipped.")
     for n, where in sorted(new_names.items()):

@@ -8,6 +8,7 @@ folder renders.
 | --- | --- |
 | `review.py` | The checks. `check` reviews one request, `learn` adds a pitfall, `pitfalls` lists them. |
 | `smoke.py` | Runs a render script for real, headless, and stops it the moment its first render would start. |
+| `hair_check.py` | The hair check, from the warden thread: creases, ridges and ledges in the hair, clothes through it, and the strand paint. |
 | `PITFALLS.md` | What has gone wrong before and how to fix it. Read on every review, added to after every rejection or bad render. |
 
 The queue itself (`rq.py`, `queue.json`, results) lives in the project folder under `render-queue/` and belongs to
@@ -50,6 +51,28 @@ result under `render-queue/facechecks/<figure>-<commit>/` and answers with that;
 
 When the change needs what the API cannot show (hair, cloth, final lighting, subsurface scattering, the sprite
 palette), add `"needs_render": "<what you need to see>"` to the request and it is forwarded as usual.
+
+## Hair check
+
+When a commit changes hair code, the review runs `hair_check.py` on the scene its headless build has just made;
+nothing extra is built and nothing is rendered. For each of the 8 facings it ray-casts the hair and flags creases
+(seams where pieces meet), ridges (a piece's corner showing) and ledges (hair lying on hair), as blobs of 10 or
+more pixels. In the walk frames it flags any other mesh coming out through the hair. It also reads each painted
+strand texture: how much of it is half-transparent, and how far its colour sits from the hair's ramp.
+
+The result is kept under `render-queue/review/hair/<commit>/`: `hair-check.json`, `hair-check.png` (red crease,
+blue ridge, yellow ledge) and `paint-<name>.png`. Each branch's result is compared with its last measured commit:
+
+* a flag of 25 px or more that was not there before, or a clash, sends the request back
+* flags that were already there, and small ones, are listed as warnings and the request goes through
+* `"needs_render": "<reason>"` turns the send-back into a warning
+
+Run it yourself before asking (needs `pip install bpy`, about 3 minutes):
+
+    RQ_HAIRCHECK=/tmp/h python3 tools/render-review/smoke.py blender/base/views.py --figure rogue --head --out /tmp/x
+
+or on a saved figure: `python3 tools/render-review/hair_check.py DIR/figure.blend --out DIR`. For the strand paint
+alone, without Blender, the rogue thread's preview is in the project folder under `tools/hair-paint-preview/`.
 
 ## For the reviewer: each request
 
