@@ -141,9 +141,10 @@ def check_view(row, root, X0, X1, Z0, Z1):
             depth[j, i] = hit[0].y
             n = shade_normal(hit[0], hit[2], vs, ps, hair)
             nrm[j, i] = -n if n[1] > 0 else n
-    # (away from the outline, where every surface turns away from the camera and would read as an edge)
+    # (away from the hair's outline, against the sky or the figure, where the surface turns under and away from the
+    # camera and any bend reads as an edge)
     inner = is_hair.copy()
-    for _ in range(3):
+    for _ in range(5):
         e = inner.copy()
         e[1:] &= inner[:-1]
         e[:-1] &= inner[1:]

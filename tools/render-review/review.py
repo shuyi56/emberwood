@@ -703,8 +703,9 @@ def review(req, thread, do_smoke=True):
             hair_findings(rep, now, before, before_tip, bool(req.get("needs_render")))
             hair_record(branch, tip, hair_dir)
         elif hair_dir and smoked_ok:
+            err = os.path.join(hair_dir, "hair-check-error.txt")
             rep.warn("hair", "This commit changes hair code (" + ", ".join(hair_defs[:6]) + ") but the hair check "
-                     "left no result.", "Look at the build log; run RQ_HAIRCHECK=/tmp/h python3 "
+                     "left no result." + (" Its error: " + open(err).read().strip().splitlines()[-1] if os.path.exists(err) else ""), "Look at the build log; run RQ_HAIRCHECK=/tmp/h python3 "
                      "tools/render-review/smoke.py <view script> <args> --out /tmp/x.")
     elif todo:
         rep.info("smoke", "Smoke run skipped.")

@@ -24,19 +24,31 @@ import bpy
 REACHED_RENDER = 77
 
 
+def _tool(name):
+    """A module from this folder, loaded by its path: a branch may carry a file of the same name (the warden has
+    its own hair_check.py) and the standard library has a `profile`, and neither must be picked up instead."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("render_review_" + name,
+                                                  os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 @bpy.app.handlers.persistent          # survives the read_factory_settings() every build starts with
 def _stop_at_first_render(*_):
     if os.environ.get("RQ_HAIRCHECK"):                 # the scene is built: measure the hair before leaving
         try:
-            import hair_check
-            hair_check.check_scene(os.environ["RQ_HAIRCHECK"])
+            _tool("hair_check").check_scene(os.environ["RQ_HAIRCHECK"])
         except Exception:                               # a failed measurement must not fail the build check
             import traceback
             traceback.print_exc()
+            os.makedirs(os.environ["RQ_HAIRCHECK"], exist_ok=True)
+            with open(os.path.join(os.environ["RQ_HAIRCHECK"], "hair-check-error.txt"), "w") as f:
+                traceback.print_exc(file=f)
     if os.environ.get("RQ_PROFILE"):                   # and, when asked, where one object's surface lies
         try:
-            import profile as surface_profile
-            surface_profile.measure(os.environ["RQ_PROFILE"])
+            _tool("profile").measure(os.environ["RQ_PROFILE"])
         except Exception:
             import traceback
             traceback.print_exc()
@@ -46,7 +58,6 @@ def _stop_at_first_render(*_):
 
 def main():
     script = sys.argv[1]
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))     # hair_check.py, after the script's own folders
     bpy.app.handlers.render_init.append(_stop_at_first_render)
     sys.argv = [script] + sys.argv[2:]
     sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
