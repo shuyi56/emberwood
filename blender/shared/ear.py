@@ -23,7 +23,8 @@ import math
 import numpy as np
 
 # the ear's layout in its own plane: u back along the head (from the ear's opening), v up, in head heights
-EAR_TOP, EAR_BOTTOM = 0.625, 0.36      # the top of the helix about level with the brow, the lobe with the nose's base
+EAR_TOP, EAR_BOTTOM = 0.60, 0.365     # the top of the helix just under the brow, the lobe at the nose's base
+EAR_SU, EAR_SV = 0.92, 0.78            # the layout below is drawn large; this is its size on the head (a compact ear)
 EAR_TILT = math.radians(15)            # the long axis leans back
 EAR_FLARE = math.radians(20)           # how far the back edge stands off the skull
 EAR_Y = 0.035                          # where the opening sits front to back (head heights; 0 is the head's middle)
@@ -31,8 +32,8 @@ EAR_Y = 0.035                          # where the opening sits front to back (h
 # the outline, round from the top of the front edge (where the helix leaves the head), back over the top, down
 # the back, round the lobe and up the front past the tragus (u, v in head heights from the opening)
 OUTLINE = [(0.000, 0.105), (0.030, 0.135), (0.075, 0.150), (0.115, 0.138), (0.140, 0.105), (0.150, 0.055),
-           (0.145, 0.000), (0.128, -0.055), (0.100, -0.100), (0.070, -0.135), (0.040, -0.160), (0.012, -0.170),
-           (-0.008, -0.158), (-0.014, -0.130), (-0.008, -0.095), (-0.012, -0.040), (-0.020, 0.020), (-0.014, 0.070)]
+           (0.145, 0.000), (0.130, -0.055), (0.107, -0.097), (0.084, -0.130), (0.055, -0.154), (0.022, -0.163),
+           (-0.002, -0.152), (-0.012, -0.125), (-0.008, -0.095), (-0.012, -0.040), (-0.020, 0.020), (-0.014, 0.070)]
 CENTRE = (0.055, -0.005)
 
 
@@ -107,7 +108,7 @@ def ear_relief(u, v, edge, outline_t):
     return h
 
 
-def ear_grids(head_point, H, NT=160, NF=36, NB=16):
+def ear_grids(head_point, H, NT=220, NF=48, NB=16):
     """The two ears as closed grids in the head's coordinates (model units). head_point(z, side, y) gives the
     head's surface x at height z (head heights) and depth y on that side, so each ear is set on its own skull.
     Returns, for each side, a dict: 'side', 'P' (NT, NF + NB, 3) points (rows round the outline, which wrap;
@@ -120,10 +121,10 @@ def ear_grids(head_point, H, NT=160, NF=36, NB=16):
     sf = np.linspace(0, 1, NF) ** 0.8          # out from the bowl's centre to the outline (the outer face)
     sb = np.linspace(1, 0, NB + 1)[1:]          # and back from the outline toward the skull (the rear face)
     ct, st = math.cos(EAR_TILT), math.sin(EAR_TILT)
-    zc = 0.5 * (EAR_TOP + EAR_BOTTOM) - 0.5 * (max(v for _, v in OUTLINE) + min(v for _, v in OUTLINE))
+    zc = 0.5 * (EAR_TOP + EAR_BOTTOM) - 0.5 * EAR_SV * (max(v for _, v in OUTLINE) + min(v for _, v in OUTLINE))
     out = []
     for side in (-1, 1):
-        P, Hr, R, E, Lb = [], [], [], [], []
+        P, Hr, R, E, Lb, A = [], [], [], [], [], []
         for i in range(NT):
             O = ring[i]
             L = np.linalg.norm(O - C)
@@ -142,16 +143,21 @@ def ear_grids(head_point, H, NT=160, NF=36, NB=16):
                       - 0.012 * (1 - sb) ** 2)
             uu, vv, ww = np.concatenate([u, ub]), np.concatenate([v, vb]), np.concatenate([w_front, w_back])
             # the ear's plane, tilted back about the opening, set on the head's side
-            y = EAR_Y + uu * ct + vv * st
-            z = zc + (-uu * st + vv * ct)
+            y = EAR_Y + EAR_SU * uu * ct + EAR_SV * vv * st
+            z = zc + (-EAR_SU * uu * st + EAR_SV * vv * ct)
             xs = np.array([head_point(zz, side, yy) for zz, yy in zip(z, y)])
+            # where the front edge joins the cheek the outer face comes down onto the skin, so the ear grows out
+            # of the head there instead of ending in an edge
+            att = (_sm(0.80, 0.92, ts[i]) + _sm(0.07, 0.0, ts[i])) * np.concatenate([_sm(0.45, 1.0, sf), np.ones(NB)])
+            ww = ww * (1 - 0.85 * att) - 0.02 * att * np.concatenate([np.zeros(NF), np.ones(NB)])
             P.append(np.stack([side * (xs + ww), y, z], -1) * H)
+            A.append(att)
             Hr.append(np.concatenate([h, np.zeros(NB)]))
             R.append(np.concatenate([np.zeros(NF), 1 - sb]))
             E.append(np.concatenate([edge, (1 - sb) * L]))
             Lb.append(_sm(-0.10, -0.13, vv))
         out.append(dict(side=side, P=np.array(P), h=np.array(Hr), rear=np.array(R), edge=np.array(E),
-                        lobe=np.array(Lb)))
+                        lobe=np.array(Lb), attach=np.array(A)))
     return out
 
 
@@ -160,8 +166,9 @@ def ear_tones(e):
     of all round the rim and in the lobe, where the light comes through thin skin; the bowl, the groove inside
     the rim and the fold where the flap meets the skull are shut in and dark."""
     rim = np.exp(-(e['edge'] / 0.02) ** 2) * (1 - e['rear'])
-    flush = np.clip(0.45 + 0.35 * rim + 0.3 * e['lobe'], 0, 1)
-    shade = np.clip(-e['h'] / 0.03, 0, 1) + _sm(0.5, 1.0, e['rear'])
+    # (fading to the head's own colour where the ear joins it, so no seam shows)
+    flush = np.clip(0.18 + 0.35 * rim + 0.25 * e['lobe'], 0, 1) * (1 - e['attach']) * (1 - _sm(0.4, 1.0, e['rear']))
+    shade = (np.clip(-e['h'] / 0.03, 0, 1) + 0.6 * _sm(0.5, 1.0, e['rear'])) * (1 - 0.7 * e['attach'])
     return flush, np.clip(shade, 0, 1)
 
 

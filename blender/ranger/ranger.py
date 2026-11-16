@@ -3869,11 +3869,14 @@ def lip_painting(W=576, H=336):
     zl = 0.258 + 0.007 * (ax / 0.082) ** 2
     bow = 0.006 * np.exp(-((ax - 0.019) / 0.011) ** 2)
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
-    # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read
-    # too full and the colour ran out past the corners as dark wedges)
+    # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider, the colour ran out past
+    # the corners as dark wedges. Its edges are the sculpt's own: the upper edge where the upper lip's roll turns
+    # back into skin, the lower edge where the lower lip's fullness falls away into the crease below. Painted
+    # shorter than the sculpt, the lit roll of the upper lip showed as a band of skin inside the colour, with the
+    # pale rim drawn across the middle of the lip)
     pinch = np.sqrt(np.clip(1 - (ax / 0.081) ** 2, 0, 1))  # each lip tapers to nothing at the corner
-    top = zl + 0.75 * (top - zl) * pinch ** 0.8
-    bot = zl - 0.028 * pinch ** 1.4
+    top = zl + (top - zl) * pinch ** 0.8
+    bot = zl - 0.034 * pinch ** 1.4
     upper = sm(top + 0.0022, top - 0.0022, w) * sm(zl - 0.002, zl + 0.001, w)
     lower = sm(bot - 0.007, bot + 0.005, w) * sm(zl + 0.002, zl - 0.001, w)
     # (past the corners both edges meet the line, which would leave a thin band of each running on out)
@@ -3908,7 +3911,7 @@ def lip_painting(W=576, H=336):
     a = lip * (0.88 - 0.5 * corner) + 0.0 * x
     a = np.maximum(a, part * 0.75)
     # the pale rim of skin just over the upper lip's edge
-    rim = np.exp(-((w - top - 0.0045) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
+    rim = np.exp(-((w - top - 0.005) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
     col = col + (np.array([232, 200, 180], dtype=np.float32) - col) * rim[..., None] * (1 - lip[..., None])
     a = np.maximum(a, 0.28 * rim)
     a *= sm(LIP_X0, LIP_X0 + 0.01, x) * sm(LIP_X1, LIP_X1 - 0.01, x)
