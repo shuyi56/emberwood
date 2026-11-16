@@ -2414,7 +2414,19 @@ def trunk_weights(co):
     the waist, so the body twists there in one piece), and the neck following the head at the top."""
     chest = 1.0 - _smooth(CHEST_Z + 2.5, CHEST_Z - 5.5, co.z)
     neck = 1.0 - _smooth(NECK_Z + 4.5, NECK_Z + 0.5, co.z)
-    return {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    w = {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    if LOCKED_WALK:
+        # (the world model) the jerkin's short skirt is carried part of the way by the thigh under it, more toward
+        # the hem, so the leg lifting forward lifts the skirt over it instead of pushing out past its front edge.
+        # Each side follows its own thigh, blended across the middle, where the two legs' swings cancel.
+        share = SKIRT_ON_THIGH * _smooth(HIP_Z + 2.0, HIP_Z - 2.5, co.z)
+        if share > 0:
+            right = min(1.0, max(0.0, 0.5 - co.x / 3.0))      # (her right is -x)
+            p = w.pop('Pelvis')
+            w['Pelvis'] = p * (1.0 - share)
+            w['Thigh.R'] = p * share * right
+            w['Thigh.L'] = p * share * (1.0 - right)
+    return w
 
 
 def skin_trunk(body):
@@ -4589,10 +4601,11 @@ def walk_drop(t):
 # allow, smoothed into an easy rise and fall, and the thigh and knee are solved to reach the ankle. One cycle then
 # covers exactly STRIDE of ground (WORLD_CYCLE in src/world/main.js), so the feet stay put in the world.
 LOCKED_WALK = False     # export_glb.py turns it on for the world model; the sheet keeps the walk above
+SKIRT_ON_THIGH = 0.45   # (with LOCKED_WALK) how much of the jerkin's hem each thigh carries: see trunk_weights
 STRIDE = 46.0           # ground covered by one cycle (two steps), in model units
 STANCE_L = 0.6          # the part of a leg's cycle its foot is on the ground (heel strike at 0, toe-off here)
 AHEAD = 0.46            # how much of the stance's travel lies ahead of the hip at the heel strike
-SWING_LIFT = 4.5        # how high the ankle is lifted as the foot is carried through (early in the swing)
+SWING_LIFT = 4.0        # how high the ankle is lifted as the foot is carried through (early in the swing)
 BOB_RANGE = 2.4         # the most the hips rise and fall through a step
 BOB_SOFT, BOB_BLUR = 0.06, 0.03  # how far round the cycle the hips' path is widened into each trough, and smoothed
 L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reaching forward carried with it)
