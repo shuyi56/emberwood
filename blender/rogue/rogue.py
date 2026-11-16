@@ -569,9 +569,9 @@ def tail_clumps(head, path, lens):
 # strands at its edges and tip instead of reading as one thick strand. (th, el, lift) knots for each lock, its
 # root tucked up under the hair; th is mirrored for her other side.
 SIDE_LOCKS = [
-    ([(0.58, 0.6, 0.02), (0.67, 0.32, 0.07), (0.76, 0.02, 0.08), (0.79, -0.3, 0.07), (0.76, -0.52, 0.06)], 0.62),
-    ([(0.68, 0.54, 0.02), (0.78, 0.26, 0.09), (0.86, -0.06, 0.1), (0.89, -0.4, 0.09), (0.85, -0.68, 0.08)], 0.72),
-    ([(0.78, 0.46, 0.02), (0.88, 0.18, 0.08), (0.95, -0.1, 0.08), (0.97, -0.36, 0.07)], 0.58),
+    ([(0.58, 0.6, 0.02), (0.67, 0.32, 0.07), (0.76, 0.02, 0.08), (0.79, -0.3, 0.07), (0.76, -0.52, 0.06)], 0.8),
+    ([(0.68, 0.54, 0.02), (0.78, 0.26, 0.11), (0.86, -0.06, 0.12), (0.89, -0.4, 0.11), (0.85, -0.68, 0.1)], 0.9),
+    ([(0.78, 0.46, 0.02), (0.88, 0.18, 0.08), (0.95, -0.1, 0.08), (0.97, -0.36, 0.07)], 0.75),
 ]
 LOCK_TEX = {}
 
@@ -593,7 +593,7 @@ def lock_image(W=256, H=1024):
     paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))
     dc, da, dp = ImageDraw.Draw(cover), ImageDraw.Draw(alpha), ImageDraw.Draw(paint)
     for _ in range(170):
-        u0 = float(np.clip(rng.normal(0.5, 0.2), 0.04, 0.96))
+        u0 = float(np.clip(rng.normal(0.5, 0.26), 0.04, 0.96))
         mid = 1.0 - abs(u0 - 0.5) * 2
         end = min(0.99, (0.45 + 0.55 * mid ** 0.6) * (0.85 + 0.2 * rng.random()))
         tone = rng.random()
@@ -606,11 +606,12 @@ def lock_image(W=256, H=1024):
             t = k / steps
             v = t * end
             # (they converge a little toward the lock's middle as it falls, and waver)
-            u = u0 + (0.5 - u0) * 0.25 * v + 0.012 * math.sin(fr * v * 6.28 + ph)
+            u = u0 + (0.5 - u0) * 0.1 * v + 0.012 * math.sin(fr * v * 6.28 + ph)
             q = (u * W * SS, v * H * SS)
             if prev is not None:
                 # (the tones of the hair it comes from: dark only at the root, under the hair's edge)
-                base = MID + (LIGHT - MID) * (0.15 + 0.55 * tone)
+                # (lifted a little: hanging in the shade of the hair above, at the hair's own tones it read darker)
+                base = np.minimum(255.0, (MID + (LIGHT - MID) * (0.45 + 0.55 * tone)) * 1.2)
                 c = DARK + (base - DARK) * min(1.0, 0.25 + 2.5 * t)
                 c = c + (LIGHT - c) * 0.4 * math.exp(-((t - 0.55) / 0.22) ** 2) * tone
                 w = max(1, int(wid * (1.0 - 0.7 * t ** 2)))
