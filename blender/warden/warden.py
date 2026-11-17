@@ -2032,6 +2032,117 @@ def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
+# The bronze of the knees, greaves and vambraces up close, as the reference's browned armour: not a polished
+# mirror but a dull satin metal, dark and warm, mottled in broad blotches where it has tarnished unevenly, darker
+# still down in the hollows where grime sits, and rubbed back toward the bright alloy on the edges and high places
+# that wear. (Metal reflectance stays metal, 0.2 to 0.45 linear in red; the tarnish is a dark warm brown, about
+# sRGB 60, 40, 25; satin roughness 0.4 to 0.75, rougher where it is tarnished.) BRONZE_LOOKS are the study's
+# candidates (bronze_study.py renders them side by side); BRONZE_LOOK is the one the figure wears.
+BRONZE_LOOKS = {
+    'browned': dict(metal=(0.30, 0.15, 0.06), tarnish=(0.045, 0.022, 0.011), mottle=0.65, rub=0.55, rgh=(0.45, 0.72)),
+    'russet': dict(metal=(0.22, 0.10, 0.04), tarnish=(0.032, 0.016, 0.008), mottle=0.75, rub=0.45, rgh=(0.5, 0.78)),
+    'aged': dict(metal=(0.45, 0.24, 0.10), tarnish=(0.07, 0.035, 0.015), mottle=0.55, rub=0.6, rgh=(0.4, 0.68)),
+    'polished': dict(metal=(0.82, 0.5, 0.29), tarnish=(0.17, 0.075, 0.035), mottle=0.3, rub=0.2, rgh=(0.3, 0.6)),
+}
+BRONZE_LOOK = 'browned'
+
+
+def bronze_closeup(name, look=None):
+    m = bpy.data.materials.get(name)
+    if m is None:
+        return
+    look = BRONZE_LOOK if look is None else look
+    # (by name, or by its place in the list: views.py --set BRONZE_LOOK=2, which needs no quoting)
+    L = BRONZE_LOOKS[look] if isinstance(look, str) else list(BRONZE_LOOKS.values())[int(look)]
+    nt = m.node_tree
+    out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+    bsdf = next((n for n in nt.nodes if n.type == 'BSDF_DIFFUSE'), None)
+    if bsdf is not None:
+        bsdf.name = 'sprite bsdf'
+    N = nt.nodes.new
+    rest = N('ShaderNodeAttribute')
+    rest.attribute_name = 'rest'
+
+    def noise(scale, detail, rough=0.55):
+        t = N('ShaderNodeTexNoise')
+        t.inputs['Scale'].default_value = scale
+        t.inputs['Detail'].default_value = detail
+        t.inputs['Roughness'].default_value = rough
+        nt.links.new(rest.outputs['Vector'], t.inputs['Vector'])
+        return t.outputs['Fac']
+
+    def rng(sock, a, b, lo=0.0, hi=1.0):
+        r = N('ShaderNodeMapRange')
+        r.inputs['From Min'].default_value, r.inputs['From Max'].default_value = a, b
+        r.inputs['To Min'].default_value, r.inputs['To Max'].default_value = lo, hi
+        nt.links.new(sock, r.inputs['Value'])
+        return r.outputs['Result']
+
+    def math_(op, a, b, clamp=True):
+        k = N('ShaderNodeMath')
+        k.operation = op
+        k.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if isinstance(v, float):
+                k.inputs[i].default_value = v
+            else:
+                nt.links.new(v, k.inputs[i])
+        return k.outputs[0]
+    # the tarnish: broad blotches, broken by a finer speckle
+    blot = rng(noise(0.55, 4.0), 0.42, 0.62)
+    speck = rng(noise(7.0, 6.0, 0.6), 0.35, 0.7)
+    mott = math_('MULTIPLY', math_('ADD', math_('MULTIPLY', blot, 0.75), math_('MULTIPLY', speck, 0.25)), L['mottle'])
+    # grime down in the hollows
+    ao = N('ShaderNodeAmbientOcclusion')
+    ao.inputs['Distance'].default_value = 0.6
+    ao.samples = 8
+    dirt = rng(ao.outputs['AO'], 0.95, 0.45)
+    # rubbed bright on the edges and high places
+    geo = N('ShaderNodeNewGeometry')
+    edge = rng(geo.outputs['Pointiness'], 0.5, 0.56)
+    rub = math_('MULTIPLY', math_('MULTIPLY', edge, rng(noise(3.0, 3.0), 0.3, 0.7, 0.4, 1.0)), L['rub'])
+    tf = math_('SUBTRACT', math_('ADD', mott, math_('MULTIPLY', dirt, 0.7)), rub)
+    col = N('ShaderNodeMix')
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (*L['metal'], 1)
+    col.inputs['B'].default_value = (*L['tarnish'], 1)
+    nt.links.new(tf, col.inputs['Factor'])
+    # (and the tone drifts a little, so no two plates match exactly)
+    var = N('ShaderNodeMix')
+    var.data_type, var.blend_type = 'RGBA', 'MULTIPLY'
+    var.inputs['Factor'].default_value = 1.0
+    nt.links.new(col.outputs['Result'], var.inputs['A'])
+    g = rng(noise(1.6, 2.0), 0.3, 0.7, 0.85, 1.12)
+    cmb = N('ShaderNodeCombineColor')
+    for c in ('Red', 'Green', 'Blue'):
+        nt.links.new(g, cmb.inputs[c])
+    nt.links.new(cmb.outputs['Color'], var.inputs['B'])
+    rough = N('ShaderNodeMapRange')
+    rough.inputs['To Min'].default_value, rough.inputs['To Max'].default_value = L['rgh']
+    nt.links.new(tf, rough.inputs['Value'])
+    # the surface: shallow hammer dents and a fine pitting of the tarnish
+    vor = N('ShaderNodeTexVoronoi')
+    vor.feature = 'SMOOTH_F1'
+    vor.inputs['Scale'].default_value = 2.6
+    nt.links.new(rest.outputs['Vector'], vor.inputs['Vector'])
+    b1 = N('ShaderNodeBump')
+    b1.inputs['Strength'].default_value = 0.25
+    b1.inputs['Distance'].default_value = 0.05
+    nt.links.new(vor.outputs['Distance'], b1.inputs['Height'])
+    b2 = N('ShaderNodeBump')
+    b2.inputs['Strength'].default_value = 0.12
+    b2.inputs['Distance'].default_value = 0.01
+    nt.links.new(noise(22.0, 4.0, 0.7), b2.inputs['Height'])
+    nt.links.new(b1.outputs['Normal'], b2.inputs['Normal'])
+    pb = N('ShaderNodeBsdfPrincipled')
+    pb.name = 'close bsdf'
+    pb.inputs['Metallic'].default_value = 1.0
+    nt.links.new(var.outputs['Result'], pb.inputs['Base Color'])
+    nt.links.new(rough.outputs['Result'], pb.inputs['Roughness'])
+    nt.links.new(b2.outputs['Normal'], pb.inputs['Normal'])
+    nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
+
+
 def fuse_hair(head, names, voxel=0.065, close=0.6):
     """Melt the hair's pieces (the cap, the side hair, the back of the head and the long fall) into one surface,
     as the ranger's: joined, remeshed as one volume and relaxed, so every join is a soft fillet. Then the waves."""
@@ -2767,10 +2878,7 @@ def build():
     # the rig, the camera and light, and the keyframes; then the hair kept clear of the clothes in every pose
     res = finish_figure(lambda: cape_on_arms(['Cape', 'Cape lining', 'Cape front -1', 'Cape front 1']))
     steel_closeup('plate')
-    # (bronze, as the hammered steel but in bronze's colour: polished, a reflectance between copper's (0.955, 0.638,
-    # 0.538, linear) and brass's, warm and a little pink; down in the hollows and the worn patches, the dark brown of
-    # tarnished bronze; a touch rougher than steel, as cast and beaten bronze is)
-    steel_closeup('bronze', dark=(0.17, 0.075, 0.035), light=(0.82, 0.5, 0.29), rgh=(0.6, 0.3))
+    bronze_closeup('bronze')
     # (the collar and its plate one dull, even finish: rougher, so the flat plate facing the light does not flare
     # brighter than the band curving round the neck)
     steel_closeup('collar', dark=(0.04, 0.041, 0.045), light=(0.2, 0.205, 0.22), rgh=(0.62, 0.48), use_ao=False)
