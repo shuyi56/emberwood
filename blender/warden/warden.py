@@ -2791,7 +2791,9 @@ def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
         return
     vs, ps = [], []
     for o in bpy.data.objects:
-        if o.type != 'MESH' or not o.name.startswith('Hair'):
+        # (the locks only: the cap lies right over the scalp, and with it the whole hairline went dark, a dirty band
+        # across the forehead)
+        if o.type != 'MESH' or not o.name.startswith('Hair locks'):
             continue
         b = len(vs)
         vs += [o.matrix_world @ v.co for v in o.data.vertices]
@@ -2799,6 +2801,16 @@ def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
     if not ps:
         return
     tree = BVHTree.FromPolygons(vs, ps)
+    # (the neck below takes no shade, so the head's own shade runs out where the head meets it, and no tone step
+    # shows along the join)
+    neck_t = None
+    nk = bpy.data.objects.get('Neck')
+    if nk is not None:
+        dg = bpy.context.evaluated_depsgraph_get()
+        nm = nk.evaluated_get(dg).to_mesh()
+        neck_t = BVHTree.FromPolygons([nk.matrix_world @ v.co for v in nm.vertices],
+                                      [list(p.vertices) for p in nm.polygons])
+        nk.evaluated_get(dg).to_mesh_clear()
     M = head.matrix_world
     N3 = M.to_3x3().inverted().transposed()
     me = head.data
@@ -2811,7 +2823,9 @@ def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
         n = (N3 @ v.normal).normalized()
         # (only hair out on the side the skin faces: hair behind the ear, past the edge of the jaw, shades nothing)
         facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
-        occ[v.index] = facing * (1.0 - smoothstep(near, reach, d)) ** 1.5
+        dn = neck_t.find_nearest(p, 0.8)[3] if neck_t is not None else None
+        seam = 1.0 if dn is None else smoothstep(0.1, 0.8, dn)
+        occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d)) ** 1.5
     at = me.attributes.get('hair occ') or me.attributes.new('hair occ', 'FLOAT', 'POINT')
     at.data.foreach_set('value', occ)
     me.update()
