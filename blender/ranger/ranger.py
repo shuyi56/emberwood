@@ -29,6 +29,8 @@ import numpy as np
 from mathutils import Vector, Euler
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
+from ear import ear_grids, ear_tones, side_x_finder  # noqa: E402  (the ears, sculpted as their own surface)
 FW, FH, RES, COLS, ROWS, WALK = 64, 80, 2, 10, 8, 8
 PW, PH = FW * RES, FH * RES
 GY = 77  # ground row in design pixels from the top of the frame
@@ -1037,6 +1039,15 @@ def skin_tones():
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
                              world_tree(['Neck', 'Head shape', 'Hair']), dist=2.0)
+        elif o.name in EAR_TONES:
+            # the ears: rosier than the face, most of all round the rim and in the lobe, and dark in the bowl,
+            # the groove inside the rim and the fold behind (see ear_tones); a faint crease along the rim's roll
+            flush, shut = EAR_TONES[o.name]
+            gloss = 0.15 * (1 - shut)
+            crease = 0.3 * shut
+            occ = np.maximum(shut, _occlusion([o.matrix_world @ Vector(c) for c in co],
+                                              [(o.matrix_world.to_3x3() @ Vector(c)).normalized() for c in nr],
+                                              world_tree(head_parts), dist=0.8))
         else:      # a hand: the wrist at the origin, the fingers down; the back of the hand faces away from her
             s = 1 if o.name.endswith('R') else -1
             z = co[:, 2]
@@ -1234,7 +1245,9 @@ def face_relief(x, z):
         t = min(1.0, max(0.0, (0.6 - z) / 0.24))
         h = (0.012 + 0.04 * t ** 1.6) * math.exp(-max(0.0, z - 0.58) ** 2 / 0.0008)
     else:
-        h = 0.05 * math.exp(-((0.36 - z) / 0.028) ** 2)    # (turning under softly, so no hard shadow under the tip)
+        # (turning under softly, so no hard shadow under the tip, but tucked in above the lip: drawn out further,
+        # the underside ran on down into the philtrum as a ridge)
+        h = 0.05 * math.exp(-((0.36 - z) / 0.022) ** 2)
     w = 0.026 + 0.01 * min(1.0, max(0.0, (0.56 - z) / 0.18)) + 0.012 * max(0.0, 1 - abs(z - 0.37) / 0.06)
     d += h * math.exp(-(x / (1.15 * w)) ** 2)      # (a rounded ridge: steep sides cast a hard shadow line from above)
     d += gauss(x, z, 0, 0.635, 0.07, 0.03, 0.012)    # the glabella between the brows, over the dip at the nose's root
@@ -1253,23 +1266,47 @@ def mouth_relief(x, z):
     nose's wing toward the corner of the mouth, and the crease under the lower lip."""
     ax = abs(x)
     d = 0.0
-    across_u = math.exp(-(x / 0.07) ** 4)                 # the upper lip runs nearly full height to its corners
+    # the line between the lips (it lifts a touch toward the corners, a relaxed half-smile: level, from above, it
+    # read as a frown), and how each lip tapers into the corner. The lips' outline is the one lip_painting colours:
+    # each lip narrows to nothing at the corner along the same curve (full height to the corners, the sculpted lips
+    # ran on past the colour as bulges of skin)
+    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
+    pinch = math.sqrt(max(0.0, 1 - (ax / 0.081) ** 2))
     bow = 0.006 * math.exp(-((ax - 0.019) / 0.011) ** 2)   # the peaks of the cupid's bow
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
-    t = (z - 0.258) / max(0.01, top - 0.258)
-    if 0.0 < t < 1.25:
-        d += 0.016 * across_u * math.sin(min(1.0, t) * math.pi * 0.9) ** 0.8 * (1.0 if t <= 1.0 else max(0.0, 1 - (t - 1) * 4))
+    top = zl + (top - zl) * pinch ** 0.8
+    t = (z - zl) / max(0.004, top - zl)
+    # (past its edge the roll falls away over a fixed distance: scaled to the lip's height it was a cliff at the
+    # thin ends, drawn as a dark outline round the lips)
+    fall = 0.0095 * max(0.4, pinch)
+    # (each lip is full right down to the line, so the two meet in a tight crease: rising from nothing at the
+    # line, the upper lip left a wide valley between them and the lips read as parted)
+    if z < top + fall:
+        if t <= 0.0:
+            prof = 0.42 * math.exp(-((zl - z) / 0.003) ** 2)
+        elif t <= 1.0:
+            prof = math.sin((0.11 + 0.85 * t) * math.pi) ** 0.8
+        else:
+            prof = math.sin(0.96 * math.pi) ** 0.8 * (0.5 + 0.5 * math.cos(math.pi * (z - top) / fall))
+        d += 0.016 * pinch ** 1.6 * prof
     d += gauss(x, z, 0, 0.266, 0.02, 0.01, 0.005)          # the tubercle
-    across_l = math.exp(-(x / 0.06) ** 4)
-    d += 0.017 * across_l * math.exp(-((z - 0.239) / 0.016) ** 2)    # lower lip (less full: it read pouty)
+    low = 0.034 * pinch ** 1.4                             # the lower lip's height (less full: it read pouty)
+    # (both thinning out fast toward the corners: a lip's worth of swelling left past the colour there read as
+    # a pale ring round the mouth)
+    zc, sg = zl - 0.56 * low, max(0.004, 0.47 * low)
+    d += 0.017 * pinch ** 2 * math.exp(-((z - zc) / (sg * 1.25 if z > zc else sg)) ** 2)
     # the line between the lips, deepest at the corners where the lips tuck in
-    # (the line lifts a touch toward the corners, a relaxed half-smile: level, from above, it read as a frown)
-    zl = 0.258 + 0.007 * (ax / 0.082) ** 2
-    d -= (0.008 + 0.003 * (ax / 0.082) ** 2) * math.exp(-((z - zl) / 0.006) ** 2) * math.exp(-(x / 0.09) ** 6)
+    # (it ends where the lips do: run on past them, it drew a dark line out beyond the lips' colour)
+    # (narrow, and dying out into the corners with the lips: wide and deepest at the corners, it opened the
+    # mouth into a dark wedge at each end)
+    d -= 0.0065 * pinch ** 0.5 * math.exp(-((z - zl) / 0.0035) ** 2) * math.exp(-(x / 0.079) ** 6)
     for sx in (-1, 1):
         # (shallow: deeper, each corner was a pit that the game's high camera saw as a dark wedge)
-        d += gauss(x, z, sx * 0.086, 0.263, 0.013, 0.012, -0.002)    # the corners, lifted
-        d += gauss(x, z, sx * 0.022, 0.33, 0.01, 0.03, 0.006)        # philtrum ridges
+        d += gauss(x, z, sx * 0.079, 0.262, 0.012, 0.011, -0.002)    # the corners, lifted
+        # philtrum ridges: low and soft, rising from the bow's peaks and fading out well under the nose (taller,
+        # with the nose's underside they ran together into one ridge from the tip down into the lip)
+        # (barely there: any firmer and they stood up as two lit posts over the bow's peaks)
+        d += gauss(x, z, sx * 0.022, 0.306, 0.013, 0.016, 0.0012)
         # the fold from the wing of the nose round to beside the corner of the mouth (a crease with a soft roll
         # of cheek just outside it)
         for k in range(6):
@@ -1277,6 +1314,7 @@ def mouth_relief(x, z):
             px, pz = sx * (0.07 + 0.032 * u), 0.355 - 0.1 * u
             d += gauss(x, z, px, pz, 0.014, 0.02, -0.0015 * (1 - 0.5 * u))
             d += gauss(x, z, px + sx * 0.022, pz, 0.018, 0.022, 0.002 * (1 - 0.5 * u))
+    d += gauss(x, z, 0, 0.308, 0.012, 0.018, -0.0008)      # the philtrum's groove between them
     d += gauss(x, z, 0, 0.385, 0.028, 0.024, 0.006)        # the ball of the nose's tip
     d += gauss(x, z, 0, 0.19, 0.05, 0.014, -0.008)         # the crease under the lower lip
     return d
@@ -1391,6 +1429,32 @@ def _section(z, c, s):
     x = w * sp(s)
     y = yw - front * sp(c) if c >= 0 else yw + back * sp(-c)
     return x, y
+
+
+EAR_TONES = {}     # each ear's (flush, shade) per point, for skin_tones (see ear_mesh)
+
+
+def ear_mesh(e, name):
+    """An ear's grid (ear_grids) as a mesh: rows round the outline joined end to end, the bowl's centre one point,
+    the rear face left open where it runs into the skull. Its colour per point goes to EAR_TONES[name]."""
+    P = e['P']
+    NT, NC = P.shape[:2]
+    bm = bmesh.new()
+    pole = bm.verts.new(tuple(P[:, 0].mean(0)))
+    vs = [[bm.verts.new(tuple(p)) for p in row[1:]] for row in P]
+    for i in range(NT):
+        a, b = vs[i], vs[(i + 1) % NT]
+        bm.faces.new((pole, a[0], b[0]))
+        for j in range(NC - 2):
+            bm.faces.new((a[j], b[j], b[j + 1], a[j + 1]))
+    # (outward: the outer face looks away from the head; the faces' winding, row to row then out along a row)
+    j = NC // 4
+    wind = np.cross(np.roll(P, -1, axis=0)[:, j] - P[:, j], P[:, j + 1] - P[:, j])[:, 0].sum()
+    if wind * e['side'] < 0:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+    flush, shade = ear_tones(e)
+    EAR_TONES[name] = tuple(np.concatenate([[t[:, 0].mean()], t[:, 1:].ravel()]) for t in (flush, shade))
+    return bm
 
 
 def sculpted_head():
@@ -3821,6 +3885,50 @@ LIP_TEX = {}
 LIP_X0, LIP_X1, LIP_Z0, LIP_Z1 = -0.12, 0.12, 0.165, 0.305     # the lip patch's extent, in head heights (real z)
 
 
+def _lip_params(xs, zr):
+    """Where on the unsculpted head each point of the lip patch comes from: (x, z) parameters for a grid of real
+    (x, z). The sculpt pushes each point of the head out along its normal, which over the muzzle leans down and
+    sideways, so the lips land a little lower and wider than the heights mouth_relief gives them (about 0.003 of
+    a head, a tenth of a lip). Painted at those heights, the colour and its dark line sat above the sculpted lips
+    and the line between them. Returns (x, z) arrays, zr down the rows and xs across."""
+    gz = np.linspace(LIP_Z0 - 0.015, LIP_Z1 + 0.015, 86)
+    gx = np.linspace(LIP_X0 - 0.015, LIP_X1 + 0.015, 131)
+    ths = np.linspace(-0.8, 0.8, 121)
+    SX, SZ = np.zeros((len(gz), len(gx))), np.zeros((len(gz), len(gx)))
+    e = 1e-3
+    for i, z0 in enumerate(gz):
+        x0s, dxs, dzs = [], [], []
+        for th in ths:
+            c, sn = math.cos(th), math.sin(th)
+            x, y = head_section(z0, c, sn)
+            xa, ya = head_section(z0, math.cos(th + e), math.sin(th + e))
+            xz, yz = head_section(z0 + e, c, sn)
+            xb, yb = head_section(z0 - e, c, sn)
+            t1, t2 = (xa - x, ya - y, 0.0), (xz - xb, yz - yb, 2 * e)
+            n = (t1[1] * t2[2], -t1[0] * t2[2], t1[0] * t2[1] - t1[1] * t2[0])
+            nl = math.sqrt(n[0] ** 2 + n[1] ** 2 + n[2] ** 2) or 1.0
+            n = (n[0] / nl, n[1] / nl, n[2] / nl)
+            if n[0] * x + n[1] * (y - 0.04) < 0:
+                n = (-n[0], -n[1], -n[2])
+            u = min(1.0, max(0.0, (z0 - 0.005) / 0.04))
+            d = face_relief(x, z0) * max(0.0, -n[1]) * u * u * (3 - 2 * u) + jaw_relief(y, z0)
+            x0s.append(x); dxs.append(n[0] * d); dzs.append(n[2] * d)
+        SX[i], SZ[i] = np.interp(gx, x0s, dxs), np.interp(gx, x0s, dzs)
+
+    def at(S, x, z):
+        fx = np.clip((x - gx[0]) / (gx[1] - gx[0]), 0, len(gx) - 1.001)
+        fz = np.clip((z - gz[0]) / (gz[1] - gz[0]), 0, len(gz) - 1.001)
+        ix, iz = fx.astype(int), fz.astype(int)
+        tx, tz = fx - ix, fz - iz
+        return ((S[iz, ix] * (1 - tx) + S[iz, ix + 1] * tx) * (1 - tz)
+                + (S[iz + 1, ix] * (1 - tx) + S[iz + 1, ix + 1] * tx) * tz)
+    X, Z = np.meshgrid(xs, zr)
+    px, pz = X, Z
+    for _ in range(4):       # (the point whose sculpted position is (X, Z))
+        px, pz = X - at(SX, px, pz), Z - at(SZ, px, pz)
+    return px, pz
+
+
 def lip_painting(W=576, H=336):
     """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
     (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
@@ -3831,10 +3939,15 @@ def lip_painting(W=576, H=336):
     the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
     across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
     a hard point."""
+    if ('px', W, H) in LIP_TEX:
+        return LIP_TEX[('px', W, H)]
     xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
     zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
-    zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
-    x, w = np.meshgrid(xs, zw)
+    # (each point of the patch is coloured by where it came from on the unsculpted head, see _lip_params, and
+    # mouth_relief is laid out in the warped heights)
+    x, zp = _lip_params(xs, zr)
+    wz = np.linspace(LIP_Z0 - 0.02, LIP_Z1 + 0.02, 400)
+    w = np.interp(zp, wz, [FACE_WARP(z) for z in wz])
     ax = np.abs(x)
 
     def sm(e0, e1, v):
@@ -3844,11 +3957,14 @@ def lip_painting(W=576, H=336):
     zl = 0.258 + 0.007 * (ax / 0.082) ** 2
     bow = 0.006 * np.exp(-((ax - 0.019) / 0.011) ** 2)
     top = 0.296 + bow - 0.012 * (ax / 0.082) ** 2
-    # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read
-    # too full and the colour ran out past the corners as dark wedges)
+    # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider, the colour ran out past
+    # the corners as dark wedges. Its edges are the sculpt's own: the upper edge where the upper lip's roll turns
+    # back into skin, the lower edge where the lower lip's fullness falls away into the crease below. Painted
+    # shorter than the sculpt, the lit roll of the upper lip showed as a band of skin inside the colour, with the
+    # pale rim drawn across the middle of the lip)
     pinch = np.sqrt(np.clip(1 - (ax / 0.081) ** 2, 0, 1))  # each lip tapers to nothing at the corner
-    top = zl + 0.75 * (top - zl) * pinch ** 0.8
-    bot = zl - 0.028 * pinch ** 1.4
+    top = zl + (top - zl) * pinch ** 0.8
+    bot = zl - 0.039 * pinch ** 1.4      # (to where the lower lip turns under: stopped short, its lit underside showed as a pale band of skin)
     upper = sm(top + 0.0022, top - 0.0022, w) * sm(zl - 0.002, zl + 0.001, w)
     lower = sm(bot - 0.007, bot + 0.005, w) * sm(zl + 0.002, zl - 0.001, w)
     # (past the corners both edges meet the line, which would leave a thin band of each running on out)
@@ -3858,36 +3974,40 @@ def lip_painting(W=576, H=336):
     tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
     tl = np.clip((zl - w) / np.maximum(zl - bot, 1e-4), 0, 1)
     MID = np.array([178, 104, 96], dtype=np.float32)        # the lip's own tone: a dusty rose on her warm skin
-    UP = np.array([162, 90, 84], dtype=np.float32)          # the upper lip, a shade deeper
+    UP = np.array([168, 92, 90], dtype=np.float32)          # the upper lip, a shade deeper (a rose, not a brown)
     HI = np.array([194, 124, 114], dtype=np.float32)        # the fullest part of the lower lip
-    DEEP = np.array([112, 58, 56], dtype=np.float32)        # into the line and the corners
-    col = MID + (UP - MID) * (upper > lower)[..., None] * sm(0.0, 0.35, tu)[..., None]
+    DEEP = np.array([134, 62, 66], dtype=np.float32)        # into the line and the corners: a deeper red
+    col = MID + (UP - MID) * (upper > lower)[..., None] * (0.7 * sm(0.0, 0.35, tu))[..., None]
     full = np.exp(-((tl - 0.5) / 0.28) ** 2) * np.exp(-(x / 0.045) ** 2) * (lower >= upper)
     col = col + (HI - col) * (0.75 * full)[..., None]
     # (the upper lip's own middle, the tubercle, catches a little light too)
-    tub = np.exp(-((tu - 0.4) / 0.25) ** 2) * np.exp(-(x / 0.02) ** 2) * (upper > lower)
-    col = col + (HI - col) * (0.35 * tub)[..., None]
+    # (the upper lip is shaded the way the lower is: one soft lit band along its fullest part, fading toward the
+    # corners. A small bright patch on the tubercle alone left the rest of the lip a flat band)
+    tub = np.exp(-((tu - 0.5) / 0.3) ** 2) * np.exp(-(x / 0.05) ** 2) * (upper > lower)
+    col = col + (HI - col) * (0.4 * tub)[..., None]
     # into the line between them and the corners
     inner = np.where(upper > lower, sm(0.35, 0.0, tu), sm(0.3, 0.0, tl))
     corner = sm(0.045, 0.078, ax)
-    col = col + (DEEP - col) * np.clip(0.4 * inner + 0.25 * corner, 0, 1)[..., None]
+    col = col + (DEEP - col) * np.clip(0.3 * inner + 0.12 * corner, 0, 1)[..., None]
     # the line itself: a dark, soft parting, deepest at the corners
     # (narrow: wider, it read as the lips parted on a dark mouth)
-    part = np.exp(-((w - zl) / 0.0019) ** 2) * sm(0.08, 0.06, ax)
-    col = col + (np.array([84, 42, 42], dtype=np.float32) - col) * np.clip(0.8 * part, 0, 1)[..., None]
+    part = np.exp(-((w - zl) / 0.0015) ** 2) * sm(0.078, 0.05, ax)
+    col = col + (np.array([98, 40, 46], dtype=np.float32) - col) * np.clip(0.8 * part, 0, 1)[..., None]
     # the fine vertical creases across the lips (fanning a little outward toward the corners)
     # (irregular: their spacing wanders and each one fades in and out, so they read as texture, not stripes)
     cr = np.sin((x + 0.18 * x * np.abs(w - zl) / 0.04) / 0.0055 * np.pi + 5.0 * _fbm2(x * 30, w * 8, 31, 3))
     cr = np.clip(cr, 0, 1) ** 4 * np.clip(0.5 + 1.5 * _fbm2(x * 18, w * 30, 37, 3), 0, 1)
     col = col * (1 - 0.045 * np.clip(cr, 0, 1) * np.maximum(sm(0.1, 0.6, tu), sm(0.1, 0.6, tl)))[..., None]
-    a = lip * (0.88 - 0.5 * corner) + 0.0 * x
+    # (nearly as solid at the corners as in the middle: thinned there, the skin showed through as a brown smudge)
+    a = lip * (0.9 - 0.18 * corner) + 0.0 * x
     a = np.maximum(a, part * 0.75)
     # the pale rim of skin just over the upper lip's edge
-    rim = np.exp(-((w - top - 0.0045) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
+    rim = np.exp(-((w - top - 0.005) / 0.0028) ** 2) * sm(0.065, 0.03, ax) * (1 - upper)
     col = col + (np.array([232, 200, 180], dtype=np.float32) - col) * rim[..., None] * (1 - lip[..., None])
-    a = np.maximum(a, 0.28 * rim)
+    a = np.maximum(a, 0.07 * rim)       # (faint: stronger, it drew a pale outline round the upper lip)
     a *= sm(LIP_X0, LIP_X0 + 0.01, x) * sm(LIP_X1, LIP_X1 - 0.01, x)
-    return np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
+    LIP_TEX[('px', W, H)] = np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
+    return LIP_TEX[('px', W, H)]
 
 
 def lip_image():
@@ -4079,6 +4199,10 @@ def build():
     sculpt_eyes(hb, eyes)
     final_tree = bvh_of(hb)
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+    # the ears, each sculpted as its own surface (blender/shared/ear.py) and set on the head's side
+    for e in ear_grids(side_x_finder(head_section, jaw_relief), HEAD_H):
+        name = 'Ear ' + ('L' if e['side'] > 0 else 'R')
+        mesh_obj(name, ear_mesh(e, name), M_SKIN, head, subdiv=0)
     eye_makeup(head, final_tree, eyes)
     lip_paint(head, final_tree)
     # (the lips are sculpted (see mouth_relief); this is only the shadowed line between them, set into it)

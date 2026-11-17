@@ -1,5 +1,12 @@
 # Emberwood: notes for sprite work
 
+## Research before you guess
+
+Research a modelling or painting technique (reference photos, tutorials, how the real thing is made) before
+changing the model whenever you are not 100% certain how to build it, or when the same feature has been rejected
+more than once. Two rejections in a row means the approach is wrong, not the numbers: stop tuning, research, and come
+back with a different construction. Write down what the reference shows before writing code.
+
 Sprites are painted in code in `src/shared/sprites.js` (figure, outfits, specs) and
 `src/shared/presets/` (female body and head, hairstyles). Check every change visually before
 committing. Render all 8 facings and a few walk frames (columns 2, 4 and 6), and zoom into the
@@ -45,3 +52,34 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   one lit band and one dark crease. Many fine dots turn into noise.
 - A piece added to the head (bun, ponytail) needs a joining shape where it meets the skull, so it
   grows out of the head instead of sitting on it.
+
+## Face checks: no renders
+
+Check a face with `python blender/facecheck/facecheck.py <figure> --before origin/main`, not with a render. It
+runs the figure's own face code without Blender (about 17 s), draws front, 3/4, profile, eyes, lips and the
+game-scale view, and measures the eyes, features, lip paint and symmetry. See `blender/facecheck/README.md`.
+Ask the render queue only for what it cannot show: hair, cloth, final lighting and the sprite palette.
+
+## Hair: build it in layers
+
+The full step-by-step guide, with the reasons, is `docs/hair-building-guide.md` (worked examples: the face creator's
+`HAIR_STYLES.ponytail`, `ponytailFull` and `ranger`). In order:
+
+1. **Cap.** The shell from the scalp outward with a depth profile, hanging straight below the skull, clear of the ears,
+   ending in the strand cut-out. Raise its front edge a little when locks make the fringe, so the locks set the outline.
+2. **Guide curves.** One per lock, rooted on the crown, lifting off the forehead in a C and turning back in at the tip.
+   All locks comb the same way; lengths follow a designed outline (arch, inverted V) with a small jitter.
+3. **Clumps of fine strands** (`hairClump`). 6 to 11 flat sub-strands per lock, together at the root, parting toward the
+   end, stopping at staggered lengths, each a slightly different tone. Never one thick tube per lock.
+4. **Sheer layer under each clump** (`hairVeil`). A soft, warm-tinted ribbon of hair colour, fading in at the root and out
+   before the strands end, sized to the gap it fills (1.3x the clump for open sets, up to 3x for a closed fringe).
+5. **Root and tip fades.** Fade strands in from the cap and out at the tips; no shadows from fine fringe strands.
+6. **Coverage.** Two staggered layers of locks so no skin shows between them. Make thin areas with fewer, finer
+   strands, never with an alpha-test density cut (it breaks strands into dashes).
+7. **Face-framing locks.** Several long clumps per side down the front edge of the side hair, built the same way.
+8. **Check.** Front, 3/4, close-up and profile every time; colour each layer flat in a debug pass to find which one
+   causes a problem.
+9. **Hair falls.** Every lock is one piece from its root (on the part line for a parting) over the head and down to its
+   end; ends are staggered and tapered, come back to the head, and every lock rides the cap of the style it is in.
+10. **Check before rendering.** Run the face creator's `hairlint.js` first. It finds buried locks, stiff flaps, ledges,
+    roots on bare skin and kinks in seconds, and names the lock.
