@@ -2774,7 +2774,68 @@ def build():
         t_ = time.time()
         creator_hair_trim()
         print(f'hair trim {time.time() - t_:.0f} s', flush=True)
+    hair_contact_shade()
     return res
+
+
+def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
+    """The shade the hair casts on the skin it lies over. The locks beside the face hang half a unit to a unit in
+    front of the cheek and the jaw; lit from the front, their shadow falls behind them, out of sight, and the face
+    stayed bright right up to the hair, a pale mask laid in front of it. (The creator's key casts the hair's shadow
+    generously onto the cheeks.) Each vertex of the head gets how near the hair is on its open side, as 'hair occ',
+    0 to 1, and the skin's close-up colour goes darker and warmer by it: deepest under a lock's edge, gone a hand's
+    breadth in. Meshes without the attribute read 0 and keep their colour."""
+    from mathutils.bvhtree import BVHTree
+    head = bpy.data.objects.get('Head shape')
+    if head is None:
+        return
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or not o.name.startswith('Hair'):
+            continue
+        b = len(vs)
+        vs += [o.matrix_world @ v.co for v in o.data.vertices]
+        ps += [[b + i for i in p.vertices] for p in o.data.polygons]
+    if not ps:
+        return
+    tree = BVHTree.FromPolygons(vs, ps)
+    M = head.matrix_world
+    N3 = M.to_3x3().inverted().transposed()
+    me = head.data
+    occ = [0.0] * len(me.vertices)
+    for v in me.vertices:
+        p = M @ v.co
+        q, _n, _i, d = tree.find_nearest(p, reach)
+        if q is None:
+            continue
+        n = (N3 @ v.normal).normalized()
+        # (only hair out on the side the skin faces: hair behind the ear, past the edge of the jaw, shades nothing)
+        facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
+        occ[v.index] = facing * (1.0 - smoothstep(near, reach, d)) ** 1.5
+    at = me.attributes.get('hair occ') or me.attributes.new('hair occ', 'FLOAT', 'POINT')
+    at.data.foreach_set('value', occ)
+    me.update()
+    m = head.data.materials[0]
+    nt = m.node_tree
+    if nt.nodes.get('hair occ') is not None:
+        return
+    bsdf = nt.nodes['close bsdf']
+    src = bsdf.inputs['Base Color'].links[0].from_socket
+    a = nt.nodes.new('ShaderNodeAttribute')
+    a.name = a.label = 'hair occ'
+    a.attribute_type = 'GEOMETRY'
+    a.attribute_name = 'hair occ'
+    k = nt.nodes.new('ShaderNodeMath')
+    k.operation = 'MULTIPLY'
+    k.use_clamp = True
+    k.inputs[1].default_value = depth
+    nt.links.new(a.outputs['Fac'], k.inputs[0])
+    mix = nt.nodes.new('ShaderNodeMix')
+    mix.data_type, mix.blend_type = 'RGBA', 'MULTIPLY'
+    mix.inputs['B'].default_value = (0.62, 0.44, 0.38, 1.0)    # (a shadow on skin: darker, and warmer)
+    nt.links.new(k.outputs[0], mix.inputs['Factor'])
+    nt.links.new(src, mix.inputs['A'])
+    nt.links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
 
 
 if __name__ == '__main__':
