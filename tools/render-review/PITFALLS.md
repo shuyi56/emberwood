@@ -141,6 +141,7 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Hair locks, f4f54d6 (2026-11-17): the strand ribbons of the new lock clumps were wound inward, so the fringe rendered black on one side and pale on the other on both figures. The build and the hair check passed, because both look at shape, not at which way a face points. It cost a render of four jobs.
 - **Spot:** A commit that builds hair (or any thin shell) from its own vertex loops: new grid, ribbon or tube code in blender/shared/locks.py or a figure's hair functions, with no recalc of normals after it. In the headless build, take each hair face's normal against the direction from the head's centre to the face: more than a few percent pointing inward on a piece means it is wound the wrong way.
 - **Fix:** Wind the faces so the normal points away from the head, or call bmesh.ops.recalc_face_normals on the piece before it is joined, and check the share of inward faces in the smoke build before asking.
+- **Also seen:** Rogue temple locks, f13d5e2 (2026-11-17): the lock check reported flap and float on every temple wisp after locks.hang_down, which makes them hang straight past the jaw at John's request. A lock meant to hang free below the jaw stands off the head by design, so those lines are not a fault: forward, and have the requester measure such locks against their hang line so the check stays quiet when right and loud when wrong. Kink, inward, glint, facing and bare lines still block.
 
 ## P022 A lit view command beside its own --clay twin
 
