@@ -94,6 +94,7 @@ def look_3d(samples):
     sc.cycles.samples = samples
     sc.cycles.use_denoising = False
     sc.cycles.max_bounces = 4
+    sc.cycles.transparent_max_bounces = 32     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
     sc.cycles.filter_width = 1.5
     sc.render.film_transparent = False
