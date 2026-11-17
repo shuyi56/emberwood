@@ -417,10 +417,33 @@ def rogue_bangs(surface):
             K = [(r, 0.82), (lerp(r, a, 0.45), 0.5), (a, 0.22), (a + 0.08, -0.08), (a + 0.1, lerp(-0.08, end, 0.4)),
                  (a + 0.08, lerp(-0.08, end, 0.75)), (a + 0.04, end)]
             path, O = guide([(side * th, el, 0.04) for th, el in K], surface, samples=40, ride=False)
+            path = hang_down(path)
+            O = out_axes(path)
             guides.append((f'wisp {side} {j}', path))
             strands += clump(path, O, lambda u: (0.1 + 0.2 * (1 - u) ** 0.8) * 0.85 * (0.55 + 0.9 * u), 6,
                                301 + j * 10 + (100 if side > 0 else 0), tip=0.14, stagger=0.22, spread=0.3, layer=0.006)
     return strands, guides
+
+
+def hang_down(path, hc=HC, z0=0.36 * 8.6, drop=0.12 * 8.6):
+    """A side lock that has left the head falls under its own weight: below the ear (z0, head-local units) it keeps
+    the distance from the head's axis it had there, so it hangs straight down past the jaw instead of following the jaw
+    in toward the chin (on a narrow, tapered face it was drawn in against the chin and neck). The face creator's
+    hangDown."""
+    ref = None
+    for p in path:
+        if p[2] <= z0:
+            ref = math.hypot(p[0] - hc[0], p[1] - hc[1])
+            break
+    if ref is None:
+        return path
+    out = []
+    for p in path:
+        rad = math.hypot(p[0] - hc[0], p[1] - hc[1])
+        b = 0.9 * sm(z0, z0 - drop, p[2])
+        k = lerp(rad, max(rad, ref), b) / rad if rad > 1e-6 else 1.0
+        out.append((hc[0] + (p[0] - hc[0]) * k, hc[1] + (p[1] - hc[1]) * k, p[2]))
+    return out
 
 
 def _wob(a, b):
