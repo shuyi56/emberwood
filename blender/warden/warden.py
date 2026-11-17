@@ -1494,6 +1494,17 @@ def hair_tip_cut(objs):
         nt.links.new(mix.outputs['Shader'], out.inputs['Surface'])
     if hasattr(m, 'blend_method'):
         m.blend_method = 'CLIP'
+    # (the Ranger-tuned close-up lightened every strand toward its end with a warm light brown and a warm sheen,
+    # which turned the Warden's near-black brown (#36251c, as the creator's) into a mid brown: here the ends lift
+    # only to the next tone of her own ramp, and the sheen is kept faint)
+    rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
+    lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
+    for n in nt.nodes:
+        if n.type == 'MIX' and getattr(n, 'blend_type', '') == 'SCREEN' and n.data_type == 'RGBA':
+            n.inputs['B'].default_value = (*(lin[3] * 0.5), 1.0)
+        if n.type == 'BSDF_PRINCIPLED' and n.name == 'hair bsdf':
+            n.inputs['Sheen Weight'].default_value = 0.12
+            n.inputs['Specular IOR Level'].default_value = 0.15
     for o in objs:
         o.data.materials[0] = m
 
@@ -1583,7 +1594,7 @@ def creator_hair(head):
                 w = W[k] * (1.05 * a ** 0.25)
                 T = (P[min(n - 1, k + 1)] - P[max(0, k - 1)]).normalized()
                 N = T.cross(w)
-                N = N.normalized() * max(0.03, st['t'][k] * H * 1.6) * a ** 0.25 if N.length > 1e-9 else Vector()
+                N = N.normalized() * max(0.03, st['t'][k] * H * 1.15) * a ** 0.25 if N.length > 1e-9 else Vector()
                 # (a lens, not a diamond: a diamond's two sharp edges each caught the light as a bright line down
                 # the strand and its flat faces read as slabs; round, its edges roll away into the strands beside it)
                 ring = [bm.verts.new(P[k] + w * math.cos(q * math.pi / 4) + N * math.sin(q * math.pi / 4))
