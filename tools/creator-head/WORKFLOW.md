@@ -29,11 +29,13 @@ A character in the 3D world is two halves, made in two places and joined in one 
 
 3. **Merge.**
 
-       BODY_TRIS=12000 node merge-head.mjs <character>-blender.glb <character>-head.glb public/models/<character>.glb
+       BODY_TRIS=12000 BODY_TRIS_PARTS='{"Greave.":48000,"Bracer.":40000}' \
+         node merge-head.mjs <character>-blender.glb <character>-head.glb public/models/<character>.glb
 
    It drops the Blender head and hair, hangs the creator's under the `Head` node and matches the face's skin to
    the Blender head (or to the `skin` material). It also smooths the mouth's shading, evens out the hair's, and
-   caps each body part at `BODY_TRIS`. A cape lining (`LINING`) is turned to face inward, and the embroidery
+   caps each body part at `BODY_TRIS` (`BODY_TRIS_PARTS` raises it for finely modelled parts, which turn lumpy at
+   the plain cap). A cape lining (`LINING`) is turned to face inward, and the embroidery
    is lifted off the cloth (`TRIM_LIFT`).
 
 4. **Roster.** Add her to `ROSTER` in `src/shared/party.js` with `model: 'models/<character>.glb'`.
@@ -43,6 +45,10 @@ A character in the 3D world is two halves, made in two places and joined in one 
        node tools/world-capture/capture.mjs --member <character> --views front,front3q,side,back3q --dist 5
 
    Look at all four views and a few walk frames (`--frames 12`), and zoom into the face (`--dist 3`).
+
+The export flattens each material to one tone, except those listed in `BAKED` in `export_glb.py`: their close-up
+shader's colour (mottle, grime, rubbed edges) is baked into vertex colours, so the Warden's aged bronze carries over.
+Add a material there when its flat tone looks cheap beside its close-up.
 
 ## What to look for
 

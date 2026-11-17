@@ -68,13 +68,17 @@ for (const m of root.listMeshes()) for (const pr of m.listPrimitives()) {
 }
 // (a body built for close-up renders, as the Warden's is, carries far more than the world needs: env BODY_TRIS caps
 // each skinned part at about that many triangles; off by default, the ranger's export is already light)
+// (env BODY_TRIS_PARTS raises the cap for parts named by prefix, as '{"Greave":48000}': a part with fine modelled
+// detail, such as lapped plates, turns lumpy at the plain cap and then looks cheap beside smooth neighbours)
 const bodyTris = +(process.env.BODY_TRIS || 0);
+const partTris = JSON.parse(process.env.BODY_TRIS_PARTS || '{}');
+const capOf = (name) => { for (const [k, v] of Object.entries(partTris)) if (name.startsWith(k)) return v; return bodyTris; };
 if (bodyTris) {
   await MeshoptSimplifier.ready;
   for (const m of root.listMeshes()) for (const pr of m.listPrimitives()) {
-    const I = pr.getIndices(), t = I ? I.getCount() / 3 : 0;
-    if (!pr.getAttribute('JOINTS_0') || t <= bodyTris) continue;
-    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio: bodyTris / t, error: +(process.env.BODY_ERR || 0.0008), lockBorder: true });
+    const I = pr.getIndices(), t = I ? I.getCount() / 3 : 0, cap = capOf(m.getName());
+    if (!pr.getAttribute('JOINTS_0') || t <= cap) continue;
+    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio: cap / t, error: +(process.env.BODY_ERR || 0.0008), lockBorder: true });
   }
 }
 

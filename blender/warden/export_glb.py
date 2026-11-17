@@ -8,6 +8,7 @@ Run with:  python blender/warden/export_glb.py [--out path/to/warden.glb]
 """
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -16,6 +17,7 @@ import warden  # noqa: E402
 import female  # noqa: E402
 
 WALK_FRAMES, IDLE_FRAME, FPS = 24, 40, 24
+BAKED = ('bronze',)   # (materials whose close-up colour is baked into the model, see bake_closeup_colours)
 
 
 def key_pose(sc, frame):
@@ -27,6 +29,51 @@ def key_pose(sc, frame):
 
 def lin(c):
     return ((c + 0.055) / 1.055) ** 2.4 if c > 0.04045 else c / 12.92
+
+
+def bake_closeup_colours(mats=('bronze',), samples=16):
+    """Bake the close-up shader's colour of these materials into a colour attribute ('baked') on each mesh that wears
+    them, with its smoothing and thickness applied first, so the world model carries the mottle, grime and rubbed
+    edges as vertex colours instead of one flat tone."""
+    sc = bpy.context.scene
+    sc.render.engine = 'CYCLES'
+    sc.cycles.device = 'CPU'
+    sc.cycles.samples = samples
+    sc.render.bake.target = 'VERTEX_COLORS'
+    sc.render.bake.use_pass_direct = False
+    sc.render.bake.use_pass_indirect = False
+    sc.render.bake.use_pass_color = True
+    # (the close-up shader is fully metallic, which has no diffuse colour to bake: feed its base colour to an
+    # emission shader and bake that instead)
+    for name in mats:
+        m = bpy.data.materials.get(name)
+        nt = m.node_tree
+        pb = nt.nodes.get('close bsdf')
+        out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output)
+        src = pb.inputs['Base Color'].links[0].from_socket
+        em = nt.nodes.new('ShaderNodeEmission')
+        nt.links.new(src, em.inputs['Color'])
+        nt.links.new(em.outputs['Emission'], out.inputs['Surface'])
+    done = []
+    for o in list(sc.objects):
+        if o.type != 'MESH' or not any(s.material and s.material.name in mats for s in o.material_slots):
+            continue
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.context.view_layer.objects.active = o
+        o.select_set(True)
+        arm = next((m for m in o.modifiers if m.type == 'ARMATURE'), None)
+        if arm:
+            arm.show_viewport = arm.show_render = False
+        for m in [m for m in o.modifiers if m.type in ('SOLIDIFY', 'SUBSURF')]:
+            bpy.ops.object.modifier_apply(modifier=m.name)
+        if arm:
+            arm.show_viewport = arm.show_render = True
+        ca = o.data.color_attributes.new('baked', 'BYTE_COLOR', 'POINT')
+        o.data.color_attributes.active_color = ca
+        t = time.time()
+        bpy.ops.object.bake(type='EMIT')
+        done.append((o.name, len(o.data.vertices), round(time.time() - t, 1)))
+    return done
 
 
 def plain_materials():
@@ -42,9 +89,13 @@ def plain_materials():
         rgb = d['ramp'][2] / 255.0
         p.inputs['Base Color'].default_value = (*[lin(c) for c in rgb], 1.0)
         name = d['name']
+        if name in BAKED:
+            vc = nt.nodes.new('ShaderNodeVertexColor')
+            vc.layer_name = 'baked'
+            nt.links.new(vc.outputs['Color'], p.inputs['Base Color'])
         metal = name in ('plate', 'steel', 'gold', 'collar', 'bronze')
         p.inputs['Metallic'].default_value = 0.8 if metal else 0.0
-        p.inputs['Roughness'].default_value = 0.45 if metal else (0.6 if name == 'skin' else 0.88)
+        p.inputs['Roughness'].default_value = 0.55 if name in BAKED else 0.45 if metal else (0.6 if name == 'skin' else 0.88)
         nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
 
 
@@ -66,12 +117,14 @@ def main():
     key_pose(sc, IDLE_FRAME)
     sc.frame_start, sc.frame_end = 1, IDLE_FRAME
     sc.render.fps = FPS
+    print('baked', bake_closeup_colours(BAKED))
     sc.frame_set(1)
     plain_materials()
     for o in sc.objects:
         if o.type == 'MESH':
             for a in list(o.data.color_attributes):
-                o.data.color_attributes.remove(a)
+                if a.name != 'baked':
+                    o.data.color_attributes.remove(a)
     # (the head's own parts are replaced in the world: thin them right down)
     for o in [o for o in sc.objects if o.type == 'MESH' and o.parent and o.parent.name == 'Head']:
         d = o.modifiers.new('lighter', 'DECIMATE'); d.ratio = 0.1
