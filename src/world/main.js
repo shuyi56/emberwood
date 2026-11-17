@@ -1460,7 +1460,9 @@ void main() {
       m.scale.setScalar(MODEL_SCALE);
       m.traverse((o) => {
         if (!o.isMesh) return;
-        o.castShadow = true;
+        // (alpha-cut hair strands cast no shadow: the depth pass ignores their alpha, so each strand would throw a
+        // solid ribbon of shade and blot the face under it)
+        o.castShadow = !(o.material && o.material.alphaTest > 0);
         o.receiveShadow = true;
         o.frustumCulled = false;      // (a skinned mesh's bounds are its rest pose)
       });
