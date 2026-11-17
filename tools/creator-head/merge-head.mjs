@@ -38,6 +38,34 @@ for (const n of old) { const m = n.getMesh(); if (m && n.getName() === 'Head sha
 // one her neck and hands wear)
 if (!skinTarget) { const sm = root.listMaterials().find((mt) => mt.getName() === 'skin'); if (sm) skinTarget = sm.getBaseColorFactor().slice(0, 3); }
 old.forEach((n) => { const m = n.getMesh(); n.dispose(); if (m) m.dispose(); });
+// The cape's lining: a sheet just inside the cape's thickness, drawn from both sides. In the world's depth buffer
+// it lay too close to the cape to tell apart, and walking (each mesh weighted on its own) pushed it through, so
+// red streaks broke through the back of the cape. So the lining is turned to face in, toward her, and drawn from
+// that side only: from outside its faces are back faces and are never drawn, however close it comes or wherever it
+// pokes through; from inside, under the cape's open front, it is the nearest surface and shows red as before.
+// (env LINING: comma-separated mesh names, default "Cape lining")
+for (const name of (process.env.LINING || 'Cape lining').split(',')) {
+  const n = root.listNodes().find((x) => x.getName() === name && x.getMesh());
+  if (!n) continue;
+  for (const pr of n.getMesh().listPrimitives()) {
+    const I = pr.getIndices(), ia = I.getArray();
+    for (let f = 0; f < ia.length; f += 3) { const t = ia[f + 1]; ia[f + 1] = ia[f + 2]; ia[f + 2] = t; }
+    I.setArray(ia);
+    const N = pr.getAttribute('NORMAL');
+    if (N) { const na = N.getArray(); for (let k = 0; k < na.length; k++) na[k] = -na[k]; N.setArray(na); }
+    if (pr.getMaterial()) pr.getMaterial().setDoubleSided(false);
+  }
+  console.log('lining faces in:', name);
+}
+// (the thin embroidered trims stood too close to the cloth for the world's depth buffer and flickered through it:
+// TRIM_LIFT lifts the 'embroidery' material off it along its normals)
+const trimLift = +(process.env.TRIM_LIFT || 0.1);
+for (const m of root.listMeshes()) for (const pr of m.listPrimitives()) {
+  const mt = pr.getMaterial(); if (!mt || mt.getName() !== 'embroidery' || !trimLift) continue;
+  const P = pr.getAttribute('POSITION'), N = pr.getAttribute('NORMAL'), p = P.getArray(), n = N.getArray();
+  for (let k = 0; k < p.length; k++) p[k] += n[k] * trimLift;
+  P.setArray(p);
+}
 // (a body built for close-up renders, as the Warden's is, carries far more than the world needs: env BODY_TRIS caps
 // each skinned part at about that many triangles; off by default, the ranger's export is already light)
 const bodyTris = +(process.env.BODY_TRIS || 0);
@@ -46,7 +74,7 @@ if (bodyTris) {
   for (const m of root.listMeshes()) for (const pr of m.listPrimitives()) {
     const I = pr.getIndices(), t = I ? I.getCount() / 3 : 0;
     if (!pr.getAttribute('JOINTS_0') || t <= bodyTris) continue;
-    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio: bodyTris / t, error: 0.002, lockBorder: true });
+    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio: bodyTris / t, error: +(process.env.BODY_ERR || 0.0008), lockBorder: true });
   }
 }
 
