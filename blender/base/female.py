@@ -1258,13 +1258,13 @@ SKIN_FRECKLES = 1.0
 SKIN_NOISE = 1.0
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
 FACE = {
-    'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'jawUnder': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
+    'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
     'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
     'noseProj': 1.0, 'noseWidth': 1.0, 'noseLen': 0.0, 'tipBall': 1.0, 'nostrils': 1.0,
     'browRidge': 1.0, 'sockets': 1.0, 'mouthWidth': 1.0, 'lipUpper': 1.0, 'lipLower': 1.0, 'smile': 1.0,
-    # (the face creator's: how the jaw runs in to the chin, + a V, - held wide to a square chin; the eyes' half-spacing,
-    # head heights)
-    'chinTaper': 0.0, 'eyeSpacing': 0.14,
+    # (the face creator's: how the jaw runs in to the chin, + a V, - held wide to a square chin; how softly the jaw
+    # falls into the neck; the eyes' half-spacing, head heights)
+    'chinTaper': 0.0, 'jawUnder': 0.0, 'eyeSpacing': 0.14,
 }
 
 
@@ -1445,9 +1445,7 @@ def jaw_relief(y, z):
         t = min(1.0, max(0.0, t))
         return t * t * (3 - 2 * t)
     js = FACE['jawSharp']                      # (narrows the turn over the lower and back edges: a crisper jawline)
-    # (jawUnder carries the jaw's fall on down the throat and back behind the ramus, so the turn into the neck is a
-    # long soft concave curve instead of a crease)
-    tail = FACE['jawUnder']
+    tail = FACE['jawUnder']                    # (lets the jaw fall softly into the neck, with no crease)
     below = ss((z - zl + 0.03 / js + tail) / (0.1 / js + tail))        # above the lower edge of the jaw
     behind = ss((0.11 + tail - y) / (0.11 / (1 + 0.3 * (js - 1)) + tail))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
