@@ -23,19 +23,21 @@ export const CAPE_SETTINGS = {
   damping: 0.3,
   airDrag: 0.04,
   gravity: 450,
-  hitRadius: 0.8,
+  hitRadius: 0.6,
   linkStiffness: 0.6,
   linkSlack: 0.12,
+  sheetBend: 0.5,
+  follow: 0.5,
   maxAngle: 1.25,
 };
 
 // [from joint, offset], [to joint, offset], radius: offsets are in the model's axes (+z is her front)
 export const WARDEN_COLLIDERS = [
   // back and shoulders: the robe's back is 4 behind the spine, the shoulder blades a little more
-  [['Pelvis', [0, 2, -0.5]], ['Chest', [0, 6, -0.5]], 5.2],
-  [['Chest', [-3.2, 7, -0.8]], ['Chest', [3.2, 7, -0.8]], 4.6],
+  [['Pelvis', [0, 2, -0.5]], ['Chest', [0, 6, -0.5]], 4.5],
+  [['Chest', [-3.2, 7, -0.8]], ['Chest', [3.2, 7, -0.8]], 4.2],
   // hips under the skirt, wide at the sides
-  [['Thigh.L', [1.2, -2, -0.5]], ['Thigh.R', [-1.2, -2, -0.5]], 5.6],
+  [['Thigh.L', [2.2, -2, -1.0]], ['Thigh.R', [-2.2, -2, -1.0]], 4.8],
   // thighs and shins, with the skirt over the thighs
   [['Thigh.L', [0, -2, 0]], ['Shin.L', [0, 1, 0]], 4.4],
   [['Thigh.R', [0, -2, 0]], ['Shin.R', [0, 1, 0]], 4.4],
@@ -63,7 +65,7 @@ export function attachCapeSprings(model, settings = CAPE_SETTINGS, colliders = W
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;
-  const springs = new SpringBones({ chains, links, colliders: makeColliders(model, colliders) });
+  const springs = new SpringBones({ chains, links, root: model, colliders: makeColliders(model, colliders) });
   springs.reset();
   return springs;
 }

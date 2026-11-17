@@ -12,7 +12,7 @@ export const FRAME = 1 / 60;
 export const CYCLE_FRAMES = 42;
 export const PACE = CYCLE / (CYCLE_FRAMES * FRAME);
 const ACCEL = 170;          // units/s^2 when setting off or stopping (to full pace in about 0.4 s)
-const TURN_RATE = 7;        // radians a second at most
+const TURN_EASE = 12;       // the game's turn: the heading closes on the goal at this rate (1/s)
 
 // what she does over time: target pace (a share of PACE) and heading
 export const SCENARIOS = {
@@ -52,7 +52,7 @@ export class CapeSim {
     const root = this.dummy.root;
     root.updateMatrixWorld(true);
     const { chains, links } = findChains(root, 'cape', this.settings, 1);
-    this.springs = new SpringBones({ chains, links, colliders: makeColliders(root, this.colliderDefs()) });
+    this.springs = new SpringBones({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()) });
     this.springs.reset();
   }
   restart() {
@@ -76,9 +76,9 @@ export class CapeSim {
     const target = SCENARIOS[this.opts.scenario].at(this.scenarioTime());
     const dv = target.pace * PACE - this.speed;
     this.speed += Math.sign(dv) * Math.min(Math.abs(dv), ACCEL * dt);
-    const dh = wrapAngle(target.heading - this.heading);
-    // ease into and out of a turn: the rate follows the angle left, up to TURN_RATE
-    this.heading += Math.sign(dh) * Math.min(Math.abs(dh), Math.min(TURN_RATE, 2 + Math.abs(dh) * 10) * dt);
+    // turn as the game turns a hero (src/world/main.js): an ease that closes the angle at 12 a second, so a
+    // reversal starts at over 30 radians a second
+    this.heading += wrapAngle(target.heading - this.heading) * Math.min(1, dt * TURN_EASE);
     // heading 0 walks toward +z (her front)
     this.x += Math.sin(this.heading) * this.speed * dt;
     this.z += Math.cos(this.heading) * this.speed * dt;

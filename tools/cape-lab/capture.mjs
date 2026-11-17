@@ -37,7 +37,7 @@ const seconds = Number(arg('seconds', 0));
 const every = Number(arg('every', 3));
 const [W, H] = arg('size', '420x520').split('x').map(Number);
 const settings = JSON.parse(arg('settings', '{}'));
-const columns = Number(arg('columns', 5)), rows = Number(arg('rows', 5));
+const columns = Number(arg('columns', 7)), rows = Number(arg('rows', 5));
 const LENGTH = { walk: 4, startstop: 6, turn: 7, run: 5, spin: 4 };
 
 fs.mkdirSync(out, { recursive: true });

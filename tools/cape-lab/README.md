@@ -16,8 +16,11 @@ settings" puts the tuned values on the clipboard as JSON, to paste into `CAPE_SE
 
 Each column of the cape is a chain `cape_<column>_0 … cape_<column>_<rows>` under `Chest`, plus an empty
 `cape_<column>_tip` at the hem that gives the last bone its length. Row 0 is the band from the collar over the
-shoulders: it rides the chest and is not simulated. The rows under it swing. The bench defaults to 5 columns and
-5 swinging rows; 7 columns and 6 rows are on the page to compare.
+shoulders: it rides the chest and is not simulated. The rows under it swing. The bench defaults to 7 columns (the
+outer two run down the front edges) and 5 swinging rows; other counts are on the page to compare.
+
+The motions turn as the game turns a hero (the heading closes on its goal at 12 a second, so a reversal starts at
+over 30 radians a second), which is the hardest case for the cape.
 
 ## Captures and numbers
 
@@ -31,9 +34,19 @@ was one walk cycle earlier; 0 means it repeats exactly), the hem's largest swing
 takes to settle after a stop, how far the hem lands at 30 and 144 fps from where it does at 60, and how close
 any bone comes to the body's capsules.
 
-What the settings do, from a sweep with `check.mjs`: damping is the main control (0.1 swings 30° and keeps
-moving 2 s after a stop; 0.3 swings 14° and settles in 0.75 s). Air drag sets how far it trails while walking.
-Stiffness hardly matters next to gravity on a cape this long; it matters more for short chains such as hair.
+What the settings do, from sweeps with `check.mjs`:
+
+- Damping is the main control for sway (0.1 keeps swinging 2 s after a stop; 0.3 settles in about 0.6 s).
+- Follow turns stops the game's snap turns from slinging the cape: at 0 the hem swings 110° in a reversal, at
+  0.5 about 45°.
+- Sheet bend keeps the hem a smooth curve instead of a jagged edge with points at each column. Above about 0.6 it
+  starts to feed energy into the cloth and goes unstable.
+- Air drag sets how far it trails while walking. Stiffness hardly matters next to gravity on a cape this long; it
+  matters more for short chains such as hair.
+
+Collisions test each bone at its middle and its tip, and the cloth between neighbouring columns at the hem and
+the middle of each panel, so an arm or a leg can't slip between bone tips. The colliders must sit clear of the
+cape at rest, or the cape puffs out where they overlap; the stand-in's cape is shaped to clear them.
 
 ## Putting it on the Warden
 

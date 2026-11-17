@@ -21,7 +21,7 @@ const PARENT = {
 
 // The cape's shape: an open ring around her back, an ellipse at each height. `t` runs from the collar (0) to
 // the hem (1); `a` is the angle round her, 0 straight behind. The real cape reaches 52.7 at the collar,
-// spreads over the shoulders to about 8.5 either side by y 47, and flares to 14.6 at the hem (y 19).
+// spreads over the shoulders and sleeves to about 10 either side by y 47, and flares to 14.6 at the hem (y 19).
 export const CAPE = {
   collarY: 53, shoulderY: 47, hemY: 19,
   span: 2.65,           // radians either side of the centre back (the front edges at about 152°)
@@ -32,10 +32,10 @@ function ringAt(y) {
   if (y >= shoulderY) {
     const u = (collarY - y) / (collarY - shoulderY);          // 0 at the collar, 1 at the shoulders
     const e = Math.sin(u * Math.PI / 2);
-    return { rx: 3.8 + (8.6 - 3.8) * e, rz: 3.6 + (5.2 - 3.6) * e, cz: -0.4 };
+    return { rx: 3.8 + (10.2 - 3.8) * e, rz: 3.6 + (6.0 - 3.6) * e, cz: -0.4 };
   }
   const u = (shoulderY - y) / (shoulderY - hemY);              // 0 at the shoulders, 1 at the hem
-  return { rx: 8.6 + (14.4 - 8.6) * Math.pow(u, 1.2), rz: 5.2 + (7.2 - 5.2) * u, cz: -0.4 - 0.5 * u };
+  return { rx: 10.2 + (14.6 - 10.2) * Math.pow(u, 1.2), rz: 6.0 + (7.6 - 6.0) * u, cz: -0.4 - 0.5 * u };
 }
 function capePoint(a, y, inset = 0, out = new THREE.Vector3()) {
   const r = ringAt(y);
@@ -64,7 +64,7 @@ function limb(a, b, r, material) {
   return m;
 }
 
-export function makeDummy({ columns = 5, rows = 5 } = {}) {
+export function makeDummy({ columns = 7, rows = 5 } = {}) {
   const root = new THREE.Group();
   root.name = 'Warden stand-in';
   const rig = new THREE.Object3D();
@@ -120,10 +120,10 @@ export function makeDummy({ columns = 5, rows = 5 } = {}) {
 
 // The cape: `columns` chains round her back, each of `rows + 1` bones: row 0 is the band from the collar to
 // the shoulders (it rides the chest), rows 1..rows swing. Named cape_<column>_<row>, parented to Chest.
-export function makeCape(bones, { columns = 5, rows = 5 } = {}) {
+export function makeCape(bones, { columns = 7, rows = 5 } = {}) {
   const { collarY, shoulderY, hemY, span } = CAPE;
   const chest = bones.Chest;
-  const colA = (c) => -span * 0.86 + (2 * span * 0.86) * (c / (columns - 1));   // outer chains just inside the edges
+  const colA = (c) => -span + 2 * span * (c / (columns - 1));   // the outer chains run down the front edges
   // the heights of each row's head: the band, then even rows down to the hem
   const rowY = [collarY + 0.4];
   for (let r = 0; r <= rows; r++) rowY.push(shoulderY - (shoulderY - hemY) * (r / rows));

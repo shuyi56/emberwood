@@ -14,8 +14,8 @@
 //    30, 60 or 144 fps. A frame longer than `MAX_STEPS` steps is clamped (a dropped frame doesn't throw the
 //    cape), and a looping walk settles into a cycle that repeats.
 //  - Links across chains. Neighbouring chains (the columns of a cape) keep the distance between their tails at
-//    each row near what it is at rest, so the columns move as one sheet: the cloth doesn't part between them
-//    or fold through itself.
+//    each row near what it is at rest, and each chain's swing is pulled toward its neighbours' (`sheetBend`),
+//    so the columns move as one sheet: the cloth doesn't part, fold through itself or go jagged at the hem.
 //
 // Units are the model's own (the game's models are 80 units tall, so a metre is about 46 units), and they
 // follow the model's scale in the world: the same settings work on the bench and on the scaled-down hero.
@@ -36,6 +36,11 @@ export const DEFAULTS = {
   hitRadius: 1.0,       // the tail's radius against colliders, in model units
   linkStiffness: 0.5,   // 0..1: how hard neighbouring chains keep their spacing each step
   linkSlack: 0.15,      // spacing may grow or shrink this share of its rest length freely
+  // 0..1: how much each chain's swing is pulled toward its neighbours' at the same row, every step. It makes
+  // the columns bend as one sheet, so the hem stays a smooth curve instead of going jagged in a hard turn
+  sheetBend: 0.35,
+  // 0..1: how much of the character's own movement in the world carries the cloth directly (see `root`)
+  follow: 0,
   // how far a bone may turn away from its rest direction (radians); keeps a cape from flipping up over the
   // shoulders in a hard turn
   maxAngle: 1.2,
@@ -45,6 +50,8 @@ const _v0 = new THREE.Vector3(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vect
 const _q0 = new THREE.Quaternion(), _qf = new THREE.Quaternion();
 const _m0 = new THREE.Matrix4();
 const _one = new THREE.Vector3(1, 1, 1), _zero = new THREE.Vector3();
+const BONE_SAMPLES = [0.5, 1];      // where along a bone it is tested against the colliders
+const _q1 = new THREE.Vector3(), _q2 = new THREE.Vector3();   // (Collider.push uses _v1.._v3)
 
 // A collider is a capsule between two points, or a sphere when they are the same. Each point is a node's origin
 // plus an offset given in the axes of `frame` (the model's root), so colliders can be placed between joints of
@@ -121,8 +128,15 @@ export class SpringChain {
 }
 
 export class SpringBones {
-  constructor({ chains = [], colliders = [], links = [] } = {}) {
+  // root: the character's root object. With `follow` set, part of its movement in the world (walking and,
+  // above all, turning) carries the cloth along directly instead of only through the springs.
+  constructor({ chains = [], colliders = [], links = [], root = null } = {}) {
     this.chains = chains;
+    this.root = root && {
+      node: root, prev: new THREE.Matrix4(), cur: new THREE.Matrix4(), step: new THREE.Matrix4(), last: new THREE.Matrix4(),
+      pp: new THREE.Vector3(), pq: new THREE.Quaternion(), ps: new THREE.Vector3(),
+      cp: new THREE.Vector3(), cq: new THREE.Quaternion(), cs: new THREE.Vector3(),
+    };
     this.colliders = colliders;
     // links: [chainA, chainB] pairs whose joints, row by row, keep their spacing
     this.links = links.map(([a, b]) => ({ a, b, rest: [] }));
@@ -155,6 +169,7 @@ export class SpringBones {
       });
     }
     for (const a of this.anchors) a.prev.copy(a.node.matrixWorld);
+    if (this.root) this.root.prev.copy(this.root.node.matrixWorld);
     for (const c of this.colliders) { c.refresh(); c.pa.copy(c.wa); c.pb.copy(c.wb); }
     this.acc = 0;
     this.ready = true;
@@ -173,12 +188,25 @@ export class SpringBones {
     this.acc += Math.min(dt, STEP * MAX_STEPS);
     const n = Math.min(MAX_STEPS, Math.floor(this.acc / STEP + 1e-9));
     this.acc -= n * STEP;
+    // no step due this frame (a fast display): the cloth holds, and the next step blends from the last pose
+    // it was solved at
+    if (n === 0) {
+      for (const ch of this.chains) ch.joints[0].bone.updateMatrixWorld(true);
+      return;
+    }
     for (const a of this.anchors) {
       a.cur.copy(a.node.matrixWorld);
       a.prev.decompose(a.pp, a.pq, a.ps);
       a.cur.decompose(a.cp, a.cq, a.cs);
     }
     for (const c of this.colliders) { c.refresh(); c.ca.copy(c.wa); c.cb.copy(c.wb); }
+    const R = this.root;
+    if (R) {
+      R.cur.copy(R.node.matrixWorld);
+      R.prev.decompose(R.pp, R.pq, R.ps);
+      R.cur.decompose(R.cp, R.cq, R.cs);
+      R.last.copy(R.prev);
+    }
     for (let i = 1; i <= n; i++) {
       // the body's pose part way from last frame to this one
       const f = i / n;
@@ -187,10 +215,26 @@ export class SpringBones {
           _v0.lerpVectors(a.pp, a.cp, f), _q0.copy(a.pq).slerp(a.cq, f), _v1.lerpVectors(a.ps, a.cs, f));
       }
       for (const c of this.colliders) { c.wa.lerpVectors(c.pa, c.ca, f); c.wb.lerpVectors(c.pb, c.cb, f); }
+      if (R) {
+        // the root's move over this step, applied in part to every tail (and its last position, so it adds
+        // no speed): the cloth is carried round a turn instead of being slung out by it
+        R.step.compose(_v0.lerpVectors(R.pp, R.cp, f), _q0.copy(R.pq).slerp(R.cq, f), _v1.lerpVectors(R.ps, R.cs, f));
+        const move = _m0.copy(R.last).invert().premultiply(R.step);
+        R.last.copy(R.step);
+        for (const ch of this.chains) {
+          const k = ch.settings.follow;
+          if (!k) continue;
+          for (const j of ch.joints) {
+            j.tail.lerp(_v2.copy(j.tail).applyMatrix4(move), k);
+            j.prevTail.lerp(_v2.copy(j.prevTail).applyMatrix4(move), k);
+          }
+        }
+      }
       this._step(STEP);
     }
     // back to this frame's pose exactly (the chains as solved hang from it)
     for (const a of this.anchors) { a.node.matrixWorld.copy(a.cur); a.prev.copy(a.cur); }
+    if (R) R.prev.copy(R.cur);
     for (const c of this.colliders) { c.pa.copy(c.ca); c.pb.copy(c.cb); }
     for (const ch of this.chains) ch.joints[0].bone.updateMatrixWorld(true);
   }
@@ -236,7 +280,9 @@ export class SpringBones {
         ja.next.addScaledVector(d, k);
         jb.next.addScaledVector(d, -k);
       }
-      // 3. limit the swing, collide, restore the length, and turn the bone to point at its tail
+      // 3. bend as a sheet: blend each chain's swing (its tail away from rest) toward its neighbours'
+      this._smooth(r);
+      // 4. limit the swing, and collide the whole bone, not only its tail
       for (const ch of this.chains) {
         const j = ch.joints[r];
         if (!j) continue;
@@ -249,15 +295,69 @@ export class SpringBones {
           dir.copy(j.restDir).applyAxisAngle(axis, s.maxAngle);
         }
         p.copy(head).addScaledVector(dir, L);
-        for (let it = 0; it < 2; it++) {
+        for (let it = 0; it < 3; it++) {
           let hit = false;
-          for (const c of this.colliders) hit = c.push(p, s.hitRadius) || hit;
+          // points along the bone: a hit part way down turns the bone about its head (by the lever)
+          for (const t of BONE_SAMPLES) {
+            const q = _q1.copy(head).lerp(p, t);
+            const before = _q2.copy(q);
+            for (const c of this.colliders) hit = c.push(q, s.hitRadius) || hit;
+            p.addScaledVector(q.sub(before), 1 / t);
+          }
           p.sub(head).setLength(L).add(head);
           if (!hit) break;
         }
-        j.tail.copy(p);
+      }
+      // 5. collide the cloth between neighbouring chains: the middle of the hem segment between two tails,
+      // and the middle of the panel the two bones span, so an arm or a leg can't pass between the columns
+      for (let it = 0; it < 2; it++) {
+        let hit = false;
+        for (const Lk of this.links) {
+          const ja = Lk.a.joints[r], jb = Lk.b.joints[r];
+          if (!ja || !jb) continue;
+          const extra = Lk.a.settings.hitRadius;
+          // (weights: how much of a push at that point the two tails take)
+          for (const [wHead, wTail] of [[0, 1], [0.5, 0.5]]) {
+            const q = _q1.copy(ja.head).add(jb.head).multiplyScalar(wHead / 2)
+              .addScaledVector(ja.next, wTail / 2).addScaledVector(jb.next, wTail / 2);
+            const before = _q2.copy(q);
+            let moved = false;
+            for (const c of this.colliders) moved = c.push(q, extra) || moved;
+            if (!moved) continue;
+            hit = true;
+            const d = q.sub(before).multiplyScalar(1 / wTail);
+            ja.next.add(d); jb.next.add(d);
+          }
+        }
+        for (const ch of this.chains) {
+          const j = ch.joints[r];
+          if (j) j.next.sub(j.head).setLength(j.worldLength).add(j.head);
+        }
+        if (!hit) break;
+      }
+      // 6. turn each bone to point at its tail
+      for (const ch of this.chains) {
+        const j = ch.joints[r];
+        if (!j) continue;
+        j.tail.copy(j.next);
         this._aim(j);
       }
+    }
+  }
+
+  _smooth(r) {
+    if (!this.links.length) return;
+    // the chains in link order (a strip: a cape's columns side by side)
+    const order = this._order || (this._order = [this.links[0].a, ...this.links.map((L) => L.b)]);
+    const js = order.map((ch) => ch.joints[r]);
+    if (js.some((j) => !j)) return;
+    const off = js.map((j) => j.next.clone().sub(j.head).addScaledVector(j.restDir, -j.worldLength));
+    for (let i = 0; i < js.length; i++) {
+      const k = order[i].settings.sheetBend;
+      if (!k) continue;
+      const nb = [off[i - 1], off[i + 1]].filter(Boolean);
+      const avg = nb.reduce((a, o) => a.add(o), new THREE.Vector3()).divideScalar(nb.length);
+      js[i].next.addScaledVector(avg.sub(off[i]), k * (nb.length === 1 ? 0.5 : 1));
     }
   }
 

@@ -17,7 +17,7 @@ const arg = (name, def) => {
   return i > 0 ? process.argv[i + 1] : def;
 };
 const settings = { ...CAPE_SETTINGS, colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
-const base = { columns: Number(arg('columns', 5)), rows: Number(arg('rows', 5)), springs: true };
+const base = { columns: Number(arg('columns', 7)), rows: Number(arg('rows', 5)), springs: true };
 const sim = (scenario) => new CapeSim({ ...settings }, { ...base, scenario });
 // the hem: each chain's last tail, in her own space
 const hem = (s) => {

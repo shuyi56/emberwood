@@ -52,7 +52,7 @@ controls.enabled = false;
 
 // ---- the character ----
 const settings = { ...CAPE_SETTINGS, colliderScale: 1, slow: 1 };
-const opts = { columns: 5, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true };
+const opts = { columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true };
 let sim, colliderGroup, boneHelper;
 function build() {
   if (sim) scene.remove(sim.dummy.root);
@@ -150,6 +150,8 @@ const SLIDERS = [
   ['gravity', 'Gravity', 0, 900, 5, 'units/s² (450 is real)'],
   ['linkStiffness', 'Sheet links', 0, 1, 0.01, 'how hard columns keep their spacing'],
   ['linkSlack', 'Link slack', 0, 0.5, 0.01, 'spacing allowed to stretch freely'],
+  ['sheetBend', 'Sheet bend', 0, 1, 0.01, 'columns swing together (smooth hem)'],
+  ['follow', 'Follow turns', 0, 1, 0.01, 'share of her own turning that carries the cloth'],
   ['maxAngle', 'Swing limit', 0.2, 2, 0.01, 'radians from the hang'],
   ['hitRadius', 'Cloth thickness', 0, 3, 0.05, 'gap kept off the body'],
   ['colliderScale', 'Collider size', 0.5, 1.5, 0.01, 'scales every body capsule'],
