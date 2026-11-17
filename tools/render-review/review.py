@@ -712,6 +712,40 @@ def review(req, thread, do_smoke=True):
             rep.block("material", f"A material-only change with needs_render runs as one figure job, not "
                       f"{len(figure_jobs)}.", "Keep one figure command; put the other looks on a swatch.", "P024")
 
+    # ---- one view first, then the turn (P025); clothes go on a mannequin (P026). John's rules, 2026-11-17
+    changed = sorted({d for path, defs in fresh.items() if path.startswith("blender/") for d in defs})
+    hairy = any(HAIR.search(d) for d in changed)
+    for v, tok in parsed:
+        if not tok or not tok[0].endswith("views.py"):
+            continue
+        known = flags_known_to(show(merged, tok[0]) or "") or set()
+        if "--turn" in tok and not str(req.get("confirmed") or "").strip():
+            if "--angles" in known:
+                rep.block("views", "A full five-angle --turn with no \"confirmed\" in the request.",
+                          "Render one angle first, the one that shows the change best (--angles front, 3/4, profile, "
+                          "back3/4 or back in place of --turn). When it is right, ask for the turn with "
+                          '"confirmed": "<what the one view showed>".', "P025")
+            else:
+                rep.warn("views", "A full --turn with no \"confirmed\". views.py at this commit has no --angles yet, "
+                         "so one view cannot be asked for; let through with the gap noted.",
+                         "Merge the commit that adds --angles and ask for one angle first.", "P025")
+        clothes = changed and not hairy and not mat_defs and "--head" not in tok and "--face" not in tok \
+            and "--mannequin" not in tok and not req.get("needs_render")
+        if clothes:
+            pieces = "--only" in tok or "--no-body" in tok
+            if "--mannequin" in known and not pieces:
+                rep.block("views", "A clothes change rendered on the real figure, which builds the face sculpt, the "
+                          "face paints, the ears and the hair to show cloth.",
+                          "Add --mannequin to the command (the body shape with a plain head). Ask for the real figure "
+                          'only with "needs_render": "<why the hair or face must be there>".', "P026")
+            elif "--mannequin" in known:
+                rep.warn("views", "Pieces alone still build the whole figure under them.",
+                         "Add --mannequin: the pieces fit the same and the face and hair are not built.", "P026")
+            else:
+                rep.warn("views", "A clothes change on the real figure. views.py at this commit has no --mannequin "
+                         "yet; let through with the gap noted.", "Merge the commit that adds --mannequin.", "P026")
+        break
+
     # ---- a face-only request never reaches the queue: the face check API answers it here
     figure, face_defs = face_only(fresh, outs, parsed)
     if figure and req.get("needs_render"):

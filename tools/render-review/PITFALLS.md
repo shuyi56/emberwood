@@ -160,3 +160,15 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Warden bronze study, c17da55, request #109 (2026-11-17): four looks of one bronze shader were asked as four views.py jobs. Each built the whole Warden (about four minutes and 7 GB), 15 minutes in all, to show armour that renders in seconds. The reviewer forwarded it. John then set the rule: a material change renders only the material, not the figure. The plum, green and blue robe colours before it cost a figure render each the same way.
 - **Spot:** The definitions changed since the branch's last render are all material code (a *_closeup or *_material function, M_* constants, mat_def, ramp, a look table such as BRONZE_LOOKS, textures), and the request runs views.py (with --turn, --only or --no-body).
 - **Fix:** Send it back and ask for a swatch script in the branch: the material on a sphere plus a cylinder or slab at the piece's size, the figure's own light and world, all looks side by side in one picture from one run, no figure build. The only way past is "needs_render" with what must be seen on the figure, and then it is one figure job, never one per look. Wording: render-queue README, "A material change renders the material, not the figure".
+
+## P025 The full turn asked before one view was looked at
+
+- **Seen:** Warden clothes and greaves, 2026-11-17: each tweak (slate blue, green, plum, slimmer greaves, grooves twice) went straight to a five-angle --turn, and several were wrong in a way one angle already showed (grooves hidden under the knee cop in #111). John set the rule: render one view first and confirm before scheduling the full turn.
+- **Spot:** A views.py command with --turn and no "confirmed" in the request.
+- **Fix:** Send it back: one angle first (--angles front, 3/4, profile, back3/4 or back), the one that shows the change best. The turn goes through only with "confirmed": "<what the one view showed>", at the one view's commit or a later one that changes nothing it showed (read the diff between the two to check). While a branch's views.py has no --angles, let the turn through and note the gap.
+
+## P026 Clothes shown by building the real figure
+
+- **Seen:** Warden clothes-only renders, 2026-11-17: every robe, cape and armour change built the whole figure (face sculpt, face paints, ears, 771 hair strands; about four minutes and 7 GB) and then hid it with --no-body. John set the rule: changes to clothes that need a model use a mannequin.
+- **Spot:** The changes since the last render are clothes or gear (not hair, not face, not material-only) and the views.py command has no --mannequin and the request no "needs_render".
+- **Fix:** Send it back to add --mannequin (the body shape with a plain head). The real figure goes through only with "needs_render" saying why (clothes against the hair, a hood on the head). With --only or --no-body, advise --mannequin as well. Material-only changes still go to a swatch (P024). While a branch's views.py has no --mannequin, let it through and note the gap.
