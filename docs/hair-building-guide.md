@@ -96,6 +96,44 @@ shaped bangs and hair cards are built, which led to real locks.
 6. Volume comes from lift: raise the inner locks' C (more lift at the root and over the brow, tip still turning in).
 7. Compare against the reference photo side by side.
 
+## Hair must fall: one piece from root to end
+
+Researched after the Warden's centre split read as a stiff shell (hair-card placement guides: cards run root to tip
+along the flow, large cards first, and no card should read as a standalone piece).
+
+1. A lock is one piece of hair from its root to its end. Root it where the hair grows (on the part line for a
+   parting), run it over the head, and carry it on down with the hanging hair. Short locks that stop on the head make
+   a shell, and their ends line up as a ledge round it.
+2. A parting is a line, not a point. Root the top locks along the line and comb them away from it at right angles.
+   Locks that all hang from the crown radiate from one point and read as a whorl.
+3. Stagger where the locks end (jaw to full length) and taper every end to a point, as a layered cut does, so no row
+   of ends lines up.
+4. Join the part of a lock that lies on the head to the part that hangs with one smooth curve. A sharp joint shows
+   as a crease round the head at ear level.
+5. Root every lock on the cap. A lock rooted in front of the hairline lies on bare skin, and its faded root shows as
+   fuzz in the opening.
+6. Ride locks on the cap of the style they are used in (scalp plus that style's depth, plus the lift). Locks placed
+   from the scalp alone get swallowed by a thicker cap, and its surface cuts through them in blocky steps.
+7. An end comes back to the head or the skin. A tip held off the cheek or the forehead is a stiff flap in profile.
+
+## Check before you render (`hairlint.js`)
+
+A render of a long style takes minutes; this check takes seconds and names the lock at fault. Run it after
+`node --check main.js` and before any render: `node hairlint.js [styles] [page]`. It builds each style in the page,
+reads every lock's path (`window.__hairLog`, filled by `hairClump`) and calls `__hairCheck(style)`, which measures
+the locks against the head and the style's cap over the skull. It exits 1 when it finds any of these:
+
+- **buried**: a lock dips back inside the cap after coming out of it (the blocky steps across the bangs).
+- **flap**: a lock's end stands off the head or the skin (the visor over the forehead, the point off the cheek).
+- **ledge**: five or more locks end in a row on the side or back of the head (the shell with a rim).
+- **bareroot**: a lock is rooted in front of the hairline, on bare skin (the fuzz in the opening).
+- **kink**: a lock bends sharply at one point (a bad joint in its path).
+
+Tested on the builds that had the faults: it flags the ledge, the roots on bare skin and the stiff flap. The buried
+check did not flag the old build with the stepped bangs, so treat a clean result there as unproven. It only sees locks
+drawn with `hairClump` (the plain ponytail's fringe is not), and only judges them over the skull, so it does not
+replace the renders in Layer 8. A new fault found in a render should become a new check here.
+
 ## Wavy hair
 
 Researched for the Warden's long waves (`HAIR_STYLES.wavy.extras`), from how wavy hair is painted (the ribbon

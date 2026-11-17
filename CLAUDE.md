@@ -79,3 +79,7 @@ The full step-by-step guide, with the reasons, is `docs/hair-building-guide.md` 
 7. **Face-framing locks.** Several long clumps per side down the front edge of the side hair, built the same way.
 8. **Check.** Front, 3/4, close-up and profile every time; colour each layer flat in a debug pass to find which one
    causes a problem.
+9. **Hair falls.** Every lock is one piece from its root (on the part line for a parting) over the head and down to its
+   end; ends are staggered and tapered, come back to the head, and every lock rides the cap of the style it is in.
+10. **Check before rendering.** Run the face creator's `hairlint.js` first. It finds buried locks, stiff flaps, ledges,
+    roots on bare skin and kinks in seconds, and names the lock.
