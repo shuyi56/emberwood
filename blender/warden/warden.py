@@ -1434,10 +1434,13 @@ HAIR_RUNS = None     # (the strands' runs of points in HAIR_PTS: (first, count))
 
 
 HAIR_TIPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hair_tips.png')
-TIP_GAIN = 1.4
+HAIR_TEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hair_tex.png')     # (the creator's strand colours)
+HAIR_BUMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hair_bump.png')   # (and its strand bump)
+TIP_GAIN = 1.4      # (the creator's tipGain, between 1 up close and 2.5 far off: the head views sit between)
 # (the 3D views' lights and tone mapping lift a dark colour about five times as much as the creator's dim viewport
-# does: her strands are taken down to this much of her ramp so she reads as dark as the creator's Warden)
-HAIR_ONSCREEN = 0.45      # (the creator's tipGain, between 1 up close and 2.5 far off: the head views sit between)
+# does: her hair is taken down to this much of its colour so she reads as dark as the creator's Warden; with the
+# creator's own HAIR_SHADE, 0.8, on top)
+HAIR_ONSCREEN = 0.45
 
 
 def hair_tip_cut(objs):
@@ -1498,17 +1501,42 @@ def hair_tip_cut(objs):
         nt.links.new(mix.outputs['Shader'], out.inputs['Surface'])
     if hasattr(m, 'blend_method'):
         m.blend_method = 'CLIP'
-    # (the Ranger-tuned close-up lightened every strand toward its end with a warm light brown and a warm sheen,
-    # which turned the Warden's near-black brown (#36251c, as the creator's) into a mid brown: here the ends lift
-    # only to the next tone of her own ramp, and the sheen is kept faint)
-    rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
-    lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
-    for n in nt.nodes:
-        if n.type == 'MIX' and getattr(n, 'blend_type', '') == 'SCREEN' and n.data_type == 'RGBA':
-            n.inputs['B'].default_value = (*(lin[3] * 0.5), 1.0)
-        if n.type == 'BSDF_PRINCIPLED' and n.name == 'hair bsdf':
-            n.inputs['Sheen Weight'].default_value = 0.12
-            n.inputs['Specular IOR Level'].default_value = 0.15
+    # the surface itself, as the creator's: its painted strand texture (fine strands in clumps of their own tone,
+    # dark partings between them, a few strands catching the light) times each strand's shade, matte (roughness 1,
+    # no sheen: the warm anisotropic sheen of the Ranger-tuned close-up lit every strand's edge into a line and read
+    # as slabs), with the creator's strand bump
+    hb = nt.nodes['hair bsdf']
+    uvh = nt.nodes.new('ShaderNodeUVMap')
+    uvh.uv_map = 'hair'
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = bpy.data.images.load(HAIR_TEX, check_existing=True)
+    tex.extension = 'REPEAT'
+    nt.links.new(uvh.outputs['UV'], tex.inputs['Vector'])
+    shade = nt.nodes.new('ShaderNodeVertexColor')
+    shade.layer_name = 'strands'
+    mul = nt.nodes.new('ShaderNodeVectorMath')
+    mul.operation = 'MULTIPLY'
+    nt.links.new(tex.outputs['Color'], mul.inputs[0])
+    nt.links.new(shade.outputs['Color'], mul.inputs[1])
+    k = nt.nodes.new('ShaderNodeVectorMath')
+    k.operation = 'SCALE'
+    k.inputs['Scale'].default_value = 0.8 * HAIR_ONSCREEN
+    nt.links.new(mul.outputs['Vector'], k.inputs[0])
+    nt.links.new(k.outputs['Vector'], hb.inputs['Base Color'])
+    hb.inputs['Roughness'].default_value = 1.0
+    hb.inputs['Specular IOR Level'].default_value = 0.1
+    hb.inputs['Anisotropic'].default_value = 0.0
+    hb.inputs['Sheen Weight'].default_value = 0.0
+    bimg = nt.nodes.new('ShaderNodeTexImage')
+    bimg.image = bpy.data.images.load(HAIR_BUMP, check_existing=True)
+    bimg.image.colorspace_settings.name = 'Non-Color'
+    bimg.extension = 'REPEAT'
+    nt.links.new(uvh.outputs['UV'], bimg.inputs['Vector'])
+    bmp = nt.nodes.new('ShaderNodeBump')
+    bmp.inputs['Strength'].default_value = 0.35
+    bmp.inputs['Distance'].default_value = 0.05
+    nt.links.new(bimg.outputs['Color'], bmp.inputs['Height'])
+    nt.links.new(bmp.outputs['Normal'], hb.inputs['Normal'])
     for o in objs:
         o.data.materials[0] = m
 
@@ -1554,7 +1582,9 @@ def creator_hair(head):
     crown[lay] = 0
     # (the cap wears the hair-tip map too: round the head across it, its cut-out along it)
     uvl = bm.loops.layers.uv.new('tips')
+    uvh = bm.loops.layers.uv.new('hair')      # (and its strand texture: round the head across, down the hair along)
     cu = C.get('u', [0.0] * (nc * nr))
+    cv = C.get('v', [1.0] * (nc * nr))
     for f in bm.faces:
         ks = [v[lay] for v in f.verts]
         us = [cu[k] if v is not crown else None for k, v in zip(ks, f.verts)]
@@ -1563,16 +1593,13 @@ def creator_hair(head):
         for lp, k, u in zip(f.loops, ks, us):
             if u is None:
                 u = sum(real) / len(real)
-            lp[uvl].uv = (u + (1.0 if wrap and u < 0.5 else 0.0), 1.0 if lp.vert is crown else al[k])
+            u = u + (1.0 if wrap and u < 0.5 else 0.0)
+            lp[uvl].uv = (u, 1.0 if lp.vert is crown else al[k])
+            lp[uvh].uv = (u, 1.0 if lp.vert is crown else cv[k])
     cap = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, solid=0.12, rest=hair_flow)
     cap.modifiers['thickness'].offset = -1.0     # (thickened inward, toward the scalp)
-    strand_colours(cap)
-    sa = cap.data.color_attributes['strands']
-    cc = np.zeros(len(sa.data) * 4)
-    sa.data.foreach_get('color', cc)
-    cc = cc.reshape(-1, 4)
-    cc[:, :3] *= HAIR_ONSCREEN
-    sa.data.foreach_set('color', cc.ravel())
+    sa = cap.data.color_attributes.new('strands', 'FLOAT_COLOR', 'POINT')
+    sa.data.foreach_set('color', [1.0] * (len(sa.data) * 4))      # (the cap: its strand texture as it is)
     # ---- the locks, strand by strand, one object per layer of the creator's: 'Hair locks' the top layer (and the
     # pieces that have no layer, as the parting's), 'Hair locks under' the darker, broader layer in its gaps
     rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
@@ -1583,6 +1610,7 @@ def creator_hair(head):
         bm = bmesh.new()
         lay = bm.verts.layers.int.new('pt')
         uvl = bm.loops.layers.uv.new('tips')
+        uvh = bm.loops.layers.uv.new('hair')
         shade = []
         for st in d['strands']:
             if st.get('layer', 0) != layer:
@@ -1596,7 +1624,7 @@ def creator_hair(head):
             k0, k1 = keep[0], keep[-1]
             u0, u1 = st.get('u', (0.0, 0.03))
             base = len(pts)
-            rings, along = [], []
+            rings, along, down = [], [], []
             for k in range(k0, k1 + 1):
                 # (the creator's own width: its tips are cut by the hair-tip map, as in the creator, so the strand
                 # only narrows a little toward its faded ends instead of tapering to a point)
@@ -1611,10 +1639,11 @@ def creator_hair(head):
                         for q in range(RING)]
                 for v in ring:
                     v[lay] = len(pts)
-                shade += [st['c'][k] - 0.12 * abs(math.cos(q * math.pi / 4)) ** 4 for q in range(RING)]
+                shade += [st['c'][k] * (1.0 - 0.1 * abs(math.cos(q * math.pi / 4)) ** 4) for q in range(RING)]
                 pts.append(P[k].copy())
                 rings.append(ring)
                 along.append(a)
+                down.append(st['v'][k] if 'v' in st else 1.0 - k / n)
             runs.append((base, len(pts) - base))
             for r in range(len(rings) - 1):
                 r0, r1 = rings[r], rings[r + 1]
@@ -1624,9 +1653,11 @@ def creator_hair(head):
                     # last; along it the cut-out, 0 at the faded root and tip, 1 where the strand is whole)
                     for lp, (qq, rr) in zip(f.loops, ((q, r), (q + 1, r), (q + 1, r + 1), (q, r + 1))):
                         lp[uvl].uv = (u0 + (u1 - u0) * qq / RING, along[rr])
+                        lp[uvh].uv = (u0 + (u1 - u0) * qq / RING, down[rr])
             for f in (bm.faces.new(rings[0][::-1]), bm.faces.new(rings[-1])):
                 for lp in f.loops:
                     lp[uvl].uv = (u0, 0.0)
+                    lp[uvh].uv = (u0, down[0])
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
         o = mesh_obj(name, bm, M_HAIR, head, subdiv=0, rest=hair_flow)
         # (each strand's own shade from the creator: lighter over a wave's crest, darker in its trough, the under
@@ -1634,9 +1665,8 @@ def creator_hair(head):
         attr = o.data.color_attributes.new('strands', 'FLOAT_COLOR', 'POINT')
         cols = []
         for c in shade:
-            t = min(1.0, max(-1.0, (c - 0.95) / 0.3))
-            col = (lin[2] + (lin[3] - lin[2]) * t if t > 0 else lin[2] + (lin[2] - lin[1]) * t) * HAIR_ONSCREEN
-            cols += [*col, 1.0]
+            # (the creator's own shade on its strand texture: lighter over a wave's crest, darker in its trough)
+            cols += [c, c, c, 1.0]
         attr.data.foreach_set('color', cols)
         locks.append(o)
     hair_tip_cut([cap] + locks)
@@ -1778,7 +1808,7 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
         P[i] += D[i]
 
 
-def creator_hair_trim(cols=range(10), cut=55.0, top=57.5, rounds=6):
+def creator_hair_trim(cols=range(10), cut=None, top=57.5, rounds=10):
     """What the clearance by points leaves. Below the collar the cap only hangs behind the locks, a curtain nobody
     sees, but its faces are coarser than the collar's rim and the cape's edge, so one whose corners all lie clear can
     still cut through a thin edge between them, and its underside faces open air in the gap at the neck. So the cap is
@@ -1802,11 +1832,14 @@ def creator_hair_trim(cols=range(10), cut=55.0, top=57.5, rounds=6):
         bm.free()
         return len(kill)
 
-    drop(lambda f: max((M @ v.co).z for v in f.verts) < cut)
+    # (cut=None, the default: the cap runs its full length behind the locks, as the creator's does; cut away below
+    # the collar it ended in a line of tips across the shoulders. Only faces that cross the clothes come out.)
+    if cut is not None:
+        drop(lambda f: max((M @ v.co).z for v in f.verts) < cut)
     # (and where it is cut it ends as the creator's hair ends, in strands: its cut-out along the map runs down to
     # nothing over the last stretch above the cut, so the tip map thins it into points instead of a hem)
     uv = cap.data.uv_layers.get('tips')
-    if uv is not None:
+    if uv is not None and cut is not None:
         for lp in cap.data.loops:
             z = (M @ cap.data.vertices[lp.vertex_index].co).z
             d = uv.data[lp.index]
