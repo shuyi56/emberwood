@@ -2857,8 +2857,11 @@ SHADOW_TEX = {}
 # and the lighter wash under the lower lashes (sRGB 0-255); shadowAmt its opacity; liner a dark line along the upper
 # lashes and wing its flick out past the outer corner (0 none .. 1 full); lip the lips' own tone (None: the
 # ranger's dusty rose), from which the upper lip, the highlight and the line between them are shaded.
-MAKEUP = {'shadow': (70, 60, 56), 'shadowDark': (34, 29, 28), 'shadowLow': (92, 80, 74), 'shadowAmt': 0.78,
-          'liner': 0.0, 'wing': 0.0, 'lip': None}
+# shadowInner is how far the wash runs in past the inner corner toward the nose (1 the ranger's, 0 none: it starts
+# on the lid itself). browArch, browThick and browHeight shape the brow (multipliers on its arch and thickness, and
+# an offset on its height in brow units).
+MAKEUP = {'shadow': (70, 60, 56), 'shadowDark': (34, 29, 28), 'shadowLow': (92, 80, 74), 'shadowAmt': 0.78, 'shadowInner': 1.0,
+          'liner': 0.0, 'wing': 0.0, 'lip': None, 'browArch': 1.0, 'browThick': 1.0, 'browHeight': 0.0}
 SH_U0, SH_U1, SH_V0, SH_V1 = -1.75, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
 
 
@@ -2882,7 +2885,8 @@ def eyeshadow_image():
     above = dd - T
     below = -B - dd
     tall = 0.46 + 0.16 * sm(-0.2, 0.9, uu)                    # how far up the wash reaches: taller toward the outer corner
-    across = sm(-1.3, -0.7, uu) * (0.85 + 0.15 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu) * sm(-1.55, -1.3, uu)
+    inn = MAKEUP['shadowInner']
+    across = (sm(-0.92, -0.35, uu) * (1 - inn) + sm(-1.3, -0.7, uu) * sm(-1.55, -1.3, uu) * inn) * (0.85 + 0.15 * sm(-0.2, 0.8, uu)) * sm(1.5, 1.0, uu)
     lid = sm(-0.012, 0.012, above) * (1 - sm(0.3 * tall, tall, above))
     # the deeper colour: smoked along the lash line and into the outer V (a wedge opening up and out from the corner)
     deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
@@ -2897,7 +2901,7 @@ def eyeshadow_image():
     col = col + (np.array(MAKEUP['shadowLow'], dtype=np.float32) - col) * low[..., None]
     a = np.maximum(a, 0.5 * low * (0.7 + 0.3 * sm(0.0, 0.9, uu)))
     # the hollow beside the nose, where the lid meets the bridge: the inner corner's own soft shade
-    hollow = np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
+    hollow = inn * np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
     col = col + (base - col) * np.clip(hollow, 0, 1)[..., None] * (1 - low[..., None]) * 0.6
     a = np.maximum(a, 0.2 * hollow)
     # the far ends, past each corner, thin out rather than pooling into dark patches
@@ -3067,9 +3071,9 @@ def brow_line(ub):
     """
     u = min(max(ub, BROW_US[0]), BROW_US[-1])
     t = (u - BROW_US[0]) / (BROW_US[-1] - BROW_US[0])
-    zc = 1.0 + 0.24 * math.sin(math.pi * t ** 1.6) - 0.08 * t
+    zc = 1.0 + 0.24 * MAKEUP['browArch'] * math.sin(math.pi * t ** 1.6) - 0.08 * t + MAKEUP['browHeight']
     rise = math.sin(0.5 * math.pi * min(1.0, t / 0.28))
-    r = 0.016 + 0.17 * (1 - t) ** 0.65 * (0.62 + 0.38 * rise)
+    r = (0.016 + 0.17 * (1 - t) ** 0.65 * (0.62 + 0.38 * rise)) * MAKEUP['browThick']
     return zc, r
 
 

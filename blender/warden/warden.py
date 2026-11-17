@@ -42,15 +42,17 @@ female.FACE.update({
 })
 female.EYE_OPEN = 0.66
 female.EYE_TILT = 0.07
-# her make-up, as the creator's preset: a light plum wash of shadow (a heavier one read as too much), lined and
-# winged at the outer corners, and wine lips
+# her make-up, as the creator's preset: a light plum wash of shadow kept to the lids (a heavier one read as too
+# much, and none runs in toward the nose), lined and winged at the outer corners, and wine lips; her brows dark,
+# full and set low, rising to a sharp high arch
 female.MAKEUP.update({'shadow': (106, 74, 112), 'shadowDark': (52, 36, 58), 'shadowLow': (150, 118, 132), 'shadowAmt': 0.42,
-                      'liner': 0.7, 'wing': 0.7, 'lip': (124, 50, 64)})
+                      'shadowInner': 0.0, 'liner': 0.7, 'wing': 0.7, 'lip': (124, 50, 64),
+                      'browArch': 1.5, 'browThick': 1.3, 'browHeight': -0.04})
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
 M_HAIR = mat_def(2, 'hair', ramp(0x36251c, 0.1), 0.24, surface='hair')
-M_BROW = mat_def(17, 'brow', ramp(0x2f221c, 0.08), 0.0, flat=1)
+M_BROW = mat_def(17, 'brow', ramp(0x2e211c, 0.08), 0.0, flat=1)
 # a violet iris, deep at the rim and paler toward the pupil
 M_EYE = mat_def(16, 'iris', [[30, 20, 48], [58, 40, 96], [92, 66, 146], [132, 102, 188], [176, 150, 214]], 0.0, flat='painted')
 M_TABARD = mat_def(30, 'tabard', ramp(0xd6cbb0, 0.09), 0.05, closeup='canvas', form=True)
