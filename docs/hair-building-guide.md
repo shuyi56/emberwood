@@ -115,6 +115,8 @@ along the flow, large cards first, and no card should read as a standalone piece
 6. Ride locks on the cap of the style they are used in (scalp plus that style's depth, plus the lift). Locks placed
    from the scalp alone get swallowed by a thicker cap, and its surface cuts through them in blocky steps.
 7. An end comes back to the head or the skin. A tip held off the cheek or the forehead is a stiff flap in profile.
+8. Lift belongs at the root. A blow-dried lock rises off the head over its first half; below the brow it falls back
+   to the skin. A lock that keeps its lift all the way down is a stiff visor in profile.
 
 ## Check before you render (`hairlint.js`)
 
@@ -125,11 +127,13 @@ the locks against the head and the style's cap over the skull. It exits 1 when i
 
 - **buried**: a lock dips back inside the cap after coming out of it (the blocky steps across the bangs).
 - **flap**: a lock's end stands off the head or the skin (the visor over the forehead, the point off the cheek).
+- **float**: a lock's last third is held off the head with nothing under it (bangs standing off the face as a visor).
 - **ledge**: five or more locks end in a row on the side or back of the head (the shell with a rim).
 - **bareroot**: a lock is rooted in front of the hairline, on bare skin (the fuzz in the opening).
 - **kink**: a lock bends sharply at one point (a bad joint in its path).
 
-Tested on the builds that had the faults: it flags the ledge, the roots on bare skin and the stiff flap. The buried
+Tested on the builds that had the faults: it flags the ledge, the roots on bare skin, the stiff flap and the
+floating bangs. The buried
 check did not flag the old build with the stepped bangs, so treat a clean result there as unproven. It only sees locks
 drawn with `hairClump` (the plain ponytail's fringe is not), and only judges them over the skull, so it does not
 replace the renders in Layer 8. A new fault found in a render should become a new check here.
