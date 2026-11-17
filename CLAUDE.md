@@ -53,4 +53,5 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   creator, never in Blender.
 - Keep the clothes that frame the hair (cape, robe, hood, collar) clearly apart from the hair's colour
   in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
-  into her cape from the side and back. Check the cape against the hair in the side and back views.
+  into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
+  clashed, so her robe and cape are forest green. Check the cape against the hair in the side and back views.

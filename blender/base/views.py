@@ -201,6 +201,11 @@ def isolate(only=None):
     for o in meshes:
         m = o.active_material
         base = m is not None and ids.get(m.name.split('.')[0], FIGURE_MATS) < FIGURE_MATS
+        # (and all the head carries: the face's paints and the hair have materials of their own, not the figure's)
+        q = o
+        while q.parent is not None and q.parent.name != 'Head':
+            q = q.parent
+        base = base or q.parent is not None
         off = (only and not o.name.startswith(only)) or (hide and o.name.startswith(hide)) or \
             ('--no-body' in argv and base)
         o.hide_render = bool(off) or o.hide_render
@@ -259,6 +264,9 @@ def main():
         sc.frame_set(int(opt('--frame', 0)) + 1)
         size = int(opt('--size', 360))
         cam = look_3d(int(opt('--samples', 32)))
+        if isolating:
+            # (again: the close-up look shows the face's paints, which the sprite look hides, over what was hidden)
+            shown = isolate()
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
             for look in ('', '-clay') if '--clay' in argv else ('',):
