@@ -2462,7 +2462,7 @@ def build():
             z = lerp(BR_TOP, BR_BOT, i / (rows - 1))
             ph = lerp(P0, P1, j / (cols - 1))
             return vam_pt(z, ph)
-        mesh_obj(f'Bracer.{side}', face_out(grid(rows, cols, vam_grid), axis_y=0.0), M_BRACER, loc=(x, 0.2, SH_Z),
+        mesh_obj(f'Bracer.{side}', face_out(grid(rows, cols, vam_grid), axis_y=0.0), M_BRONZE, loc=(x, 0.2, SH_Z),
                       skin=fore, solid=0.12)
         # (the rolled border all round its edge: a rounded rectangle in (phi, z), the corners eased)
         cr, cz = 0.14, 0.25
@@ -2549,7 +2549,7 @@ def build():
                 bulge = 0.66 + lift - 0.38 * u * u
                 return (s * 0.23 - s * bulge, -0.03 + hw * u, z)
             return face_out(grid(rows, cols, pt), axis_y=0.0)
-        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.8, 1.15, 0.85, 0.22), M_BRACER,
+        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.8, 1.15, 0.85, 0.22), M_BRONZE,
                  loc=(x, 0.2, SH_Z), skin=w, solid=0.1, subdiv=1)
     build_arms(chest, sleeve)   # (the hands are the base figure's)
 
@@ -2619,7 +2619,8 @@ def build():
             ridge = 0.14 * math.exp(-(wrap(phi) / 0.3) ** 2)
             # (shaped to the leg: swelling over the calf behind, drawn in toward its foot)
             calf = 0.16 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
-            ex = 0.12 + flare + out + calf - 0.06 * smoothstep(-3.5, GB, z)
+            ex = 0.12 + flare + out + calf - 0.02 * smoothstep(-3.5, GB, z)   # (not drawn in far: the boot's slack
+            # wrinkles above the ankle came through the greave's foot)
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
         gz = [GT - (GT - GB) * i / 48 for i in range(49)]
         mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_BRONZE, loc=(x, 0, kz),
