@@ -275,6 +275,7 @@ if (!CAPTURE) {
     view(v) { opts.view = v; },
     advance(frames) { for (let i = 0; i < frames; i++) sim.step(); },
     render() { render(); },
+    sim: () => sim,
     state: () => ({ t: sim.t, frame: sim.frame, speed: sim.speed / PACE, heading: sim.heading, drift: sim.drift }),
   };
   render();

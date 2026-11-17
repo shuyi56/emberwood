@@ -62,7 +62,7 @@ export class CapeSim {
     const root = this.dummy.root;
     root.updateMatrixWorld(true);
     const { chains, links } = findChains(root, 'cape', this.settings, 1);
-    this.springs = new SpringBones({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()) });
+    this.springs = new SpringBones({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()), fit: true });
     this.springs.reset();
   }
   restart() {

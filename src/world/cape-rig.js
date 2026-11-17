@@ -74,7 +74,7 @@ export function attachCapeSprings(model, settings = CAPE_SETTINGS, colliders = W
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;
-  const springs = new SpringBones({ chains, links, root: model, colliders: makeColliders(model, colliders) });
+  const springs = new SpringBones({ chains, links, root: model, colliders: makeColliders(model, colliders), fit: true });
   springs.reset();
   return springs;
 }

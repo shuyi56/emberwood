@@ -142,8 +142,10 @@ export class SpringChain {
 export class SpringBones {
   // root: the character's root object. With `follow` set, part of its movement in the world (walking and,
   // above all, turning) carries the cloth along directly instead of only through the springs.
-  constructor({ chains = [], colliders = [], links = [], root = null } = {}) {
+  // fit: shrink any collider the cape's rest shape already sits inside (see fitColliders)
+  constructor({ chains = [], colliders = [], links = [], root = null, fit = false } = {}) {
     this.chains = chains;
+    this.fit = fit;
     this.root = root && {
       node: root, prev: new THREE.Matrix4(), cur: new THREE.Matrix4(), step: new THREE.Matrix4(), last: new THREE.Matrix4(),
       pp: new THREE.Vector3(), pq: new THREE.Quaternion(), ps: new THREE.Vector3(),
@@ -183,6 +185,7 @@ export class SpringBones {
     for (const a of this.anchors) a.prev.copy(a.node.matrixWorld);
     if (this.root) this.root.prev.copy(this.root.node.matrixWorld);
     for (const c of this.colliders) { c.refresh(); c.pa.copy(c.wa); c.pb.copy(c.wb); }
+    if (this.fit && !this.fitCuts) this.fitCuts = this.fitColliders();
     // let the cloth settle against the body as it stands, without gaining speed, so it doesn't jump on the
     // first frames
     for (let k = 0; k < SETTLE_STEPS; k++) {
@@ -191,6 +194,39 @@ export class SpringBones {
     }
     this.acc = 0;
     this.ready = true;
+  }
+
+  // Shrink each collider until the cape, as it hangs at rest, is clear of its contact band. The cape as modelled
+  // is the statement of where the cloth sits on this body; a capsule sized for another body (or a generous one)
+  // that reaches into it would push the whole cape out into a stiff bell the moment the springs start. Run at
+  // rest pose, on the same points the solver tests (along each bone, the hem between columns, the panels).
+  // Returns how much each radius came down (model units).
+  fitColliders(minShare = 0.35) {
+    const pts = [];
+    for (const ch of this.chains) for (const j of ch.joints) {
+      for (const t of BONE_SAMPLES) pts.push([j.head.clone().lerp(j.tail, t), ch.settings]);
+    }
+    for (const L of this.links) {
+      L.a.joints.forEach((ja, i) => {
+        const jb = L.b.joints[i];
+        if (!jb) return;
+        pts.push([ja.tail.clone().add(jb.tail).multiplyScalar(0.5), L.a.settings]);
+        pts.push([ja.head.clone().add(jb.head).add(ja.tail).add(jb.tail).multiplyScalar(0.25), L.a.settings]);
+      });
+    }
+    return this.colliders.map((c) => {
+      const ab = _v1.subVectors(c.wb, c.wa), len2 = ab.lengthSq();
+      let over = 0;
+      for (const [p, s] of pts) {
+        const t = len2 > 1e-9 ? Math.min(1, Math.max(0, _v2.subVectors(p, c.wa).dot(ab) / len2)) : 0;
+        const dist = p.distanceTo(_v2.copy(c.wa).addScaledVector(ab, t)) / c.scale;
+        // (resting in the soft band is fine: only a point held inside the surface the cloth is pushed out to)
+        over = Math.max(over, c.radius + s.hitRadius - dist);
+      }
+      const cut = Math.min(over, c.radius * (1 - minShare));
+      c.radius -= cut;
+      return cut;
+    });
   }
 
   // the tail where the joint points at rest relative to its parent's current pose (world)
