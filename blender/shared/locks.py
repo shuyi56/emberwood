@@ -13,6 +13,18 @@ Units are the figure's head-local units (a head is 8.6 high, the chin at the ori
 import math
 
 HC = (0.0, 0.5, 4.8)     # the skull's centre
+# the base head's hairline, as an elevation from HC by |angle| from the front (the Rogue's HAIRLINE knots), for
+# check_cover
+HAIRLINE_KNOTS = [(0.0, 0.47), (0.2, 0.5), (0.48, 0.57), (0.72, 0.36), (1.0, 0.08), (1.2, -0.2), (1.32, -0.38),
+                  (1.42, -0.12), (1.55, 0.18), (1.75, 0.27), (1.97, 0.2), (2.12, -0.2), (2.32, -0.66), (2.6, -0.82),
+                  (3.1416, -0.8)]
+
+
+def hairline(a, knots=HAIRLINE_KNOTS):
+    for (x0, y0), (x1, y1) in zip(knots, knots[1:]):
+        if a <= x1:
+            return lerp(y0, y1, sm(0.0, 1.0, (a - x0) / (x1 - x0)))
+    return knots[-1][1]
 
 
 def sm(e0, e1, x):
@@ -263,6 +275,18 @@ def ranger_bangs(surface, s, frame=True):
     path, O = guide(K, surface, 0.06, ride=(0.12, 0.12))
     guides.append((f'cover {s}', path))
     strands += clump(path, O, lambda u: 0.75 * (0.55 + 0.45 * sm(0, 0.3, u)), 11, 940 + (50 if s > 0 else 0), tip=0.26)
+    # the temple: without the framing locks the skin between the bangs and the side hair showed (check_cover), so a
+    # set of wide locks sweeps from beside the cover lock's root back over the temple and down into the side hair,
+    # as the old strand bangs carried on under the side lock
+    if not frame:
+        for j in range(5):
+            t = j / 4
+            K = [(s * (0.28 + 0.4 * t), 1.02, 0.08), (s * (0.5 + 0.38 * t), 0.72, 0.3), (s * (0.68 + 0.36 * t), 0.4, 0.3),
+                 (s * (0.82 + 0.34 * t), 0.08, 0.24), (s * (0.95 + 0.32 * t), -0.22, 0.18), (s * (1.05 + 0.3 * t), -0.45 + 0.08 * t, 0.12)]
+            path, O = guide(K, surface, 0.02 + 0.015 * (j % 2), ride=(0.12, 0.04 + 0.02 * (j % 2)), smooth=8)
+            guides.append((f'temple {s} {j}', path))
+            strands += clump(path, O, lambda u: 0.42 * (1 - 0.3 * sm(0.6, 1, u)), 8, 980 + j + (50 if s > 0 else 0),
+                               tip=0.24, stagger=0.2, spread=0.35)
     # the face-framing locks: long curtains down the front edge of the side hair, from the temple to the jaw, on top
     # of the side hair
     if frame:
@@ -422,3 +446,109 @@ def tail_locks(path, radius, k_tie):
             out.append(S)
             tones.append(toneP * (0.95 + 0.1 * rs))
     return out, tones
+
+
+def check_shading(verts, faces, normals, info, hc=HC, glint_deg=25.0):
+    """The checks on built strands before a render, for what made the bangs render wrong (render-review P021 and
+    the glitter John saw on 63699c9). verts, faces, normals, info as ribbons returns them. Returns (fault, note):
+      inward  faces wound toward their strand's middle: under custom normals the strand renders black or washed out
+      glint   vertex normals turned far off the head's outward direction: each strand edge catches the light on its
+              own and the bangs glitter against the hair under them
+      facing  normals that point in toward the head: the underside of the bangs turns dark"""
+    out = []
+    centre = {}
+    for v, (k, u, _c) in zip(verts, info):
+        key = (k, round(u, 4))
+        s = centre.setdefault(key, [0.0, 0.0, 0.0, 0])
+        s[0] += v[0]
+        s[1] += v[1]
+        s[2] += v[2]
+        s[3] += 1
+    inward = sides = 0
+    for f in faces:
+        if len(f) != 4:
+            continue
+        a, b, c = verts[f[0]], verts[f[1]], verts[f[2]]
+        n = cross(sub(b, a), sub(c, a))
+        k, u, _ = info[f[0]]
+        s = centre[(k, round(u, 4))]
+        mid = (s[0] / s[3], s[1] / s[3], s[2] / s[3])
+        sides += 1
+        if dot(n, sub(a, mid)) < 0:
+            inward += 1
+    if sides and inward / sides > 0.02:
+        out.append(('inward', f'{round(100 * inward / sides)}% of the strand faces point into their strand'))
+    # glint: how far the normals turn across one strand (a round strand turns them through every angle, so each
+    # strand edge catches the light on its own); facing: normals turned in toward the head
+    rings = {}
+    facing = 0
+    for v, n, (k, u, _c) in zip(verts, normals, info):
+        rings.setdefault((k, round(u, 4)), []).append(n)
+        if dot(n, norm(sub(v, hc))) < -0.2:
+            facing += 1
+    glint = 0
+    cg = math.cos(math.radians(glint_deg))
+    for ns in rings.values():
+        if min(dot(a_, b_) for a_ in ns for b_ in ns) < cg:
+            glint += 1
+    nv = max(1, len(verts))
+    if glint / max(1, len(rings)) > 0.05:
+        out.append(('glint', f'{round(100 * glint / len(rings))}% of the strand sections turn their normals more than {glint_deg:.0f} degrees across the strand'))
+    if facing / nv > 0.01:
+        out.append(('facing', f'{round(100 * facing / nv)}% of the normals point in toward the head'))
+    return out
+
+
+def check_cover(strands, surface, hairline=hairline, hc=HC, th_max=1.6, el_max=1.0, step=0.025, bare_max=0.02):
+    """Coverage of the front of the head: every direction inside the hairline (el above hairline(|th|), |th| up to
+    th_max) must be under the hair (the cap or a side piece standing off the scalp) or under a strand of the
+    locks. Bare skin there is the gap between the bangs and the side hair. Returns (faults, bare directions)."""
+    hit = set()
+    for S in strands:
+        for (p, ax, o, rx, ry, u) in S:
+            v = sub(p, hc)
+            r = math.sqrt(dot(v, v))
+            d = scl(v, 1 / r)
+            th, el = math.atan2(d[0], -d[1]), math.asin(max(-1.0, min(1.0, d[2])))
+            rad = max(rx / r, 0.5 * step)
+            ce = max(0.2, math.cos(el))
+            for i in range(-int(rad / step) - 1, int(rad / step) + 2):
+                for j in range(-int(rad / step / ce) - 1, int(rad / step / ce) + 2):
+                    if (i * step) ** 2 + (j * step * ce) ** 2 <= rad * rad:
+                        hit.add((round(el / step) + i, round(th / step) + j))
+    bare, total = [], 0
+    for i in range(int(-0.6 / step), int(el_max / step) + 1):
+        el = i * step
+        for j in range(int(-th_max / step), int(th_max / step) + 1):
+            th = j * step
+            if el < hairline(abs(th)):
+                continue
+            total += 1
+            if (i, j) in hit:
+                continue
+            scalp, outer = surface(rdir(th, el))
+            if outer > scalp + 0.015:      # (a thin cap is still hair)
+                continue
+            bare.append((th, el))
+    faults = []
+    if total and len(bare) / total > bare_max:
+        sides = {}
+        for th, el in bare:
+            sides.setdefault('right' if th < 0 else 'left', []).append((th, el))
+        where = '; '.join(f"{k}: th {min(a for a, _ in v):.2f}..{max(a for a, _ in v):.2f}, el {min(b for _, b in v):.2f}..{max(b for _, b in v):.2f}" for k, v in sides.items())
+        faults.append(('bare', f'{round(100 * len(bare) / total)}% of the hair inside the hairline shows skin ({where})'))
+    return faults, bare
+
+
+def report(name, strands, guides, surface, verts=None, faces=None, normals=None, info=None, cover=True):
+    """All the checks on one set of locks, printed as 'hair lock check:' lines (the reviewer reads them)."""
+    faults = [(f, n, note) for f, n, note in check_locks(guides, surface)]
+    if verts is not None:
+        faults += [(f, name, note) for f, note in check_shading(verts, faces, normals, info)]
+    if cover:
+        faults += [(f, name, note) for f, note in check_cover(strands, surface)[0]]
+    for f in faults:
+        print('hair lock check:', *f, flush=True)
+    if not faults:
+        print(f'hair lock check: {name} clean ({len(guides)} locks)', flush=True)
+    return faults

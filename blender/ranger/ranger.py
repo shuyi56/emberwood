@@ -462,8 +462,14 @@ def lock_bangs(trees, s, frame=True):
                 outer = max(outer, r)
         return scalp, outer
 
-    strands, _ = L.ranger_bangs(surface, s, frame)
+    strands, guides = L.ranger_bangs(surface, s, frame)
     verts, faces, normals, info = L.ribbons(strands)
+    # (coverage is checked on one side's locks only over that side of the head)
+    L.report(f'ranger bangs {s}', strands, guides, surface, verts, faces, normals, info, cover=False)
+    bare = [b for b in L.check_cover(strands, surface)[1] if b[0] * s > 0.05]
+    if len(bare) > 20:
+        print(f'hair lock check: bare ranger bangs {s} {len(bare)} directions inside the hairline show skin '
+              f'(th {min(a for a, _ in bare):.2f}..{max(a for a, _ in bare):.2f})', flush=True)
     bm = bmesh.new()
     L.to_bmesh(bm, verts, faces)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)

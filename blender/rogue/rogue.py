@@ -982,8 +982,7 @@ def lock_hair(head, head_tree, path):
         return scalp, max(scalp, outer) if outer is not None else scalp
 
     strands, guides = L.rogue_bangs(surface)
-    for f in L.check_locks(guides, surface):
-        print('hair lock check:', *f, flush=True)
+    L.report('rogue fringe', strands, guides, surface, *L.ribbons(strands))
     N = len(path)
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
     tail, tones = L.tail_locks([tuple(p) for p in path], tail_radius, k_tie)
