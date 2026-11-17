@@ -136,10 +136,28 @@ def out_axes(path, hc=HC):
     return O
 
 
-def clump(path, O, width_at, ns, seed, tip=0.3, stagger=0.2, spread=0.6, layer=0.004):
+def veil(path, O, width_at, sink=0.012, end=0.82):
+    """The sheer layer under a lock (hairVeil in the face creator, step 4 of the hair guide): one thin, wide ribbon
+    of hair just under the strands, fading in at the root and narrowing out before the strands end, so the gaps
+    between the strands show hair, not skin. (Solid here: the exported model has no see-through hair, so it sits
+    under the strands and is narrower than the face creator's.)"""
+    n, S = len(path), []
+    for q in range(n):
+        T = norm(sub(path[min(n - 1, q + 1)], path[max(0, q - 1)]))
+        ax = norm(cross(T, O[q]))
+        u = q / (n - 1)
+        w = width_at(u) * (0.25 + 0.75 * sm(0.0, 0.12, u)) * (1 - sm(end - 0.25, end, u)) + 0.002
+        S.append((sub(path[q], scl(O[q], sink)), ax, O[q], w, 0.01, u))
+    return S
+
+
+def clump(path, O, width_at, ns, seed, tip=0.3, stagger=0.2, spread=0.6, layer=0.004, under=1.0):
     """The strands of one lock (hairClump in the face creator). width_at(u) is the lock's half-width along it.
-    Returns strands, each a list of (centre, across axis, out axis, half-width, half-depth, u)."""
+    Returns strands, each a list of (centre, across axis, out axis, half-width, half-depth, u); with under, the
+    first is the veil under them, that many times the lock's width."""
     n0, strands = len(path), []
+    if under:
+        strands.append(veil(path, O, lambda u: width_at(u) * under))
     for si in range(ns):
         c = (si + 0.5) / ns - 0.5
         r1 = frac(math.sin(si * 12.9898 + seed * 78.233) * 43758.5453)
@@ -376,6 +394,8 @@ def rogue_bangs(surface):
             path, O = guide(K, surface, ride=(0.35, 0.02), smooth=12)
             gl = gl or path
             strands.append(strand(path, O, lambda u: h3 * 2.3 / NS * (1 - 0.45 * sm(0.6, 1, u))))
+            if si == 0:
+                strands.append(veil(path, O, lambda u: h3 * 1.3 * (1 - 0.35 * sm(0.5, 1, u))))
         guides.append((f'hook {k}', gl))
     # the face-framing locks at each temple: five, the front ones longest, stepping shorter and back toward the ear,
     # rooted under the combed-back hair and slipping out from under it at the hairline

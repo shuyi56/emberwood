@@ -13,6 +13,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import bpy  # noqa: E402
 import rogue  # noqa: E402
 import female  # noqa: E402  (the base figure, on the path once rogue is imported)
@@ -115,6 +116,9 @@ def main():
         o = bpy.data.objects.get(name)
         if o is not None:
             o.modifiers.new('lighter', 'DECIMATE').ratio = ratio
+    # (and the locks kept on top of what was thinned: see glb_locks)
+    import glb_locks
+    glb_locks.lift_locks(['Hair fringe', 'Hair tail locks'], ['Hair', 'Head shape'])
     bpy.data.objects['Rig'].hide_render = False
 
     bpy.ops.export_scene.gltf(
