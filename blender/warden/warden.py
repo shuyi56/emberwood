@@ -1801,32 +1801,42 @@ def creator_hair_trim(cols=range(10), cut=55.0, top=57.5, rounds=6):
             z = (M @ cap.data.vertices[lp.vertex_index].co).z
             d = uv.data[lp.index]
             d.uv = (d.uv[0], min(d.uv[1], smoothstep(cut + 0.1, cut + 2.2, z)))
+    # (the clothes and the rest of the figure, pose by pose, built once: only the cap changes between rounds, and the
+    # cap rides the head, so each pose needs only where the head has carried it)
+    poses = []
+    for col in cols:
+        sc.frame_set(col + 1)
+        bpy.context.view_layer.update()
+        dg = bpy.context.evaluated_depsgraph_get()
+        cloth, rest_vs, rest_ps = [], [], []
+        for o in bpy.data.objects:
+            if o.type != 'MESH' or o.hide_render or not o.visible_get() or o == cap:
+                continue
+            me = o.evaluated_get(dg).to_mesh()
+            vs = [o.matrix_world @ v.co for v in me.vertices]
+            ps = [list(q.vertices) for q in me.polygons]
+            o.evaluated_get(dg).to_mesh_clear()
+            b = len(rest_vs)
+            rest_vs += vs
+            rest_ps += [[b + i for i in q] for q in ps]
+            if o.name.startswith(CLOTHES) and ps:
+                cloth.append(BVHTree.FromPolygons(vs, ps))
+        poses.append((cap.matrix_world.copy(), cloth, BVHTree.FromPolygons(rest_vs, rest_ps)))
+    sc.frame_set(1)
+    bpy.context.view_layer.update()
     for _round in range(rounds):
         nv = len(cap.data.vertices)
         bad = set()
-        for col in cols:
-            sc.frame_set(col + 1)
-            bpy.context.view_layer.update()
-            dg = bpy.context.evaluated_depsgraph_get()
-            cloth, rest_vs, rest_ps = [], [], []
-            for o in bpy.data.objects:
-                if o.type != 'MESH' or o.hide_render or not o.visible_get() or o == cap:
-                    continue
-                me = o.evaluated_get(dg).to_mesh()
-                vs = [o.matrix_world @ v.co for v in me.vertices]
-                ps = [list(q.vertices) for q in me.polygons]
-                o.evaluated_get(dg).to_mesh_clear()
-                b = len(rest_vs)
-                rest_vs += vs
-                rest_ps += [[b + i for i in q] for q in ps]
-                if o.name.startswith(CLOTHES) and ps:
-                    cloth.append(BVHTree.FromPolygons(vs, ps))
-            figure = BVHTree.FromPolygons(rest_vs, rest_ps)
-            me = cap.evaluated_get(dg).to_mesh()
-            hv = [cap.matrix_world @ v.co for v in me.vertices]
+        dg = bpy.context.evaluated_depsgraph_get()
+        me = cap.evaluated_get(dg).to_mesh()
+        lv = [v.co.copy() for v in me.vertices]
+        # (only faces low enough to be taken out are tested: the crown is far above every cloth)
+        polys = [list(q.vertices) for q in me.polygons if min((M @ lv[i]).z for i in q.vertices) < top]
+        cap.evaluated_get(dg).to_mesh_clear()
+        for Mw, cloth, figure in poses:
+            hv = [Mw @ v for v in lv]
             outside = []
-            for q in me.polygons:
-                vi = list(q.vertices)
+            for vi in polys:
                 c = sum((hv[i] for i in vi), Vector()) / len(vi)
                 n = (hv[vi[1]] - hv[vi[0]]).cross(hv[vi[2]] - hv[vi[0]])
                 if n.length < 1e-12:
@@ -1834,7 +1844,6 @@ def creator_hair_trim(cols=range(10), cut=55.0, top=57.5, rounds=6):
                 n.normalize()
                 if figure.ray_cast(c + n * 0.02, n, 1.5)[0] is None:
                     outside.append(vi)
-            cap.evaluated_get(dg).to_mesh_clear()
             if not outside:
                 continue
             ht = BVHTree.FromPolygons(hv, outside)
@@ -2714,9 +2723,14 @@ def build():
     patina_closeup('bracers')
     if not os.environ.get('WARDEN_NO_CLEARANCE'):
         # (twice: the first pass's easing lets a little back in where a lock crosses the shoulder in the walk)
+        import time
+        t_ = time.time()
         creator_hair_clearance()
         creator_hair_clearance()
+        print(f'hair clearance {time.time() - t_:.0f} s', flush=True)
+        t_ = time.time()
         creator_hair_trim()
+        print(f'hair trim {time.time() - t_:.0f} s', flush=True)
     return res
 
 

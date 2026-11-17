@@ -2650,11 +2650,39 @@ def sculpt_eyes(hb, eyes):
     # the rest lie on the old flat faces: put each back onto the head's own smooth surface before sculpting, easing
     # from the flat faces at the patch's edge to the smooth surface a little way in, so no step shows where the
     # finer mesh meets the coarser (a hard switch drew a line across the nose)
+    # (the smooth surface is looked up on a grid 0.025 apart, solved once per grid point and read bicubically: solving
+    # it exactly for each of the patch's 190,000 points was half the figure's build)
+    G = 0.025
+    xs_ = np.arange(P[:, 0].min() - G, P[:, 0].max() + 2 * G, G)
+    zs_ = np.arange(P[:, 2].min() - G, P[:, 2].max() + 2 * G, G)
+    grid_ = {}
+
+    def node(i, j):
+        k = (i, j)
+        if k not in grid_:
+            grid_[k] = head_front_y((xs_[0] + i * G) / HEAD_H, (zs_[0] + j * G) / HEAD_H)
+        return grid_[k]
+
+    def cr(p0, p1, p2, p3, t):      # (Catmull-Rom: the surface's curvature kept between grid points)
+        return p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)))
+
+    def front_y(x, z):
+        fi, fj = (x - xs_[0]) / G, (z - zs_[0]) / G
+        i, j = int(math.floor(fi)), int(math.floor(fj))
+        tx, tz = fi - i, fj - j
+        rows = []
+        for dj in (-1, 0, 1, 2):
+            c = [node(i + di, j + dj) for di in (-1, 0, 1, 2)]
+            if any(y is None for y in c):
+                return head_front_y(x / HEAD_H, z / HEAD_H)
+            rows.append(cr(*c, tx))
+        return cr(*rows, tz)
+
     for v, r in zip(new, rim_d):
         w = smooth(0.0, 0.9, float(r))
         if w <= 0:
             continue
-        y = head_front_y(v.co.x / HEAD_H, v.co.z / HEAD_H)
+        y = front_y(v.co.x, v.co.z)
         if y is not None:
             v.co.y += w * (y * HEAD_H - v.co.y)
     for v in hb.verts:
