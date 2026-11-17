@@ -1433,6 +1433,71 @@ HAIR_PTS = None      # (every point the clearance moves: the cap's vertices, the
 HAIR_RUNS = None     # (the strands' runs of points in HAIR_PTS: (first, count))
 
 
+HAIR_TIPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hair_tips.png')
+TIP_GAIN = 1.4      # (the creator's tipGain, between 1 up close and 2.5 far off: the head views sit between)
+
+
+def hair_tip_cut(objs):
+    """The creator's layered hair ends on the Blender hair: its hair-tip map (red each hair's tone, green the top
+    layer's cut-out, blue the wider hairs of the layers under it), read three times as the creator's shader reads it.
+    The top layer; a second shifted round the head and ending a little higher; a third higher again. Through a gap
+    between two strands of one you see the next, so the strands join the mass, and skin shows only where all three
+    have run out, toward the very tips. A hard cut, as the creator's alphaTest. (Wrapped round the material's own
+    output, so the sprite sheet, which wires its own output, keeps solid hair.)"""
+    src = objs[0].data.materials[0]
+    m = src.copy()
+    m.name = 'hair cut'
+    nt = m.node_tree
+    img = bpy.data.images.load(HAIR_TIPS, check_existing=True)
+    img.colorspace_settings.name = 'Non-Color'
+    uvn = nt.nodes.new('ShaderNodeUVMap')
+    uvn.uv_map = 'tips'
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    nt.links.new(uvn.outputs['UV'], sep.inputs['Vector'])
+
+    def m_(op, a, b):
+        n = nt.nodes.new('ShaderNodeMath')
+        n.operation = op
+        for i, x in enumerate((a, b)):
+            if isinstance(x, (int, float)):
+                n.inputs[i].default_value = x
+            else:
+                nt.links.new(x, n.inputs[i])
+        return n.outputs[0]
+
+    def read(du, dv, ch):
+        u = m_('ADD', sep.outputs['X'], du)
+        v = m_('MINIMUM', m_('MAXIMUM', m_('SUBTRACT', sep.outputs['Y'], dv), 0.002), 0.998)
+        cmb = nt.nodes.new('ShaderNodeCombineXYZ')
+        nt.links.new(u, cmb.inputs['X'])
+        nt.links.new(v, cmb.inputs['Y'])
+        tx = nt.nodes.new('ShaderNodeTexImage')
+        tx.image = img
+        tx.extension = 'REPEAT'
+        tx.interpolation = 'Linear'
+        nt.links.new(cmb.outputs['Vector'], tx.inputs['Vector'])
+        rgb = nt.nodes.new('ShaderNodeSeparateColor')
+        nt.links.new(tx.outputs['Color'], rgb.inputs['Color'])
+        return rgb.outputs[ch]
+
+    a = m_('MAXIMUM', read(0.0, 0.0, 'Green'), m_('MAXIMUM', read(0.3713, 0.035, 'Blue'), read(0.7129, 0.08, 'Blue')))
+    keep = m_('GREATER_THAN', m_('MULTIPLY', a, TIP_GAIN), 0.5)
+    clear = nt.nodes.new('ShaderNodeBsdfTransparent')
+    for out in [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL']:
+        if not out.inputs['Surface'].is_linked:
+            continue
+        sh = out.inputs['Surface'].links[0].from_socket
+        mix = nt.nodes.new('ShaderNodeMixShader')
+        nt.links.new(keep, mix.inputs['Fac'])
+        nt.links.new(clear.outputs['BSDF'], mix.inputs[1])
+        nt.links.new(sh, mix.inputs[2])
+        nt.links.new(mix.outputs['Shader'], out.inputs['Surface'])
+    if hasattr(m, 'blend_method'):
+        m.blend_method = 'CLIP'
+    for o in objs:
+        o.data.materials[0] = m
+
+
 def creator_hair(head):
     """Build the exported hairstyle on the head: 'Hair' (the cap, cut off where its strands thin out toward its
     edge, so the locks make the outline) and 'Hair locks' (each strand a flat ribbon tapering to a point where the
@@ -1472,58 +1537,88 @@ def creator_hair(head):
         for j in range(1, nr):
             vs[i * nr + j][lay] = i * nr + j
     crown[lay] = 0
+    # (the cap wears the hair-tip map too: round the head across it, its cut-out along it)
+    uvl = bm.loops.layers.uv.new('tips')
+    cu = C.get('u', [0.0] * (nc * nr))
+    for f in bm.faces:
+        ks = [v[lay] for v in f.verts]
+        us = [cu[k] if v is not crown else None for k, v in zip(ks, f.verts)]
+        real = [u for u in us if u is not None]
+        wrap = max(real) - min(real) > 0.5       # (a face across the seam, where u comes round from 1 to 0)
+        for lp, k, u in zip(f.loops, ks, us):
+            if u is None:
+                u = sum(real) / len(real)
+            lp[uvl].uv = (u + (1.0 if wrap and u < 0.5 else 0.0), 1.0 if lp.vert is crown else al[k])
     cap = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, solid=0.12, rest=hair_flow)
     cap.modifiers['thickness'].offset = -1.0     # (thickened inward, toward the scalp)
     strand_colours(cap)
-    # ---- the locks, strand by strand
+    # ---- the locks, strand by strand, one object per layer of the creator's: 'Hair locks' the top layer (and the
+    # pieces that have no layer, as the parting's), 'Hair locks under' the darker, broader layer in its gaps
     rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
     lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
-    bm = bmesh.new()
-    lay = bm.verts.layers.int.new('pt')
-    shade = []
     RING = 8
-    for st in d['strands']:
-        n = len(st['t'])
-        P = [Vector(st['p'][k * 3:k * 3 + 3]) * H for k in range(n)]
-        W = [Vector(st['w'][k * 3:k * 3 + 3]) * H for k in range(n)]
-        # (the cut-out becomes a taper: the ribbon narrows to nothing where the creator fades the strand out)
-        keep = [k for k in range(n) if st['a'][k] > 0.02]
-        if len(keep) < 4:
-            continue
-        k0, k1 = keep[0], keep[-1]
-        base = len(pts)
-        rings = []
-        for k in range(k0, k1 + 1):
-            a = min(1.0, st['a'][k]) ** 0.6
-            w = W[k] * (1.25 * a)
-            T = (P[min(n - 1, k + 1)] - P[max(0, k - 1)]).normalized()
-            N = T.cross(w)
-            N = N.normalized() * max(0.03, st['t'][k] * H * 1.6) * a if N.length > 1e-9 else Vector()
-            # (a lens, not a diamond: a diamond's two sharp edges each caught the light as a bright line down the
-            # strand and its flat faces read as slabs; round, its edges roll away into the strands beside it)
-            ring = [bm.verts.new(P[k] + w * math.cos(q * math.pi / 4) + N * math.sin(q * math.pi / 4)) for q in range(RING)]
-            for v in ring:
-                v[lay] = len(pts)
-            shade += [st['c'][k] - 0.12 * abs(math.cos(q * math.pi / 4)) ** 4 for q in range(RING)]
-            pts.append(P[k].copy())
-            rings.append(ring)
-        runs.append((base, len(pts) - base))
-        for r0, r1 in zip(rings, rings[1:]):
-            for q in range(RING):
-                bm.faces.new((r0[q], r0[(q + 1) % RING], r1[(q + 1) % RING], r1[q]))
-        bm.faces.new(rings[0][::-1])
-        bm.faces.new(rings[-1])
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
-    locks = mesh_obj('Hair locks', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
-    # (each strand's own shade from the creator: lighter over a wave's crest, darker in its trough, the under
-    # layer darker than the top one)
-    attr = locks.data.color_attributes.new('strands', 'FLOAT_COLOR', 'POINT')
-    cols = []
-    for c in shade:
-        t = min(1.0, max(-1.0, (c - 0.95) / 0.3))
-        col = lin[2] + (lin[3] - lin[2]) * t if t > 0 else lin[2] + (lin[2] - lin[1]) * t
-        cols += [*col, 1.0]
-    attr.data.foreach_set('color', cols)
+    locks = []
+    for layer, name in ((0, 'Hair locks'), (1, 'Hair locks under')):
+        bm = bmesh.new()
+        lay = bm.verts.layers.int.new('pt')
+        uvl = bm.loops.layers.uv.new('tips')
+        shade = []
+        for st in d['strands']:
+            if st.get('layer', 0) != layer:
+                continue
+            n = len(st['t'])
+            P = [Vector(st['p'][k * 3:k * 3 + 3]) * H for k in range(n)]
+            W = [Vector(st['w'][k * 3:k * 3 + 3]) * H for k in range(n)]
+            keep = [k for k in range(n) if st['a'][k] > 0.02]
+            if len(keep) < 4:
+                continue
+            k0, k1 = keep[0], keep[-1]
+            u0, u1 = st.get('u', (0.0, 0.03))
+            base = len(pts)
+            rings, along = [], []
+            for k in range(k0, k1 + 1):
+                # (the creator's own width: its tips are cut by the hair-tip map, as in the creator, so the strand
+                # only narrows a little toward its faded ends instead of tapering to a point)
+                a = min(1.0, st['a'][k])
+                w = W[k] * (1.05 * a ** 0.25)
+                T = (P[min(n - 1, k + 1)] - P[max(0, k - 1)]).normalized()
+                N = T.cross(w)
+                N = N.normalized() * max(0.03, st['t'][k] * H * 1.6) * a ** 0.25 if N.length > 1e-9 else Vector()
+                # (a lens, not a diamond: a diamond's two sharp edges each caught the light as a bright line down
+                # the strand and its flat faces read as slabs; round, its edges roll away into the strands beside it)
+                ring = [bm.verts.new(P[k] + w * math.cos(q * math.pi / 4) + N * math.sin(q * math.pi / 4))
+                        for q in range(RING)]
+                for v in ring:
+                    v[lay] = len(pts)
+                shade += [st['c'][k] - 0.12 * abs(math.cos(q * math.pi / 4)) ** 4 for q in range(RING)]
+                pts.append(P[k].copy())
+                rings.append(ring)
+                along.append(a)
+            runs.append((base, len(pts) - base))
+            for r in range(len(rings) - 1):
+                r0, r1 = rings[r], rings[r + 1]
+                for q in range(RING):
+                    f = bm.faces.new((r0[q], r0[(q + 1) % RING], r1[(q + 1) % RING], r1[q]))
+                    # (round the tube across the map, as the creator's: u from the strand's first ring point to its
+                    # last; along it the cut-out, 0 at the faded root and tip, 1 where the strand is whole)
+                    for lp, (qq, rr) in zip(f.loops, ((q, r), (q + 1, r), (q + 1, r + 1), (q, r + 1))):
+                        lp[uvl].uv = (u0 + (u1 - u0) * qq / RING, along[rr])
+            for f in (bm.faces.new(rings[0][::-1]), bm.faces.new(rings[-1])):
+                for lp in f.loops:
+                    lp[uvl].uv = (u0, 0.0)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        o = mesh_obj(name, bm, M_HAIR, head, subdiv=0, rest=hair_flow)
+        # (each strand's own shade from the creator: lighter over a wave's crest, darker in its trough, the under
+        # layer darker than the top one)
+        attr = o.data.color_attributes.new('strands', 'FLOAT_COLOR', 'POINT')
+        cols = []
+        for c in shade:
+            t = min(1.0, max(-1.0, (c - 0.95) / 0.3))
+            col = lin[2] + (lin[3] - lin[2]) * t if t > 0 else lin[2] + (lin[2] - lin[1]) * t
+            cols += [*col, 1.0]
+        attr.data.foreach_set('color', cols)
+        locks.append(o)
+    hair_tip_cut([cap] + locks)
     HAIR_PTS, HAIR_RUNS = pts, runs
     return cap, locks
 
@@ -1537,7 +1632,8 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
     the cap and the strands by it."""
     from mathutils.kdtree import KDTree
     sc = bpy.context.scene
-    cap, locks = bpy.data.objects['Hair'], bpy.data.objects['Hair locks']
+    cap = bpy.data.objects['Hair']
+    locks = [o for o in bpy.data.objects if o.name.startswith('Hair locks')]
     P = HAIR_PTS
     need = {}
     clear_ = [1e9] * len(P)      # how close each point comes to the clothes in any pose
@@ -1652,7 +1748,7 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
             for k in range(n):
                 m = (run[max(0, k - 1)] + run[k] * 2.0 + run[min(n - 1, k + 1)]) / 4.0
                 D[b + k] = m if m.length > need.get(b + k, Vector()).length else D[b + k]
-    for o in (cap, locks):
+    for o in [cap] + locks:
         lay = o.data.attributes['pt'].data
         for v in o.data.vertices:
             v.co += D[lay[v.index].value]
@@ -1686,6 +1782,14 @@ def creator_hair_trim(cols=range(10), cut=55.0, top=57.5, rounds=6):
         return len(kill)
 
     drop(lambda f: max((M @ v.co).z for v in f.verts) < cut)
+    # (and where it is cut it ends as the creator's hair ends, in strands: its cut-out along the map runs down to
+    # nothing over the last stretch above the cut, so the tip map thins it into points instead of a hem)
+    uv = cap.data.uv_layers.get('tips')
+    if uv is not None:
+        for lp in cap.data.loops:
+            z = (M @ cap.data.vertices[lp.vertex_index].co).z
+            d = uv.data[lp.index]
+            d.uv = (d.uv[0], min(d.uv[1], smoothstep(cut + 0.1, cut + 2.2, z)))
     for _round in range(rounds):
         nv = len(cap.data.vertices)
         bad = set()
