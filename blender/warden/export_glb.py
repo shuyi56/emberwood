@@ -42,7 +42,7 @@ def plain_materials():
         rgb = d['ramp'][2] / 255.0
         p.inputs['Base Color'].default_value = (*[lin(c) for c in rgb], 1.0)
         name = d['name']
-        metal = name in ('plate', 'steel', 'gold', 'collar')
+        metal = name in ('plate', 'steel', 'gold', 'collar', 'bronze')
         p.inputs['Metallic'].default_value = 0.8 if metal else 0.0
         p.inputs['Roughness'].default_value = 0.45 if metal else (0.6 if name == 'skin' else 0.88)
         nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
