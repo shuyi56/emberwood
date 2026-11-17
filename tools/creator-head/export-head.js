@@ -15,7 +15,13 @@ const fs = require('fs'), path = require('path');
   await p.goto('file://' + page_);
   const ready = () => window.__rangerBody && window.__rangerBody.group.children.length > 1 && document.getElementById('busy').hidden;
   await p.waitForFunction(ready, null, { timeout: 300000 });
-  if (settings) { await p.fill('#vw-json', settings); await p.click('#vw-load'); }
+  // The face paint for the world: the skin's fine surface texture and blotches are painted for the creator's own
+  // shader (a bump map and a pore tint undo them there); exported bare, they read as a grey-green mottle in the game.
+  // So the export repaints with them off, keeping the freckles, flush, make-up, brows and lips.
+  const FOR_WORLD = { texture: 0, blotch: 0 };
+  const base = settings ? JSON.parse(settings) : await p.evaluate(() => JSON.parse(JSON.stringify(window.__fc.P)));
+  await p.fill('#vw-json', JSON.stringify(Object.assign(base, FOR_WORLD))); await p.click('#vw-load');
+  await p.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 300000 });
   await p.waitForTimeout(3000);
   const b64 = await p.evaluate(async () => {
     const THREE = await import('three');

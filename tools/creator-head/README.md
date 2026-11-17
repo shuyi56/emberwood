@@ -9,10 +9,12 @@ clothes, skinning and the walk and idle animations are the Blender export (`blen
    settings JSON copied from the creator ("Copy settings (JSON)") exports that face instead of the Ranger preset.
    The hair strands' alpha maps are baked into the alpha of their colour maps (alphaMode MASK); glTF has no alpha
    map. The creator's shader tweaks (onBeforeCompile) do not export, so the model gets each plain material and its
-   painted maps.
+   painted maps. So the export repaints the face without the creator's fine skin texture and blotches, which only its
+   shader balances (in the world they read as a grey-green mottle).
 2. `node merge-head.mjs ranger.glb creator-head.glb out.glb [headRatio] [hairRatio]` drops the Blender head, hair,
    face paint and eye animation channels, simplifies the creator's parts for the world (the head to about 25k
-   triangles, the joined strands to about 0.4) and hangs them under the Head node. Needs `@gltf-transform/core`,
+   triangles, the joined strands to about 0.4) and hangs them under the Head node. It drops the face's roughness map (oily patches in the world's light) and checks
+   the face's mean colour against the Blender head's skin. Also needs `sharp` (0.33.5). Needs `@gltf-transform/core`,
    `@gltf-transform/extensions`, `@gltf-transform/functions` (4.1.1) and `meshoptimizer` (0.22.0).
 
 Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator.
