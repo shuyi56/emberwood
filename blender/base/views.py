@@ -86,6 +86,13 @@ def look_3d(samples):
     sc.cycles.use_denoising = True
     if hasattr(sc.cycles, 'denoiser'):
         sc.cycles.denoiser = 'OPENIMAGEDENOISE'
+    # (guided by the albedo and normal passes, prefiltered accurately: the denoiser then keeps what is really on the
+    # surface, the freckles and make-up in the colour and the pores and fine creases in the bump, and removes only
+    # the sampling grain; unguided it smoothed them away with the grain)
+    if hasattr(sc.cycles, 'denoising_input_passes'):
+        sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
+    if hasattr(sc.cycles, 'denoising_prefilter'):
+        sc.cycles.denoising_prefilter = 'ACCURATE'
     sc.cycles.max_bounces = 4
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
     sc.cycles.filter_width = 1.5
