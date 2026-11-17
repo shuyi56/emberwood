@@ -1427,7 +1427,7 @@ def patina_closeup(name):
     nt.links.new(sc_.outputs['Vector'], b.inputs['Base Color'])
 
 
-def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(0.55, 0.22)):
+def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(0.55, 0.22), use_ao=True):
     """The greaves and the breastplate up close (the sprites keep the plain diffuse surface: see sprite_mode):
     hammered steel, a little worn. Shallow overlapping dents from the hammer break up the light; the tone drifts
     in broad patches; it is darker and duller down in the hollows, where grime collects, and polished brighter on
@@ -1458,7 +1458,11 @@ def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(
     ao.samples = 8
     tone = nt.nodes.new('ShaderNodeMath')
     tone.operation = 'MULTIPLY'
-    nt.links.new(ao.outputs['AO'], tone.inputs[0])
+    if use_ao:
+        nt.links.new(ao.outputs['AO'], tone.inputs[0])
+    else:
+        # (an even tone, not lighter where it stands open: so a flat plate reads as the same steel as the band)
+        tone.inputs[0].default_value = 0.7
     nt.links.new(patch.outputs['Fac'], tone.inputs[1])
     col = nt.nodes.new('ShaderNodeMix')
     col.data_type = 'RGBA'
@@ -2229,7 +2233,7 @@ def build():
     steel_closeup('plate')
     # (the collar and its plate one dull, even finish: rougher, so the flat plate facing the light does not flare
     # brighter than the band curving round the neck)
-    steel_closeup('collar', dark=(0.04, 0.041, 0.045), light=(0.2, 0.205, 0.22), rgh=(0.62, 0.48))
+    steel_closeup('collar', dark=(0.04, 0.041, 0.045), light=(0.2, 0.205, 0.22), rgh=(0.62, 0.48), use_ao=False)
     velvet_closeup('robe')
     velvet_closeup('cape')
     patina_closeup('bracers')
