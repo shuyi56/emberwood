@@ -2850,10 +2850,12 @@ def _hair_shade_material(m, depth):
     if bsdf is None:
         out = next((n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL' and n.inputs['Surface'].links), None)
         if out is None:
+            print(f'hair contact shade: no output in material {m.name!r}', flush=True)
             return
         bsdf = out.inputs['Surface'].links[0].from_node
     sock = bsdf.inputs.get('Base Color') or bsdf.inputs.get('Color')
     if sock is None:
+        print(f'hair contact shade: no colour to shade in material {m.name!r} ({bsdf.type})', flush=True)
         return
     if sock.links:
         src = sock.links[0].from_socket
@@ -2876,6 +2878,17 @@ def _hair_shade_material(m, depth):
     nt.links.new(k.outputs[0], mix.inputs['Factor'])
     nt.links.new(src, mix.inputs['A'])
     nt.links.new(mix.outputs['Result'], sock)
+    # (and the shine: a shadow takes the highlight too. Left at full, the brow ridge's top under the fringe kept
+    # its highlight in the shaded skin round it, a pale streak across the brows)
+    spec = bsdf.inputs.get('Specular IOR Level')
+    if spec is not None and not spec.links:
+        f = nt.nodes.new('ShaderNodeMath')
+        f.operation = 'MULTIPLY_ADD'
+        f.use_clamp = True
+        f.inputs[1].default_value = -0.9 * spec.default_value
+        f.inputs[2].default_value = spec.default_value
+        nt.links.new(k.outputs[0], f.inputs[0])
+        nt.links.new(f.outputs[0], spec)
 
 if __name__ == '__main__':
     run(build, 'warden', HERE)
