@@ -466,9 +466,10 @@ def lock_bangs(trees, s, frame=True):
     verts, faces, normals, info = L.ribbons(strands)
     bm = bmesh.new()
     L.to_bmesh(bm, verts, faces)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     rest = {}
     for v, (k, u, ca) in zip(verts, info):
-        rest[Vector(v).freeze()] = (k * 2.3 + ca * 0.25, 0.0, -u * 3.0)
+        rest[Vector(v).freeze()] = (k * 2.3, 0.0, -u * 3.0)      # (one value across each fine strand: an across term read as steep slopes by the hair's bump)
     from mathutils.kdtree import KDTree
     keys = list(rest)
     kd = KDTree(len(keys))

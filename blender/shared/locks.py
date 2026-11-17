@@ -167,11 +167,14 @@ def ribbons(strands, seg=6):
                 normals.append(norm(add(scl(o, 0.8), scl(add(scl(ax, ca), scl(o, sa)), 0.35))))
                 info.append((k, u, ca))
             rings.append(ring)
+        # (wound so every face looks out of the strand: the ring runs from the across axis toward the out axis,
+        # which turns back along the strand, so the sides go ring-to-next-ring first and the start cap keeps the
+        # ring's order; wound the other way they faced in and rendered black under their custom normals)
         for ra, rb in zip(rings, rings[1:]):
             for j in range(seg):
-                faces.append((ra[j], ra[(j + 1) % seg], rb[(j + 1) % seg], rb[j]))
-        faces.append(tuple(reversed(rings[0])))
-        faces.append(tuple(rings[-1]))
+                faces.append((ra[j], rb[j], rb[(j + 1) % seg], ra[(j + 1) % seg]))
+        faces.append(tuple(rings[0]))
+        faces.append(tuple(reversed(rings[-1])))
     return verts, faces, normals, info
 
 
@@ -358,10 +361,10 @@ def rogue_bangs(surface):
             r, a, end = 0.46 + 0.36 * t, 0.66 + 0.3 * t, -1.12 + 0.32 * t
             K = [(r, 0.82), (lerp(r, a, 0.45), 0.5), (a, 0.22), (a + 0.08, -0.08), (a + 0.1, lerp(-0.08, end, 0.4)),
                  (a + 0.08, lerp(-0.08, end, 0.75)), (a + 0.04, end)]
-            path, O = guide([(side * th, el, 0.07) for th, el in K], surface, samples=40, ride=False)
+            path, O = guide([(side * th, el, 0.04) for th, el in K], surface, samples=40, ride=False)
             guides.append((f'wisp {side} {j}', path))
             strands += clump(path, O, lambda u: (0.1 + 0.2 * (1 - u) ** 0.8) * 0.85 * (0.55 + 0.9 * u), 6,
-                               301 + j * 10 + (100 if side > 0 else 0), tip=0.14, stagger=0.22, spread=0.3, layer=0.012)
+                               301 + j * 10 + (100 if side > 0 else 0), tip=0.14, stagger=0.22, spread=0.3, layer=0.006)
     return strands, guides
 
 
@@ -415,7 +418,7 @@ def tail_locks(path, radius, k_tie):
                 C = add(P0, add(scl(ax, r * pr * split * math.cos(ths)), scl(dp, rd * pr * split * math.sin(ths))))
                 # (bound in at the tie, full through the fall, tapering to a point over a long last stretch)
                 cr = pr * 0.62 * subW * sm(0, 0.05, u + 0.02) * (1 - u) ** 0.55 + 0.012
-                S.append((C, ax, dp, r * cr, rd * cr * 1.15, u))
+                S.append((C, scl(ax, -1.0), dp, r * cr, rd * cr * 1.15, u))      # (across = cross(T, out), as ribbons winds it)
             out.append(S)
             tones.append(toneP * (0.95 + 0.1 * rs))
     return out, tones
