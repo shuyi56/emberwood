@@ -15,6 +15,9 @@
 --hair-only  with --turn or --head: only the hair is rendered (every mesh in the hair material, and the tie);
            the rest of the figure is still built, so the hair lies as it does on her
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
+--face     FILE: a face from the face creator (tools/face-creator/export-face.cjs, e.g. blender/faces/rogue.json.gz)
+           on this character's body: the creator's head, eyes, brows, lips, skin, make-up and hair colour in place
+           of the character's own (her hairstyle and clothes stay); see blender/base/creator.py
 
 Rendering pieces on their own (any of the views above):
 --only     PREFIXES: render only the meshes whose names start with one of these (comma separated), e.g.
@@ -256,6 +259,9 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
+    if opt('--face'):
+        import creator
+        creator.apply(opt('--face'))
     F.build()
     sc = bpy.context.scene
     sc.frame_set(1)
