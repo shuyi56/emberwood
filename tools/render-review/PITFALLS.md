@@ -141,3 +141,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Hair locks, f4f54d6 (2026-11-17): the strand ribbons of the new lock clumps were wound inward, so the fringe rendered black on one side and pale on the other on both figures. The build and the hair check passed, because both look at shape, not at which way a face points. It cost a render of four jobs.
 - **Spot:** A commit that builds hair (or any thin shell) from its own vertex loops: new grid, ribbon or tube code in blender/shared/locks.py or a figure's hair functions, with no recalc of normals after it. In the headless build, take each hair face's normal against the direction from the head's centre to the face: more than a few percent pointing inward on a piece means it is wound the wrong way.
 - **Fix:** Wind the faces so the normal points away from the head, or call bmesh.ops.recalc_face_normals on the piece before it is joined, and check the share of inward faces in the smoke build before asking.
+
+## P022 A lit view command beside its own --clay twin
+
+- **Seen:** Warden head turn, 37f53b3 and c75919e (2026-11-17): the reviewer itself added a second command, the same views with or without --clay, to get both looks. views.py --clay renders the lit views first and then the clay ones (turn.png, head.png, turn-clay.png, head-clay.png), so the pair built the figure twice and rendered the lit views twice. The queue caught it and dropped the duplicate.
+- **Spot:** Two commands in "views" that are equal once --clay is taken out.
+- **Fix:** Keep only the --clay command. To add clay to a request, add the flag to the existing command; never add a second command.

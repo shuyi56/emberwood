@@ -630,6 +630,15 @@ def review(req, thread, do_smoke=True):
                      "Add --head --clay to the view command.", "P009")
             break
 
+    # ---- a lit command beside its own --clay twin (--clay renders the lit views first, then the clay ones)
+    cmds = [shlex.split(v) for v in views if isinstance(v, str)]
+    for c in cmds:
+        if "--clay" in c and [t for t in c if t != "--clay"] in [o for o in cmds if "--clay" not in o]:
+            rep.block("views", "The same view command is asked with and without --clay. --clay already writes the "
+                      "lit views (turn.png, head.png) as well as the clay ones, so the second command builds and "
+                      "renders the lit views twice.", "Keep only the --clay command.", "P022")
+            break
+
     # ---- pitfall patterns against the lines the branch adds
     lines = added_lines(main, merged) if fp else []
     for p in read_pitfalls():
