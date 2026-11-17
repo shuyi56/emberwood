@@ -1434,7 +1434,10 @@ HAIR_RUNS = None     # (the strands' runs of points in HAIR_PTS: (first, count))
 
 
 HAIR_TIPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hair_tips.png')
-TIP_GAIN = 1.4      # (the creator's tipGain, between 1 up close and 2.5 far off: the head views sit between)
+TIP_GAIN = 1.4
+# (the 3D views' lights and tone mapping lift a dark colour about five times as much as the creator's dim viewport
+# does: her strands are taken down to this much of her ramp so she reads as dark as the creator's Warden)
+HAIR_ONSCREEN = 0.45      # (the creator's tipGain, between 1 up close and 2.5 far off: the head views sit between)
 
 
 def hair_tip_cut(objs):
@@ -1488,6 +1491,7 @@ def hair_tip_cut(objs):
             continue
         sh = out.inputs['Surface'].links[0].from_socket
         mix = nt.nodes.new('ShaderNodeMixShader')
+        mix.name = 'tip cut'      # (sprite_mode takes it out of the way for the sheet, and puts it back)
         nt.links.new(keep, mix.inputs['Fac'])
         nt.links.new(clear.outputs['BSDF'], mix.inputs[1])
         nt.links.new(sh, mix.inputs[2])
@@ -1563,6 +1567,12 @@ def creator_hair(head):
     cap = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, solid=0.12, rest=hair_flow)
     cap.modifiers['thickness'].offset = -1.0     # (thickened inward, toward the scalp)
     strand_colours(cap)
+    sa = cap.data.color_attributes['strands']
+    cc = np.zeros(len(sa.data) * 4)
+    sa.data.foreach_get('color', cc)
+    cc = cc.reshape(-1, 4)
+    cc[:, :3] *= HAIR_ONSCREEN
+    sa.data.foreach_set('color', cc.ravel())
     # ---- the locks, strand by strand, one object per layer of the creator's: 'Hair locks' the top layer (and the
     # pieces that have no layer, as the parting's), 'Hair locks under' the darker, broader layer in its gaps
     rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
@@ -1625,7 +1635,7 @@ def creator_hair(head):
         cols = []
         for c in shade:
             t = min(1.0, max(-1.0, (c - 0.95) / 0.3))
-            col = lin[2] + (lin[3] - lin[2]) * t if t > 0 else lin[2] + (lin[2] - lin[1]) * t
+            col = (lin[2] + (lin[3] - lin[2]) * t if t > 0 else lin[2] + (lin[2] - lin[1]) * t) * HAIR_ONSCREEN
             cols += [*col, 1.0]
         attr.data.foreach_set('color', cols)
         locks.append(o)

@@ -4211,17 +4211,24 @@ def sprite_mode(on):
     """At sprite size the hair's strand relief is finer than a pixel and only adds speckle; the painted strands
     (the detail pass) carry it there instead, so the relief is turned down for the sheet; the iris is drawn larger
     (see below)."""
-    for d in MATERIALS.values():
-        m = bpy.data.materials.get(d['name']) if d['surface'] == 'hair' else None
-        if m is None:
-            continue
+    hair_names = [d['name'] for d in MATERIALS.values() if d['surface'] == 'hair']
+    for m in [m for m in bpy.data.materials if m.name in hair_names
+              or any(m.name.startswith(n + ' ') for n in hair_names)]:
         nt = m.node_tree
+        if 'sprite bsdf' not in nt.nodes or 'hair bsdf' not in nt.nodes:
+            continue
         for n in nt.nodes:
             if n.type == 'BUMP':
                 n.inputs['Strength'].default_value = 0.1 if on else 0.6
-        # (and the sheet is lit from the plain diffuse surface, its tones picked from the palette ramp)
+        # (and the sheet is lit from the plain diffuse surface, its tones picked from the palette ramp; a hair cut-out
+        # wrapped round the close-up surface ('tip cut', a figure's own copy of the hair) is for the 3D view only)
         out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
-        nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
+        cut = nt.nodes.get('tip cut')
+        if on or cut is None:
+            nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
+        else:
+            nt.links.new(nt.nodes['hair bsdf'].outputs['BSDF'], cut.inputs[2])
+            nt.links.new(cut.outputs['Shader'], out.inputs['Surface'])
     # the wool, the gold, the leather, the cloth and the skin, likewise: their close-up surfaces are for the 3D
     # view only
     for name in [d['name'] for d in MATERIALS.values() if d['closeup'] and d['name'] in bpy.data.materials]:
