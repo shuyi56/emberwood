@@ -682,18 +682,21 @@ def review(req, thread, do_smoke=True):
     hair_defs = sorted({d for defs in fresh.values() for d in defs if HAIR.search(d)})
     # (measured on the figure the first job builds, and compared only with that figure's last measurement: a branch
     # that carries two figures has two baselines)
-    first = (todo or facts["jobs"] or [{}])[0]
+    # (a view that hides part of the figure, --hair-only, --only, --hide, --no-body, is no basis for the check: with
+    # the clothes hidden nothing can come through the hair and the hair's hidden parts count as flags)
+    whole = [j for j in (todo or facts["jobs"]) if not re.search(r"--(hair-only|only|hide|no-body)\b", j.get("param") or "")]
+    first = (whole or [{}])[0]
     m = re.search(r"--figure\s+(\w+)", first.get("param") or "") or re.search(r"blender/(\w+)/", first.get("param") or "")
     figure_ = m.group(1) if m and m.group(1) != "base" else "ranger"
     hair_key = f"{branch}#{figure_}"
-    hair_dir = os.path.join(HAIR_DIR, f"{tip[:9]}-{merged[:9]}-{figure_}") if hair_defs else None
+    hair_dir = os.path.join(HAIR_DIR, f"{tip[:9]}-{merged[:9]}-{figure_}") if hair_defs and whole else None
     if hair_dir and not todo and not rep.blocked and do_smoke and not os.path.exists(os.path.join(hair_dir, "hair-check.json")) \
             and facts["jobs"]:
-        todo.append(facts["jobs"][0])          # the renders are cached, but this hair was never measured
+        todo.append(first)          # the renders are cached, but this hair was never measured
     if do_smoke and todo:
         with concurrent.futures.ThreadPoolExecutor(3) as ex:
             for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"],
-                                                           hair_dir if j is todo[0] else None), todo)):
+                                                           hair_dir if j is first else None), todo)):
                 j["smoke"] = res
                 faults = [ln for ln in res.get("lock_lines", []) if " clean (" not in ln]
                 if faults:
