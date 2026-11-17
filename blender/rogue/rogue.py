@@ -22,6 +22,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'base'))
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
 from mathutils import Vector, Matrix  # noqa: E402
@@ -30,18 +31,28 @@ from female import _profile, _gs, _torso_dims, _perlin2  # noqa: E402,F401
 import female  # noqa: E402
 
 # ---------------------------------------------------------------- her face
-# Designed in the face creator (/mnt/project-files/face-creator) on the base head: leaner than the ranger, with
-# high, sharp cheekbones over a hollow, a narrower jaw with a firmer edge, a neat pointed chin, a finer nose and a
-# thinner upper lip whose corners lift into a half-smile; the eyes a touch narrower and more tilted, a sly look.
+# Designed in the face creator (/mnt/project-files/face-creator, the head preset "Rogue") on the base head: a narrow,
+# heart-shaped face, a slim jaw running in to a neat tapered chin, high cheekbones over a hollow with the cheeks a
+# little plumper under them, a finer nose, a thinner upper lip whose corners lift into a half-smile; the eyes narrower
+# and more tilted, a sly look.
 female.FACE.update({
-    'jawWidth': -0.07, 'jawDef': 1.5, 'jawSharp': 0.6, 'jawAngle': 0.3, 'chinProj': 1.2, 'chinWidth': 0.88,
-    'cheekWidth': -0.02, 'cheekbones': 1.6, 'cbHeight': 0.008, 'apples': 0.8, 'cheekFull': 0.55,
-    'noseProj': 1.05, 'noseWidth': 0.92, 'tipBall': 0.8, 'nostrils': 0.85,
-    'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 0.85, 'lipLower': 0.95, 'smile': 1.6,
+    'jawWidth': -0.1, 'jawDef': 1.6, 'jawSharp': 1.0, 'jawAngle': 0.2, 'jawUnder': 0.1, 'chinProj': 1.3, 'chinWidth': 0.82,
+    'chinHeight': 1.06, 'chinTaper': 0.3, 'cheekWidth': -0.01, 'cheekbones': 1.8, 'cbHeight': 0.014, 'apples': 0.9,
+    'cheekFull': 0.8, 'noseProj': 1.15, 'noseWidth': 0.88, 'noseLen': 0.005, 'tipBall': 0.65, 'nostrils': 0.8,
+    'browRidge': 1.1, 'sockets': 1.08, 'eyeSpacing': 0.137, 'mouthWidth': 0.95, 'lipUpper': 0.82, 'lipLower': 1.0, 'smile': 1.6,
 })
-female.EYE_OPEN = 0.68
-female.EYE_TILT = 0.105
+female.EYE_OPEN = 0.66
+female.EYE_TILT = 0.13
 female.EARS = True       # (her hair is drawn back into the tail, so they show)
+import ear  # noqa: E402
+ear.EAR_SU, ear.EAR_SV = 0.92 * 0.8, 0.78 * 0.8   # her ears a fifth smaller than the shared layout
+female.UNDER_JAW_SHADE = (0.0, 1.6, 0.75)   # (spread over the whole soft turn under her jaw: kept to the edge, it drew a line there)
+# makeup, from the face creator (Rogue preset: blush 0.35 '#d0766a', lipstick 0.6 '#a5434c', gloss 0.35)
+female.BLUSH = (0.35, (208, 118, 106))
+female.LIP_COLOURS = {'MID': [170, 82, 84], 'UP': [166, 77, 82], 'HI': [177, 90, 91], 'DEEP': [153, 65, 72]}
+female.LIP_GLOSS = 0.35
+female.SKIN_FRECKLES = 0.3      # (a light dusting, and the skin's colour much more even than the ranger's)
+female.SKIN_NOISE = 0.35
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
@@ -917,19 +928,23 @@ def build_hair(head, head_tree):
     N = len(path)
 
     def tail_r(i, a):
-        # the tail's body, under its clumps: a little slimmer than the tail, so the clumps make its outline
+        # the tail's body, under its clumps: a little slimmer than the tail, so the clumps make its outline (with
+        # the locks, a slim core: the shade inside the tail, seen between them)
         r, rd = tail_radius(i / (N - 1))
-        return r * 0.78, rd * 0.72
+        return (r * 0.55, rd * 0.55) if LOCKS else (r * 0.78, rd * 0.72)
     mesh_obj('Hair tail', sweep(path, tail_r, n=28), M_HAIR, head, subdiv=0)
     if not FUSE:          # (for checking the pieces before they are melted together)
         return None
     TIE.pop('wisps', None)
-    wisps = temple_wisps(head_tree, 1) + temple_wisps(head_tree, -1)
+    wisps = [] if LOCKS else temple_wisps(head_tree, 1) + temple_wisps(head_tree, -1)
     hair = fuse_parts(head, ['Hair cap', 'Hair tail'] + wisps)
     fine_streaks(hair)
     paint_hair(hair)
     scalp_paint(head, head_tree)
-    tail_clumps(head, path, lens)
+    if LOCKS:
+        lock_hair(head, head_tree, path)
+    else:
+        tail_clumps(head, path, lens)
     # the tie: a leather thong wound round the root of the tail, in three turns
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
     seg = path[max(0, k_tie - 4):k_tie + 6]
@@ -940,6 +955,58 @@ def build_hair(head, head_tree):
         return r, r * 0.85
     mesh_obj('Hair tie', sweep(seg, tie_r, n=24), M_BELT, head, subdiv=1)
     return hair
+
+
+# The fringe, the face-framing locks and the tail built as locks, as the face creator builds the Rogue's hair
+# (HAIR_STYLES.ponytail; see docs/hair-building-guide.md and blender/shared/locks.py). LOCKS = False goes back to the
+# pulled-back hair with the fused temple wisps and the tail's clumps (views.py --set LOCKS=False).
+LOCKS = True
+
+
+def lock_hair(head, head_tree, path):
+    """The swept fringe with its hooked centre locks, the face-framing locks at the temples (locks.rogue_bangs), laid
+    on the fused hair, and the tail as a hierarchy of locks round its core (locks.tail_locks)."""
+    import locks as L
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    hair_tree = body_tree(dg, ('Hair',), Vector((0, 0, HEAD_Z)))
+    hc = Vector(L.HC)
+
+    def cast(tree, d):
+        hit = tree.ray_cast(hc + d * 20.0, -d, 19.9)
+        return (hit[0] - hc).length if hit[0] is not None else None
+
+    def surface(d):
+        d = Vector(d)
+        scalp = cast(head_tree, d) or 4.0
+        outer = cast(hair_tree, d)
+        return scalp, max(scalp, outer) if outer is not None else scalp
+
+    strands, guides = L.rogue_bangs(surface)
+    L.report('rogue fringe', strands, guides, surface, *L.ribbons(strands))
+    N = len(path)
+    k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
+    tail, tones = L.tail_locks([tuple(p) for p in path], tail_radius, k_tie)
+    for name, parts, seg, tn in (('Hair fringe', strands, 6, None), ('Hair tail locks', tail, 10, tones)):
+        verts, faces, normals, info = L.ribbons(parts, seg=seg)
+        bm = bmesh.new()
+        L.to_bmesh(bm, verts, faces)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        # (the pattern laid as on the hair they lie on, hair_rest: a lock's own coordinates gave its strands a
+        # pattern of their own, finer than the cap's, which glittered against it)
+        o = mesh_obj(name, bm, M_HAIR, head, subdiv=0, rest=hair_rest)
+        if tn is None:
+            o.data.normals_split_custom_set_from_vertices([Vector(n_) for n_ in normals])
+            o.visible_shadow = False      # (fine strands throw no shadow of their own; see the ranger's bangs)
+        strand_colours(o)
+        if tn is not None:      # (each secondary lock its own tone, as the face creator tints them)
+            sc = o.data.color_attributes['strands']
+            cols = [0.0] * (4 * len(sc.data))
+            sc.data.foreach_get('color', cols)
+            for v_, (k, _u, _c) in enumerate(info):
+                for ch in range(3):
+                    cols[4 * v_ + ch] *= tn[k]
+            sc.data.foreach_set('color', cols)
 
 
 def fuse_parts(head, names, voxel=0.065):

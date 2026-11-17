@@ -12,7 +12,8 @@ const ROSTER = [
   // hairstyle choice (the painted spec is only the fallback if the render is missing)
   { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle, modelled in 3D', spec: { ...RANGER, hairStyle: null }, rendered: 'blender/ranger/ranger-blender.png', model: 'models/ranger.glb' },
   { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC },
-  { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger', spec: ROGUE }
+  // the rogue is modelled in Blender too (blender/rogue/): the world shows public/models/rogue.glb, from her export_glb.py
+  { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger, modelled in 3D', spec: ROGUE, model: 'models/rogue.glb' }
 ];
 const DEFAULT_MEMBERS = ['knight', 'mage', 'ranger'];
 const STORE = 'emberwood.party';

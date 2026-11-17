@@ -12,6 +12,8 @@
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
+--hair-only  with --turn or --head: only the hair is rendered (every mesh in the hair material, and the tie);
+           the rest of the figure is still built, so the hair lies as it does on her
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
 
 Rendering pieces on their own (any of the views above):
@@ -92,7 +94,18 @@ def look_3d(samples):
     female.sprite_mode(False)
     sc.render.use_persistent_data = False
     sc.cycles.samples = samples
-    sc.cycles.use_denoising = False
+    # (denoised: at these samples the skin's random-walk subsurface scattering and the fine hair strands came out
+    # as grain, the skin reading as noise)
+    sc.cycles.use_denoising = True
+    if hasattr(sc.cycles, 'denoiser'):
+        sc.cycles.denoiser = 'OPENIMAGEDENOISE'
+    # (guided by the albedo and normal passes, prefiltered accurately: the denoiser then keeps what is really on the
+    # surface, the freckles and make-up in the colour and the pores and fine creases in the bump, and removes only
+    # the sampling grain; unguided it smoothed them away with the grain)
+    if hasattr(sc.cycles, 'denoising_input_passes'):
+        sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
+    if hasattr(sc.cycles, 'denoising_prefilter'):
+        sc.cycles.denoising_prefilter = 'ACCURATE'
     sc.cycles.max_bounces = 4
     sc.cycles.transparent_max_bounces = 16     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
@@ -259,6 +272,17 @@ def main():
         sc.frame_set(int(opt('--frame', 0)) + 1)
         size = int(opt('--size', 360))
         cam = look_3d(int(opt('--samples', 32)))
+        if '--hair-only' in argv:
+            hair = F.MATERIALS[F.M_HAIR]['name']
+            kept = []
+            for o in sc.objects:
+                if o.type != 'MESH':
+                    continue
+                if any(sl.material and sl.material.name == hair for sl in o.material_slots) or o.name.startswith('Hair'):
+                    kept.append(o.name)
+                else:
+                    o.hide_render = True
+            print('hair only:', ', '.join(sorted(kept)), flush=True)
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
             for look in ('', '-clay') if '--clay' in argv else ('',):

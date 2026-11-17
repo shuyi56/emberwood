@@ -13,6 +13,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import bpy  # noqa: E402
 import ranger  # noqa: E402
 import female  # noqa: E402  (the base figure, on the path once ranger is imported)
@@ -511,6 +512,9 @@ def main():
     for name, ratio in (('Hair', 0.11), ('Head shape', 0.4)):
         d = bpy.data.objects[name].modifiers.new('lighter', 'DECIMATE')
         d.ratio = ratio
+    # (and the locks kept on top of what was thinned: see glb_locks)
+    import glb_locks
+    glb_locks.lift_locks(['Bangs -1', 'Bangs 1'], ['Hair', 'Head shape'])
     # the solid brows are for the sprites only: the model has the painted ones
     for o in [o for o in bpy.data.objects if o.name.startswith('Brow tube')]:
         bpy.data.objects.remove(o, do_unlink=True)

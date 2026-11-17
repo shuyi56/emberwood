@@ -904,13 +904,13 @@ def skin_surface(nt, bsdf, out):
     # blotches (redder or sallower), then a fine speckle of lighter and darker
     blotch = tex('ShaderNodeTexNoise', 1.3)
     blotch.inputs['Detail'].default_value = 2.0
-    c = tint(col.outputs['Color'], [206, 124, 110], ramp_(blotch.outputs['Fac'], 0.52, 0.8, 0.0, 0.22))
-    c = tint(c, [212, 176, 128], ramp_(blotch.outputs['Fac'], 0.48, 0.2, 0.0, 0.2))
+    c = tint(col.outputs['Color'], [206, 124, 110], ramp_(blotch.outputs['Fac'], 0.52, 0.8, 0.0, 0.22 * SKIN_NOISE))
+    c = tint(c, [212, 176, 128], ramp_(blotch.outputs['Fac'], 0.48, 0.2, 0.0, 0.2 * SKIN_NOISE))
     fine = tex('ShaderNodeTexNoise', 9.0)
     fine.inputs['Detail'].default_value = 3.0
     fine.inputs['Roughness'].default_value = 0.65
     # (and the grooves and pores hold a little shade)
-    k = math_('MULTIPLY', ramp_(fine.outputs['Fac'], 0.25, 0.75, 0.92, 1.06, smooth=False),
+    k = math_('MULTIPLY', ramp_(fine.outputs['Fac'], 0.25, 0.75, 1 - 0.08 * SKIN_NOISE, 1 + 0.06 * SKIN_NOISE, smooth=False),
               math_('SUBTRACT', math_('MULTIPLY_ADD', net, 0.025, 0.975), math_('MULTIPLY_ADD', pit, 0.1, math_('MULTIPLY', fold, 0.12))))
     sc_ = node('ShaderNodeVectorMath', operation='SCALE')
     L(c, sc_.inputs[0])
@@ -1035,7 +1035,12 @@ def skin_tones():
                              + 0.8 * _g(u, w, 0, 0.35, 0.05, 0.045) + 0.35 * _g(u, w, 0, 0.085, 0.07, 0.05)
                              + 0.3 * _g(u, w, 0, 0.66, 0.12, 0.05))
             cold = front * 0.8 * (_g(u, w, -0.14, 0.47, 0.065, 0.025) + _g(u, w, 0.14, 0.47, 0.065, 0.025))
-            cold += np.clip(-nr[:, 2] - 0.25, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * 1.1   # under the jaw
+            # blush (makeup, BLUSH): a soft wash over the apples of the cheeks, where the face creator lays it
+            blush = np.clip(0.55 * BLUSH[0] * front * (_g(u, w, -0.2, 0.375, 0.085, 0.055)
+                                                       + _g(u, w, 0.2, 0.375, 0.085, 0.055)), 0, 1)
+            # under the jaw (UNDER_JAW_SHADE: where it starts on the turn under, over how much of it, and how cool)
+            j0, jr, ja = UNDER_JAW_SHADE
+            cold += np.clip((-nr[:, 2] - j0) / jr, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * ja
             cold += np.clip((0.02 - w) / 0.1, 0, 1) * 0.7        # and down the throat, in the head's shade
             gloss = front * (_g(u, w, 0, 0.43, 0.04, 0.15) + 0.7 * _g(u, w, 0, 0.085, 0.06, 0.05)
                              + 0.5 * _g(u, w, 0, 0.66, 0.15, 0.06))
@@ -1098,6 +1103,9 @@ def skin_tones():
         flush, cold, gloss = np.clip(flush, 0, 1), np.clip(cold, 0, 1), np.clip(gloss, 0, 1)
         c = base[None, :] * np.ones((n, 1))
         c = c + (flushc - base)[None, :] * (0.6 * flush)[:, None]
+        if o.name == 'Head shape' and BLUSH[0] > 0:
+            c = c + (np.array(_srgb_lin(BLUSH[1])) - c) * blush[:, None]
+            flush = np.clip(flush + blush, 0, 1)      # (and the sprite's rosier ramp)
         c = c + (cool - c) * (0.5 * cold)[:, None]
         # shut in: darker and warmer (a reddened shade rather than a grey one)
         k = np.clip(occ * 1.3, 0, 1)[:, None]
@@ -1109,8 +1117,9 @@ def skin_tones():
         # world model, whose skin is only this colour)
         from mathutils import noise
         drift = np.array([noise.noise(Vector(q) * 0.75 + Vector((3.1, 7.7, 1.3))) for q in rest_of(o, co)])
-        c = c + (_srgb_lin([206, 124, 110]) - c) * np.clip(drift, 0, 1)[:, None] * 0.3
-        c = c + (_srgb_lin([212, 176, 128]) - c) * np.clip(-drift, 0, 1)[:, None] * 0.3
+        c = c + (_srgb_lin([206, 124, 110]) - c) * np.clip(drift, 0, 1)[:, None] * 0.3 * SKIN_NOISE
+        c = c + (_srgb_lin([212, 176, 128]) - c) * np.clip(-drift, 0, 1)[:, None] * 0.3 * SKIN_NOISE
+        freck = freck * SKIN_FRECKLES
         for name, rgb in (('skin', c), ('skin fx', np.stack([flush, shade, gloss], 1)),
                           ('skin tex', np.stack([freck, crease, pores], 1))):
             a = me.color_attributes.new(name, 'FLOAT_COLOR', 'POINT')
@@ -1247,6 +1256,20 @@ GAIT, ARM_SWING = 1.0, 0.2
 # The face's shape, as the face creator's sliders (/mnt/project-files/face-creator): multipliers on face_relief's,
 # mouth_relief's and jaw_relief's forms, and offsets on the head's width and a few features' heights. These defaults
 # are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
+# the cool shade on the underside of the jaw (skin_tones): it begins where the surface turns down past j0 (the
+# normal's downward part), reaches full over jr more of the turn, and goes ja cool. A figure with a softly turned jaw
+# spreads it, so it does not draw a line along the jaw's edge.
+UNDER_JAW_SHADE = (0.25, 1.0, 1.1)
+# makeup, as the face creator sets it (all off for the ranger): BLUSH is the creator's (blush, blushTone), a rosy
+# wash over the apples of the cheeks; LIP_COLOURS its exported MID/UP/HI/DEEP lip tones (lipstick mixed in), over
+# the natural lip in lip_painting; LIP_GLOSS its lipGloss, which takes the lip paint's roughness down
+BLUSH = (0.0, (215, 122, 124))
+LIP_COLOURS = {}
+LIP_GLOSS = 0.0
+# how much of the skin's freckles, and of its uneven colour (redder or sallower blotches, the fine speckle), she has:
+# 1 is the ranger's
+SKIN_FRECKLES = 1.0
+SKIN_NOISE = 1.0
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
 FACE = {
     'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
@@ -3479,7 +3502,7 @@ def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     tex.extension = 'EXTEND'
     nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
     nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
-    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
+    p.inputs['Roughness'].default_value = 0.55 - 0.2 * LIP_GLOSS      # (0.42 read as wet lipstick)
     p.inputs['Specular IOR Level'].default_value = 0.3
     nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
     m.surface_render_method = 'BLENDED'
