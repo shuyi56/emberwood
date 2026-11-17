@@ -79,7 +79,11 @@ def look_3d(samples):
     female.sprite_mode(False)
     sc.render.use_persistent_data = False
     sc.cycles.samples = samples
-    sc.cycles.use_denoising = False
+    # (denoised: at these samples the skin's random-walk subsurface scattering and the fine hair strands came out
+    # as grain, the skin reading as noise)
+    sc.cycles.use_denoising = True
+    if hasattr(sc.cycles, 'denoiser'):
+        sc.cycles.denoiser = 'OPENIMAGEDENOISE'
     sc.cycles.max_bounces = 4
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
     sc.cycles.filter_width = 1.5

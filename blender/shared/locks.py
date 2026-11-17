@@ -143,17 +143,18 @@ def out_axes(path, hc=HC):
     return O
 
 
-def veil(path, O, width_at, sink=0.012, end=0.82):
+def veil(path, O, width_at, sink=0.012, end=0.97):
     """The sheer layer under a lock (hairVeil in the face creator, step 4 of the hair guide): one thin, wide ribbon
     of hair just under the strands, fading in at the root and narrowing out before the strands end, so the gaps
     between the strands show hair, not skin. (Solid here: the exported model has no see-through hair, so it sits
-    under the strands and is narrower than the face creator's.)"""
+    under the strands and is narrower than the face creator's; it runs nearly to the strand ends, where they part,
+    or skin showed between the tips.)"""
     n, S = len(path), []
     for q in range(n):
         T = norm(sub(path[min(n - 1, q + 1)], path[max(0, q - 1)]))
         ax = norm(cross(T, O[q]))
         u = q / (n - 1)
-        w = width_at(u) * (0.25 + 0.75 * sm(0.0, 0.12, u)) * (1 - sm(end - 0.25, end, u)) + 0.002
+        w = width_at(u) * (0.25 + 0.75 * sm(0.0, 0.12, u)) * (1 - 0.85 * sm(end - 0.3, end, u)) + 0.002
         S.append((sub(path[q], scl(O[q], sink)), ax, O[q], w, 0.01, u))
     return S
 
@@ -268,7 +269,7 @@ def check_locks(locks, surface, hc=HC, hairline=None):
     return out
 
 
-def ranger_bangs(surface, s, frame=True):
+def ranger_bangs(surface, s, frame=True, lift_k=0.55):
     """One side of the Ranger's curtain bangs (the face creator's rangerBangs): curtain locks in two staggered
     layers, rooted beside the centre parting, lifting off the brow in a C and falling back to the skin below it,
     the inner edge of the opening concave; one wide cover lock over them; and, with frame, four long locks framing
@@ -288,7 +289,9 @@ def ranger_bangs(surface, s, frame=True):
             K = [(th0, 1.05, 0.08), (lerp(th0, thT, 0.05), 0.88, 0.4 + 0.3 * ea + dl), (lerp(th0, thT, 0.17) + jit, 0.7, 0.62 + 0.5 * ea + dl),
                  (lerp(th0, thT, 0.4), lerp(0.62, elT, 0.4), 0.4 + 0.25 * ea + dl),
                  (lerp(th0, thT, 0.78) + jit, lerp(0.62, elT, 0.78), 0.22 + 0.08 * ea + 0.5 * dl), (thT + jit, elT, 0.08 + 0.3 * dl)]
-            path, O = guide(K, surface, 0.02 * ly + 0.01 * (i % 3), ride=(0.12, 0.03 + 0.03 * ly + 0.015 * (i % 3)))
+            # (lift_k: the 3D Ranger's bangs lie closer than the face creator's; at full lift they puffed off the brow)
+            K = [(a, b, c * lift_k) for a, b, c in K]
+            path, O = guide(K, surface, 0.02 * ly + 0.01 * (i % 3), ride=(0.12, 0.03 + 0.03 * ly + 0.015 * (i % 3)), smooth=6)
             w0 = lerp(0.36, 0.46, t)
             guides.append((f'curtain {s} {ly}.{i}', path))
             strands += clump(path, O, lambda u, w0=w0: w0 * 1.1 * (0.55 + 0.45 * sm(0, 0.3, u)), 7,
@@ -297,7 +300,8 @@ def ranger_bangs(surface, s, frame=True):
     th0, thT, elT = s * 0.14, s * 1.06, -0.45
     K = [(th0, 1.05, 0.12), (lerp(th0, thT, 0.12), 0.88, 0.62), (lerp(th0, thT, 0.35), 0.68, 0.8), (lerp(th0, thT, 0.6), lerp(0.6, elT, 0.4), 0.56),
          (lerp(th0, thT, 0.86), lerp(0.6, elT, 0.78), 0.3), (thT, elT, 0.12)]
-    path, O = guide(K, surface, 0.06, ride=(0.12, 0.12))
+    K = [(a, b, c * lift_k) for a, b, c in K]
+    path, O = guide(K, surface, 0.06, ride=(0.12, 0.07), smooth=6)
     guides.append((f'cover {s}', path))
     strands += clump(path, O, lambda u: 0.75 * (0.55 + 0.45 * sm(0, 0.3, u)), 11, 940 + (50 if s > 0 else 0), tip=0.26)
     # the temple: without the framing locks the skin between the bangs and the side hair showed (check_cover), so a
