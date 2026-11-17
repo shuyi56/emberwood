@@ -707,7 +707,7 @@ def review(req, thread, do_smoke=True):
             and facts["jobs"]:
         todo.append(first)          # the renders are cached, but this hair was never measured
     if do_smoke and todo:
-        with concurrent.futures.ThreadPoolExecutor(3) as ex:
+        with concurrent.futures.ThreadPoolExecutor(2) as ex:
             for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"],
                                                            hair_dir if j is first else None), todo)):
                 j["smoke"] = res

@@ -148,3 +148,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Warden head turn, 37f53b3 and c75919e (2026-11-17): the reviewer itself added a second command, the same views with or without --clay, to get both looks. views.py --clay renders the lit views first and then the clay ones (turn.png, head.png, turn-clay.png, head-clay.png), so the pair built the figure twice and rendered the lit views twice. The queue caught it and dropped the duplicate.
 - **Spot:** Two commands in "views" that are equal once --clay is taken out.
 - **Fix:** Keep only the --clay command. To add clay to a request, add the flag to the existing command; never add a second command.
+
+## P023 A build killed for memory, read as a crash
+
+- **Seen:** Creator faces on the Warden, 44308e5 (2026-11-17): five Warden builds ran side by side in the review (four views of one request and one of another). Each peaks near 7 GB, the container has 15 GB, and two were killed (exit 137, the log ends in "Killed" with no traceback). The review reported them as build failures. Rerun two at a time, both passed.
+- **Spot:** Exit 137 or a bare "Killed" as the last log line, with no Python traceback. dmesg shows "Memory cgroup out of memory".
+- **Fix:** Never send this back as a broken build. Rerun the killed views with nothing else building (the review now runs two builds at a time, and a second review must wait for the first). Tell the queue the build's peak so it does not run three side by side, and tell the requester when one build passes about 5 GB.
