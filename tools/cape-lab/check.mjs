@@ -9,6 +9,11 @@
 //  - settle: after she stops, how long until the hem stays within 1 unit of where it comes to rest
 //  - frame rate: the hem at 30 and 144 fps against 60, over the start-and-stop (units, largest gap)
 //  - clearance: the closest any tail comes to the body's capsules (negative is inside)
+//  - cloth in body: the deepest any vertex of the skinned cape (below the shoulders) goes into a body capsule
+//    through the sharp turns, where an arm or a leg would show through
+//  - jitter: how much the cape shakes from frame to frame (the mean size of each tail's third difference over
+//    frames, in her own space: a smooth swing, however fast, scores low; a flicker scores high)
+import * as THREE from 'three';
 import { CapeSim, FRAME, CYCLE_FRAMES } from '../../src/cape-lab/sim.js';
 import { CAPE_SETTINGS } from '../../src/world/cape-rig.js';
 
@@ -86,6 +91,47 @@ function gap(fps) {
   }
   return g;
 }
+// cloth in body, through the turns
+function clothInBody() {
+  const s = sim('turn');
+  const mesh = s.dummy.cape.mesh, pos = mesh.geometry.attributes.position, v = new THREE.Vector3();
+  let worst = 0;
+  for (let f = 0; f < 7 * 60; f++) {
+    s.step();
+    if (f % 2) continue;
+    mesh.skeleton.update();
+    for (const c of s.springs.colliders) c.refresh();
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) > 45) continue;          // the band over the shoulders sits on them by design
+      v.fromBufferAttribute(pos, i);
+      mesh.boneTransform(i, v);
+      v.applyMatrix4(mesh.matrixWorld);
+      for (const c of s.springs.colliders) {
+        const ab = c.wb.clone().sub(c.wa);
+        const t = Math.min(1, Math.max(0, v.clone().sub(c.wa).dot(ab) / Math.max(1e-9, ab.lengthSq())));
+        worst = Math.max(worst, c.radius * c.scale - v.distanceTo(c.wa.clone().addScaledVector(ab, t)));
+      }
+    }
+  }
+  return worst;
+}
+function jitter(scenario, secs) {
+  const s = sim(scenario);
+  const hist = [];
+  let sum = 0, n = 0;
+  for (let f = 0; f < secs * 60; f++) {
+    s.step();
+    hist.push(s.tails());
+    if (hist.length > 4) hist.shift();
+    if (hist.length < 4) continue;
+    const [a, b, c, d] = hist;
+    for (let i = 0; i < a.length; i++) {
+      sum += d[i].clone().sub(c[i].clone().multiplyScalar(3)).add(b[i].clone().multiplyScalar(3)).sub(a[i]).length();
+      n++;
+    }
+  }
+  return sum / n;
+}
 const report = {
   loopDrift: +w.drift.toFixed(4),
   walkSwingDeg: +walkSwing.toFixed(1),
@@ -94,5 +140,9 @@ const report = {
   fps30Gap: +gap(30).toFixed(2),
   fps144Gap: +gap(144).toFixed(2),
   minClearance: +minClear.toFixed(2),
+  clothInBody: +clothInBody().toFixed(2),
+  jitterWalk: +jitter('walk', 4).toFixed(3),
+  jitterStartStop: +jitter('startstop', 6).toFixed(3),
+  jitterTurn: +jitter('turn', 7).toFixed(3),
 };
 console.log(JSON.stringify(report, null, 2));

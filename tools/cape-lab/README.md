@@ -29,18 +29,28 @@ over 30 radians a second), which is the hardest case for the cape.
     node tools/cape-lab/check.mjs [--settings '{"damping":0.25}'] [--columns 7 --rows 6]
 
 `capture.mjs` writes a GIF, a sheet of 8 frames and the frames themselves for each motion and view. `check.mjs`
-runs the same simulation in node in half a second and prints the loop drift (how far the cape is from where it
-was one walk cycle earlier; 0 means it repeats exactly), the hem's largest swing walking and turning, how long it
-takes to settle after a stop, how far the hem lands at 30 and 144 fps from where it does at 60, and how close
-any bone comes to the body's capsules.
+runs the same simulation in node in a few seconds and prints:
+
+- the loop drift (how far the cape is from where it was one walk cycle earlier; 0 means it repeats exactly);
+- the hem's largest swing walking and turning, and how long it takes to settle after a stop;
+- how far the hem lands at 30 and 144 fps from where it does at 60;
+- how close any bone comes to the body's capsules, and how deep any vertex of the cloth goes into them through
+  the sharp turns (where an arm would show through);
+- the jitter: the mean frame-to-frame jerk of the cape walking, starting and stopping, and turning.
+
+Corrections that move the cloth (collisions, the swing limit, sheet bend) are applied to its last position too,
+so they never add speed. On reset the cloth settles against the body for a second of steps without gaining
+speed, so it doesn't jump on the first frames.
 
 What the settings do, from sweeps with `check.mjs`:
 
 - Damping is the main control for sway (0.1 keeps swinging 2 s after a stop; 0.3 settles in about 0.6 s).
 - Follow turns stops the game's snap turns from slinging the cape: at 0 the hem swings 110° in a reversal, at
   0.5 about 45°.
-- Sheet bend keeps the hem a smooth curve instead of a jagged edge with points at each column. Above about 0.6 it
-  starts to feed energy into the cloth and goes unstable.
+- Sheet bend keeps the hem a smooth curve instead of a jagged edge with points at each column. It moves the
+  cloth without adding speed, but above about 0.6 the cape gets stiff and boxy.
+- Soft contact eases the body's push in over a band (2 units) instead of snapping the cloth flat against a leg
+  every step. Hard contact (0) is what made the cape shiver against the legs on every stride.
 - Air drag sets how far it trails while walking. Stiffness hardly matters next to gravity on a cape this long; it
   matters more for short chains such as hair.
 

@@ -26,7 +26,8 @@ export const CAPE_SETTINGS = {
   hitRadius: 0.6,
   linkStiffness: 0.6,
   linkSlack: 0.12,
-  sheetBend: 0.5,
+  sheetBend: 0.3,
+  contactSoftness: 2,
   follow: 0.5,
   maxAngle: 1.25,
 };

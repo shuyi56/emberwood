@@ -154,6 +154,7 @@ const SLIDERS = [
   ['follow', 'Follow turns', 0, 1, 0.01, 'share of her own turning that carries the cloth'],
   ['maxAngle', 'Swing limit', 0.2, 2, 0.01, 'radians from the hang'],
   ['hitRadius', 'Cloth thickness', 0, 3, 0.05, 'gap kept off the body'],
+  ['contactSoftness', 'Soft contact', 0, 4, 0.1, 'band over which the body eases the cloth away'],
   ['colliderScale', 'Collider size', 0.5, 1.5, 0.01, 'scales every body capsule'],
   ['slow', 'Playback speed', 0.1, 1, 0.05, 'slow motion'],
 ];

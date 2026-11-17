@@ -25,7 +25,8 @@
 import * as THREE from 'three';
 
 export const STEP = 1 / 120;          // seconds per solver step
-export const MAX_STEPS = 12;          // at most this many steps per update (0.1 s): a longer frame is dropped
+export const MAX_STEPS = 12;
+const SETTLE_STEPS = 120;             // steps of settling on reset          // at most this many steps per update (0.1 s): a longer frame is dropped
 
 export const DEFAULTS = {
   stiffness: 250,       // pull toward the rest direction (model units / s^2)
@@ -34,6 +35,7 @@ export const DEFAULTS = {
   gravity: 450,         // fall (model units / s^2; 450 is real gravity at 46 units a metre)
   gravityDir: [0, -1, 0],
   hitRadius: 1.0,       // the tail's radius against colliders, in model units
+  contactSoftness: 0,   // the band (model units) over which a collider's push eases in
   linkStiffness: 0.5,   // 0..1: how hard neighbouring chains keep their spacing each step
   linkSlack: 0.15,      // spacing may grow or shrink this share of its rest length freely
   // 0..1: how much each chain's swing is pulled toward its neighbours' at the same row, every step. It makes
@@ -78,19 +80,24 @@ export class Collider {
         .add(_v1.copy(end.offset).applyQuaternion(_qf).multiplyScalar(this.scale));
     }
   }
-  // push point p (world) out to at least `extra` beyond the surface; returns true if it moved
-  push(p, extra) {
+  // push point p (world) out of the surface grown by `extra`. With `soft`, the push eases in over a band `soft`
+  // wide that ends at that surface (it starts half of `soft` outside it, and holds the point on the surface once
+  // it would go deeper), so cloth meets a moving leg smoothly instead of being snapped flat against it every
+  // step. Returns true if it moved.
+  push(p, extra, soft = 0) {
     const ab = _v1.subVectors(this.wb, this.wa);
     const len2 = ab.lengthSq();
     let t = len2 > 1e-9 ? _v2.subVectors(p, this.wa).dot(ab) / len2 : 0;
     t = Math.min(1, Math.max(0, t));
     const c = _v2.copy(this.wa).addScaledVector(ab, t);
     const d = _v3.subVectors(p, c);
-    const r = (this.radius + extra) * this.scale;
+    const band = soft * this.scale, r = (this.radius + extra) * this.scale - band / 2;
     const dist = d.length();
-    if (dist >= r) return false;
+    if (dist >= r + band) return false;
+    const x = r + band - dist;
+    const to = x < band ? dist + x * x / (2 * band) : r + band / 2;
     if (dist < 1e-6) d.set(0, 0, -1); else d.divideScalar(dist);
-    p.copy(c).addScaledVector(d, r);
+    p.copy(c).addScaledVector(d, to);
     return true;
   }
 }
@@ -107,6 +114,7 @@ class Joint {
     this.head = new THREE.Vector3();
     this.prevHead = new THREE.Vector3();
     this.next = new THREE.Vector3();
+    this.pre = new THREE.Vector3();
     this.restDir = new THREE.Vector3();
     this.worldLength = 0;
   }
@@ -171,6 +179,12 @@ export class SpringBones {
     for (const a of this.anchors) a.prev.copy(a.node.matrixWorld);
     if (this.root) this.root.prev.copy(this.root.node.matrixWorld);
     for (const c of this.colliders) { c.refresh(); c.pa.copy(c.wa); c.pb.copy(c.wb); }
+    // let the cloth settle against the body as it stands, without gaining speed, so it doesn't jump on the
+    // first frames
+    for (let k = 0; k < SETTLE_STEPS; k++) {
+      this._step(STEP);
+      for (const ch of this.chains) for (const j of ch.joints) j.prevTail.copy(j.tail);
+    }
     this.acc = 0;
     this.ready = true;
   }
@@ -282,6 +296,8 @@ export class SpringBones {
       }
       // 3. bend as a sheet: blend each chain's swing (its tail away from rest) toward its neighbours'
       this._smooth(r);
+      // (where each tail was before the swing limit and the collisions moved it)
+      for (const ch of this.chains) { const j = ch.joints[r]; if (j) j.pre.copy(j.next); }
       // 4. limit the swing, and collide the whole bone, not only its tail
       for (const ch of this.chains) {
         const j = ch.joints[r];
@@ -301,7 +317,7 @@ export class SpringBones {
           for (const t of BONE_SAMPLES) {
             const q = _q1.copy(head).lerp(p, t);
             const before = _q2.copy(q);
-            for (const c of this.colliders) hit = c.push(q, s.hitRadius) || hit;
+            for (const c of this.colliders) hit = c.push(q, s.hitRadius, s.contactSoftness) || hit;
             p.addScaledVector(q.sub(before), 1 / t);
           }
           p.sub(head).setLength(L).add(head);
@@ -322,7 +338,7 @@ export class SpringBones {
               .addScaledVector(ja.next, wTail / 2).addScaledVector(jb.next, wTail / 2);
             const before = _q2.copy(q);
             let moved = false;
-            for (const c of this.colliders) moved = c.push(q, extra) || moved;
+            for (const c of this.colliders) moved = c.push(q, extra, Lk.a.settings.contactSoftness) || moved;
             if (!moved) continue;
             hit = true;
             const d = q.sub(before).multiplyScalar(1 / wTail);
@@ -339,6 +355,9 @@ export class SpringBones {
       for (const ch of this.chains) {
         const j = ch.joints[r];
         if (!j) continue;
+        // a push by the body or the swing limit is not kept as speed: the cloth comes to rest against the body
+        // instead of bouncing off it every step, which reads as jitter
+        j.prevTail.add(_v1.subVectors(j.next, j.pre));
         j.tail.copy(j.next);
         this._aim(j);
       }
@@ -357,7 +376,10 @@ export class SpringBones {
       if (!k) continue;
       const nb = [off[i - 1], off[i + 1]].filter(Boolean);
       const avg = nb.reduce((a, o) => a.add(o), new THREE.Vector3()).divideScalar(nb.length);
-      js[i].next.addScaledVector(avg.sub(off[i]), k * (nb.length === 1 ? 0.5 : 1));
+      const d = avg.sub(off[i]).multiplyScalar(k * (nb.length === 1 ? 0.5 : 1));
+      js[i].next.add(d);
+      // the same shift to where it was a step ago: the sheet is evened out without being set swinging
+      js[i].prevTail.add(d);
     }
   }
 
