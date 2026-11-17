@@ -20,7 +20,8 @@ clothes, skinning and the walk and idle animations are the Blender export (`blen
    normals over the mouth (MOUTH_ITERS, MOUTH_MAX), so the sculpted folds round it stop drawing a frown in the world's
    light, and leaves out the ears (under her hair) and the hair's unlit veil (flat orange patches at the temples). It drops the face's roughness map (oily patches in the world's light) and checks
    the face's mean colour against the Blender head's skin. It blurs the hair texture across the strands and softens
-   its cut-out tips, which speckled in the world (hairSoft, default 5). Also needs `sharp` (0.33.5). Needs `@gltf-transform/core`,
+   its cut-out tips, which speckled in the world (hairSoft, default 5), and evens out and lifts the hair's shading
+   (HAIR_EVEN 0.85, HAIR_LIFT 0.45: a little of its own colour as emission), which went dark and streaky in the sun. Also needs `sharp` (0.33.5). Needs `@gltf-transform/core`,
    `@gltf-transform/extensions`, `@gltf-transform/functions` (4.1.1) and `meshoptimizer` (0.22.0).
 
 Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator.

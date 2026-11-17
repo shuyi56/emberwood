@@ -3,7 +3,7 @@
 // as exported; the creator's parts go under the Head node, whose frame is the creator's (chin at 0, face toward +z).
 //   node merge-head.mjs ranger.glb creator-head.glb out.glb [headRatio] [hairRatio] [hairSoft]
 // The creator's head is sculpted far finer than the game needs: it is simplified to headRatio of its triangles
-// (default 0.25), its hair strands joined by material; textures come from the export (the face at up to 2048).
+// (default 0.12), its hair strands joined by material, and every texture capped at 1024.
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mergeDocuments, dedup, join, weld, simplifyPrimitive, prune, unpartition } from '@gltf-transform/functions';
@@ -118,6 +118,9 @@ for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitive
 // over the head. Blur the colour across the strands (they run down the texture) so the locks keep their bands but lose
 // the pixel stripes, and soften the cut-out across too, so the tips end in a few clean points instead of a fringe of
 // single-pixel hairs.
+// (hairCut, env HAIR_CUT: where the softened cut-out starts; lower fills the gaps inside the fine strand clumps of the
+// bangs, which at the world's size broke into a dotted, dark speckle)
+const hairCut = +(process.env.HAIR_CUT || 0.15);
 const hairTex = new Set();
 for (const mt of headDoc.getRoot().listMaterials()) if (mt.getAlphaMode() === 'MASK' && mt.getBaseColorTexture()) hairTex.add(mt.getBaseColorTexture());
 for (const t of hairTex) {
@@ -133,9 +136,24 @@ for (const t of hairTex) {
   };
   for (let ch = 0; ch < 3; ch++) { const b = blurRow(data, ch, hairSoft * W / 1024); for (let i = 0; i < W * H; i++) out[i * 4 + ch] = Math.round(0.3 * data[i * 4 + ch] + 0.7 * b[i]); }
   const a = blurRow(data, 3, 2.5 * W / 1024);
-  for (let i = 0; i < W * H; i++) { const v = a[i] / 255, s = Math.min(1, Math.max(0, (v - 0.3) / 0.4)); out[i * 4 + 3] = Math.round(255 * s * s * (3 - 2 * s)); }
+  for (let i = 0; i < W * H; i++) { const v = a[i] / 255, s = Math.min(1, Math.max(0, (v - hairCut) / 0.4)); out[i * 4 + 3] = Math.round(255 * s * s * (3 - 2 * s)); }
   t.setImage(await sharp(out, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer());
   console.log('softened the hair texture', W + 'x' + H);
+}
+// The hair's shading for the world: the creator darkens the locks between one another (their vertex colours) for its
+// own soft light, and in the world, with the sun's hard shading on top, the bangs and the locks under them went dark
+// and streaky. So the locks' shading is pulled most of the way to its mean (hairEven, default 0.85), and the hair gets a little of its own colour
+// back as emission (hairLift, env HAIR_LIFT, default 0.45), which lifts its shadows without flattening the sunlit side.
+const hairLift = +(process.env.HAIR_LIFT || 0.45), hairEven = +(process.env.HAIR_EVEN || 0.85);
+for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitives()) {
+  const mt = pr.getMaterial(), C = pr.getAttribute('COLOR_0');
+  if (!mt || mt.getAlphaMode() !== 'MASK' || !mt.getBaseColorTexture()) continue;
+  if (C && hairEven > 0) {
+    const n = C.getCount(), e = [], mean = [0, 0, 0];
+    for (let i = 0; i < n; i++) { C.getElement(i, e); for (let k = 0; k < 3; k++) mean[k] += e[k] / n; }
+    for (let i = 0; i < n; i++) { C.getElement(i, e); for (let k = 0; k < 3; k++) e[k] = mean[k] + (e[k] - mean[k]) * (1 - hairEven); C.setElement(i, e); }
+  }
+  if (hairLift > 0) { mt.setEmissiveTexture(mt.getBaseColorTexture()); mt.setEmissiveFactor([hairLift, hairLift, hairLift]); }
 }
 await headDoc.transform(join({ keepNamed: false }));
 // the joined hair strands (hundreds of ribbons): thinned along their length, borders free, so they keep their
