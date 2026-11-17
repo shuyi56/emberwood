@@ -808,10 +808,13 @@ def build_throat_plate(body):
     a shield that leaves the ring's curve and comes to lie on the chest, drawing to a soft point. Three raised
     lines run down band and plate in one, studs between them. The collar's fronts lie on the band and are
     stitched down to it."""
-    T = clothes_bvh(('Hair', 'Collar', 'Medallion', 'Clasp', 'Cape'), head=True)
+    T = clothes_bvh(('Hair', 'Collar', 'Medallion', 'Clasp'), head=True)   # (the plate lies over the cape too)
     A = 0.95                 # (the band's half-angle: well in under the collar's fronts, which open at 0.4 to 0.6)
     ZB, ZT = 52.7, 54.0
-    W0, L = 0.6, 2.9         # (the plate's half-angle where it leaves the band, and its length)
+    # the plate is joined to the collar: its top is as wide as the collar's fronts and their foot beside the opening,
+    # at the collar's own radius and height, so its edges run from the collar's lower rim straight down to the point
+    W0, L = 1.05, 3.2
+    ZP, RP = 53.1, 0.14
 
     def ztop(a):
         return ZT - 0.2 * math.exp(-(a / 0.3) ** 2)
@@ -831,53 +834,63 @@ def build_throat_plate(body):
     top = [band(a, 1.0, 0.03) for a in angs[3:-3]]
     mesh_obj('Collar choker edge', tube(top, [0.08] * len(top), flat=1.0, n=8), M_GOLD, body, subdiv=0)
 
-    # the plate hanging from the band
-    prow, pcol = 26, 21
-    front = {}
+    # the plate hanging from the band, as the reference's: a pentagon (a square section going straight down, then
+    # drawn to a point), and behind it a yoke either side joining it to the collar: from the collar's lower rim
+    # beside the opening, its edge runs diagonally in and down to the square section's lower corners
+    prow, pcol = 28, 29
+    SQ, HWP = 0.55, 0.5       # (how far down the square section runs, and the pentagon's half-angle)
+    def w_pent(t):
+        return HWP * (1.0 if t < SQ else (1.0 - t) / (1.0 - SQ)) + 0.01
 
-    def chest(i):
-        if i not in front:
-            t = i / (prow - 1)
-            z = ZB - L * t
-            wd = W0 * (1.0 - t ** 1.7) ** 0.8 + 0.01
-            front[i] = [surf(-(g_neck(0.0)) * math.sin(lerp(-wd, wd, j / (pcol - 1))), z) - 0.22 for j in range(pcol)]
-        return front[i]
+    def w_yoke(t):
+        return lerp(W0, HWP, min(1.0, t / SQ)) + 0.01
 
-    def plate(i, j, out=0.0):
+    def plate(i, j, out=0.0, wf=w_pent):
+        """(a smooth surface, with no ray casts in it: the ring's curve where it leaves the collar, coming forward
+        as it falls to lie a little off the tabard over the chest)"""
         t = i / (prow - 1)
         u = lerp(-1.0, 1.0, j / (pcol - 1))
-        z = ZB - L * t
-        a = u * (W0 * (1.0 - t ** 1.7) ** 0.8 + 0.01)
-        r = g_neck(a) + 0.02
+        z = ZP - L * t
+        a = u * wf(t)
+        r = g_neck(a) + RP
         x, yr = -r * math.sin(a), GC_Y - r * math.cos(a)
-        row = chest(i)
-        curve = yr - (GC_Y - (g_neck(0.0) + 0.02))            # (how far the ring curves back at this point)
-        lie = min(row[j], min(row) + 0.75 * curve)
-        sdown = smoothstep(0.0, 0.45, t)
-        y = lerp(yr, lie, sdown)
-        if t > 0.12:
-            y = min(y, row[j])
+        curve = yr - (GC_Y - (g_neck(0.0) + RP))             # (how far the ring curves back at this point)
+        hw = tab_hw(z) - 0.05
+        lie = tab_y(max(-hw, min(hw, 0.0)), z) - 0.3 + 0.75 * curve
+        # (a soft minimum: the ring above, the chest below, eased into each other)
+        d = yr - lie
+        y = min(yr, lie) - 0.12 * math.exp(-(d / 0.35) ** 2)
         return Vector((x, y - out, z))
-    mesh_obj('Collar plate', face_out(grid(prow, pcol, plate)), M_COLLAR, body, solid=0.08, subdiv=1)
-    edge = [plate(i, 0, 0.04) for i in range(prow)] + [plate(i, pcol - 1, 0.04) for i in reversed(range(prow - 1))]
+    yrow = int(SQ * (prow - 1)) + 1
+    mesh_obj('Collar yoke', face_out(grid(yrow, pcol, lambda i, j: plate(i, j, 0.0, w_yoke))), M_COLLAR, body, solid=0.08,
+             subdiv=1)
+    for jj, nm in ((0, 'a'), (pcol - 1, 'b')):
+        ye = [plate(i, jj, 0.03, w_yoke) for i in range(yrow)]
+        mesh_obj(f'Collar yoke edge {nm}', tube(ye, [0.07] * len(ye), flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    mesh_obj('Collar plate', face_out(grid(prow, pcol, lambda i, j: plate(i, j, 0.12))), M_COLLAR, body, solid=0.08, subdiv=1)
+    edge = [plate(i, 0, 0.16) for i in range(prow)] + [plate(i, pcol - 1, 0.16) for i in reversed(range(prow - 1))]
     mesh_obj('Collar plate edge', tube(edge, [0.08] * len(edge), flat=1.0, n=8), M_GOLD, body, subdiv=0)
-    # the three raised lines, down the band and on down the plate
-    for u in (-0.45, 0.0, 0.45):
-        jj = round((u + 1.0) / 2.0 * (pcol - 1))
-        ln = [band(u * W0, v, 0.04) for v in (0.95, 0.75, 0.5, 0.25, 0.05)]
-        ln += [plate(i, jj, 0.05) for i in range(1, prow - (2 if u == 0.0 else 7))]
-        mesh_obj(f'Collar line {u}', tube(ln, [0.045] * len(ln), flat=1.0, n=6), M_GOLD, body, subdiv=0)
-    st = [band(sg * 0.14, v, 0.06) for sg in (-1, 1) for v in (0.3, 0.7)]
-    st += [plate(i, round((sg * 0.72 + 1.0) / 2.0 * (pcol - 1)), 0.08) for sg in (-1, 1) for i in (4, 9, 14)]
-    mesh_obj('Collar plate studs', dots(st, 0.15), M_GOLD, body, subdiv=0)
+    # studs in pairs down the middle of the plate, as the reference's, and a pair on the band
+    jl, jr = round(0.36 * (pcol - 1)), round(0.64 * (pcol - 1))
+    st = [band(sg * 0.14, 0.5, 0.06) for sg in (-1, 1)]
+    st += [plate(i, jj, 0.2) for i in (3, 8, 13, 18) for jj in (jl, jr)]
+    mesh_obj('Collar plate studs', dots(st, 0.16), M_GOLD, body, subdiv=0)
+    # (the plate stitched down onto the yoke, a row of stitches outside each side of the square section)
+    sti = [plate(i, jj, 0.06, w_yoke) for i in range(2, yrow - 1) for jj in (round(0.14 * (pcol - 1)), round(0.86 * (pcol - 1)))
+           if abs(plate(i, jj, 0.0, w_yoke).x) > abs(plate(i, 0, 0.0).x) + 0.15]
     # the collar's fronts stitched down onto the band: a row of stitches inside each front edge
-    sti = []
     for sg in (1, -1):
         for k in range(20):
             v = lerp(0.03, 0.75, k / 19)
             p_ = collar_pt(sg * (collar_open(v) + 0.07), v, 0.06)
             if p_.z <= ZT - 0.05:
                 sti.append(p_)
+    # (and the plate's top stitched to the collar's foot, either side of the opening)
+    for sg in (1, -1):
+        for k in range(9):
+            a = sg * lerp(collar_open(0.0) + 0.1, W0 - 0.08, k / 8)
+            r = g_neck(a) + RP + 0.07
+            sti.append(Vector((-r * math.sin(a), GC_Y - r * math.cos(a), ZP - 0.18)))
     mesh_obj('Collar stitching', dots(sti, 0.1), M_STITCH, body, subdiv=0)
 
 
