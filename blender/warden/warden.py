@@ -29,6 +29,20 @@ import female  # noqa: E402
 from female import *  # noqa: E402,F401,F403  (the base figure: shapes, materials, rig, walk and sprite pipeline)
 from female import _profile, _gs, _torso_dims  # noqa: E402,F401
 
+# ---------------------------------------------------------------- her face
+# Designed in the face creator (/mnt/project-files/face-creator, the head preset "Warden") on the base head, from
+# the reference: a stern, weathered face. A firm jaw with a clear corner and edge, a strong, slightly longer chin,
+# high cheekbones over leaner cheeks, a heavier brow over deeper sockets, a straighter nose, thinner lips with the
+# corners set level instead of lifted, and the eyes a little narrower and less tilted: a level, watchful look.
+female.FACE.update({
+    'jawWidth': -0.02, 'jawDef': 1.6, 'jawSharp': 0.9, 'jawAngle': 0.5, 'chinProj': 1.15, 'chinWidth': 1.0, 'chinHeight': 1.05,
+    'cheekWidth': -0.02, 'cheekbones': 1.4, 'cbHeight': 0.004, 'apples': 0.75, 'cheekFull': 0.6,
+    'noseProj': 1.1, 'tipBall': 0.85, 'browRidge': 1.4, 'sockets': 1.2,
+    'mouthWidth': 1.02, 'lipUpper': 0.8, 'lipLower': 0.9, 'smile': 0.3,
+})
+female.EYE_OPEN = 0.66
+female.EYE_TILT = 0.07
+
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
 M_HAIR = mat_def(2, 'hair', ramp(0x36251c, 0.1), 0.24, surface='hair')
@@ -1402,6 +1416,215 @@ def hair_clearance(cols=range(10), gap=0.22):
     hair.data.update()
 
 
+# ---------------------------------------------------------------- the hair designed in the face creator
+# The face creator's "Warden (long, wavy, centre parting)" (HAIR_STYLES.wavyFull), exported by
+# tools/face-creator/export-hair.cjs into hair_creator.json.gz beside this file: the cap (the opaque head of hair)
+# as a grid, and every strand of every lock as a centre line with its width, thickness, shade and cut-out, in head
+# heights. Head space is the creator's own (x across, y back, z up from the chin), HEAD_H to the head.
+HAIR_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hair_creator.json.gz')
+HAIR_PTS = None      # (every point the clearance moves: the cap's vertices, then the strands' centre lines)
+HAIR_RUNS = None     # (the strands' runs of points in HAIR_PTS: (first, count))
+
+
+def creator_hair(head):
+    """Build the exported hairstyle on the head: 'Hair' (the cap, cut off where its strands thin out toward its
+    edge, so the locks make the outline) and 'Hair locks' (each strand a flat ribbon tapering to a point where the
+    creator fades it out, at its root and its tip)."""
+    import gzip
+    import json
+    global HAIR_PTS, HAIR_RUNS
+    with gzip.open(HAIR_FILE, 'rt') as f:
+        d = json.load(f)
+    H = HEAD_H
+    pts, runs = [], []
+    # ---- the cap
+    C = d['cap']
+    nc, nr = C['cols'], C['rows']
+    bm = bmesh.new()
+    lay = bm.verts.layers.int.new('pt')      # (which point of HAIR_PTS each vertex follows)
+    vs = [bm.verts.new(Vector(C['p'][k * 3:k * 3 + 3]) * H) for k in range(nc * nr)]
+    pts += [v.co.copy() for v in vs]
+    al = C['a']
+    for i in range(nc):
+        i2 = (i + 1) % nc
+        for j in range(nr - 1):
+            q = (i * nr + j, i2 * nr + j, i2 * nr + j + 1, i * nr + j + 1)
+            if min(al[k] for k in q) < 0.3:
+                continue
+            if j == 0:
+                continue      # (the crown: closed with a fan below)
+            bm.faces.new([vs[k] for k in q])
+    crown = bm.verts.new(sum((vs[i * nr].co for i in range(nc)), Vector()) / nc)
+    for i in range(nc):
+        bm.faces.new((crown, vs[((i + 1) % nc) * nr + 1], vs[i * nr + 1]))
+    for i in range(nc):
+        pts[i * nr] = crown.co.copy()
+    bmesh.ops.delete(bm, geom=[vs[i * nr] for i in range(nc)], context='VERTS')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    for i in range(nc):
+        for j in range(1, nr):
+            vs[i * nr + j][lay] = i * nr + j
+    crown[lay] = 0
+    cap = mesh_obj('Hair', bm, M_HAIR, head, subdiv=0, solid=0.12, rest=hair_flow)
+    cap.modifiers['thickness'].offset = -1.0     # (thickened inward, toward the scalp)
+    strand_colours(cap)
+    # ---- the locks, strand by strand
+    rmp = MATERIALS[M_HAIR]['ramp'] / 255.0
+    lin = np.where(rmp > 0.04045, ((rmp + 0.055) / 1.055) ** 2.4, rmp / 12.92)
+    bm = bmesh.new()
+    lay = bm.verts.layers.int.new('pt')
+    shade = []
+    for st in d['strands']:
+        n = len(st['t'])
+        P = [Vector(st['p'][k * 3:k * 3 + 3]) * H for k in range(n)]
+        W = [Vector(st['w'][k * 3:k * 3 + 3]) * H for k in range(n)]
+        # (the cut-out becomes a taper: the ribbon narrows to nothing where the creator fades the strand out)
+        keep = [k for k in range(n) if st['a'][k] > 0.02]
+        if len(keep) < 4:
+            continue
+        k0, k1 = keep[0], keep[-1]
+        base = len(pts)
+        rings = []
+        for k in range(k0, k1 + 1):
+            a = min(1.0, st['a'][k]) ** 0.6
+            w = W[k] * (1.25 * a)
+            T = (P[min(n - 1, k + 1)] - P[max(0, k - 1)]).normalized()
+            N = T.cross(w)
+            N = N.normalized() * max(0.03, st['t'][k] * H * 1.6) * a if N.length > 1e-9 else Vector()
+            ring = [bm.verts.new(P[k] + o) for o in (w, N, -w, -N)]
+            for v in ring:
+                v[lay] = len(pts)
+            shade += [st['c'][k]] * 4
+            pts.append(P[k].copy())
+            rings.append(ring)
+        runs.append((base, len(pts) - base))
+        for r0, r1 in zip(rings, rings[1:]):
+            for q in range(4):
+                bm.faces.new((r0[q], r0[(q + 1) % 4], r1[(q + 1) % 4], r1[q]))
+        bm.faces.new(rings[0][::-1])
+        bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    locks = mesh_obj('Hair locks', bm, M_HAIR, head, subdiv=0, rest=hair_flow)
+    # (each strand's own shade from the creator: lighter over a wave's crest, darker in its trough, the under
+    # layer darker than the top one)
+    attr = locks.data.color_attributes.new('strands', 'FLOAT_COLOR', 'POINT')
+    cols = []
+    for c in shade:
+        t = min(1.0, max(-1.0, (c - 0.95) / 0.3))
+        col = lin[2] + (lin[3] - lin[2]) * t if t > 0 else lin[2] + (lin[2] - lin[1]) * t
+        cols += [*col, 1.0]
+    attr.data.foreach_set('color', cols)
+    HAIR_PTS, HAIR_RUNS = pts, runs
+    return cap, locks
+
+
+def creator_hair_clearance(cols=range(0, 10, 2), gap=0.2):
+    """After the rig and the walk: the creator's head has no shoulders, so its long hair falls straight through
+    the collar, the cape and the shoulders. In each pose of the sheet, find the points of the hair that are inside
+    the clothes or closer to them than `gap`, and the move that clears each (out past the cloth along the radius
+    from the neck where that is near, as over the collar and down the back; else off the nearest cloth, as on the
+    shoulders); take the largest over the poses, ease it along each strand and into the hair round it, and move
+    the cap and the strands by it."""
+    from mathutils.kdtree import KDTree
+    sc = bpy.context.scene
+    cap, locks = bpy.data.objects['Hair'], bpy.data.objects['Hair locks']
+    P = HAIR_PTS
+    need = {}
+    for col in cols:
+        sc.frame_set(col + 1)
+        tree = clothes_tree(cap, bpy.context.evaluated_depsgraph_get())
+        if tree is None:
+            continue
+        for i, p in enumerate(P):
+            if p.z > 1.0:
+                continue
+            rad = Vector((p.x, p.y - HC.y, 0.0))
+            if rad.length < 1e-6:
+                continue
+            rad.normalize()
+            d_ = None
+            # (inside the clothes: going out along the radius, the hair leaves a cloth it never entered)
+            o_, far, depth = p.copy(), None, 0
+            for _k in range(6):
+                h_ = tree.ray_cast(o_ + rad * 0.003, rad, 2.2 - (o_ - p).length)
+                if h_[0] is None:
+                    break
+                depth += 1 if h_[1].dot(rad) < 0.0 else -1
+                o_ = h_[0]
+                if depth < 0:
+                    far, depth = o_, 0
+            if far is not None and (far - p).dot(rad) < 0.9:
+                d_ = rad * ((far - p).dot(rad) + gap)
+            elif far is not None:
+                # (deep inside, as where a lock comes down into the shoulder: it comes to rest on the nearest
+                # cloth instead of being thrown out past the arm)
+                p_, n_, _i, _dist = tree.find_nearest(p, 3.0)
+                if p_ is None:
+                    continue
+                d_ = p_ - p
+                d_ = d_ + (d_.normalized() if d_.length > 1e-6 else n_) * gap
+            else:
+                p_, n_, _i, _dist = tree.find_nearest(p, gap + 0.4)
+                if p_ is None:
+                    continue
+                dd = (p - p_).dot(n_)
+                if dd >= gap or dd < -0.5:
+                    continue
+                d_ = n_ * (gap - dd)
+            if d_.length > need.get(i, Vector()).length:
+                need[i] = d_.copy()
+    sc.frame_set(1)
+    if not need:
+        return
+    # spread through the hair round each point that needed it (pooled in small cells, as apply_lift), so the hair
+    # keeps its thickness and its locks stay together where it is lifted
+    reach, SQ, CELL = 1.2, 0.4, 0.3
+    sq = lambda c: Vector((c.x, c.y, c.z * SQ))     # noqa: E731
+    cells = {}
+    for i, dv in need.items():
+        c = sq(P[i])
+        key = (math.floor(c.x / CELL), math.floor(c.y / CELL), math.floor(c.z / CELL))
+        e = cells.get(key)
+        if e is None:
+            cells[key] = [c.copy(), dv.copy(), 1]
+        else:
+            e[0] += c
+            e[1] += dv
+            e[2] += 1
+    pool = [(c / n, dv / n, n) for c, dv, n in cells.values()]
+    kd = KDTree(len(pool))
+    for k, (c, _d, _n) in enumerate(pool):
+        kd.insert(c, k)
+    kd.balance()
+    D = [Vector() for _ in P]
+    for i, p in enumerate(P):
+        near = kd.find_range(sq(p), reach * 2.0)
+        if not near:
+            continue
+        acc, ws, wmax = Vector(), 0.0, 0.0
+        for _co, k, dist in near:
+            w = math.exp(-(dist / reach) ** 2)
+            acc += pool[k][1] * (w * pool[k][2])
+            ws += w * pool[k][2]
+            wmax = max(wmax, w)
+        D[i] = acc / ws * min(1.0, wmax * 1.6)
+        # (never less than the point's own need)
+        if i in need and need[i].length > D[i].length:
+            D[i] = need[i].copy()
+    # eased along each strand, so a strand bends over the cloth instead of stepping
+    for b, n in HAIR_RUNS:
+        for _ in range(3):
+            run = [D[b + k] for k in range(n)]
+            for k in range(n):
+                m = (run[max(0, k - 1)] + run[k] * 2.0 + run[min(n - 1, k + 1)]) / 4.0
+                D[b + k] = m if m.length > need.get(b + k, Vector()).length else D[b + k]
+    for o in (cap, locks):
+        lay = o.data.attributes['pt'].data
+        for v in o.data.vertices:
+            v.co += D[lay[v.index].value]
+        o.data.update()
+
+
 def velvet_closeup(name):
     """The robe up close as velvet rather than felted wool: a dense, short pile that is dark where it faces you and
     glows along every turn away (Principled sheen at full weight and a tight sheen roughness, the base deepened under
@@ -1840,26 +2063,10 @@ def build():
     head, head_tree = build_head(body)
     cheek_scar(head)
 
-    # ---- the hair: the cap, the side hair, the back of the head, then the long fall draped and all fused
-    cap, w = hair_cap(head_tree)
-    cap_o = mesh_obj('Hair cap', cap, M_HAIR, head, solid=0.42)
-    vg = cap_o.vertex_groups.new(name='thick')
-    for i_, w_ in enumerate(w):
-        vg.add([i_], w_, 'REPLACE')
-    cap_o.modifiers['thickness'].vertex_group = 'thick'
-    cap_o.modifiers['thickness'].thickness_vertex_group = 0.32
-    for s in (-1, 1):
-        mesh_obj(f'Side lock {s}', side_lock(s), M_HAIR, head)
-    mesh_obj('Hair fall', loft([(7.5, 3.5, 3.4, 0, 0.75), (4.5, 3.9, 4.1, 0, 0.9), (2.0, 3.9, 2.7, 0, 2.1), (0.5, 3.75, 1.9, 0, 2.8),
-                                (-0.4, 3.25, 1.3, 0, 2.95), (-1.4, 2.4, 0.75, 0, 2.75)]), M_HAIR, head)
-    # (the robe's skirt is built after the rig, but the hair's ends rest on it: a stand-in for the drape to rest on)
-    proxy = mesh_obj('Robe skirt stand-in', robe_sheet(39.9, None, 40, hem=robe_hem), M_ROBE, body, solid=0.15, subdiv=0)
+    # ---- the hair: the face creator's long waves with a centre parting (lifted clear of the clothes after the rig)
     global CAPE_UNDER
-    CAPE_UNDER = under_table()     # (what is built so far: the stand-in lies over the robe as the cape will)
-    proxy2 = mesh_obj('Cape stand-in', cape_sheet(rows=60, cols=150), M_CAPE, body, solid=0.12, subdiv=0)
-    fuse_hair(head, ['Hair cap', 'Side lock -1', 'Side lock 1', 'Hair fall'])
-    bpy.data.objects.remove(proxy)
-    bpy.data.objects.remove(proxy2)
+    CAPE_UNDER = under_table()     # (what is built so far, for the cape to lie over)
+    creator_hair(head)
 
     # ---- the rig (the base figure's)
     build_rig(body)
@@ -2283,7 +2490,7 @@ def build():
     velvet_closeup('cape')
     patina_closeup('bracers')
     if not os.environ.get('WARDEN_NO_CLEARANCE'):
-        hair_clearance()
+        creator_hair_clearance()
     return res
 
 
