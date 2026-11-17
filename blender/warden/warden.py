@@ -360,7 +360,9 @@ CAPE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.7, 3.1, 0.35), (51.3, 5.55, 3.8, 
               (49.3, 8.0, 4.55, 0.3), (48.4, 8.55, 4.7, 0.3), (47.0, 8.9, 4.8, 0.3), (42.0, 9.0, 4.85, 0.35),
               (34.0, 9.2, 5.0, 0.4), (26.0, 9.55, 5.2, 0.45), (18.0, 10.0, 5.5, 0.5)]
 CAPE_BACK = [(53.4, 2.65), (52.4, 3.3), (51.3, 3.3), (49.0, 3.45), (45.0, 3.65), (38.0, 3.9), (28.0, 4.3), (18.0, 4.8)]
-CAPE_EDGE = [(53.4, 0.3), (51.0, 0.4), (50.3, 0.46), (49.3, 0.6), (47.5, 0.95), (45.0, 1.2), (30.0, 1.32), (18.0, 1.4)]
+# (at the neck the fronts sweep back under the collar's foot instead of ending in a square corner beside the throat:
+# the cloth comes out from under the collar and falls away down the yoke's edge)
+CAPE_EDGE = [(53.4, 0.98), (53.0, 0.8), (52.5, 0.64), (52.0, 0.53), (51.5, 0.46), (51.0, 0.43), (50.3, 0.46), (49.3, 0.6), (47.5, 0.95), (45.0, 1.2), (30.0, 1.32), (18.0, 1.4)]
 CLASP_Z = 50.3
 
 
@@ -718,7 +720,7 @@ def collar_pt(a, v, out=0.0):
     neck = g_neck(a) + 0.16
     rim = min(max(collar_base(a) + 0.08, neck + 0.3), neck + 0.8)
     sa, ca = math.sin(a), math.cos(a)
-    k = smoothstep(0.5, 1.05, abs(wrap(a)))
+    k = smoothstep(0.45, 0.9, abs(wrap(a)))
     if v <= FOOT_V:
         t = v / FOOT_V
         r = lerp(neck, lerp(rim, neck, 1.0 - (1.0 - t) ** 2), k)
@@ -894,13 +896,7 @@ def build_throat_plate(body):
     mesh_obj('Collar plate studs', dots(st, 0.16), M_GOLD, body, subdiv=0)
     # (the plate stitched down onto the yoke, a row of stitches outside each side of the square section)
     sti = [yoke(i, jj, 0.06) for i in range(4, yrow - 1) for jj in (round(0.16 * (pcol - 1)), round(0.84 * (pcol - 1)))]
-    # the collar's fronts stitched down onto the band: a row of stitches inside each front edge
-    for sg in (1, -1):
-        for k in range(20):
-            v = lerp(0.03, 0.75, k / 19)
-            p_ = collar_pt(sg * (collar_open(v) + 0.07), v, 0.06)
-            if p_.z <= ZT - 0.05:
-                sti.append(p_)
+    # (the collar's fronts lie on the band with no seam drawn along them)
     mesh_obj('Collar stitching', dots(sti, 0.1), M_STITCH, body, subdiv=0)
 
 
