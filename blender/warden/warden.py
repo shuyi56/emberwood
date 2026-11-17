@@ -434,7 +434,7 @@ def cape_hem(phi):
 CAPE_UNDER = None   # (z0, dz, n_phi, radii) of the clothes under the cape, once they are built (see under_table)
 
 
-def clothes_bvh(skip=('Hair',)):
+def clothes_bvh(skip=('Hair',), head=False):
     """One BVH of what is built so far (all but what the head carries, the stand-ins and the names in skip)."""
     from mathutils.bvhtree import BVHTree
     dg = bpy.context.evaluated_depsgraph_get()
@@ -445,7 +445,7 @@ def clothes_bvh(skip=('Hair',)):
         q = o
         while q.parent is not None and q.parent.name != 'Head':
             q = q.parent
-        if q.parent is not None:
+        if q.parent is not None and not (head and o.name in ('Head shape', 'Neck')):
             continue
         me = o.evaluated_get(dg).to_mesh()
         b = len(vs)
@@ -658,38 +658,168 @@ def g_neck(a):
     return G_NECK_R[-1][1]
 
 
+COLLAR_BASE = None   # (the cape's outer radius round the neck at the collar's foot, once the cape is built)
+
+
 def collar_top(a):
-    """The band's top edge: under the chin in front, rising to the nape, the corners at the throat rounded."""
-    z = 54.3 + 0.6 * ((1.0 - math.cos(a)) / 2) ** 1.2
-    d = (abs(wrap(a)) - COLLAR_OPEN) / 0.32
-    if d < 1.0:
-        z -= 0.4 * (1.0 - math.sqrt(max(0.0, 1.0 - (1.0 - max(0.0, d)) ** 2)))
-    return z
+    """The band's top edge: up under the jaw at the sides, highest at the nape."""
+    return 55.1 + 0.6 * ((1.0 - math.cos(a)) / 2) ** 1.2
+
+
+def collar_open(v):
+    """The half-angle of the opening at the throat, up the band: the two fronts nearly meet at the foot and part in
+    a V as they rise."""
+    return lerp(0.1, 0.52, v ** 1.3)
+
+
+def collar_base(a):
+    n = len(COLLAR_BASE)
+    f = (a % (2 * math.pi)) / (2 * math.pi) * n
+    i = int(f) % n
+    return lerp(COLLAR_BASE[i], COLLAR_BASE[(i + 1) % n], f - int(f))
+
+
+COLLAR_ON = None     # (a BVH of the cape and robe, for the collar's foot to lie on)
+FOOT_V = 0.36        # (the part of the band, from its foot, that lies down over the cape)
+
+
+def cape_top_z(x, y):
+    """(the highest the cape or robe stands near (x, y): the pleats' crests over the shoulders included)"""
+    best = None
+    for dx, dy in ((0, 0), (0.25, 0), (-0.25, 0), (0, 0.25), (0, -0.25), (0.18, 0.18), (-0.18, -0.18), (0.18, -0.18),
+                   (-0.18, 0.18)):
+        hit = COLLAR_ON.ray_cast(Vector((x + dx, y + dy, 60.0)), Vector((0, 0, -1)), 12.0)
+        if hit[0] is not None:
+            best = hit[0].z if best is None else max(best, hit[0].z)
+    return COLLAR_FOOT if best is None else best
 
 
 def collar_pt(a, v, out=0.0):
-    z = lerp(COLLAR_FOOT, collar_top(a), v)
-    r = g_neck(a) + 0.14 - 0.14 * (z - COLLAR_FOOT) + 0.05 * smoothstep(0.75, 1.0, v) + out
-    return Vector((-r * math.sin(a), GC_Y - r * math.cos(a), z))
+    """The band at a (round from the front) and v (0 at its foot, 1 at its top): its foot spreads over the cape
+    round the neck and lies on it (covering where the cape meets the neck, the rim tucked down onto the cloth),
+    turns up round the neck, and stands, flaring out again to its top edge, as the reference's."""
+    neck = g_neck(a) + 0.16
+    rim = min(max(collar_base(a) + 0.08, neck + 0.3), neck + 0.8)
+    sa, ca = math.sin(a), math.cos(a)
+    if v <= FOOT_V:
+        t = v / FOOT_V
+        r = lerp(rim, neck, 1.0 - (1.0 - t) ** 2)
+        x, y = -r * sa, GC_Y - r * ca
+        zt = cape_top_z(x, y) + 0.26
+        # (easing into the upright: the last of the foot rises off the cloth into the band's curve)
+        z = zt + smoothstep(0.6, 1.0, t) * 0.25
+        r += out
+        return Vector((-r * sa, GC_Y - r * ca, z))
+    w = (v - FOOT_V) / (1.0 - FOOT_V)
+    zb = cape_top_z(-neck * sa, GC_Y - neck * ca) + 0.45
+    z = lerp(zb, collar_top(a), w)
+    r = neck + 0.45 * w ** 1.6 + out
+    return Vector((-r * sa, GC_Y - r * ca, z))
+
+
+def cape_base(n=120):
+    """The cape's outer radius round the neck from the collar's foot up past the cape's top (the farthest of it
+    along each ray in, the folds' crests softened), for the collar's foot to cover."""
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or not o.name.startswith(('Cape', 'Robe')) or o.name == 'Cape stand-in':
+            continue
+        me = o.evaluated_get(dg).to_mesh()
+        b = len(vs)
+        vs += [o.matrix_world @ v.co for v in me.vertices]
+        ps += [[b + i for i in pl.vertices] for pl in me.polygons]
+        o.evaluated_get(dg).to_mesh_clear()
+    T = BVHTree.FromPolygons(vs, ps)
+    global COLLAR_ON
+    COLLAR_ON = T
+    R = np.zeros(n)
+    for j in range(n):
+        a = 2 * math.pi * j / n
+        d = Vector((math.sin(a), math.cos(a), 0.0))     # (inward, from outside)
+        best = 0.0
+        for dz in (0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9):
+            org = Vector((0.0, GC_Y, COLLAR_FOOT + dz)) - d * 12.0
+            hit = T.ray_cast(org, d, 12.0)
+            if hit[0] is not None:
+                best = max(best, 12.0 - hit[3])
+        R[j] = best
+    M = np.maximum.reduce([np.roll(R, k) for k in range(-2, 3)])
+    for _ in range(3):
+        M = (np.roll(M, 1) + M + np.roll(M, -1)) / 3
+    return list(M)
 
 
 def build_collar(body):
-    n, rows = 120, 10
-    ang = [lerp(COLLAR_OPEN, 2 * math.pi - COLLAR_OPEN, j / (n - 1)) for j in range(n)]
-    sheet = grid(rows, n, lambda i, j: collar_pt(ang[j], 1.0 - i / (rows - 1)))
+    global COLLAR_BASE
+    COLLAR_BASE = cape_base()
+    n, rows = 120, 16
+
+    def ang(v, j):
+        o = collar_open(v)
+        return lerp(o, 2 * math.pi - o, j / (n - 1))
+    sheet = grid(rows, n, lambda i, j: collar_pt(ang(1.0 - i / (rows - 1), j), 1.0 - i / (rows - 1)))
     mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
     # the rolled edge: up one front, round the top and down the other
-    path = [collar_pt(ang[0], v, 0.03) for v in (0.42, 0.56, 0.7, 0.84, 0.95)]
-    path += [collar_pt(a, 1.0, 0.03) for a in ang]
-    path += [collar_pt(ang[-1], v, 0.03) for v in (0.95, 0.84, 0.7, 0.56, 0.42)]
-    mesh_obj('Collar edge', tube(path, [0.09] * len(path), flat=1.0, n=8), M_GOLD, body, subdiv=0)
-    # (a line tooled round it, a third of the way down from the top)
-    line = [collar_pt(a, 0.68 + 0.0 * a, 0.035) for a in ang[3:-3]]
+    vs_ = [k / 12 for k in range(2, 12)]
+    path = [collar_pt(ang(v, 0), v, 0.03) for v in vs_]
+    path += [collar_pt(ang(1.0, j), 1.0, 0.03) for j in range(n)]
+    path += [collar_pt(ang(v, n - 1), v, 0.03) for v in reversed(vs_)]
+    mesh_obj('Collar edge', tube(path, [0.1] * len(path), flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    # (and the foot's rim rolled too, lying on the cloth)
+    rim = [collar_pt(ang(0.0, j), 0.0, 0.02) for j in range(n)]
+    mesh_obj('Collar rim', tube(rim, [0.1] * n, flat=1.0, n=8), M_COLLAR, body, subdiv=0)
+    # (a line tooled round it below the top, and a row of studs between)
+    line = [collar_pt(ang(0.78, j), 0.78, 0.035) for j in range(3, n - 3)]
     mesh_obj('Collar line', tube(line, [0.045] * len(line), flat=1.0, n=6), M_GOLD, body, subdiv=0)
-    # the hook and bar across the throat
-    zc = 0.5
-    bar = [collar_pt(lerp(-COLLAR_OPEN - 0.12, COLLAR_OPEN + 0.12, k / 6), zc, 0.1) for k in range(7)]
-    mesh_obj('Collar clasp', tube(bar, [0.1] * 7, flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    studs = [collar_pt(ang(0.89, j), 0.89, 0.06) for j in range(4, n - 4, 6)]
+    mesh_obj('Collar studs', dots(studs, 0.14), M_GOLD, body, subdiv=0)
+    build_throat_plate(body)
+
+
+def build_throat_plate(body):
+    """The plate between the collar's fronts, as the reference's: steel lying on the throat and the top of the chest,
+    as wide as the V at the top, under the chin, drawing to a point over the breastbone, with a ridge down its
+    middle, its edge rolled in brass and a stud at the top either side."""
+    T = clothes_bvh(('Hair', 'Collar', 'Medallion', 'Clasp', 'Cape'), head=True)
+    z0, z1 = 54.05, 51.2
+
+    def hw(z):
+        v = (z0 - z) / (z0 - z1)
+        return 1.25 * (1.0 - v ** 1.8) ** 0.75 + 0.02
+
+    def surf(x, z):
+        hit = T.ray_cast(Vector((x, -12.0, z)), Vector((0, 1, 0)), 20.0)
+        return hit[0].y if hit[0] is not None else -2.0
+
+    rows, cols = 22, 15
+    Y = [[0.0] * cols for _ in range(rows)]
+    for i in range(rows):
+        z = lerp(z0, z1, i / (rows - 1))
+        for j in range(cols):
+            u = lerp(-1.0, 1.0, j / (cols - 1))
+            Y[i][j] = surf(u * (hw(z) + 0.3), z)
+    # (laid over the farthest-forward of what is under it along each row, so it bridges the hollow of the throat)
+    for i in range(rows):
+        m = min(Y[i])
+        Y[i] = [lerp(y, m, 0.6) for y in Y[i]]
+
+    def pt(i, j):
+        z = lerp(z0, z1, i / (rows - 1))
+        u = lerp(-1.0, 1.0, j / (cols - 1))
+        ridge = 0.12 * math.exp(-(u / 0.18) ** 2) + 0.08 * (1.0 - u * u)
+        return (u * hw(z), Y[i][j] - 0.26 - ridge, z)
+    mesh_obj('Collar plate', face_out(grid(rows, cols, pt)), M_COLLAR, body, solid=0.08, subdiv=1)
+    edge = [Vector(pt(i, 0)) for i in range(rows)] + [Vector(pt(i, cols - 1)) for i in reversed(range(rows))]
+    edge = [p + Vector((0, -0.04, 0)) for p in edge]
+    edge.append(edge[0])
+    mesh_obj('Collar plate edge', tube(edge, [0.08] * len(edge), flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    mid = [Vector(pt(i, cols // 2)) + Vector((0, -0.05, 0)) for i in range(1, rows - 2)]
+    mesh_obj('Collar plate ridge', tube(mid, [0.05] * len(mid), flat=1.0, n=6), M_GOLD, body, subdiv=0)
+    st = [Vector(pt(2, 3)) + Vector((0, -0.08, 0)), Vector(pt(2, cols - 4)) + Vector((0, -0.08, 0))]
+    mesh_obj('Collar plate studs', dots(st, 0.2), M_GOLD, body, subdiv=0)
 
 
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
