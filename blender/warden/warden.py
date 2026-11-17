@@ -2778,7 +2778,7 @@ def build():
     return res
 
 
-def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
+def hair_contact_shade(reach=1.3, near=0.25, depth=1.0):
     """The shade the hair casts on the skin it lies over. The locks beside the face hang half a unit to a unit in
     front of the cheek and the jaw; lit from the front, their shadow falls behind them, out of sight, and the face
     stayed bright right up to the hair, a pale mask laid in front of it. (The creator's key casts the hair's shadow
@@ -2825,7 +2825,7 @@ def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
         facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
         dn = neck_t.find_nearest(p, 0.8)[3] if neck_t is not None else None
         seam = 1.0 if dn is None else smoothstep(0.1, 0.8, dn)
-        occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d)) ** 1.5
+        occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d))
     at = me.attributes.get('hair occ') or me.attributes.new('hair occ', 'FLOAT', 'POINT')
     at.data.foreach_set('value', occ)
     me.update()
@@ -2846,7 +2846,7 @@ def hair_contact_shade(reach=1.3, near=0.12, depth=0.6):
     nt.links.new(a.outputs['Fac'], k.inputs[0])
     mix = nt.nodes.new('ShaderNodeMix')
     mix.data_type, mix.blend_type = 'RGBA', 'MULTIPLY'
-    mix.inputs['B'].default_value = (0.62, 0.44, 0.38, 1.0)    # (a shadow on skin: darker, and warmer)
+    mix.inputs['B'].default_value = (0.4, 0.27, 0.23, 1.0)    # (a shadow on skin: darker, and warmer)
     nt.links.new(k.outputs[0], mix.inputs['Factor'])
     nt.links.new(src, mix.inputs['A'])
     nt.links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
