@@ -2811,30 +2811,56 @@ def hair_contact_shade(reach=1.3, near=0.25, depth=1.0):
         neck_t = BVHTree.FromPolygons([nk.matrix_world @ v.co for v in nm.vertices],
                                       [list(p.vertices) for p in nm.polygons])
         nk.evaluated_get(dg).to_mesh_clear()
-    M = head.matrix_world
-    N3 = M.to_3x3().inverted().transposed()
-    me = head.data
-    occ = [0.0] * len(me.vertices)
-    for v in me.vertices:
-        p = M @ v.co
-        q, _n, _i, d = tree.find_nearest(p, reach)
-        if q is None:
-            continue
-        n = (N3 @ v.normal).normalized()
-        # (only hair out on the side the skin faces: hair behind the ear, past the edge of the jaw, shades nothing)
-        facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
-        dn = neck_t.find_nearest(p, 0.8)[3] if neck_t is not None else None
-        seam = 1.0 if dn is None else smoothstep(0.1, 0.8, dn)
-        occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d))
-    at = me.attributes.get('hair occ') or me.attributes.new('hair occ', 'FLOAT', 'POINT')
-    at.data.foreach_set('value', occ)
-    me.update()
-    m = head.data.materials[0]
+    # (the head and what is painted on it: the brows' paint and the eyeshadow are their own meshes, close-up only,
+    # coloured by their own materials; left unshaded, a brow under the fringe came out paler than the shaded skin
+    # round it, a light streak where the brow should be)
+    objs = [head] + [o for o in bpy.data.objects if o.type == 'MESH' and o.parent == head.parent
+                     and o.name.startswith(('Brow paint', 'Eyeshadow'))]
+    for ob in objs:
+        M = ob.matrix_world
+        N3 = M.to_3x3().inverted().transposed()
+        me = ob.data
+        occ = [0.0] * len(me.vertices)
+        for v in me.vertices:
+            p = M @ v.co
+            q, _n, _i, d = tree.find_nearest(p, reach)
+            if q is None:
+                continue
+            n = (N3 @ v.normal).normalized()
+            # (only hair out on the side the skin faces: hair behind the ear, past the edge of the jaw, shades
+            # nothing)
+            facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
+            dn = neck_t.find_nearest(p, 0.8)[3] if neck_t is not None else None
+            seam = 1.0 if dn is None else smoothstep(0.1, 0.8, dn)
+            occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d))
+        at = me.attributes.get('hair occ') or me.attributes.new('hair occ', 'FLOAT', 'POINT')
+        at.data.foreach_set('value', occ)
+        me.update()
+    for m in {s_.material for ob in objs for s_ in ob.material_slots if s_.material is not None}:
+        _hair_shade_material(m, depth)
+
+
+def _hair_shade_material(m, depth):
+    """Darken and warm a material's colour by the mesh's 'hair occ' (the close-up skin's base colour, or the colour
+    of a paint's or the brows' own shader)."""
     nt = m.node_tree
     if nt.nodes.get('hair occ') is not None:
         return
-    bsdf = nt.nodes['close bsdf']
-    src = bsdf.inputs['Base Color'].links[0].from_socket
+    bsdf = nt.nodes.get('close bsdf')
+    if bsdf is None:
+        out = next((n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL' and n.inputs['Surface'].links), None)
+        if out is None:
+            return
+        bsdf = out.inputs['Surface'].links[0].from_node
+    sock = bsdf.inputs.get('Base Color') or bsdf.inputs.get('Color')
+    if sock is None:
+        return
+    if sock.links:
+        src = sock.links[0].from_socket
+    else:
+        rgb = nt.nodes.new('ShaderNodeRGB')
+        rgb.outputs[0].default_value = tuple(sock.default_value)
+        src = rgb.outputs[0]
     a = nt.nodes.new('ShaderNodeAttribute')
     a.name = a.label = 'hair occ'
     a.attribute_type = 'GEOMETRY'
@@ -2849,8 +2875,7 @@ def hair_contact_shade(reach=1.3, near=0.25, depth=1.0):
     mix.inputs['B'].default_value = (0.4, 0.27, 0.23, 1.0)    # (a shadow on skin: darker, and warmer)
     nt.links.new(k.outputs[0], mix.inputs['Factor'])
     nt.links.new(src, mix.inputs['A'])
-    nt.links.new(mix.outputs['Result'], bsdf.inputs['Base Color'])
-
+    nt.links.new(mix.outputs['Result'], sock)
 
 if __name__ == '__main__':
     run(build, 'warden', HERE)
