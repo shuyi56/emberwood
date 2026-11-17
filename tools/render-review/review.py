@@ -417,7 +417,11 @@ def smoke(commit, kind, param, hair_dir=None):
     subprocess.run(["rm", "-rf", out])
     res = {"ok": rc in (0, 77), "reached_render": rc == 77, "exit": rc,
            "seconds": round((datetime.datetime.now() - t0).total_seconds()),
-           "tail": "\n".join(log.strip().splitlines()[-8:]) if rc not in (0, 77) else ""}
+           "tail": "\n".join(log.strip().splitlines()[-8:]) if rc not in (0, 77) else "",
+           # (the lines the build's own hair checks print, blender/shared/locks.py report(): a line that does not
+           # say 'clean' is a fault)
+           "lock_lines": sorted({ln.split("hair lock check:", 1)[1].strip() for ln in log.splitlines()
+                                 if "hair lock check:" in ln})}
     os.makedirs(os.path.dirname(memo), exist_ok=True)
     if rc != -1:
         json.dump(res, open(memo, "w"))
@@ -684,6 +688,15 @@ def review(req, thread, do_smoke=True):
             for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"],
                                                            hair_dir if j is todo[0] else None), todo)):
                 j["smoke"] = res
+                faults = [ln for ln in res.get("lock_lines", []) if " clean (" not in ln]
+                if faults:
+                    rep.block("hair", f"{j['kind']} {j['param'] or ''}: the build's own hair lock check reports "
+                              + "; ".join(faults) + ".",
+                              "Fix what the line names (kink: smooth that lock's guide points so no one point bends it sharply; inward: rewind the strand faces; glint: give the strands "
+                              "the cap's outward normal; facing: flip normals that point at the head; bare: add "
+                              "locks or widen the cap where skin shows inside the hairline) and push.", "P021")
+                elif res.get("lock_lines"):
+                    rep.info("hair", f"{j['kind']} {j['param'] or ''}: hair lock check " + "; ".join(res["lock_lines"]) + ".")
                 if res["ok"]:
                     rep.info("smoke", f"{j['kind']} {j['param'] or ''}: built headless and "
                              f"{'reached its first render' if res['reached_render'] else 'finished'} in "
