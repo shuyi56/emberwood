@@ -70,11 +70,12 @@ M_BELT = mat_def(40, 'belt', ramp(0x4b3123, 0.1), 0.2, surface='leather')
 M_GOLD = mat_def(41, 'gold', ramp(0xb08f4f, 0.09), 0.0, closeup='gold', shadow_on=(M_TABARD, M_BELT))
 M_STEEL = mat_def(42, 'steel', ramp(0x9a978f, 0.09), 0.0)
 M_STITCH = mat_def(43, 'stitching', ramp(0xa8927a, 0.08), 0.0, flat=2)
-M_ROBE = mat_def(46, 'robe', ramp(0x2f4a35, 0.1), 0.1, surface='wool', closeup='wool', form=True)
+M_ROBE = mat_def(46, 'robe', ramp(0x2e1d33, 0.1), 0.1, surface='wool', closeup='wool', form=True)
 M_ROBE_TRIM = mat_def(47, 'robe trim', ramp(0x9c7c45, 0.09), 0.0, closeup='canvas')
-M_CAPE = mat_def(48, 'cape', ramp(0x253c2b, 0.1), 0.12, surface='wool', closeup='wool', form=True)
+M_CAPE = mat_def(48, 'cape', ramp(0x23162a, 0.1), 0.12, surface='wool', closeup='wool', form=True)
 M_LINING = mat_def(49, 'cape lining', ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
 M_COLLAR = mat_def(50, 'collar', ramp(0x3b3e45, 0.12), 0.0, closeup='steel')   # (blackened steel: steel_closeup)
+M_BRONZE = mat_def(51, 'bronze', ramp(0x9a6438, 0.12), 0.0, closeup='steel')   # (the knees and greaves: steel_closeup in bronze)
 M_SCAR = mat_def(44, 'scar', [[178, 114, 100], [202, 142, 124], [216, 164, 144], [226, 182, 164], [236, 202, 186]], 0.0)
 
 
@@ -310,6 +311,11 @@ def robe_pt(z, phi, lift=0.0):
     off, _ = robe_form(z, phi)
     # (close over the hips at the sides, where the arms hang against it)
     hug = math.sin(phi) ** 4 * smoothstep(38.0, 35.5, z) * smoothstep(23.0, 27.0, z)
+    # (behind, under the cape, the skirt falls nearly straight from the seat instead of flaring out in deep folds:
+    # flared, it stood out past the cape's fall below the seat and poked through it, and a cape laid over it belled
+    # out into a box)
+    tame = 1.0 - 0.8 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(33.0, 30.0, z)
+    off *= tame
     extra = (R_SIDE - P_OFF + off) * (1.0 - 0.85 * hug) + lift
     if z >= 32.0:
         x, y = plate_pt(z, phi)
@@ -318,7 +324,7 @@ def robe_pt(z, phi, lift=0.0):
             x, y = lerp(x2, x, smoothstep(32.0, 36.0, z)), lerp(y2, y, smoothstep(32.0, 36.0, z))
     else:
         flare = (0.1 * (32.0 - z) * (0.5 + 0.5 * max(0.0, math.cos(phi))) + 0.05 * (32.0 - z) * max(0.0, -math.cos(phi))) \
-            * (1.0 - 0.8 * hug)
+            * (1.0 - 0.8 * hug) * tame
         x, y = torso_point(32.0, phi, P_OFF + flare, bust=0.0)
     r = math.hypot(x, y) or 1.0
     x, y = x + x / r * extra, y + y / r * extra
@@ -509,15 +515,6 @@ def under_table(skip=('Hair',)):
         M = (M + np.roll(M, 1, 1) + np.roll(M, -1, 1) + np.roll(M, 2, 1) + np.roll(M, -2, 1)) / 5
         P = np.pad(M, ((2, 2), (0, 0)), mode='edge')
         M = (P[:-4] + P[1:-3] + P[2:-2] + P[3:-1] + P[4:]) / 5
-    # (and hung: cloth falling from a high point cannot cut back in under it, nor dip into a hollow between two
-    # high points. Without this the cape clung to the small of the back and rose again over the seat, and then
-    # stepped out where the skirt flares, a moulded bustle across the back. Down from each point it comes in at
-    # most `fall` per unit of height; up from the skirt toward the seat at most `rise`.)
-    fall, rise = 0.1, 0.16
-    for i in range(nz - 2, -1, -1):
-        M[i] = np.maximum(M[i], M[i + 1] - fall * dz)
-    for i in range(1, nz):
-        M[i] = np.maximum(M[i], M[i - 1] - rise * dz)
     return z0, dz, nph, M
 
 
@@ -1922,7 +1919,7 @@ def velvet_closeup(name):
     b = nt.nodes['close bsdf']
     b.inputs['Sheen Weight'].default_value = 1.0
     b.inputs['Sheen Roughness'].default_value = 0.3
-    b.inputs['Sheen Tint'].default_value = (0.86, 0.92, 0.74, 1.0)   # (a soft moss sheen on the forest-green velvet)
+    b.inputs['Sheen Tint'].default_value = (0.92, 0.8, 0.94, 1.0)   # (a soft lilac sheen on the plum velvet)
     b.inputs['Roughness'].default_value = 0.85
     b.inputs['Specular IOR Level'].default_value = 0.05
     # the base deepened (the sheen supplies the light) and patchily crushed
@@ -2624,7 +2621,7 @@ def build():
             ex = 0.22 + flare + out + calf - 0.1 * smoothstep(-3.5, GB, z)
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
         gz = [GT - (GT - GB) * i / 48 for i in range(49)]
-        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_PLATE, loc=(x, 0, kz),
+        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_BRONZE, loc=(x, 0, kz),
                  skin=w, solid=0.14)
         # the knee: a domed oval cop over the kneecap, its foot lapping over the greave's top; a fan-shaped wing on
         # the outside tucked under the cop's edge; a curved lame above, tucked under the cop's top. Each is a shell
@@ -2652,7 +2649,7 @@ def build():
         for nm, args in (('Knee wing', (0.95, -0.85, s * 1.5, 0.55, lambda u, v: 0.16 + 0.08 * (1 - v * v))),
                          ('Knee lame', (2.05, 1.05, 0.0, 1.3, lambda u, v: 0.13 + 0.05 * (1 - v * v))),
                          ('Knee cop', (1.35, -1.1, 0.0, 1.4, cop))):
-            mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_PLATE, loc=(x, 0, kz), skin=w,
+            mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_BRONZE, loc=(x, 0, kz), skin=w,
                      solid=0.13, subdiv=1)
         rv = [knee_pt(0.05, s * 1.55, 0.3), knee_pt(1.55, -1.05, 0.2), knee_pt(1.55, 1.05, 0.2),
               knee_pt(0.0, -1.05, cop(0.0, 0.75) + 0.12), knee_pt(0.0, 1.05, cop(0.0, 0.75) + 0.12)]
@@ -2768,6 +2765,10 @@ def build():
     # the rig, the camera and light, and the keyframes; then the hair kept clear of the clothes in every pose
     res = finish_figure(lambda: cape_on_arms(['Cape', 'Cape lining', 'Cape front -1', 'Cape front 1']))
     steel_closeup('plate')
+    # (bronze, as the hammered steel but in bronze's colour: polished, a reflectance between copper's (0.955, 0.638,
+    # 0.538, linear) and brass's, warm and a little pink; down in the hollows and the worn patches, the dark brown of
+    # tarnished bronze; a touch rougher than steel, as cast and beaten bronze is)
+    steel_closeup('bronze', dark=(0.17, 0.075, 0.035), light=(0.82, 0.5, 0.29), rgh=(0.6, 0.3))
     # (the collar and its plate one dull, even finish: rougher, so the flat plate facing the light does not flare
     # brighter than the band curving round the neck)
     steel_closeup('collar', dark=(0.04, 0.041, 0.045), light=(0.2, 0.205, 0.22), rgh=(0.62, 0.48), use_ao=False)
