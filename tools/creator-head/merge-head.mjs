@@ -34,7 +34,21 @@ function meanVC(prim) {
 }
 let skinTarget = null;
 for (const n of old) { const m = n.getMesh(); if (m && n.getName() === 'Head shape') skinTarget = meanVC(m.listPrimitives()[0]); }
+// (a model exported without the head's vertex colours, as the Warden's is: match the face to her skin material, the
+// one her neck and hands wear)
+if (!skinTarget) { const sm = root.listMaterials().find((mt) => mt.getName() === 'skin'); if (sm) skinTarget = sm.getBaseColorFactor().slice(0, 3); }
 old.forEach((n) => { const m = n.getMesh(); n.dispose(); if (m) m.dispose(); });
+// (a body built for close-up renders, as the Warden's is, carries far more than the world needs: env BODY_TRIS caps
+// each skinned part at about that many triangles; off by default, the ranger's export is already light)
+const bodyTris = +(process.env.BODY_TRIS || 0);
+if (bodyTris) {
+  await MeshoptSimplifier.ready;
+  for (const m of root.listMeshes()) for (const pr of m.listPrimitives()) {
+    const I = pr.getIndices(), t = I ? I.getCount() / 3 : 0;
+    if (!pr.getAttribute('JOINTS_0') || t <= bodyTris) continue;
+    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio: bodyTris / t, error: 0.002, lockBorder: true });
+  }
+}
 
 // (merge the creator's scene and hang its nodes under the Head node)
 await MeshoptSimplifier.ready;

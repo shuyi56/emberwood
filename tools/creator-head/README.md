@@ -25,3 +25,16 @@ clothes, skinning and the walk and idle animations are the Blender export (`blen
    `@gltf-transform/extensions`, `@gltf-transform/functions` (4.1.1) and `meshoptimizer` (0.22.0).
 
 Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator.
+
+## The Warden
+
+Her body and clothes come from `blender/warden/export_glb.py` (it needs `blender/warden/warden.py` and the base
+figure, and bpy with Pillow and SciPy). Her head is the creator's "Warden" preset (`warden-face.json`, dumped from the
+creator), exported with her own mouth and softer make-up for the world, and merged with her body cut down for the game:
+
+    python blender/warden/export_glb.py --out warden-blender.glb
+    WORLD='{"smile":0.6,"mouthWidth":1.06,"lipUpper":0.6,"lipLower":0.7,"apples":0.65,"cheekFull":0.55,"chinProj":1.3,"flushAmt":0.7,"blush":0.15,"noseFlush":0.1}' \
+      node export-head.js ranger-body-viewer.html warden-head.glb warden-face.json
+    BODY_TRIS=12000 node merge-head.mjs warden-blender.glb warden-head.glb public/models/warden.glb
+
+With no vertex colours on her Blender head, the face's skin is matched to her `skin` material (her neck and hands).
