@@ -224,16 +224,29 @@ def to_bmesh(bm, verts, faces):
     return vs
 
 
+HANG_Z0, HANG_DROP = 0.36 * 8.6, 0.12 * 8.6      # (below the ear, a hung side lock keeps its distance from the head's axis; see hang_down)
+
+
+def _hang_ref(path, hc=HC, z0=HANG_Z0):
+    for p in path:
+        if p[2] <= z0:
+            return math.hypot(p[0] - hc[0], p[1] - hc[1])
+    return None
+
+
 def check_locks(locks, surface, hc=HC, hairline=None):
     """The checks the face creator runs before a render (hairlint.js), on lock guide paths: locks = [(name, path)].
     surface(d) -> (scalp, outer) as for guide. Returns a list of (fault, name, note):
       buried  the lock comes out of the hair and dips back into it, so the hair's surface cuts through it in steps
       float   its last third is held off the head with nothing under it (bangs standing off the face as a visor)
       flap    its end stands off the head
-      kink    it bends sharply at one point"""
+      kink    it bends sharply at one point
+    A side lock that hangs (its name starts 'wisp') is measured against its hang line below the ear, not against the head:
+    there it hangs straight down by design, so its distance from the head's axis is compared with the one it had at the ear."""
     out = []
     for name, path in locks:
         n = len(path)
+        ref = _hang_ref(path, hc) if name.startswith('wisp') else None
         bur = cnt = fl = fc = 0
         out1 = False
         kink = 0.0
@@ -242,6 +255,8 @@ def check_locks(locks, surface, hc=HC, hairline=None):
             r = math.sqrt(dot(v, v))
             scalp, outer = surface(scl(v, 1 / r))
             clear = r - outer
+            if ref is not None and p[2] <= HANG_Z0:
+                clear = max(0.0, math.hypot(p[0] - hc[0], p[1] - hc[1]) - ref)      # (on its hang line: 0 is hanging true; it cannot be buried there)
             cnt += 1
             if clear > 0.02:
                 out1 = True
@@ -258,6 +273,8 @@ def check_locks(locks, surface, hc=HC, hairline=None):
         v = sub(path[-1], hc)
         r = math.sqrt(dot(v, v))
         tip_clear = r - surface(scl(v, 1 / r))[1]
+        if ref is not None and path[-1][2] <= HANG_Z0:
+            tip_clear = math.hypot(path[-1][0] - hc[0], path[-1][1] - hc[1]) - ref
         if cnt > 4 and bur / cnt > 0.15:
             out.append(('buried', name, f'{round(100 * bur / cnt)}% of it dips back inside the hair'))
         if fc > 3 and fl / fc > 0.3:
@@ -425,7 +442,7 @@ def rogue_bangs(surface):
     return strands, guides
 
 
-def hang_down(path, hc=HC, z0=0.36 * 8.6, drop=0.12 * 8.6):
+def hang_down(path, hc=HC, z0=HANG_Z0, drop=HANG_DROP):
     """A side lock that has left the head falls under its own weight: below the ear (z0, head-local units) it keeps
     the distance from the head's axis it had there, so it hangs straight down past the jaw instead of following the jaw
     in toward the chin (on a narrow, tapered face it was drawn in against the chin and neck). The face creator's
