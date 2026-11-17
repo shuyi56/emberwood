@@ -2037,7 +2037,7 @@ def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(
 # still down in the hollows where grime sits, and rubbed back toward the bright alloy on the edges and high places
 # that wear. (Metal reflectance stays metal, 0.2 to 0.45 linear in red; the tarnish is a dark warm brown, about
 # sRGB 60, 40, 25; satin roughness 0.4 to 0.75, rougher where it is tarnished.) BRONZE_LOOKS are the study's
-# candidates (bronze_study.py renders them side by side); BRONZE_LOOK is the one the figure wears.
+# candidates (bronze_study.py renders them side by side on stand-in shapes, without building the figure); BRONZE_LOOK is the one the figure wears.
 BRONZE_LOOKS = {
     'browned': dict(metal=(0.30, 0.15, 0.06), tarnish=(0.045, 0.022, 0.011), mottle=0.65, rub=0.55, rgh=(0.45, 0.72)),
     'russet': dict(metal=(0.22, 0.10, 0.04), tarnish=(0.032, 0.016, 0.008), mottle=0.75, rub=0.45, rgh=(0.5, 0.78)),
@@ -2089,7 +2089,7 @@ def bronze_closeup(name, look=None):
                 nt.links.new(v, k.inputs[i])
         return k.outputs[0]
     # the tarnish: broad blotches, broken by a finer speckle
-    blot = rng(noise(0.55, 4.0), 0.42, 0.62)
+    blot = rng(noise(1.1, 4.0), 0.42, 0.62)     # (blotches a third of a greave across, not wider than the plate)
     speck = rng(noise(7.0, 6.0, 0.6), 0.35, 0.7)
     mott = math_('MULTIPLY', math_('ADD', math_('MULTIPLY', blot, 0.75), math_('MULTIPLY', speck, 0.25)), L['mottle'])
     # grime down in the hollows
@@ -2098,8 +2098,17 @@ def bronze_closeup(name, look=None):
     ao.samples = 8
     dirt = rng(ao.outputs['AO'], 0.95, 0.45)
     # rubbed bright on the edges and high places
+    # (where the surface turns sharply: a rounded normal against the true one. Pointiness is per vertex of the
+    # base mesh and sits at 0.5 all over a smooth lofted plate, so it found no edges)
     geo = N('ShaderNodeNewGeometry')
-    edge = rng(geo.outputs['Pointiness'], 0.5, 0.56)
+    bev = N('ShaderNodeBevel')
+    bev.samples = 4
+    bev.inputs['Radius'].default_value = 0.09
+    dot = N('ShaderNodeVectorMath')
+    dot.operation = 'DOT_PRODUCT'
+    nt.links.new(bev.outputs['Normal'], dot.inputs[0])
+    nt.links.new(geo.outputs['Normal'], dot.inputs[1])
+    edge = rng(dot.outputs['Value'], 0.995, 0.9)
     rub = math_('MULTIPLY', math_('MULTIPLY', edge, rng(noise(3.0, 3.0), 0.3, 0.7, 0.4, 1.0)), L['rub'])
     tf = math_('SUBTRACT', math_('ADD', mott, math_('MULTIPLY', dirt, 0.7)), rub)
     col = N('ShaderNodeMix')
