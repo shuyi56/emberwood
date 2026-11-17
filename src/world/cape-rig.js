@@ -32,7 +32,8 @@ export const CAPE_SETTINGS = {
   maxAngle: 1.25,
 };
 
-// [from joint, offset], [to joint, offset], radius: offsets are in the model's axes (+z is her front)
+// [from joint, offset], [to joint, offset, beyond], radius: offsets are in the model's axes (+z is her front);
+// `beyond` carries the far end on past its joint by that share of the capsule's length
 export const WARDEN_COLLIDERS = [
   // back and shoulders: the robe's back is 4 behind the spine, the shoulder blades a little more
   [['Pelvis', [0, 2, -0.5]], ['Chest', [0, 6, -0.5]], 4.5],
@@ -47,8 +48,9 @@ export const WARDEN_COLLIDERS = [
   // arms, which swing back into the cape
   [['UpperArm.L', [0.5, 0, 0]], ['Forearm.L', [0.3, 0, 0]], 2.6],
   [['UpperArm.R', [-0.5, 0, 0]], ['Forearm.R', [-0.3, 0, 0]], 2.6],
-  [['Forearm.L', [0, 0, 0]], ['Hand.L', [0, 0, 0]], 2.2],
-  [['Forearm.R', [0, 0, 0]], ['Hand.R', [0, 0, 0]], 2.2],
+  // forearms and hands: on past the hand joint to the fingertips (her hand reaches 4 below it, 25.5)
+  [['Forearm.L', [0, 0, 0]], ['Hand.L', [0, 0, 0], 0.42], 2.2],
+  [['Forearm.R', [0, 0, 0]], ['Hand.R', [0, 0, 0], 0.42], 2.2],
 ];
 
 export function makeColliders(model, defs = WARDEN_COLLIDERS) {
@@ -58,7 +60,7 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
     return o;
   };
   return defs.map(([a, b, r]) => new Collider(model,
-    { node: find(a[0]), offset: a[1] }, { node: find(b[0]), offset: b[1] }, r));
+    { node: find(a[0]), offset: a[1] }, { node: find(b[0]), offset: b[1], beyond: b[2] || 0 }, r));
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)

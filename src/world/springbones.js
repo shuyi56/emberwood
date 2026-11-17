@@ -58,13 +58,16 @@ const _q1 = new THREE.Vector3(), _q2 = new THREE.Vector3();   // (Collider.push 
 // A collider is a capsule between two points, or a sphere when they are the same. Each point is a node's origin
 // plus an offset given in the axes of `frame` (the model's root), so colliders can be placed between joints of
 // any rig without knowing how its bones are rolled: `{ node: chest, offset: [0, 0, -2] }` is 2 units behind
-// the chest joint, whichever way the chest bone points.
+// the chest joint, whichever way the chest bone points. An end can also reach on past its joint along the
+// capsule (`beyond`: a share of the capsule's length), so a capsule from the wrist to the hand joint can cover
+// the hand out to the fingertips and follow the forearm as it swings.
 export class Collider {
   constructor(frame, a, b, radius) {
     this.frame = frame;
     this.a = { node: a.node, offset: new THREE.Vector3(...(a.offset || [0, 0, 0])) };
     b = b || a;
     this.b = { node: b.node, offset: new THREE.Vector3(...(b.offset || [0, 0, 0])) };
+    this.beyond = b.beyond || 0;
     this.radius = radius;
     this.wa = new THREE.Vector3(); this.wb = new THREE.Vector3();          // where it is for this step
     this.pa = new THREE.Vector3(); this.pb = new THREE.Vector3();          // last frame
@@ -79,6 +82,7 @@ export class Collider {
       out.setFromMatrixPosition(end.node.matrixWorld)
         .add(_v1.copy(end.offset).applyQuaternion(_qf).multiplyScalar(this.scale));
     }
+    if (this.beyond) this.wb.add(_v1.subVectors(this.wb, this.wa).multiplyScalar(this.beyond));
   }
   // push point p (world) out of the surface grown by `extra`. With `soft`, the push eases in over a band `soft`
   // wide that ends at that surface (it starts half of `soft` outside it, and holds the point on the surface once
