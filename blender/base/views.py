@@ -12,6 +12,8 @@
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
+--hair-only  with --turn or --head: only the hair is rendered (every mesh in the hair material, and the tie);
+           the rest of the figure is still built, so the hair lies as it does on her
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
 """
 import importlib
@@ -187,6 +189,17 @@ def main():
         sc.frame_set(int(opt('--frame', 0)) + 1)
         size = int(opt('--size', 360))
         cam = look_3d(int(opt('--samples', 32)))
+        if '--hair-only' in argv:
+            hair = F.MATERIALS[F.M_HAIR]['name']
+            kept = []
+            for o in sc.objects:
+                if o.type != 'MESH':
+                    continue
+                if any(sl.material and sl.material.name == hair for sl in o.material_slots) or o.name.startswith('Hair'):
+                    kept.append(o.name)
+                else:
+                    o.hide_render = True
+            print('hair only:', ', '.join(sorted(kept)), flush=True)
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
             for look in ('', '-clay') if '--clay' in argv else ('',):
