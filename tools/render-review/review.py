@@ -370,7 +370,8 @@ def hair_before(branch, tip):
         index = json.load(open(os.path.join(HAIR_DIR, "index.json")))
     except (OSError, ValueError):
         return None, None
-    for e in reversed(index.get(branch, [])):
+    # (entries from before baselines were kept per figure sit under the bare branch name)
+    for e in reversed(index.get(branch, []) or index.get(branch.split("#")[0], [])):
         if e["tip"] != tip and rq.git("merge-base", "--is-ancestor", e["tip"], tip, check=False).returncode == 0:
             try:
                 return json.load(open(os.path.join(e["dir"], "hair-check.json"))), e["tip"]
@@ -679,7 +680,13 @@ def review(req, thread, do_smoke=True):
     smoked_ok = False
     # the hair check rides on the first job's build, for every request whose commit touches hair code
     hair_defs = sorted({d for defs in fresh.values() for d in defs if HAIR.search(d)})
-    hair_dir = os.path.join(HAIR_DIR, f"{tip[:9]}-{merged[:9]}") if hair_defs else None
+    # (measured on the figure the first job builds, and compared only with that figure's last measurement: a branch
+    # that carries two figures has two baselines)
+    first = (todo or facts["jobs"] or [{}])[0]
+    m = re.search(r"--figure\s+(\w+)", first.get("param") or "") or re.search(r"blender/(\w+)/", first.get("param") or "")
+    figure_ = m.group(1) if m and m.group(1) != "base" else "ranger"
+    hair_key = f"{branch}#{figure_}"
+    hair_dir = os.path.join(HAIR_DIR, f"{tip[:9]}-{merged[:9]}-{figure_}") if hair_defs else None
     if hair_dir and not todo and not rep.blocked and do_smoke and not os.path.exists(os.path.join(hair_dir, "hair-check.json")) \
             and facts["jobs"]:
         todo.append(facts["jobs"][0])          # the renders are cached, but this hair was never measured
@@ -710,11 +717,11 @@ def review(req, thread, do_smoke=True):
         smoked_ok = all(j["smoke"]["ok"] for j in todo)
         if hair_dir and os.path.exists(os.path.join(hair_dir, "hair-check.json")):
             now = json.load(open(os.path.join(hair_dir, "hair-check.json")))
-            before, before_tip = hair_before(branch, tip)
+            before, before_tip = hair_before(hair_key, tip)
             facts["hair"] = {"dir": hair_dir, "changed": hair_defs, "problems": len(now.get("problems", [])),
                              "clashes": len(now.get("clashes", [])), "compared_with": before_tip}
             hair_findings(rep, now, before, before_tip, bool(req.get("needs_render")))
-            hair_record(branch, tip, hair_dir)
+            hair_record(hair_key, tip, hair_dir)
         elif hair_dir and smoked_ok:
             err = os.path.join(hair_dir, "hair-check-error.txt")
             rep.warn("hair", "This commit changes hair code (" + ", ".join(hair_defs[:6]) + ") but the hair check "
