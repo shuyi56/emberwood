@@ -1247,6 +1247,10 @@ GAIT, ARM_SWING = 1.0, 0.2
 # The face's shape, as the face creator's sliders (/mnt/project-files/face-creator): multipliers on face_relief's,
 # mouth_relief's and jaw_relief's forms, and offsets on the head's width and a few features' heights. These defaults
 # are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
+# A mannequin: the same body and the same head shape, but the head left plain: no eyes, lids, ears, face paint or
+# mouth (and each figure skips its hair, see its build). The clothes, armour and gear build and fit exactly as on the
+# real figure, in a fraction of the time. For checking clothes that need a body under them (views.py --mannequin).
+MANNEQUIN = False
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
 FACE = {
     'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
@@ -3559,6 +3563,9 @@ def build_head(body):
     # (the eyes are set against the head before its lids are sculpted, so the balls follow the plain socket and
     # the lids then close over their edges)
     eyes = [(feat[s][0], 0.525 * HEAD_H + EYE_LIFT, s) for s in (-1, 1)]
+    if MANNEQUIN:
+        mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
+        return head, head_tree
     for s in (-1, 1):
         x, ey, by = feat[s]
         build_eye(head, head_tree, s, x, ey, 0.525 * HEAD_H + EYE_LIFT)

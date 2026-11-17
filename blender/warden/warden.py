@@ -2468,7 +2468,8 @@ def build():
     # ---- the hair: the face creator's long waves with a centre parting (lifted clear of the clothes after the rig)
     global CAPE_UNDER
     CAPE_UNDER = under_table()     # (what is built so far, for the cape to lie over)
-    creator_hair(head)
+    if not female.MANNEQUIN:
+        creator_hair(head)
 
     # ---- the rig (the base figure's)
     build_rig(body)
@@ -2911,7 +2912,7 @@ def build():
     velvet_closeup('robe')
     velvet_closeup('cape')
     patina_closeup('bracers')
-    if not os.environ.get('WARDEN_NO_CLEARANCE'):
+    if not os.environ.get('WARDEN_NO_CLEARANCE') and not female.MANNEQUIN:
         # (twice: the first pass's easing lets a little back in where a lock crosses the shoulder in the walk)
         import time
         t_ = time.time()

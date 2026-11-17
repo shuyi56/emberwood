@@ -12,6 +12,11 @@
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
+--angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
+           comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
+--mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
+           a build), with the clothes, armour and gear built and fitted exactly as on the real figure. For clothes
+           changes that need a body under them.
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
 
 Rendering pieces on their own (any of the views above):
@@ -49,6 +54,12 @@ import female  # noqa: E402
 F = importlib.import_module(FIGURE)
 
 VIEWS = [('front', 0), ('3/4', 45), ('profile', 90), ('back 3/4', 135), ('back', 180)]
+if opt('--angles'):
+    _want = [a.strip().replace(' ', '') for a in opt('--angles').split(',') if a.strip()]
+    _bad = [a for a in _want if a not in [n.replace(' ', '') for n, _ in VIEWS]]
+    if _bad or not _want:
+        sys.exit(f'views.py: --angles takes front, 3/4, profile, back3/4, back (got {",".join(_bad) or "nothing"})')
+    VIEWS = [v for v in VIEWS if v[0].replace(' ', '') in _want]
 
 
 def span(s, n):
@@ -250,7 +261,12 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
+    if '--mannequin' in argv:
+        female.MANNEQUIN = True
+    import time
+    t0 = time.time()
     F.build()
+    print(f'build {time.time() - t0:.0f} s' + (' (mannequin)' if female.MANNEQUIN else ''), flush=True)
     sc = bpy.context.scene
     sc.frame_set(1)
     if '--list' in argv:
