@@ -2614,11 +2614,12 @@ def build():
 
         def greave_pt(z, phi, out=0.0):
             rx, ry, cy = ring_r(rings, z)
-            flare = 0.14 * (smoothstep(GT - 0.7, GT, z) + smoothstep(GB + 0.7, GB, z))
-            ridge = 0.22 * math.exp(-(wrap(phi) / 0.32) ** 2)
+            # (slim: close over the boot, so the leg keeps its line instead of reading as a stovepipe)
+            flare = 0.08 * (smoothstep(GT - 0.7, GT, z) + smoothstep(GB + 0.7, GB, z))
+            ridge = 0.14 * math.exp(-(wrap(phi) / 0.3) ** 2)
             # (shaped to the leg: swelling over the calf behind, drawn in toward its foot)
-            calf = 0.32 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
-            ex = 0.22 + flare + out + calf - 0.1 * smoothstep(-3.5, GB, z)
+            calf = 0.16 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
+            ex = 0.12 + flare + out + calf - 0.06 * smoothstep(-3.5, GB, z)
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
         gz = [GT - (GT - GB) * i / 48 for i in range(49)]
         mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_BRONZE, loc=(x, 0, kz),
@@ -2630,7 +2631,7 @@ def build():
             lx, ly = leg_pt(z - THIGH, ph)
             rl = math.hypot(lx, ly)
             gx, gy = greave_pt(z, ph)
-            need = math.hypot(gx, gy - 0.0) - rl + 0.12
+            need = math.hypot(gx, gy - 0.0) - rl + 0.08
             off = base + max(0.0, need - base) * smoothstep(GT + 0.7, GT - 0.1, z) + out
             return lx * (rl + off) / rl, ly * (rl + off) / rl, z
 
@@ -2645,9 +2646,9 @@ def build():
                 v = (ph - pc) / pw
                 return knee_pt(z, ph, base(u, v))
             return face_out(grid(rows, cols, pt), axis_y=0.0)
-        cop = lambda u, v: 0.2 + 0.32 * (1 - u * u) * (1 - v * v)    # noqa: E731
-        for nm, args in (('Knee wing', (0.95, -0.85, s * 1.5, 0.55, lambda u, v: 0.16 + 0.08 * (1 - v * v))),
-                         ('Knee lame', (2.05, 1.05, 0.0, 1.3, lambda u, v: 0.13 + 0.05 * (1 - v * v))),
+        cop = lambda u, v: 0.13 + 0.22 * (1 - u * u) * (1 - v * v)    # noqa: E731
+        for nm, args in (('Knee wing', (0.95, -0.85, s * 1.5, 0.55, lambda u, v: 0.11 + 0.06 * (1 - v * v))),
+                         ('Knee lame', (2.05, 1.05, 0.0, 1.3, lambda u, v: 0.09 + 0.04 * (1 - v * v))),
                          ('Knee cop', (1.35, -1.1, 0.0, 1.4, cop))):
             mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_BRONZE, loc=(x, 0, kz), skin=w,
                      solid=0.13, subdiv=1)
