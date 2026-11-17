@@ -832,7 +832,8 @@ def build_throat_plate(body):
         Y.append([lerp(y, m, 0.6) - 0.26 for y in row])
 
     def ridge(u):
-        return 0.1 * math.exp(-(u / 0.12) ** 2) + 0.07 * math.exp(-((abs(u) - 0.62) / 0.1) ** 2) + 0.1 * (1.0 - u * u)
+        # (domed across, as the band is round: its sides turn back from the light instead of one flat face catching it)
+        return 0.1 * math.exp(-(u / 0.12) ** 2) + 0.07 * math.exp(-((abs(u) - 0.62) / 0.1) ** 2) + 0.42 * (1.0 - u * u)
 
     def pt(i, j):
         z = zs[i]
