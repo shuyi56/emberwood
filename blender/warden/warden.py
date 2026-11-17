@@ -697,6 +697,7 @@ def collar_base(a):
 
 COLLAR_ON = None     # (a BVH of the cape and robe, for the collar's foot to lie on)
 COLLAR_STAND = 53.5  # (where the band turns upright, at the throat)
+FOOT_A0, FOOT_A1 = 0.62, 1.0   # (the foot spreads onto the cape only toward the yoke's edge, at about 0.97, and beyond)
 FOOT_V = 0.36        # (the part of the band, from its foot, that lies down over the cape)
 
 
@@ -720,10 +721,13 @@ def collar_pt(a, v, out=0.0):
     neck = g_neck(a) + 0.16
     rim = min(max(collar_base(a) + 0.08, neck + 0.3), neck + 0.8)
     sa, ca = math.sin(a), math.cos(a)
-    k = smoothstep(0.45, 0.9, abs(wrap(a)))
+    k = smoothstep(FOOT_A0, FOOT_A1, abs(wrap(a)))
     if v <= FOOT_V:
         t = v / FOOT_V
         r = lerp(neck, lerp(rim, neck, 1.0 - (1.0 - t) ** 2), k)
+        # (over the yoke the foot has no lip: its lower edge sinks into the yoke's surface, so the two read as one
+        # piece of steel with no step between them)
+        r -= 0.12 * (1.0 - k) * (1.0 - smoothstep(0.0, 1.0, t))
         x, y = -r * sa, GC_Y - r * ca
         z = lerp(53.0, COLLAR_STAND, t)
         if k > 0.0:
@@ -784,7 +788,14 @@ def build_collar(body):
     def ang(v, j):
         o = collar_open(v)
         return lerp(o, 2 * math.pi - o, j / (n - 1))
-    sheet = grid(rows, n, lambda i, j: collar_pt(ang(1.0 - i / (rows - 1), j), 1.0 - i / (rows - 1)))
+
+    def front(i, j):
+        # (the fronts' plain edge below the rolled brass is feathered down into the choker's band, so it has no
+        # thickness there to draw a line with)
+        v = 1.0 - i / (rows - 1)
+        e = (1.0 - smoothstep(0.0, 5.0, min(j, n - 1 - j))) * (1.0 - smoothstep(0.42, 0.58, v))
+        return collar_pt(ang(v, j), v, -0.13 * e)
+    sheet = grid(rows, n, front)
     mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
     # the rolled edge: up one front, round the top and down the other
     vs_ = [k / 12 for k in range(7, 12)]   # (the fronts' rolled edge only above the plate, where they stand free)
@@ -794,7 +805,9 @@ def build_collar(body):
     mesh_obj('Collar edge', tube(path, [0.1] * len(path), flat=1.0, n=8), M_GOLD, body, subdiv=0)
     # (and the foot's rim rolled too, lying on the cloth)
     rim = [collar_pt(ang(0.0, j), 0.0, 0.02) for j in range(n)]
-    mesh_obj('Collar rim', tube(rim, [0.1] * n, flat=1.0, n=8), M_COLLAR, body, subdiv=0)
+    # (it thins away to nothing over the yoke, where the foot sinks into it)
+    rr = [0.1 * smoothstep(FOOT_A0, FOOT_A1, abs(wrap(ang(0.0, j)))) + 0.005 for j in range(n)]
+    mesh_obj('Collar rim', tube(rim, rr, flat=1.0, n=8), M_COLLAR, body, subdiv=0)
     # (a line tooled round it below the top, and a row of studs between)
     line = [collar_pt(ang(0.78, j), 0.78, 0.035) for j in range(3, n - 3)]
     mesh_obj('Collar line', tube(line, [0.045] * len(line), flat=1.0, n=6), M_GOLD, body, subdiv=0)
@@ -880,8 +893,8 @@ def build_throat_plate(body):
     mesh_obj('Collar yoke', face_out(grid(yrow, pcol, yoke)), M_COLLAR, body, solid=0.08, subdiv=1)
     for jj, nm in ((0, 'a'), (pcol - 1, 'b')):
         # (its brass edge starts below the collar's rim and swells in from nothing, so no stub pokes out above it)
-        ye = [yoke(i, jj, 0.03) for i in range(3, yrow)]
-        mesh_obj(f'Collar yoke edge {nm}', tube(ye, [0.07 * smoothstep(0, 3, k) + 0.015 for k in range(len(ye))], flat=1.0, n=8),
+        ye = [yoke(i, jj, 0.03) for i in range(5, yrow)]
+        mesh_obj(f'Collar yoke edge {nm}', tube(ye, [0.07 * smoothstep(0, 4, k) + 0.008 for k in range(len(ye))], flat=1.0, n=8),
                  M_GOLD, body, subdiv=0)
     mesh_obj('Collar plate', face_out(grid(prow, pcol, lambda i, j: plate(i, j, 0.12))), M_COLLAR, body, solid=0.08, subdiv=1)
     # (the plate's brass edge likewise swells in below the band, down each side and round the point)
@@ -1800,8 +1813,9 @@ def build():
     ro = mesh_obj('Robe', robe_sheet(53.6, 38.9, 62), M_ROBE, body, solid=0.15)
     crease_attr(ro, lambda co: robe_form(co.z, math.atan2(-co.x, -co.y))[1])
     RT = 0.07
+        # (the trim starts under the choker: higher up it stood out through the band beside the collar)
     for s in (-1, 1):
-        mesh_obj(f'Robe front {s}', strip(polyline(lambda z: (s * (robe_edge(z) + 0.36), z), 53.4, 38.9, 44), 0.3,
+        mesh_obj(f'Robe front {s}', strip(polyline(lambda z: (s * (robe_edge(z) + 0.36), z), 52.8, 38.9, 44), 0.3,
                                           robe_y, 0.15 + RT), M_ROBE_TRIM, body, subdiv=0, solid=0.05)
 
     # ---- the belt at the waist, over the robe and the tabard, with a gold buckle
