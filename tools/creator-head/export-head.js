@@ -18,12 +18,15 @@ const fs = require('fs'), path = require('path');
   // The face paint for the world: the skin's fine surface texture and blotches are painted for the creator's own
   // shader (a bump map and a pore tint undo them there); exported bare, they read as a grey-green mottle in the game.
   // So the export repaints with them off, keeping the freckles, flush, make-up, brows and lips.
-  const FOR_WORLD = { texture: 0, blotch: 0 };
+  // The lips for the world: flatter and painted, a clear shape of colour on an almost flat mouth (the sculpted volume,
+  // lit by the game's sun, read as a puffy pout at play distance), no gloss.
+  const FOR_WORLD = { texture: 0, blotch: 0, lipUpper: 0.3, lipLower: 0.35, lipGloss: 0, lipLine: 1.3 };
   const base = settings ? JSON.parse(settings) : await p.evaluate(() => JSON.parse(JSON.stringify(window.__fc.P)));
   await p.fill('#vw-json', JSON.stringify(Object.assign(base, FOR_WORLD))); await p.click('#vw-load');
   await p.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 300000 });
   await p.waitForTimeout(3000);
-  const b64 = await p.evaluate(async () => {
+  const STRAND_MAX = +(process.env.STRAND_MAX || 2000), FRONT_Z = +(process.env.FRONT_Z || 1.3);
+  const b64 = await p.evaluate(async ([STRAND_MAX, FRONT_Z]) => {
     const THREE = await import('three');
     const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
     const RB = window.__rangerBody, g = new THREE.Group(); g.name = 'Creator head';
@@ -49,6 +52,13 @@ const fs = require('fs'), path = require('path');
       if (o === RB.group || !o.visible) return;
       o.traverse((m) => {
         if (!m.isMesh || !m.visible) return;
+        // (the fine strand clumps laid over each lock: hundreds of thin alpha-cut ribbons that at the world's size only
+        // break into a speckle of dark dashes over the hair; the locks underneath carry the shape and the light)
+        // (the bangs and the locks framing the face are built the same way, so only those behind the front of the head go)
+        if (m.material && m.material.alphaMap && m.geometry.attributes.position.count < STRAND_MAX) {
+          m.geometry.computeBoundingBox(); const c = m.geometry.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(m.matrixWorld);
+          if (c.z < FRONT_Z) return;
+        }
         m.updateWorldMatrix(true, false);
         const c = new THREE.Mesh(m.geometry, Array.isArray(m.material) ? m.material.map(bakeAlpha) : bakeAlpha(m.material));
         c.name = (m.name || 'head part') + ' ' + (k++);
@@ -59,7 +69,7 @@ const fs = require('fs'), path = require('path');
     const buf = await new GLTFExporter().parseAsync(g, { binary: true, onlyVisible: true, maxTextureSize: 1024 });
     let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
     return btoa(s);
-  });
+  }, [STRAND_MAX, FRONT_Z]);
   fs.writeFileSync(out, Buffer.from(b64, 'base64'));
   console.log('wrote', out, fs.statSync(out).size, 'bytes');
   await b.close();
