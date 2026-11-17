@@ -1481,6 +1481,7 @@ def creator_hair(head):
     bm = bmesh.new()
     lay = bm.verts.layers.int.new('pt')
     shade = []
+    RING = 8
     for st in d['strands']:
         n = len(st['t'])
         P = [Vector(st['p'][k * 3:k * 3 + 3]) * H for k in range(n)]
@@ -1498,16 +1499,18 @@ def creator_hair(head):
             T = (P[min(n - 1, k + 1)] - P[max(0, k - 1)]).normalized()
             N = T.cross(w)
             N = N.normalized() * max(0.03, st['t'][k] * H * 1.6) * a if N.length > 1e-9 else Vector()
-            ring = [bm.verts.new(P[k] + o) for o in (w, N, -w, -N)]
+            # (a lens, not a diamond: a diamond's two sharp edges each caught the light as a bright line down the
+            # strand and its flat faces read as slabs; round, its edges roll away into the strands beside it)
+            ring = [bm.verts.new(P[k] + w * math.cos(q * math.pi / 4) + N * math.sin(q * math.pi / 4)) for q in range(RING)]
             for v in ring:
                 v[lay] = len(pts)
-            shade += [st['c'][k]] * 4
+            shade += [st['c'][k] - 0.12 * abs(math.cos(q * math.pi / 4)) ** 4 for q in range(RING)]
             pts.append(P[k].copy())
             rings.append(ring)
         runs.append((base, len(pts) - base))
         for r0, r1 in zip(rings, rings[1:]):
-            for q in range(4):
-                bm.faces.new((r0[q], r0[(q + 1) % 4], r1[(q + 1) % 4], r1[q]))
+            for q in range(RING):
+                bm.faces.new((r0[q], r0[(q + 1) % RING], r1[(q + 1) % RING], r1[q]))
         bm.faces.new(rings[0][::-1])
         bm.faces.new(rings[-1])
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
@@ -1537,6 +1540,7 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
     cap, locks = bpy.data.objects['Hair'], bpy.data.objects['Hair locks']
     P = HAIR_PTS
     need = {}
+    clear_ = [1e9] * len(P)      # how close each point comes to the clothes in any pose
     for col in cols:
         sc.frame_set(col + 1)
         tree = clothes_tree(cap, bpy.context.evaluated_depsgraph_get())
@@ -1545,6 +1549,9 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
         for i, p in enumerate(P):
             if p.z > 1.0:
                 continue
+            _p, _n, _i, dn = tree.find_nearest(p, 3.0)
+            if dn is not None and dn < clear_[i]:
+                clear_[i] = dn
             rad = Vector((p.x, p.y - HC.y, 0.0))
             if rad.length < 1e-6:
                 continue
@@ -1633,6 +1640,9 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
             wmax = max(wmax, w)
         D[i] = acc / ws * min(1.0, wmax * 1.6)
         # (never less than the point's own need)
+        # (the spread stays by the clothes: a lift at the collar carried 3 units up the locks beside the face, which
+        # stood them off the cheeks; hair more than a little way clear of every cloth keeps its place)
+        D[i] *= 1.0 - smoothstep(gap + 0.25, gap + 0.9, clear_[i])
         if i in need and need[i].length > D[i].length:
             D[i] = need[i].copy()
     # eased along each strand, so a strand bends over the cloth instead of stepping
