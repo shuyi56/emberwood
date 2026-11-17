@@ -2830,6 +2830,10 @@ def hair_contact_shade(reach=1.3, near=0.25, depth=1.0):
             # (only hair out on the side the skin faces: hair behind the ear, past the edge of the jaw, shades
             # nothing)
             facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
+            # (but hair touching the skin shades it whichever side its nearest point lies: where a fringe lock grazes
+            # the brow ridge its nearest point is under the surface, and the shade had a hole there, a pale streak
+            # along the brow)
+            facing = max(facing, 1.0 - smoothstep(near, near + 0.35, d))
             dn = neck_t.find_nearest(p, 0.8)[3] if neck_t is not None else None
             seam = 1.0 if dn is None else smoothstep(0.1, 0.8, dn)
             occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d))
