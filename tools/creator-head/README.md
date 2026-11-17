@@ -10,13 +10,15 @@ clothes, skinning and the walk and idle animations are the Blender export (`blen
    The hair strands' alpha maps are baked into the alpha of their colour maps (alphaMode MASK); glTF has no alpha
    map. The creator's shader tweaks (onBeforeCompile) do not export, so the model gets each plain material and its
    painted maps. So the export repaints the face without the creator's fine skin texture and blotches, which only its
-   shader balances (in the world they read as a grey-green mottle). For the world it also flattens the lips to a painted
-   shape (lips 0.3 and 0.35, no gloss), and leaves out the fine strand clumps laid over the locks behind the front of
+   shader balances (in the world they read as a grey-green mottle). For the world it also softens the mouth (lips 0.55
+   and 0.6, no gloss, a little wider with the corners up, slimmer cheeks round it), and leaves out the fine strand clumps laid over the locks behind the front of
    the head (FRONT_Z, default 1.3): at the world's size they only speckle the hair. The bangs and the locks framing
    the face stay. Only the game model changes; the creator keeps its own lips and strands.
 2. `node merge-head.mjs ranger.glb creator-head.glb out.glb [headRatio] [hairRatio]` drops the Blender head, hair,
-   face paint and eye animation channels, simplifies the creator's parts for the world (the head to about 25k
-   triangles, the joined strands to about 0.4) and hangs them under the Head node. It drops the face's roughness map (oily patches in the world's light) and checks
+   face paint and eye animation channels, simplifies the creator's parts for the world (the head, alone, to 0.25 of
+   its triangles, about 67k; the joined strands to about 0.4) and hangs them under the Head node. It smooths the
+   normals over the mouth (MOUTH_ITERS, MOUTH_MAX), so the sculpted folds round it stop drawing a frown in the world's
+   light, and leaves out the ears (under her hair) and the hair's unlit veil (flat orange patches at the temples). It drops the face's roughness map (oily patches in the world's light) and checks
    the face's mean colour against the Blender head's skin. It blurs the hair texture across the strands and softens
    its cut-out tips, which speckled in the world (hairSoft, default 5). Also needs `sharp` (0.33.5). Needs `@gltf-transform/core`,
    `@gltf-transform/extensions`, `@gltf-transform/functions` (4.1.1) and `meshoptimizer` (0.22.0).

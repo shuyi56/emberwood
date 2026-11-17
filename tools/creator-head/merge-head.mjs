@@ -3,15 +3,15 @@
 // as exported; the creator's parts go under the Head node, whose frame is the creator's (chin at 0, face toward +z).
 //   node merge-head.mjs ranger.glb creator-head.glb out.glb [headRatio] [hairRatio] [hairSoft]
 // The creator's head is sculpted far finer than the game needs: it is simplified to headRatio of its triangles
-// (default 0.12), its hair strands joined by material, and every texture capped at 1024.
+// (default 0.25), its hair strands joined by material; textures come from the export (the face at up to 2048).
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { mergeDocuments, dedup, join, weld, simplify, prune, unpartition } from '@gltf-transform/functions';
+import { mergeDocuments, dedup, join, weld, simplifyPrimitive, prune, unpartition } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
 
 const [, , basePath, headPath, outPath, ratioArg] = process.argv;
-const ratio = parseFloat(ratioArg || '0.12'), hairRatio = parseFloat(process.argv[6] || '0.4'), hairSoft = parseFloat(process.argv[7] || '5');
+const ratio = parseFloat(ratioArg || '0.25'), hairRatio = parseFloat(process.argv[6] || '0.4'), hairSoft = parseFloat(process.argv[7] || '5');
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 const doc = await io.read(basePath), headDoc = await io.read(headPath);
 const root = doc.getRoot();
@@ -39,6 +39,16 @@ old.forEach((n) => { const m = n.getMesh(); n.dispose(); if (m) m.dispose(); });
 // (merge the creator's scene and hang its nodes under the Head node)
 await MeshoptSimplifier.ready;
 await headDoc.transform(dedup(), weld({ tolerance: 0.0001 }));
+// Two creator parts that do not carry over, both found by their materials (vertex colours, no map):
+//  - the hair's veil, a soft see-through glow laid over the locks at the temples for the creator's light; it exports
+//    unlit, and in the world it showed as flat, bright orange patches either side of the face;
+//  - the ears (sheen): her hair is worn down over them, and their tops showed through the gaps between the locks.
+const extOf = (mt, name) => mt.listExtensions().some((e) => e.extensionName === name);
+for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitives()) {
+  const mt = pr.getMaterial();
+  if (!mt || mt.getBaseColorTexture() || !pr.getAttribute('COLOR_0')) continue;
+  if ((mt.getAlphaMode() === 'BLEND' && extOf(mt, 'KHR_materials_unlit')) || extOf(mt, 'KHR_materials_sheen')) { m.removePrimitive(pr); pr.dispose(); }
+}
 // (the creator's skin: the opaque part with a painted map and vertex colours, the head)
 if (skinTarget) for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitives()) {
   const mt = pr.getMaterial(), tex = mt && mt.getBaseColorTexture(), vc = pr.getAttribute('COLOR_0'), uv = pr.getAttribute('TEXCOORD_0');
@@ -57,10 +67,50 @@ if (skinTarget) for (const m of headDoc.getRoot().listMeshes()) for (const pr of
   console.log('skin matched to the Blender head: gain', g.map((v) => v.toFixed(3)).join(' '));
 }
 
-// simplify only the big pieces (the head, the eyes, the hair cap); the strands are left as built
+// simplify only the head itself, one primitive at a time (a document-wide pass reached every piece again on each
+// call, and the head, simplified twice, lost the shape of the mouth); the error is kept small so the lips, the nose
+// and the lids hold their shape
 for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitives()) {
-  const n = pr.getAttribute('POSITION').getCount();
-  if (n > 20000) await headDoc.transform(simplify({ simplifier: MeshoptSimplifier, ratio, error: 0.0004, lockBorder: true }));
+  const mt = pr.getMaterial();
+  if (pr.getAttribute('POSITION').getCount() > 100000 && mt && mt.getAlphaMode() === 'OPAQUE')
+    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio, error: 0.0001, lockBorder: true });
+}
+
+// The mouth's shading for the world: the sculpt round the mouth (the folds from the nose wings to the corners, the dip
+// above the upper lip, the fold under the lower lip, the parting) is modelled for the creator's soft, scattering skin;
+// under the game's top-down sun and plain shading every fold went dark, and together they drew a frown and a pursed
+// pout round the painted lips. So the normals over the mouth are smoothed (the shape and silhouette stay as sculpted),
+// fading out to the cheeks and chin: the lips read from their paint, the creases go.
+const MOUTH = { x: 0, y: 2.3, z: 4.0, rx: 1.8, ry: 1.6, rz: 1.6 }, mouthIters = +(process.env.MOUTH_ITERS || 40), mouthMax = +(process.env.MOUTH_MAX || 0.9);
+for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitives()) {
+  const mt = pr.getMaterial(), P = pr.getAttribute('POSITION'), N = pr.getAttribute('NORMAL'), I = pr.getIndices();
+  if (!(mt && mt.getAlphaMode() === 'OPAQUE' && mt.getBaseColorTexture() && N && I && P.getCount() > 20000)) continue;
+  const n = P.getCount(), pos = P.getArray(), nor = N.getArray(), idx = I.getArray();
+  const w = new Float32Array(n); let any = 0;
+  for (let i = 0; i < n; i++) {
+    const r = Math.hypot((pos[i * 3] - MOUTH.x) / MOUTH.rx, (pos[i * 3 + 1] - MOUTH.y) / MOUTH.ry, (pos[i * 3 + 2] - MOUTH.z) / MOUTH.rz);
+    const t = Math.min(1, Math.max(0, (1 - r) / 0.5)); w[i] = mouthMax * t * t * (3 - 2 * t); if (w[i] > 0) any++;
+  }
+  if (any < 100) continue;
+  // (neighbours from the triangles, for the vertices in the region and their rings)
+  const nb = new Map(); const link = (a, b) => { if (w[a] > 0) { let s = nb.get(a); if (!s) nb.set(a, s = new Set()); s.add(b); } };
+  for (let f = 0; f < idx.length; f += 3) { const a = idx[f], b = idx[f + 1], c = idx[f + 2]; link(a, b); link(a, c); link(b, a); link(b, c); link(c, a); link(c, b); }
+  let cur = Float32Array.from(nor);
+  for (let it = 0; it < mouthIters; it++) {
+    const nx = Float32Array.from(cur);
+    for (const [i, s] of nb) {
+      let x = cur[i * 3], y = cur[i * 3 + 1], z = cur[i * 3 + 2];
+      for (const j of s) { x += cur[j * 3]; y += cur[j * 3 + 1]; z += cur[j * 3 + 2]; }
+      const l = Math.hypot(x, y, z) || 1; nx[i * 3] = x / l; nx[i * 3 + 1] = y / l; nx[i * 3 + 2] = z / l;
+    }
+    cur = nx;
+  }
+  for (const i of nb.keys()) {
+    let x = nor[i * 3] + (cur[i * 3] - nor[i * 3]) * w[i], y = nor[i * 3 + 1] + (cur[i * 3 + 1] - nor[i * 3 + 1]) * w[i], z = nor[i * 3 + 2] + (cur[i * 3 + 2] - nor[i * 3 + 2]) * w[i];
+    const l = Math.hypot(x, y, z) || 1; nor[i * 3] = x / l; nor[i * 3 + 1] = y / l; nor[i * 3 + 2] = z / l;
+  }
+  N.setArray(nor);
+  console.log('mouth normals smoothed:', nb.size, 'vertices,', mouthIters, 'passes');
 }
 
 // The hair's texture for the world: in the creator a bump map, per-lock shading and its shader soften the fine strand
@@ -92,9 +142,8 @@ await headDoc.transform(join({ keepNamed: false }));
 // outline at the world's distance
 for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitives()) {
   const mt = pr.getMaterial();
-  if (mt && mt.getAlphaMode() === 'MASK' && pr.getAttribute('POSITION').getCount() > 20000) {
-    await headDoc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: hairRatio, error: 0.002, lockBorder: false }));
-  }
+  if (mt && mt.getAlphaMode() === 'MASK' && pr.getAttribute('POSITION').getCount() > 20000)
+    simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio: hairRatio, error: 0.002, lockBorder: false });
 }
 const map = mergeDocuments(doc, headDoc);
 const hs = headDoc.getRoot().getDefaultScene() || headDoc.getRoot().listScenes()[0];

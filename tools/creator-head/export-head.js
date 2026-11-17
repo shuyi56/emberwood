@@ -20,7 +20,11 @@ const fs = require('fs'), path = require('path');
   // So the export repaints with them off, keeping the freckles, flush, make-up, brows and lips.
   // The lips for the world: flatter and painted, a clear shape of colour on an almost flat mouth (the sculpted volume,
   // lit by the game's sun, read as a puffy pout at play distance), no gloss.
-  const FOR_WORLD = { texture: 0, blotch: 0, lipUpper: 0.3, lipLower: 0.35, lipGloss: 0, lipLine: 1.3 };
+  // The mouth is also a little wider with its corners turned up, and the cheeks round it slimmer, so that it reads as a
+  // soft closed smile rather than a small pursed mouth set between full cheeks.
+  const FOR_WORLD = { texture: 0, blotch: 0, lipUpper: 0.55, lipLower: 0.6, lipGloss: 0, lipLine: 1, smile: 2.2, mouthWidth: 1.0,
+    apples: 0.3, cheekFull: 0.25, chinProj: 1.0 };
+  if (process.env.WORLD) Object.assign(FOR_WORLD, JSON.parse(process.env.WORLD));
   const base = settings ? JSON.parse(settings) : await p.evaluate(() => JSON.parse(JSON.stringify(window.__fc.P)));
   await p.fill('#vw-json', JSON.stringify(Object.assign(base, FOR_WORLD))); await p.click('#vw-load');
   await p.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 300000 });
@@ -66,7 +70,7 @@ const fs = require('fs'), path = require('path');
         g.add(c);
       });
     });
-    const buf = await new GLTFExporter().parseAsync(g, { binary: true, onlyVisible: true, maxTextureSize: 1024 });
+    const buf = await new GLTFExporter().parseAsync(g, { binary: true, onlyVisible: true, maxTextureSize: 2048 });
     let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
     return btoa(s);
   }, [STRAND_MAX, FRONT_Z]);
