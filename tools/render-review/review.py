@@ -719,14 +719,17 @@ def review(req, thread, do_smoke=True):
         if not tok or not tok[0].endswith("views.py"):
             continue
         known = flags_known_to(show(merged, tok[0]) or "") or set()
-        if "--turn" in tok and not str(req.get("confirmed") or "").strip():
+        one = "--angles" in tok and tok.index("--angles") + 1 < len(tok) \
+            and "," not in tok[tok.index("--angles") + 1]
+        multi = [f for f in ("--turn", "--head", "--pieces") if f in tok]
+        if multi and not one and not str(req.get("confirmed") or "").strip():
             if "--angles" in known:
-                rep.block("views", "A full five-angle --turn with no \"confirmed\" in the request.",
-                          "Render one angle first, the one that shows the change best (--angles front, 3/4, profile, "
-                          "back3/4 or back in place of --turn). When it is right, ask for the turn with "
+                rep.block("views", f"All five angles of {' '.join(multi)} with no \"confirmed\" in the request.",
+                          "Render one angle first, the one that shows the change best: add --angles front (or 3/4, "
+                          "profile, back3/4, back) to the command. When it is right, ask for all angles with "
                           '"confirmed": "<what the one view showed>".', "P025")
             else:
-                rep.warn("views", "A full --turn with no \"confirmed\". views.py at this commit has no --angles yet, "
+                rep.warn("views", "All five angles with no \"confirmed\". views.py at this commit has no --angles yet, "
                          "so one view cannot be asked for; let through with the gap noted.",
                          "Merge the commit that adds --angles and ask for one angle first.", "P025")
         clothes = changed and not hairy and not mat_defs and "--head" not in tok and "--face" not in tok \

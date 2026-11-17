@@ -164,8 +164,8 @@ place when it turns out to be too broad; do not add a near copy.
 ## P025 The full turn asked before one view was looked at
 
 - **Seen:** Warden clothes and greaves, 2026-11-17: each tweak (slate blue, green, plum, slimmer greaves, grooves twice) went straight to a five-angle --turn, and several were wrong in a way one angle already showed (grooves hidden under the knee cop in #111). John set the rule: render one view first and confirm before scheduling the full turn.
-- **Spot:** A views.py command with --turn and no "confirmed" in the request.
-- **Fix:** Send it back: one angle first (--angles front, 3/4, profile, back3/4 or back), the one that shows the change best. The turn goes through only with "confirmed": "<what the one view showed>", at the one view's commit or a later one that changes nothing it showed (read the diff between the two to check). While a branch's views.py has no --angles, let the turn through and note the gap.
+- **Spot:** A views.py command with --turn, --head or --pieces, no single --angles name, and no "confirmed" in the request. (--angles filters the angles those views use: --turn --angles front is one view.)
+- **Fix:** Send it back: one angle first (add --angles front, 3/4, profile, back3/4 or back to the command), the one that shows the change best. The turn goes through only with "confirmed": "<what the one view showed>", at the one view's commit or a later one that changes nothing it showed (read the diff between the two to check). While a branch's views.py has no --angles, let the turn through and note the gap.
 
 ## P026 Clothes shown by building the real figure
 
