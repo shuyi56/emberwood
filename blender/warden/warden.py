@@ -42,13 +42,16 @@ female.FACE.update({
 })
 female.EYE_OPEN = 0.66
 female.EYE_TILT = 0.07
+# her make-up, as the creator's preset: a smoky plum shadow lined and winged at the outer corners, and wine lips
+female.MAKEUP.update({'shadow': (88, 54, 94), 'shadowDark': (36, 22, 42), 'shadowLow': (108, 78, 108), 'shadowAmt': 0.9,
+                      'liner': 0.85, 'wing': 0.75, 'lip': (124, 50, 64)})
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
 M_HAIR = mat_def(2, 'hair', ramp(0x36251c, 0.1), 0.24, surface='hair')
 M_BROW = mat_def(17, 'brow', ramp(0x2f221c, 0.08), 0.0, flat=1)
-# a dark grey-brown iris
-M_EYE = mat_def(16, 'iris', [[30, 28, 24], [58, 50, 38], [86, 74, 52], [114, 100, 70], [142, 130, 92]], 0.0, flat='painted')
+# a violet iris, deep at the rim and paler toward the pupil
+M_EYE = mat_def(16, 'iris', [[30, 20, 48], [58, 40, 96], [92, 66, 146], [132, 102, 188], [176, 150, 214]], 0.0, flat='painted')
 M_TABARD = mat_def(30, 'tabard', ramp(0xd6cbb0, 0.09), 0.05, closeup='canvas', form=True)
 M_TRIM = mat_def(31, 'embroidery', ramp(0x9b2f25, 0.09), 0.0, closeup='canvas')
 M_PLATE = mat_def(32, 'plate', ramp(0x8e9196, 0.13), 0.0, closeup='steel')   # (steel_closeup)

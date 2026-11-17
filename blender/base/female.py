@@ -2852,6 +2852,13 @@ def _warped_fbm(x, y, seed=0, k=3.0):
 
 
 SHADOW_TEX = {}
+# The make-up's colours and strengths. These defaults are the ranger's; a figure changes the ones it wants with
+# MAKEUP.update({...}) before it builds. shadow, shadowDark and shadowLow are the eyeshadow's wash, its deepest tone
+# and the lighter wash under the lower lashes (sRGB 0-255); shadowAmt its opacity; liner a dark line along the upper
+# lashes and wing its flick out past the outer corner (0 none .. 1 full); lip the lips' own tone (None: the
+# ranger's dusty rose), from which the upper lip, the highlight and the line between them are shaded.
+MAKEUP = {'shadow': (70, 60, 56), 'shadowDark': (34, 29, 28), 'shadowLow': (92, 80, 74), 'shadowAmt': 0.78,
+          'liner': 0.0, 'wing': 0.0, 'lip': None}
 SH_U0, SH_U1, SH_V0, SH_V1 = -1.75, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
 
 
@@ -2881,13 +2888,13 @@ def eyeshadow_image():
     deep = sm(0.1, 1.0, uu) * (1 - sm(0.0, 0.5 * tall, above)) * sm(-0.005, 0.02, above)
     vwedge = sm(0.55, 1.05, uu) * (1 - sm(0.3 * tall, 1.1 * tall, np.abs(dd - (T + 0.07 + 0.2 * np.maximum(0, uu - 0.9)))))
     deep = np.maximum(deep * 0.8, 0.6 * vwedge * sm(1.5, 0.95, uu))
-    base = np.array([70, 60, 56], dtype=np.float32)          # a warm charcoal: near-black with a little brown, so it
-    dark = np.array([34, 29, 28], dtype=np.float32)          # sits on warm skin (a mauve fought it); deepest in the corners
+    base = np.array(MAKEUP['shadow'], dtype=np.float32)      # (the ranger's: a warm charcoal, near-black with a little brown, so it
+    dark = np.array(MAKEUP['shadowDark'], dtype=np.float32)  # sits on warm skin; deepest in the corners)
     col = base + (dark - base) * np.clip(deep, 0, 1)[..., None]
     a = 0.8 * lid * across + 0.1 * deep * lid * across
     # under the lower lashes, outer half only
     low = sm(-0.01, 0.015, below) * (1 - sm(0.06, 0.3, below)) * sm(-1.0, -0.5, uu) * sm(1.35, 1.0, uu)
-    col = col + (np.array([92, 80, 74], dtype=np.float32) - col) * low[..., None]
+    col = col + (np.array(MAKEUP['shadowLow'], dtype=np.float32) - col) * low[..., None]
     a = np.maximum(a, 0.5 * low * (0.7 + 0.3 * sm(0.0, 0.9, uu)))
     # the hollow beside the nose, where the lid meets the bridge: the inner corner's own soft shade
     hollow = np.exp(-(((uu + 1.02) / 0.26) ** 2 + ((dd - 0.04) / 0.3) ** 2))
@@ -2904,7 +2911,17 @@ def eyeshadow_image():
     smoke = _warped_fbm(uu * 2.2, dd * 2.6, seed=9, k=2.5)
     a = a * np.clip(0.95 + 0.6 * smoke, 0.55, 1.3)
     img = bpy.data.images.new('eyeshadow', W, H, alpha=True)
-    a = a * 0.78                  # (charcoal reads much stronger than the mauve did at the same opacity)
+    a = a * MAKEUP['shadowAmt']   # (0.78 for the ranger: charcoal reads much stronger than the mauve did at the same opacity)
+    # the liner: a dark line drawn along the upper lashes, thickening outward, and its wing, a flick carried up and
+    # out past the outer corner along the line the lower lid would take if it went on, tapering to a point
+    if MAKEUP['liner'] > 0 or MAKEUP['wing'] > 0:
+        line = np.exp(-((above - 0.02) / (0.016 + 0.02 * sm(-0.6, 0.9, uu))) ** 2) * sm(-0.95, -0.4, uu) * sm(1.08, 0.98, uu)
+        k = np.clip((uu - 0.95) / 0.55, 0, 1)
+        flick = np.exp(-((dd - (0.03 + 0.34 * (uu - 0.95))) / (0.075 * (1 - 0.85 * k) + 0.004)) ** 2) * sm(0.9, 0.98, uu) * sm(1.5, 1.42, uu)
+        ink = np.clip(np.maximum(MAKEUP['liner'] * line, MAKEUP['wing'] * flick), 0, 1)
+        ink *= 1 - ((above < 0) & (below < 0) & (np.abs(uu) < 1.0))
+        rgb = rgb + (dark / 255 * 0.7 - rgb) * ink[..., None]
+        a = np.maximum(a, 0.92 * ink)
     px = np.concatenate([rgb, np.clip(a, 0, 1)[..., None]], axis=2)[::-1]
     img.pixels.foreach_set(px.ravel().astype(np.float32))
     img.pack()
@@ -3359,6 +3376,9 @@ def lip_painting(W=576, H=336):
     UP = np.array([162, 90, 84], dtype=np.float32)          # the upper lip, a shade deeper
     HI = np.array([194, 124, 114], dtype=np.float32)        # the fullest part of the lower lip
     DEEP = np.array([112, 58, 56], dtype=np.float32)        # into the line and the corners
+    if MAKEUP['lip'] is not None:      # (a figure's own lip tone: the four tones keep their relations to it)
+        k_ = np.array(MAKEUP['lip'], dtype=np.float32) / MID
+        MID, UP, HI, DEEP = MID * k_, UP * k_, np.minimum(HI * k_, 255), DEEP * k_
     col = MID + (UP - MID) * (upper > lower)[..., None] * sm(0.0, 0.35, tu)[..., None]
     full = np.exp(-((tl - 0.5) / 0.28) ** 2) * np.exp(-(x / 0.045) ** 2) * (lower >= upper)
     col = col + (HI - col) * (0.75 * full)[..., None]
