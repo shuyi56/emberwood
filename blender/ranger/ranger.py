@@ -19,6 +19,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'base'))
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -435,6 +436,51 @@ SLEEVE_DRAPE = [
 ]
 
 
+def lock_bangs(trees, s, frame=True):
+    """One side of the curtain bangs built as locks, as in the face creator (HAIR_STYLES.ranger, rangerBangs; see
+    docs/hair-building-guide.md): curtain locks in two staggered layers, rooted beside the centre parting under the
+    cap, lifting off the brow in a C and falling back to the skin below it, the inner edge of the opening concave
+    (they drop almost straight off the parting, then flare out over the brow); one wide cover lock over them; and,
+    with frame, four long locks framing the face down the front of the side hair. Each lock is a clump of fine flat
+    strands that part toward its end and stop at staggered lengths, each tapering to a point.
+    Returns the mesh, a lookup for each vertex's pattern coordinates and the vertex normals, as curtain_bang."""
+    import locks as L
+    head_tree, outer_trees = trees
+    hc = Vector(L.HC)
+
+    def cast(tree, d):
+        hit = tree.ray_cast(hc + d * 20.0, -d, 19.9)
+        return (hit[0] - hc).length if hit[0] is not None else None
+
+    def surface(d):
+        d = Vector(d)
+        scalp = cast(head_tree, d) or 4.0
+        outer = scalp
+        for t_ in outer_trees:
+            r = cast(t_, d)
+            if r is not None:
+                outer = max(outer, r)
+        return scalp, outer
+
+    strands, _ = L.ranger_bangs(surface, s, frame)
+    verts, faces, normals, info = L.ribbons(strands)
+    bm = bmesh.new()
+    L.to_bmesh(bm, verts, faces)
+    rest = {}
+    for v, (k, u, ca) in zip(verts, info):
+        rest[Vector(v).freeze()] = (k * 2.3 + ca * 0.25, 0.0, -u * 3.0)
+    from mathutils.kdtree import KDTree
+    keys = list(rest)
+    kd = KDTree(len(keys))
+    for k, co in enumerate(keys):
+        kd.insert(co, k)
+    kd.balance()
+    return bm, (lambda co: rest[keys[kd.find(co)[1]]]), [Vector(n_) for n_ in normals]
+
+
+BANGS = 'locks'      # 'locks' (built as the face creator builds them) or 'strands' (curtain_bang); views.py --set BANGS=strands
+
+
 def sleeve_folds(z, phi, s):
     """(radial offset, crease) of the sleeve at local height z, angle phi (phi 0 faces front)."""
     pm = s * phi                                    # (mirrored: +pi/2 is out from the body on either arm)
@@ -783,8 +829,15 @@ def build():
         vg.add([i_], w_, 'REPLACE')
     cap_o.modifiers['thickness'].vertex_group = 'thick'
     cap_o.modifiers['thickness'].thickness_vertex_group = 0.3     # (kept thick enough to fuse; see fuse_hair)
+    side_trees = {}
     for s in (-1, 1):
-        bm_, rest_, nrm_ = curtain_bang((head_tree, cap_tree), s)
+        if BANGS == 'locks':
+            # (the side lock is laid first, so the framing locks can lie on it)
+            side_trees[s] = bvh_of(loft([(7.0, 0.62, 1.5, s * 2.9, 0.35), (4.5, 0.7, 2.05, s * 3.22, 1.35), (2.0, 0.8, 1.75, s * 2.85, 2.45),
+                                         (-1.0, 0.75, 1.7, s * 3.0, 2.55), (-2.0, 0.6, 1.4, s * 3.1, 2.7), (-3.2, 0.4, 0.8, s * 3.1, 3.1), (-4.0, 0.15, 0.3, s * 2.8, 3.2)]))
+            bm_, rest_, nrm_ = lock_bangs((head_tree, [cap_tree, side_trees[s]]), s, frame=False)      # (the side lock frames the face here: the face creator's framing locks, laid in front of it, hung off the cheek)      # (s: the side lock at x = s * 2.9 is on the side of +X for s = 1)
+        else:
+            bm_, rest_, nrm_ = curtain_bang((head_tree, cap_tree), s)
         bang = mesh_obj(f'Bangs {s}', bm_, M_HAIR, head, rest=rest_, subdiv=0)
         bang.data.normals_split_custom_set_from_vertices(nrm_)
         # (the strands cast no shadow of their own: their dark undersides and the shade they threw on the cap

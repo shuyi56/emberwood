@@ -22,6 +22,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'base'))
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
 from mathutils import Vector, Matrix  # noqa: E402
@@ -926,19 +927,23 @@ def build_hair(head, head_tree):
     N = len(path)
 
     def tail_r(i, a):
-        # the tail's body, under its clumps: a little slimmer than the tail, so the clumps make its outline
+        # the tail's body, under its clumps: a little slimmer than the tail, so the clumps make its outline (with
+        # the locks, a slim core: the shade inside the tail, seen between them)
         r, rd = tail_radius(i / (N - 1))
-        return r * 0.78, rd * 0.72
+        return (r * 0.55, rd * 0.55) if LOCKS else (r * 0.78, rd * 0.72)
     mesh_obj('Hair tail', sweep(path, tail_r, n=28), M_HAIR, head, subdiv=0)
     if not FUSE:          # (for checking the pieces before they are melted together)
         return None
     TIE.pop('wisps', None)
-    wisps = temple_wisps(head_tree, 1) + temple_wisps(head_tree, -1)
+    wisps = [] if LOCKS else temple_wisps(head_tree, 1) + temple_wisps(head_tree, -1)
     hair = fuse_parts(head, ['Hair cap', 'Hair tail'] + wisps)
     fine_streaks(hair)
     paint_hair(hair)
     scalp_paint(head, head_tree)
-    tail_clumps(head, path, lens)
+    if LOCKS:
+        lock_hair(head, head_tree, path)
+    else:
+        tail_clumps(head, path, lens)
     # the tie: a leather thong wound round the root of the tail, in three turns
     k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
     seg = path[max(0, k_tie - 4):k_tie + 6]
@@ -949,6 +954,65 @@ def build_hair(head, head_tree):
         return r, r * 0.85
     mesh_obj('Hair tie', sweep(seg, tie_r, n=24), M_BELT, head, subdiv=1)
     return hair
+
+
+# The fringe, the face-framing locks and the tail built as locks, as the face creator builds the Rogue's hair
+# (HAIR_STYLES.ponytail; see docs/hair-building-guide.md and blender/shared/locks.py). LOCKS = False goes back to the
+# pulled-back hair with the fused temple wisps and the tail's clumps (views.py --set LOCKS=False).
+LOCKS = True
+
+
+def lock_hair(head, head_tree, path):
+    """The swept fringe with its hooked centre locks, the face-framing locks at the temples (locks.rogue_bangs), laid
+    on the fused hair, and the tail as a hierarchy of locks round its core (locks.tail_locks)."""
+    import locks as L
+    from mathutils.kdtree import KDTree
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    hair_tree = body_tree(dg, ('Hair',), Vector((0, 0, HEAD_Z)))
+    hc = Vector(L.HC)
+
+    def cast(tree, d):
+        hit = tree.ray_cast(hc + d * 20.0, -d, 19.9)
+        return (hit[0] - hc).length if hit[0] is not None else None
+
+    def surface(d):
+        d = Vector(d)
+        scalp = cast(head_tree, d) or 4.0
+        outer = cast(hair_tree, d)
+        return scalp, max(scalp, outer) if outer is not None else scalp
+
+    strands, guides = L.rogue_bangs(surface)
+    for f in L.check_locks(guides, surface):
+        print('hair lock check:', *f, flush=True)
+    N = len(path)
+    k_tie = min(range(N), key=lambda i: (path[i] - TIE['point']).length)
+    tail, tones = L.tail_locks([tuple(p) for p in path], tail_radius, k_tie)
+    for name, parts, seg, tn in (('Hair fringe', strands, 6, None), ('Hair tail locks', tail, 10, tones)):
+        verts, faces, normals, info = L.ribbons(parts, seg=seg)
+        bm = bmesh.new()
+        L.to_bmesh(bm, verts, faces)
+        rest = {}
+        for v, (k, u, ca) in zip(verts, info):
+            rest[Vector(v).freeze()] = (k * 2.3 + ca * 0.25, 0.0, -u * 3.0)
+        keys = list(rest)
+        kd = KDTree(len(keys))
+        for k, co in enumerate(keys):
+            kd.insert(co, k)
+        kd.balance()
+        o = mesh_obj(name, bm, M_HAIR, head, subdiv=0, rest=lambda co: rest[keys[kd.find(co)[1]]])
+        if tn is None:
+            o.data.normals_split_custom_set_from_vertices([Vector(n_) for n_ in normals])
+            o.visible_shadow = False      # (fine strands throw no shadow of their own; see the ranger's bangs)
+        strand_colours(o)
+        if tn is not None:      # (each secondary lock its own tone, as the face creator tints them)
+            sc = o.data.color_attributes['strands']
+            cols = [0.0] * (4 * len(sc.data))
+            sc.data.foreach_get('color', cols)
+            for v_, (k, _u, _c) in enumerate(info):
+                for ch in range(3):
+                    cols[4 * v_ + ch] *= tn[k]
+            sc.data.foreach_set('color', cols)
 
 
 def fuse_parts(head, names, voxel=0.065):
