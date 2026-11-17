@@ -135,3 +135,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Warden bare arms, 02a9e43 (2026-11-16): skin_tones picks its colouring by object name (head, ears, neck, then everything else as a hand). The new Arm.R and Arm.L took the hand's branch and its fingertip flush turned the whole arm pink. It cost one render to see.
 - **Spot:** A commit adds a mesh in M_SKIN (mesh_obj(..., M_SKIN, ...)) under a name skin_tones has no branch for. Read the if and elif chain on o.name in skin_tones at that commit: an unnamed mesh lands in the last branch.
 - **Fix:** Add the new name's own branch to skin_tones in the same commit, and match its tone to the neighbours where they meet (wrist, shoulder, neck).
+
+## P021 Hair strands or ribbons wound inside out
+
+- **Seen:** Hair locks, f4f54d6 (2026-11-17): the strand ribbons of the new lock clumps were wound inward, so the fringe rendered black on one side and pale on the other on both figures. The build and the hair check passed, because both look at shape, not at which way a face points. It cost a render of four jobs.
+- **Spot:** A commit that builds hair (or any thin shell) from its own vertex loops: new grid, ribbon or tube code in blender/shared/locks.py or a figure's hair functions, with no recalc of normals after it. In the headless build, take each hair face's normal against the direction from the head's centre to the face: more than a few percent pointing inward on a piece means it is wound the wrong way.
+- **Fix:** Wind the faces so the normal points away from the head, or call bmesh.ops.recalc_face_normals on the piece before it is joined, and check the share of inward faces in the smoke build before asking.
