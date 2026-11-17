@@ -66,6 +66,9 @@ blue ridge, yellow ledge) and `paint-<name>.png`. Each branch's result is compar
 
 * a flag of 25 px or more that was not there before, or a clash, sends the request back
 * flags that were already there, and small ones, are listed as warnings and the request goes through
+* `"quality": "check"` asks the queue for a quick look at a views job (8 Cycles samples, denoised, cached apart
+  from the final render). The review passes it on unchanged. Use it for work in progress on hair and cloth; leave
+  it out for anything John signs off on. Frames, glb and the sheet ignore it.
 * `"needs_render": "<reason>"` turns the send-back into a warning
 
 Run it yourself before asking (needs `pip install bpy`, about 3 minutes):

@@ -469,6 +469,10 @@ def review(req, thread, do_smoke=True):
             rep.block("shape", '"frames" is requested without "cells".', 'Add "cells": "0-7:2,4,6".')
         else:
             check_cells(rep, cells, "cells")
+    if req.get("quality") not in (None, "check", "final"):
+        rep.block("shape", f'"quality" is {req.get("quality")!r}; the queue reads only "check" or "final".',
+                  'Use "quality": "check" for work in progress on a 3D look (8 samples, denoised, views only) and '
+                  'leave it out, or say "final", for anything John signs off on.')
     if req.get("mode") == "isolated":
         rep.info("shape", "mode: isolated is ignored; the queue combines every branch whose code does not overlap.")
     note = str(req.get("note") or "")
