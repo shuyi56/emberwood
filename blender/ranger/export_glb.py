@@ -470,9 +470,10 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
     ranger.RES = 10000            # no snapping of the bob to sheet pixels: the model moves smoothly
-    # in the world she covers ground at a good pace, so the walk takes a longer stride than the sprite sheet's and
-    # keeps the arm swing small (it has to read from the zoomed-out game camera). WORLD_CYCLE in src/world/main.js is the ground one cycle covers (see stride_length).
-    ranger.GAIT, ranger.ARM_SWING = 1.3, 0.24
+    # in the world she covers real ground, so she walks with her feet planted (ranger.LOCKED_WALK: one cycle covers
+    # ranger.STRIDE, which is WORLD_CYCLE in src/world/main.js) and keeps the arm swing small (it has to read from
+    # the zoomed-out game camera)
+    ranger.LOCKED_WALK, ranger.ARM_SWING = True, 0.24
     ranger.build()
     sc = bpy.context.scene
     for o in sc.objects:

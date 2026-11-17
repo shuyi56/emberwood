@@ -2414,7 +2414,19 @@ def trunk_weights(co):
     the waist, so the body twists there in one piece), and the neck following the head at the top."""
     chest = 1.0 - _smooth(CHEST_Z + 2.5, CHEST_Z - 5.5, co.z)
     neck = 1.0 - _smooth(NECK_Z + 4.5, NECK_Z + 0.5, co.z)
-    return {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    w = {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    if LOCKED_WALK:
+        # (the world model) the jerkin's short skirt is carried part of the way by the thigh under it, more toward
+        # the hem, so the leg lifting forward lifts the skirt over it instead of pushing out past its front edge.
+        # Each side follows its own thigh, blended across the middle, where the two legs' swings cancel.
+        share = SKIRT_ON_THIGH * _smooth(HIP_Z + 2.0, HIP_Z - 2.5, co.z)
+        if share > 0:
+            right = min(1.0, max(0.0, 0.5 - co.x / 3.0))      # (her right is -x)
+            p = w.pop('Pelvis')
+            w['Pelvis'] = p * (1.0 - share)
+            w['Thigh.R'] = p * share * right
+            w['Thigh.L'] = p * share * (1.0 - right)
+    return w
 
 
 def skin_trunk(body):
@@ -4580,9 +4592,106 @@ def walk_drop(t):
     return best if best is not None else 0.0
 
 
+# ---- the world model's walk: planted feet
+# The sheet's walk above drives each joint from its curve, which is right for a cycle seen one frame at a time, but
+# its standing foot does not move back at an even pace (it slides forward in mid-stance and again before toe-off),
+# which shows as skating the moment the model covers real ground. The world's walk is built the other way round:
+# each ankle follows a path on the ground (still while it bears weight, carried back under the body at exactly the
+# pace the body moves forward, then swung through on a smooth arc), the hips ride as high as the standing legs
+# allow, smoothed into an easy rise and fall, and the thigh and knee are solved to reach the ankle. One cycle then
+# covers exactly STRIDE of ground (WORLD_CYCLE in src/world/main.js), so the feet stay put in the world.
+LOCKED_WALK = False     # export_glb.py turns it on for the world model; the sheet keeps the walk above
+SKIRT_ON_THIGH = 0.45   # (with LOCKED_WALK) how much of the jerkin's hem each thigh carries: see trunk_weights
+STRIDE = 46.0           # ground covered by one cycle (two steps), in model units
+STANCE_L = 0.6          # the part of a leg's cycle its foot is on the ground (heel strike at 0, toe-off here)
+AHEAD = 0.46            # how much of the stance's travel lies ahead of the hip at the heel strike
+SWING_LIFT = 4.0        # how high the ankle is lifted as the foot is carried through (early in the swing)
+BOB_RANGE = 2.4         # the most the hips rise and fall through a step
+BOB_SOFT, BOB_BLUR = 0.06, 0.03  # how far round the cycle the hips' path is widened into each trough, and smoothed
+L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reaching forward carried with it)
+# the arms in the locked walk: the upper arm swings ARM_SWING either way; the forearm follows a little later and
+# folds more as it comes forward, so the swing travels down the arm instead of the arm swinging stiff from the shoulder
+L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
+# the feet in the locked walk: each turned out a little, as a relaxed walk sets them (pointing dead ahead they read as
+# turned in), and set nearly under the hips, so the legs do not lean in and the knees do not come together
+L_TOE_OUT, L_FOOT_X = 0.13, 0.97
+
+
+def _hermite(p0, p1, m0, m1, u):
+    return ((2 * u ** 3 - 3 * u ** 2 + 1) * p0 + (u ** 3 - 2 * u ** 2 + u) * m0 + (-2 * u ** 3 + 3 * u ** 2) * p1
+            + (u ** 3 - u ** 2) * m1)
+
+
+def locked_foot(t):
+    """(forward of the hip's ground point, ankle height, foot pitch toes-up, on the ground) for a leg at point t of
+    its cycle. On the ground the ankle moves back at the body's pace; in the swing it is carried forward on a smooth
+    curve that leaves and lands moving a little backward (the foot is drawn back just before the heel strikes), and
+    lifted most early on, as the toes leave the ground."""
+    t %= 1.0
+    a = AHEAD * STANCE_L * STRIDE
+    pitch = math.radians(cyclic(GAIT_FOOT, t))
+    if t < STANCE_L:
+        return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+    u = (t - STANCE_L) / (1 - STANCE_L)
+    span = STRIDE * (1 - STANCE_L)
+    off = toe_roll(math.radians(cyclic(GAIT_FOOT, STANCE_L)))
+    fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
+    return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+
+
+def toe_roll(pitch):
+    """How far forward the ankle moves as the heel lifts and the foot rolls over the ball of the foot (3 ahead of
+    the ankle, as in foot_lift), so the ball stays where it was planted instead of sliding back under her."""
+    return 3.0 * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
+
+
+def locked_turn(tr):
+    """The pelvis's turn at walk phase tr (of the right leg): the right hip furthest forward as its heel strikes."""
+    return L_PELVIS_TURN * math.cos(2 * math.pi * (tr + 0.03))
+
+
+_LOCKED_HIPS = {}
+
+
+def locked_hips(tr):
+    """The hip joints' height at walk phase tr. As high as both standing legs reach with the knee just off straight,
+    then smoothed (the step's own rhythm, twice a cycle, and its first two overtones) and kept under that reach by a
+    soft minimum, and held to BOB_RANGE of rise above the lowest point, so the body rises and falls in one easy wave."""
+    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_RANGE, BOB_SOFT, BOB_BLUR, L_PELVIS_TURN, PELVIS_LIST)
+    if key not in _LOCKED_HIPS:
+        n = 96
+        reach = np.zeros(n)
+        for i in range(n):
+            t = i / n
+            lst, turn, best = pelvis_list(t), locked_turn(t), 1e9
+            for s, off in ((1, 0.0), (-1, 0.5)):
+                fwd, az, _, ground = locked_foot(t + off)
+                if ground:
+                    f = fwd - s * LEG_X * math.sin(turn)
+                    leg = (THIGH + SHIN) * 0.997
+                    best = min(best, az + math.sqrt(max(0.0, leg * leg - f * f)) - s * LEG_X * math.sin(lst))
+            reach[i] = best
+        # (capped at the top of the rise, then each point lowered to the least reach around it, so the sharp dip
+        # as the leading heel lands is widened into a trough, then blurred round the cycle, and lowered by whatever
+        # the blur lifted above the reach)
+        h = np.minimum(reach, reach.min() + BOB_RANGE)
+        w = max(1, int(round(BOB_SOFT * n)))
+        h = np.min([np.roll(h, j) for j in range(-w, w + 1)], axis=0)
+        g = np.exp(-0.5 * (np.minimum(np.arange(n), n - np.arange(n)) / (BOB_BLUR * n)) ** 2)
+        h = np.real(np.fft.ifft(np.fft.fft(h) * np.fft.fft(g / g.sum())))
+        h -= max(0.0, float((h - reach).max()))
+        _LOCKED_HIPS[key] = h
+    h = _LOCKED_HIPS[key]
+    x = (tr % 1.0) * len(h)
+    i = int(x)
+    return float(h[i % len(h)] + (h[(i + 1) % len(h)] - h[i % len(h)]) * (x - i))
+
+
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
+    if walking and LOCKED_WALK:
+        return pose_locked(col)
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
     # (the right leg's point in its cycle: its heel strikes when its foot is furthest forward)
@@ -4644,6 +4753,66 @@ def pose(col):
         # (held a little off the body, so the waist shows, and a little further out as it swings back, past the hip)
         sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-bend, 0, 0)
+        wr.rotation_euler = (flick, 0, 0)
+
+
+def _euler_m(e):
+    """The matrix of a Blender XYZ Euler (X applied first)."""
+    (ca, sa), (cb, sb), (cc, sc) = [(math.cos(v), math.sin(v)) for v in e]
+    rx = np.array([[1, 0, 0], [0, ca, -sa], [0, sa, ca]])
+    ry = np.array([[cb, 0, sb], [0, 1, 0], [-sb, 0, cb]])
+    rz = np.array([[cc, -sc, 0], [sc, cc, 0], [0, 0, 1]])
+    return rz @ ry @ rx
+
+
+def foot_level(pelvis, hip, knee, pitch, toe=0.0):
+    """The ankle's XYZ Euler that sets the foot pointing straight down the line of the walk, its sole level from
+    side to side, pitched only by `pitch` (toes up positive) and turned out by `toe`, whatever the pelvis's turn and list and the leg's
+    roll above it. (Taking each of those out one angle at a time, as pose() does, leaves the foot turned and rolled
+    by a few degrees once the shin leans far over, most at push-off, where it shows as the foot twisting on its toes.)"""
+    parent = _euler_m(pelvis) @ _euler_m(hip) @ _euler_m(knee)
+    m = parent.T @ _euler_m((pitch, 0.0, toe))
+    return (math.atan2(m[2, 1], m[2, 2]), -math.asin(max(-1.0, min(1.0, m[2, 0]))), math.atan2(m[1, 0], m[0, 0]))
+
+
+def pose_locked(col):
+    """The world model's walk (LOCKED_WALK) at sheet column col: feet planted on their paths (locked_foot), the
+    hips at locked_hips, the legs solved to reach, and the arms swinging against the legs with the forearm following
+    through. Same rig and the same trunk motion as pose()."""
+    ob = bpy.data.objects
+    ph = (col - 2 + 0.5) / WALK * 2 * math.pi
+    tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
+    hips = locked_hips(tr)
+    bob = HIP_Z - hips
+    turn, lst = locked_turn(tr), pelvis_list(tr)
+    sway = -SWAY * math.sin(2 * math.pi * (tr - 0.06))
+    ob['Body'].location = (sway, 0, -bob)
+    ob['Body'].rotation_euler = (0, 0, 0)
+    ob['Pelvis'].rotation_euler = (0, lst, turn)
+    # (a touch more lean as each foot pushes off, easing back as the body rides up over the standing leg)
+    lean = LEAN + 0.012 * math.cos(4 * math.pi * (tr + 0.08))
+    ob['Chest'].rotation_euler = (lean, -CHEST_TILT * lst, -CHEST_TURN * turn)
+    for side, s in (('R', 1), ('L', -1)):
+        hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
+        sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
+        t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
+        fwd, az, pitch, _ = locked_foot(t)
+        f = fwd - s * LEG_X * math.sin(turn)            # (the pelvis's turn carries the hip forward or back)
+        hz = hips + s * LEG_X * math.sin(lst)           # (and its list lifts or drops it)
+        # the leg leans in under the body so the foot keeps to its track; the lean lengthens the reach a little
+        hip_x = sway - s * LEG_X * math.cos(lst)
+        roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * L_FOOT_X) / (hz - az)))) - lst
+        th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
+        kb = th - shn
+        hip.location = (-s * LEG_X, 0, 0)
+        hip.rotation_euler = (-th, roll, 0)
+        kn.rotation_euler = (kb, 0, 0)
+        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
+        a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
+        fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
+        flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
+        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
+        el.rotation_euler = (-(L_BEND + L_FOLD * fold), 0, 0)
         wr.rotation_euler = (flick, 0, 0)
 
 
