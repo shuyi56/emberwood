@@ -2545,29 +2545,37 @@ def build():
         mesh_obj(f'Robe sleeve hem.{side}', loft_fn([SE + 0.55, SE + 0.25, SE - 0.02], lambda z, p: robe_sleeve_pt(z, p, 0.07),
                                                    n=NP * 10, cap_top=False, cap_bot=False),
                  M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
-        # the vambrace: moulded hardened leather, antique bronze-brown, as the reference: a tapered cone flared at
-        # the elbow and drawn in to the wrist, open up the inside of the forearm and laced shut there through brass
-        # grommets; every edge rolled into a raised border, a second raised line framing the panel down the outside
-        # and a two-strand plait tooled into it.
+        # the vambrace: bronze, as the reference: a tapered cone flared at the elbow and drawn in to the wrist, open
+        # up the inside of the forearm and laced shut there through brass grommets, its edge bound in a rolled
+        # border. It is built of lames, bands lapping one over the next: a deep cuff at the elbow and four bands
+        # below it, each band's upper edge turned out into a rounded rib that rides over the foot of the one above,
+        # with rivets under the rib. The steps and their ribs are what read as grooves.
+        VAM_EDGES = [BR_TOP, BR_TOP - 2.25] + [lerp(BR_TOP - 2.25, BR_BOT, k / 4) for k in range(1, 5)]
+        VLAP, VBEAD = 0.085, 0.045
+
+        def vam_rise(z, z0, z1):
+            t = min(1.0, max(0.0, (z0 - z) / (z0 - z1)))
+            return VLAP * (1.0 - t) ** 1.3 + VBEAD * math.exp(-((z0 - z - 0.13) / 0.075) ** 2)
+
+        def vam_lame(z):
+            for k in range(len(VAM_EDGES) - 1):
+                if z >= VAM_EDGES[k + 1] or k == len(VAM_EDGES) - 2:
+                    return k
         GAP = 0.3     # (the half-width of the laced opening up the inside, as an angle)
         P0, P1 = -s * math.pi / 2 + GAP, -s * math.pi / 2 + 2 * math.pi - GAP
 
-        def vam_pt(z, phi, out=0.0):
+        def vam_pt(z, phi, out=0.0, k=None):
             """(x, y, z) of the vambrace at its nominal height z and phi: the arm's own surface (arm_xy) a leather's
             thickness off it, so it is full where the forearm's muscle is and an oval at the wrist as the arm is;
             its elbow edge is cut to the arm, rising to a point over the elbow behind and dipping in the crook in
             front so the arm can bend, and its wrist edge runs a little down over the back of the hand."""
-            d = wrap(phi - s * math.pi / 2)
-            # (the plait: two strands swinging across the panel and crossing every 0.85 down it)
-            y1 = 0.42 * math.sin(2 * math.pi * (z - BR_TOP) / 1.7)
-            tool = math.exp(-((d - y1) / 0.11) ** 2) + math.exp(-((d + y1) / 0.11) ** 2)
-            tool *= smoothstep(BR_TOP - 0.25, BR_TOP - 0.7, z) * smoothstep(BR_BOT + 0.25, BR_BOT + 0.7, z)
-            frame = math.exp(-((abs(d) - 0.82) / 0.07) ** 2)
+            k = vam_lame(z) if k is None else k
+            rise = vam_rise(z, VAM_EDGES[k], VAM_EDGES[k + 1])
             t = (z - BR_BOT) / (BR_TOP - BR_BOT)
             c = math.cos(phi)
             zz = z + t * (0.8 * max(0.0, -c) ** 2 - 0.5 * max(0.0, c) ** 2) - (1.0 - t) * 0.12 * max(0.0, s * math.sin(phi)) ** 2
             lip = 0.05 * smoothstep(BR_BOT + 0.5, BR_BOT, z) + 0.03 * smoothstep(BR_TOP - 0.4, BR_TOP, z)
-            x_, y_ = arm_xy(zz, phi, s, 0.15 + lip + 0.035 * min(1.0, tool) + 0.045 * frame + out)
+            x_, y_ = arm_xy(zz, phi, s, 0.15 + lip + rise + out)
             return x_, y_, zz
 
         def vam_n(z, phi):
@@ -2576,13 +2584,17 @@ def build():
             p_ = vam_pt(z, phi)
             return n_ if n_.x * p_[0] + n_.y * p_[1] > 0 else -n_
 
-        rows = int((BR_TOP - BR_BOT) / 0.08) + 1
+        # (each lame has its own rows, closer together toward its ribbed upper edge; the lame above ends on the
+        # ground surface right over that edge, so the step is a clean wall)
+        VR = 22
+        rows = VR * (len(VAM_EDGES) - 1)
         cols = 150
 
         def vam_grid(i, j):
-            z = lerp(BR_TOP, BR_BOT, i / (rows - 1))
+            k, u = i // VR, (i % VR) / (VR - 1)
+            z = lerp(VAM_EDGES[k] - (0.012 if k else 0.0), VAM_EDGES[k + 1], u * u)
             ph = lerp(P0, P1, j / (cols - 1))
-            return vam_pt(z, ph)
+            return vam_pt(z, ph, 0.0, k)
         mesh_obj(f'Bracer.{side}', face_out(grid(rows, cols, vam_grid), axis_y=0.0), M_BRONZE, loc=(x, 0.2, SH_Z),
                       skin=fore, solid=0.12)
         # (the rolled border all round its edge: a rounded rectangle in (phi, z), the corners eased)
@@ -2633,6 +2645,10 @@ def build():
                 grom.append(vam_pt(z, ph, 0.05))
         mesh_obj(f'Bracer grommets.{side}', dots(grom, 0.17), M_GOLD, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         hole = [vam_pt(z, ph, 0.09) for z, ph in ((z, ph) for z in gz for ph in (P0 + 0.17, P1 - 0.17))]
+        # (the rivets under each rib: on the outside of the forearm and a way round to either side of it)
+        vrv = [vam_pt(VAM_EDGES[k] - 0.42, s * math.pi / 2 + d_, 0.13)
+               for k in range(len(VAM_EDGES) - 1) for d_ in (-0.95, 0.0, 0.95)]
+        mesh_obj(f'Bracer rivets.{side}', dots(vrv, 0.15), M_GOLD, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         mesh_obj(f'Bracer grommet holes.{side}', dots(hole, 0.08), M_BELT, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         # (what shows through the opening: the dark lining of the vambrace, just inside it)
         def lin_pt(i, j):
@@ -2732,11 +2748,17 @@ def build():
         # the greave: a short steel shell round the shin over the boot, from under the knee to halfway down the shin,
         # shaped to the calf, with a ridge down the front; its top and bottom edges turned out a little
         GT, GB = -0.75, -6.6
-        # (height at the sides, how far it drops at the front, a V or a curve. The Vs are steep, so they read as Vs
-        # and their points clear the knee cop's foot; the straps keep to the back of the calf, out of their way)
-        GROOVES = ((-1.3, 1.6, True), (-1.9, 1.6, True), (-4.5, 0.5, False), (-5.1, 0.5, False))
+        # Built as the reference's: not one shell with lines cut in it but lames, plates lapping one over the next
+        # down the shin like shingles. Each lame starts tucked under the one above and stands out further toward
+        # its own lower edge, which is turned out into a rounded bead; so every joint is a step with a rib on it
+        # and a shadow under it, and that is what reads as a groove. The joints (height at the sides, how far each
+        # drops at the front, a V or a curve): two nested Vs under the knee, their points down the front ridge, and
+        # two curving across low on the shin like bands.
+        JOINTS = ((-1.3, 1.6, True), (-1.9, 1.6, True), (-4.5, 0.5, False), (-5.1, 0.5, False))
+        LAP, BEAD = 0.1, 0.05     # (how far a lame stands off the next at its lower edge; its bead on top of that)
 
         def greave_pt(z, phi, out=0.0):
+            """The greave's ground surface, on which the lames are raised (see lame_off)."""
             rx, ry, cy = ring_r(rings, z)
             # (slim: close over the boot, so the leg keeps its line instead of reading as a stovepipe)
             flare = 0.08 * (smoothstep(GT - 0.7, GT, z) + smoothstep(GB + 0.7, GB, z))
@@ -2745,28 +2767,49 @@ def build():
             calf = 0.16 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
             ex = 0.17 + flare + out + calf - 0.02 * smoothstep(-3.5, GB, z)   # (not drawn in far: the boot's slack
             # wrinkles above the ankle came through the greave's foot)
-            # worked as the reference's: under the knee two grooves in nested Vs, their points down the front ridge;
-            # low on the shin two more curving across it like bands, sagging at the front; each a narrow channel where
-            # one plate laps the next, the plate below it sitting a hair lower. And a shallow flute down either side
-            # of the front ridge.
-            a_ = abs(wrap(phi))
-            for zs_, dip, vee in GROOVES:
-                zg = zs_ - dip * (max(0.0, 1.0 - a_ / 1.3) if vee else max(0.0, math.cos(a_)) ** 0.8)
-                ex -= 0.06 * math.exp(-((z - zg) / 0.11) ** 2) + 0.006 * smoothstep(zg + 0.1, zg - 0.1, z)
-            fl = smoothstep(GT - 0.5, GT - 1.1, z) * smoothstep(GB + 0.5, GB + 1.1, z)
-            ex -= 0.035 * fl * sum(math.exp(-((wrap(phi) - pf) / 0.11) ** 2) for pf in (-0.52, 0.52))
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
-        gz = [GT - (GT - GB) * i / 120 for i in range(121)]      # (fine enough to hold the grooves)
-        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=128, cap_top=False, cap_bot=False), M_BRONZE, loc=(x, 0, kz),
-                 skin=w, solid=0.14)
+
+        def lame_edges(phi):
+            a_ = abs(wrap(phi))
+            return [GT] + [zs_ - dip * (max(0.0, 1.0 - a_ / 1.3) if vee else max(0.0, math.cos(a_)) ** 0.8)
+                           for zs_, dip, vee in JOINTS] + [GB]
+
+        def lame_rise(z, z0, z1):
+            """How far a lame running from z0 down to z1 stands off the ground surface at z."""
+            t = min(1.0, max(0.0, (z0 - z) / (z0 - z1)))
+            return LAP * t ** 1.3 + BEAD * math.exp(-((z - z1 - 0.13) / 0.075) ** 2)
+
+        def lame_off(z, phi):
+            e = lame_edges(phi)
+            for k in range(len(e) - 1):
+                if z >= e[k + 1] or k == len(e) - 2:
+                    return lame_rise(z, e[k], e[k + 1])
+
+        def lamed_pt(z, phi, out=0.0):
+            return greave_pt(z, phi, out + lame_off(z, phi))
+        # (one surface, its rows following the joints: each lame has its own rows, closer together toward its beaded
+        # edge, and the next lame's first row lies right under that edge on the ground surface, so the step is a
+        # clean wall along the joint however the joint slants)
+        LR, LC = 20, 128
+
+        def lame_grid(i, j):
+            k, u = i // LR, (i % LR) / (LR - 1)
+            phi = lerp(-math.pi, math.pi, j / LC)
+            e = lame_edges(phi)
+            z = lerp(e[k] - (0.012 if k else 0.0), e[k + 1], 1.0 - (1.0 - u) ** 2)
+            gx, gy = greave_pt(z, phi, lame_rise(z, e[k], e[k + 1]))
+            return gx, gy, z
+        gbm = face_out(grid(LR * (len(JOINTS) + 1), LC + 1, lame_grid), axis_y=0.0)
+        bmesh.ops.remove_doubles(gbm, verts=gbm.verts, dist=1e-4)      # (the seam, up the back)
+        mesh_obj(f'Greave.{side}', gbm, M_BRONZE, loc=(x, 0, kz), skin=w, solid=0.09)
         # the knee: a domed oval cop over the kneecap, its foot lapping over the greave's top; a fan-shaped wing on
         # the outside tucked under the cop's edge; a curved lame above, tucked under the cop's top. Each is a shell
         # lofted round the leg itself, so it wraps the knee instead of sitting on it.
         def knee_pt(z, ph, base, out=0.0):
             lx, ly = leg_pt(z - THIGH, ph)
             rl = math.hypot(lx, ly)
-            gx, gy = greave_pt(z, ph)
-            need = math.hypot(gx, gy - 0.0) - rl + 0.08
+            gx, gy = lamed_pt(z, ph)
+            need = math.hypot(gx, gy - 0.0) - rl + 0.11
             off = base + max(0.0, need - base) * smoothstep(GT + 0.7, GT - 0.1, z) + out
             return lx * (rl + off) / rl, ly * (rl + off) / rl, z
 
@@ -2791,10 +2834,10 @@ def build():
               knee_pt(0.0, -1.05, cop(0.0, 0.75) + 0.12), knee_pt(0.0, 1.05, cop(0.0, 0.75) + 0.12)]
         mesh_obj(f'Knee rivets.{side}', dots(rv, 0.17), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the leather straps holding the greave on, round the calf behind
-        for j_, zs_ in enumerate((-2.2, GB + 1.2)):
+        for j_, zs_ in enumerate((-3.2, -5.85)):
             def strap_pt(z, phi, zs_=zs_):
                 # (over the metal behind; at the front it runs under the plate, between it and the boot)
-                gx, gy = greave_pt(zs_, phi, lerp(-0.13, 0.1, smoothstep(1.2, 1.45, abs(wrap(phi)))))
+                gx, gy = greave_pt(zs_, phi, lerp(-0.13, lame_off(zs_, phi) + 0.11, smoothstep(1.2, 1.45, abs(wrap(phi)))))
                 return gx, gy
             mesh_obj(f'Greave strap {j_}.{side}', loft_fn([zs_ + 0.28, zs_, zs_ - 0.28], strap_pt, n=56, cap_top=False,
                                                          cap_bot=False), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
@@ -2803,22 +2846,24 @@ def build():
         for z_, sg in ((GT, -1), (GB, 1)):
             rz = [z_ + 0.17 * math.cos(math.pi * k / 4) for k in range(5)]
             mesh_obj(f'Greave roll {"top" if sg < 0 else "foot"}.{side}',
-                     loft_fn(rz, lambda z, p, z_=z_: greave_pt(z_, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
+                     loft_fn(rz, lambda z, p, z_=z_: lamed_pt(z_ + 0.02, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
                              n=56, cap_top=False, cap_bot=False), M_BIND, loc=(x, 0, kz), skin=w, subdiv=0)
         grv = []
-        # (a row of domed rivets down the outside of the shin, one to each plate and two to the long ones, as the
-        # reference's; and a pair at the top either side of the ridge)
-        for zr_ in (-1.1, -2.75, -3.6, -4.4, -6.05):
-            gx, gy = greave_pt(zr_, s * 1.0, 0.07)
-            grv.append((gx, gy, zr_))
-        for ph in (-0.62, 0.62):
-            gx, gy = greave_pt(GT - 0.45, ph, 0.07)
-            grv.append((gx, gy, GT - 0.45))
-        for zs_ in (-2.2, GB + 1.2):
-            for ph in (-1.35, 1.35):
-                gx, gy = greave_pt(zs_, ph, 0.14)
+        # (domed rivets holding each lame to the next, set above its beaded edge: a pair either side of the front
+        # ridge and one on the outside of the shin; and one at each strap's ends)
+        for ph in (-0.6, 0.6, s * 1.25):
+            e = lame_edges(ph)
+            for k in range(len(e) - 1):
+                zr_ = e[k + 1] + 0.36
+                if zr_ > e[k] - 0.12:
+                    continue        # (no room on a lame this narrow here)
+                gx, gy = lamed_pt(zr_, ph, 0.07)
+                grv.append((gx, gy, zr_))
+        for zs_ in (-3.2, -5.85):
+            for ph in (-1.4, 1.4):
+                gx, gy = lamed_pt(zs_, ph, 0.14)
                 grv.append((gx, gy, zs_))
-        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.19), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.17), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the shoe: a toe cap of paler leather sewn over the front of the foot, its seam stitched in a double row,
         # and a strap round the ankle buckled on the outside
         YC = -3.85
