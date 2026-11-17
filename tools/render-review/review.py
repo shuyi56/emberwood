@@ -60,6 +60,52 @@ LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
 SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "1800"))
 SHEET_ROWS, SHEET_COLS = 8, 10
 SHELL_META = re.compile(r"[;&|<>$`\\\n\r]")
+MATERIAL = re.compile(r"(_closeup|_material|_shade|_tones|_image|_tex|_painting|_paint|_LOOKS?|_TONE|_TINT|TEX)$"
+                      r"|^M_[A-Z0-9_]+$|^(mat_def|ramp|MATERIALS|MAKEUP|LIP_COLOURS|SKIN|SKIN_FLUSH)$")
+MATLINE = re.compile(r"mat_def\(|_closeup\(|\bramp\(|\bM_[A-Z0-9_]+\b|_LOOKS?\b|default_value|node_tree|\.nodes\b"
+                     r"|\.links\b|Sheen|Roughness|Metallic|Base Color|Specular|\bmaterials\b")
+
+
+def material_only(since, tip):
+    """The material things a diff changes, if it changes nothing else under blender/ (else []). A hunk inside a
+    material function counts whole; elsewhere every changed line must itself be a material line, a comment, or the
+    continuation of one (a look table's rows, the body of a new material function)."""
+    files = rq.git("diff", "--name-only", since, tip, "--", "blender/", check=False).stdout.split()
+    if not files or any(not f.endswith((".py", ".png", ".jpg", ".exr")) for f in files):
+        return []
+    found, skip, block = set(), False, None        # block: indent of the accepted line a continuation hangs from
+    for ln in rq.git("diff", "-U0", since, tip, "--", "blender/", check=False).stdout.splitlines():
+        if ln.startswith(("diff ", "index ", "--- ", "+++ ", "Binary ", "new file", "deleted file", "similarity")):
+            continue
+        if ln.startswith("@@"):
+            m = re.search(r"\bdef (\w+)", ln.split("@@")[-1])
+            skip, block = bool(m and MATERIAL.search(m.group(1))), None
+            if skip:
+                found.add(m.group(1))
+            continue
+        if skip or not ln[:1] in "+-":
+            continue
+        raw = ln[1:]
+        t = raw.strip()
+        ind = len(raw) - len(raw.lstrip())
+        if not t or t.startswith("#"):
+            continue
+        if block is not None and (ind > block or re.fullmatch(r"[)\]}]+,?", t)):
+            continue
+        block = None
+        m = re.match(r"def (\w+)", t)
+        if m and MATERIAL.search(m.group(1)):
+            found.add(m.group(1))
+            block = ind
+            continue
+        hit = MATLINE.search(t)
+        if not hit:
+            return []
+        found.add(hit.group(0).rstrip("("))
+        block = ind
+    return sorted(found)
+
+
 HAIR = re.compile(r"hair|bang|fringe|lock(?!ed)|pony|wisp|strand|braid|bun(?![a-z])", re.I)
 # what blender/facecheck/facecheck.py draws and measures without Blender: the sculpted face and its paintings
 FACE = re.compile(r"face|mouth|jaw|lid|eye|iris|sclera|brow|lash|lip|nose|nostril|chin|cheek|philtrum|"
@@ -650,6 +696,21 @@ def review(req, thread, do_smoke=True):
             rep.warn("pitfalls", f"{p['id']} {p['title']}: " +
                      "; ".join(f"{path}:{ln} `{t.strip()[:90]}`" for path, ln, t in hits[:4]) +
                      (f" (+{len(hits) - 4} more)" if len(hits) > 4 else ""), p["fix"], p["id"])
+
+    # ---- a material change renders the material, not the figure (John's rule, 2026-11-17; P024)
+    mat_defs = material_only(since, tip)
+    figure_jobs = [v for v, tok in parsed if tok and tok[0].endswith("views.py")]
+    if mat_defs and figure_jobs:
+        if not req.get("needs_render"):
+            rep.block("material", "Since this branch was last rendered only material code changed (" +
+                      ", ".join(mat_defs[:6]) + "), and the request builds the whole figure to show it.",
+                      "Ask for a swatch render: a script in your branch that puts the material on a sphere and a "
+                      "cylinder or slab at the piece's size, under the figure's own light and world, with every look "
+                      "side by side in one picture from one run and no figure build. If the material must be seen on "
+                      'the figure, add "needs_render": "<what you need to see>" and ask for one figure job.', "P024")
+        elif len(figure_jobs) > 1:
+            rep.block("material", f"A material-only change with needs_render runs as one figure job, not "
+                      f"{len(figure_jobs)}.", "Keep one figure command; put the other looks on a swatch.", "P024")
 
     # ---- a face-only request never reaches the queue: the face check API answers it here
     figure, face_defs = face_only(fresh, outs, parsed)
