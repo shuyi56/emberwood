@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'base'))
 import bpy  # noqa: E402
 import bmesh  # noqa: E402
 from mathutils import Vector  # noqa: E402
+import female  # noqa: E402
 from female import *  # noqa: E402,F401,F403  (the base figure: shapes, materials, rig, walk and sprite pipeline)
 from female import _torso_dims, _profile, _gs  # noqa: E402,F401
 
@@ -907,7 +908,12 @@ def build():
     fuzz_shells(mantle, MATERIALS[M_MANTLE]['ramp'])
 
     # the hair's pieces are fused once the mantle is on, so the fall can be kept clear of it
-    fuse_hair(*HAIR_PARTS)
+    if female.MANNEQUIN:
+        # (a mannequin has no hair: its pieces go, unfused, which is most of what the hair costs)
+        for o_ in [o for o in bpy.data.objects if o.name in HAIR_PARTS[1] or o.name.startswith('Bangs')]:
+            bpy.data.objects.remove(o_)
+    else:
+        fuse_hair(*HAIR_PARTS)
 
     # ---- the rig: one bone per limb segment, each following its pivot (the pivots carry the pose; see pose()).
     # Each limb is a single mesh weighted across its joints, so elbows and knees bend in one smooth piece.

@@ -1360,7 +1360,8 @@ def build():
     fuzz_shells(cowl, MATERIALS[M_COWL]['ramp'])
 
     # ---- the hair: pulled back into a ponytail, laid over the cowl
-    build_hair(head, head_tree)
+    if not female.MANNEQUIN:
+        build_hair(head, head_tree)
 
     # ---- the rig (the base figure's)
     build_rig(body)
