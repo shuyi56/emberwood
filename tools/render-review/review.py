@@ -623,7 +623,7 @@ def review(req, thread, do_smoke=True):
                           f"Flags it reads: {' '.join(sorted(known - {'--out'}))}", "P010")
         # (a painted texture changes colour, not form: clay would show nothing new)
         hair = sorted({d for defs in fresh.values() for d in defs
-                       if HAIR.search(d) and not re.search(r"(_image|_tex|_painting|_paint|TEX)$", d)})
+                       if HAIR.search(d) and not re.search(r"(_image|_tex|_painting|_paint|_shade|_material|TEX)$", d)})
         if hair and known and "--clay" in known and not any("--clay" in t for _, t in parsed):
             rep.warn("views", "This commit changes hair code (" + ", ".join(hair[:6]) + ") but no view asks for "
                      "--clay. Seams, ledges and ridges where hair meets the head only show in clay.",
