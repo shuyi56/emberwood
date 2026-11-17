@@ -1,8 +1,7 @@
 """The Warden: the base female figure (blender/base/female.py) in her hair and clothes, rendered to a pixel-art
 sprite sheet.
 
-Long, loose, wavy dark-brown hair parted in the middle, falling past the shoulders down her back, and a pale scar
-across her right cheek. A cream tabard over a belted brown leather tunic: the tabard runs from the collar to just
+Long, loose, wavy dark-brown hair parted in the middle, falling past the shoulders down her back. A cream tabard over a belted brown leather tunic: the tabard runs from the collar to just
 above the knee, trimmed in red along its edges and its stepped hem, with a red yoke embroidered at the chest and a
 red band down the middle. Under it a leather tunic, belted at the waist, whose skirt falls over the tops of brown
 trousers, gambeson sleeves under buckled leather bracers, and tall buckled boots with a turned-down cuff. (No cloak
@@ -35,19 +34,21 @@ from female import _profile, _gs, _torso_dims  # noqa: E402,F401
 # high cheekbones over leaner cheeks, a heavier brow over deeper sockets, a straighter nose, thinner lips with the
 # corners set level instead of lifted, and the eyes a little narrower and less tilted: a level, watchful look.
 female.FACE.update({
-    'jawWidth': -0.02, 'jawDef': 1.6, 'jawSharp': 0.9, 'jawAngle': 0.5, 'chinProj': 1.15, 'chinWidth': 1.0, 'chinHeight': 1.05,
-    'cheekWidth': -0.02, 'cheekbones': 1.4, 'cbHeight': 0.004, 'apples': 0.75, 'cheekFull': 0.6,
-    'noseProj': 1.1, 'tipBall': 0.85, 'browRidge': 1.4, 'sockets': 1.2,
-    'mouthWidth': 1.02, 'lipUpper': 0.8, 'lipLower': 0.9, 'smile': 0.3,
+    'jawWidth': 0.03, 'jawDef': 1.6, 'jawSharp': 0.95, 'jawAngle': 0.6, 'chinProj': 1.3, 'chinWidth': 1.1,
+    'chinHeight': 1.15, 'cheekWidth': -0.02, 'cheekbones': 1.5, 'cbHeight': -0.004, 'apples': 0.65,
+    'cheekFull': 0.55, 'noseProj': 1.25, 'noseWidth': 1.04, 'noseLen': -0.006, 'tipBall': 0.75, 'nostrils': 1.1,
+    'browRidge': 1.6, 'sockets': 1.35, 'mouthWidth': 1.06, 'lipUpper': 0.75, 'lipLower': 0.88, 'smile': 0.3,
+    'chinTaper': -0.2, 'eyeSpacing': 0.145,
 })
-female.EYE_OPEN = 0.66
-female.EYE_TILT = 0.07
+female.EYE_OPEN = 0.64
+female.EYE_TILT = 0.06
 # her make-up, as the creator's preset: a light plum wash of shadow kept to the lids (a heavier one read as too
 # much, and none runs in toward the nose), lined and winged at the outer corners, and wine lips; her brows dark,
 # full and set low, rising to a sharp high arch
 female.MAKEUP.update({'shadow': (106, 74, 112), 'shadowDark': (52, 36, 58), 'shadowLow': (150, 118, 132), 'shadowAmt': 0.42,
-                      'shadowInner': 0.0, 'liner': 0.7, 'wing': 0.7, 'lip': (124, 50, 64),
+                      'shadowInner': 0.0, 'liner': 0.7, 'wing': 0.7,
                       'browArch': 1.5, 'browThick': 0.8, 'browHeight': -0.04})
+female.LIP_COLOURS = {'MID': [124, 50, 64], 'UP': [113, 43, 56], 'HI': [135, 60, 76], 'DEEP': [78, 28, 37]}
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
@@ -1524,7 +1525,7 @@ def creator_hair(head):
     return cap, locks
 
 
-def creator_hair_clearance(cols=range(0, 10, 2), gap=0.2):
+def creator_hair_clearance(cols=range(10), gap=0.2):
     """After the rig and the walk: the creator's head has no shoulders, so its long hair falls straight through
     the collar, the cape and the shoulders. In each pose of the sheet, find the points of the hair that are inside
     the clothes or closer to them than `gap`, and the move that clears each (out past the cloth along the radius
@@ -1549,34 +1550,51 @@ def creator_hair_clearance(cols=range(0, 10, 2), gap=0.2):
                 continue
             rad.normalize()
             d_ = None
-            # (inside the clothes: going out along the radius, the hair leaves a cloth it never entered)
-            o_, far, depth = p.copy(), None, 0
-            for _k in range(6):
-                h_ = tree.ray_cast(o_ + rad * 0.003, rad, 2.2 - (o_ - p).length)
+            # over the shoulders the cloth lies below the hair: going up from a point inside it, the first face met is
+            # one where the cloth's top faces up. Then the point comes up out of every layer there (robe, breastplate,
+            # cape: the last upward-facing face it passes), off that face.
+            up, o_, top_ = Vector((0, 0, 1)), p.copy(), None
+            for _k in range(8):
+                h_ = tree.ray_cast(o_ + up * 0.003, up, 1.5 - (o_ - p).length)
                 if h_[0] is None:
                     break
-                depth += 1 if h_[1].dot(rad) < 0.0 else -1
+                if _k == 0 and h_[1].z <= 0.2:
+                    break
                 o_ = h_[0]
-                if depth < 0:
-                    far, depth = o_, 0
-            if far is not None and (far - p).dot(rad) < 0.9:
-                d_ = rad * ((far - p).dot(rad) + gap)
-            elif far is not None:
-                # (deep inside, as where a lock comes down into the shoulder: it comes to rest on the nearest
-                # cloth instead of being thrown out past the arm)
-                p_, n_, _i, _dist = tree.find_nearest(p, 3.0)
-                if p_ is None:
-                    continue
-                d_ = p_ - p
-                d_ = d_ + (d_.normalized() if d_.length > 1e-6 else n_) * gap
+                if h_[1].z > 0.2:
+                    top_ = (o_.copy(), h_[1].copy())
+            if top_ is not None:
+                d_ = (top_[0] - p) + top_[1] * gap
             else:
-                p_, n_, _i, _dist = tree.find_nearest(p, gap + 0.4)
-                if p_ is None:
-                    continue
-                dd = (p - p_).dot(n_)
-                if dd >= gap or dd < -0.5:
-                    continue
-                d_ = n_ * (gap - dd)
+                # out along the radius from the neck: the hair has to lie outside every cloth it passes within reach
+                # (a collar standing up round the neck is passed in and out again), so the move is to the last face
+                # it leaves; a point deep inside, as where a lock comes down into the shoulder, comes to rest on the
+                # nearest cloth instead of being thrown out past the arm
+                o_, far, inside = p.copy(), None, False
+                for _k in range(8):
+                    h_ = tree.ray_cast(o_ + rad * 0.003, rad, 1.6 - (o_ - p).length)
+                    if h_[0] is None:
+                        break
+                    o_ = h_[0]
+                    if h_[1].dot(rad) > 0.0:
+                        far = o_
+                        inside = inside or _k == 0
+                if far is not None and (far - p).dot(rad) < 0.9:
+                    d_ = rad * ((far - p).dot(rad) + gap)
+                elif far is not None and inside:
+                    p_, n_, _i, _dist = tree.find_nearest(p, 3.0)
+                    if p_ is None:
+                        continue
+                    d_ = p_ - p
+                    d_ = d_ + (d_.normalized() if d_.length > 1e-6 else n_) * gap
+                else:
+                    p_, n_, _i, _dist = tree.find_nearest(p, gap + 0.4)
+                    if p_ is None:
+                        continue
+                    dd = (p - p_).dot(n_)
+                    if dd >= gap or dd < -0.5:
+                        continue
+                    d_ = n_ * (gap - dd)
             if d_.length > need.get(i, Vector()).length:
                 need[i] = d_.copy()
     sc.frame_set(1)
@@ -1629,6 +1647,81 @@ def creator_hair_clearance(cols=range(0, 10, 2), gap=0.2):
         for v in o.data.vertices:
             v.co += D[lay[v.index].value]
         o.data.update()
+    for i in range(len(P)):
+        P[i] += D[i]
+
+
+def creator_hair_trim(cols=range(10), cut=55.0, top=57.5, rounds=6):
+    """What the clearance by points leaves. Below the collar the cap only hangs behind the locks, a curtain nobody
+    sees, but its faces are coarser than the collar's rim and the cape's edge, so one whose corners all lie clear can
+    still cut through a thin edge between them, and its underside faces open air in the gap at the neck. So the cap is
+    cut away below `cut` (the locks cover it there), and then, pose by pose, any face of it still crossing the
+    clothes where the sheet's hair check looks (its outer faces: open air along the normal) is taken out, up to
+    `top`, until none is left."""
+    import bmesh
+    from mathutils.bvhtree import BVHTree
+    sc = bpy.context.scene
+    cap = bpy.data.objects['Hair']
+    M = cap.matrix_world
+
+    def drop(test):
+        bm = bmesh.new()
+        bm.from_mesh(cap.data)
+        kill = [f for f in bm.faces if test(f)]
+        if kill:
+            bmesh.ops.delete(bm, geom=kill, context='FACES')
+            bm.to_mesh(cap.data)
+            cap.data.update()
+        bm.free()
+        return len(kill)
+
+    drop(lambda f: max((M @ v.co).z for v in f.verts) < cut)
+    for _round in range(rounds):
+        nv = len(cap.data.vertices)
+        bad = set()
+        for col in cols:
+            sc.frame_set(col + 1)
+            bpy.context.view_layer.update()
+            dg = bpy.context.evaluated_depsgraph_get()
+            cloth, rest_vs, rest_ps = [], [], []
+            for o in bpy.data.objects:
+                if o.type != 'MESH' or o.hide_render or not o.visible_get() or o == cap:
+                    continue
+                me = o.evaluated_get(dg).to_mesh()
+                vs = [o.matrix_world @ v.co for v in me.vertices]
+                ps = [list(q.vertices) for q in me.polygons]
+                o.evaluated_get(dg).to_mesh_clear()
+                b = len(rest_vs)
+                rest_vs += vs
+                rest_ps += [[b + i for i in q] for q in ps]
+                if o.name.startswith(CLOTHES) and ps:
+                    cloth.append(BVHTree.FromPolygons(vs, ps))
+            figure = BVHTree.FromPolygons(rest_vs, rest_ps)
+            me = cap.evaluated_get(dg).to_mesh()
+            hv = [cap.matrix_world @ v.co for v in me.vertices]
+            outside = []
+            for q in me.polygons:
+                vi = list(q.vertices)
+                c = sum((hv[i] for i in vi), Vector()) / len(vi)
+                n = (hv[vi[1]] - hv[vi[0]]).cross(hv[vi[2]] - hv[vi[0]])
+                if n.length < 1e-12:
+                    continue
+                n.normalize()
+                if figure.ray_cast(c + n * 0.02, n, 1.5)[0] is None:
+                    outside.append(vi)
+            cap.evaluated_get(dg).to_mesh_clear()
+            if not outside:
+                continue
+            ht = BVHTree.FromPolygons(hv, outside)
+            for t in cloth:
+                for fi, _j in ht.overlap(t):
+                    # (the solidified copy's vertices follow the cap's own, in order)
+                    bad.update(i % nv for i in outside[fi])
+        sc.frame_set(1)
+        n = drop(lambda f: any(v.index in bad for v in f.verts) and max((M @ v.co).z for v in f.verts) < top)
+        print('hair trim round', _round, 'faces out', n, flush=True)
+        if not n:
+            break
 
 
 def velvet_closeup(name):
@@ -2065,9 +2158,8 @@ def build():
     mesh_obj('Buckle', frame_bm(1.6, 1.7, 0.3, 0.3), M_GOLD, body, loc=(0, by_ - 0.42, 39.4), subdiv=0)
     mesh_obj('Buckle prong', box(0.9, 0.16, 0.16), M_GOLD, body, loc=(0.22, by_ - 0.56, 39.4), subdiv=0)
 
-    # ---- neck and head (the base figure's), and the scar on her cheek
+    # ---- neck and head (the base figure's)
     head, head_tree = build_head(body)
-    cheek_scar(head)
 
     # ---- the hair: the face creator's long waves with a centre parting (lifted clear of the clothes after the rig)
     global CAPE_UNDER
@@ -2496,7 +2588,10 @@ def build():
     velvet_closeup('cape')
     patina_closeup('bracers')
     if not os.environ.get('WARDEN_NO_CLEARANCE'):
+        # (twice: the first pass's easing lets a little back in where a lock crosses the shoulder in the walk)
         creator_hair_clearance()
+        creator_hair_clearance()
+        creator_hair_trim()
     return res
 
 

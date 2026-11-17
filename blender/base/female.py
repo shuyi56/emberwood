@@ -1253,6 +1253,9 @@ FACE = {
     'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
     'noseProj': 1.0, 'noseWidth': 1.0, 'noseLen': 0.0, 'tipBall': 1.0, 'nostrils': 1.0,
     'browRidge': 1.0, 'sockets': 1.0, 'mouthWidth': 1.0, 'lipUpper': 1.0, 'lipLower': 1.0, 'smile': 1.0,
+    # (the face creator's: how the jaw runs in to the chin, + a V, - held wide to a square chin; how softly the jaw
+    # falls into the neck; the eyes' half-spacing, head heights)
+    'chinTaper': 0.0, 'jawUnder': 0.0, 'eyeSpacing': 0.14,
 }
 
 
@@ -1271,18 +1274,19 @@ def face_relief(x, z):
     d = 0.0
     F = FACE
     nw, nl, cb = F['noseWidth'], F['noseLen'], F['cbHeight']
+    es = F['eyeSpacing'] / 0.14
     for s in (-1, 1):
         # brow ridge: falling away toward the middle and easing down into the sockets (a ridge that ran on across the
         # bridge as a shelf threw a band of shade between the eyes)
-        d += gauss(x, z, s * 0.15, 0.62, 0.075 if x * s < 0.15 else 0.12, 0.052, 0.03 * F['browRidge'])
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
+        d += gauss(x, z, s * 0.15 * es, 0.62, 0.075 if x * s < 0.15 * es else 0.12, 0.052, 0.03 * F['browRidge'])
+        d += gauss(x, z, s * 0.14 * es, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
         d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * F['cheekbones'])    # cheekbone, running back toward the ear
         d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * F['apples'])    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032 * F['cheekFull'])      # the cheek filled out under the cheekbone, no hollow
         d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016 * F['cheekFull'])       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.05 * nw, 0.37 + nl, 0.021 * nw, 0.02, 0.018 * F['nostrils'])    # wing of the nose (smaller: it read big from the game's camera)
         d += gauss(x, z, s * 0.037 * nw, 0.378 + nl, 0.008, 0.02, -0.004 * F['nostrils'])  # the groove between the wing and the tip
-        d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
+        d += gauss(x, z, s * 0.235 * es, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     zt = 0.36 + nl
@@ -1432,8 +1436,9 @@ def jaw_relief(y, z):
         t = min(1.0, max(0.0, t))
         return t * t * (3 - 2 * t)
     js = FACE['jawSharp']                      # (narrows the turn over the lower and back edges: a crisper jawline)
-    below = ss((z - zl + 0.03 / js) / (0.1 / js))        # above the lower edge of the jaw
-    behind = ss((0.11 - y) / (0.11 / (1 + 0.3 * (js - 1))))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
+    tail = FACE['jawUnder']                    # (lets the jaw fall softly into the neck, with no crease)
+    below = ss((z - zl + 0.03 / js + tail) / (0.1 / js + tail))        # above the lower edge of the jaw
+    behind = ss((0.11 + tail - y) / (0.11 / (1 + 0.3 * (js - 1)) + tail))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
     # the angle of the jaw under the ear, where the lower edge turns up into the ramus: a firm corner on a
     # defined jaw (the masseter over it), set inside both edges so they stay clean
@@ -1448,7 +1453,9 @@ def _head_w(z):
         return t * t * (3 - 2 * t)
     jw = ss(-0.05, 0.08, z) * ss(0.42, 0.2, z)
     cw = math.exp(-((z - 0.42) / 0.12) ** 2)
-    return HEAD_W(z) * (1 + FACE['jawWidth'] * jw + FACE['cheekWidth'] * cw)
+    # (chinTaper works only below the mouth, where the jaw narrows, so the cheeks keep their width)
+    ct = math.exp(-((z - 0.1) / 0.075) ** 2) * ss(-0.06, 0.03, z)
+    return HEAD_W(z) * (1 + FACE['jawWidth'] * jw + FACE['cheekWidth'] * cw - 0.2 * FACE['chinTaper'] * ct)
 
 
 def _section(z, c, s):
@@ -2854,16 +2861,19 @@ def _warped_fbm(x, y, seed=0, k=3.0):
 
 
 SHADOW_TEX = {}
+# the lips' MID/UP/HI/DEEP tones (sRGB 0-255), as the face creator exports them; empty for the ranger's own
+LIP_COLOURS = {}
 # The make-up's colours and strengths. These defaults are the ranger's; a figure changes the ones it wants with
 # MAKEUP.update({...}) before it builds. shadow, shadowDark and shadowLow are the eyeshadow's wash, its deepest tone
 # and the lighter wash under the lower lashes (sRGB 0-255); shadowAmt its opacity; liner a dark line along the upper
 # lashes and wing its flick out past the outer corner (0 none .. 1 full); lip the lips' own tone (None: the
-# ranger's dusty rose), from which the upper lip, the highlight and the line between them are shaded.
+# ranger's dusty rose), from which the upper lip, the highlight and the line between them are shaded. (The lips' tones
+# themselves are LIP_COLOURS, as the rogue's branch has them.)
 # shadowInner is how far the wash runs in past the inner corner toward the nose (1 the ranger's, 0 none: it starts
 # on the lid itself). browArch, browThick and browHeight shape the brow (multipliers on its arch and thickness, and
 # an offset on its height in brow units).
 MAKEUP = {'shadow': (70, 60, 56), 'shadowDark': (34, 29, 28), 'shadowLow': (92, 80, 74), 'shadowAmt': 0.78, 'shadowInner': 1.0,
-          'liner': 0.0, 'wing': 0.0, 'lip': None, 'browArch': 1.0, 'browThick': 1.0, 'browHeight': 0.0}
+          'liner': 0.0, 'wing': 0.0, 'browArch': 1.0, 'browThick': 1.0, 'browHeight': 0.0}
 SH_U0, SH_U1, SH_V0, SH_V1 = -1.75, 1.5, -0.45, 0.95      # the patch's extent: across (u) and up from the line between the corners
 
 
@@ -3378,13 +3388,11 @@ def lip_painting(W=576, H=336):
     # how far down each lip lies, 0 at the line between them, 1 at its outer edge
     tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
     tl = np.clip((zl - w) / np.maximum(zl - bot, 1e-4), 0, 1)
-    MID = np.array([178, 104, 96], dtype=np.float32)        # the lip's own tone: a dusty rose on her warm skin
-    UP = np.array([162, 90, 84], dtype=np.float32)          # the upper lip, a shade deeper
-    HI = np.array([194, 124, 114], dtype=np.float32)        # the fullest part of the lower lip
-    DEEP = np.array([112, 58, 56], dtype=np.float32)        # into the line and the corners
-    if MAKEUP['lip'] is not None:      # (a figure's own lip tone: the four tones keep their relations to it)
-        k_ = np.array(MAKEUP['lip'], dtype=np.float32) / MID
-        MID, UP, HI, DEEP = MID * k_, UP * k_, np.minimum(HI * k_, 255), DEEP * k_
+    L = LIP_COLOURS
+    MID = np.array(L.get('MID', [178, 104, 96]), dtype=np.float32)      # the lip's own tone: a dusty rose on her warm skin
+    UP = np.array(L.get('UP', [162, 90, 84]), dtype=np.float32)         # the upper lip, a shade deeper
+    HI = np.array(L.get('HI', [194, 124, 114]), dtype=np.float32)       # the fullest part of the lower lip
+    DEEP = np.array(L.get('DEEP', [112, 58, 56]), dtype=np.float32)     # into the line and the corners
     col = MID + (UP - MID) * (upper > lower)[..., None] * sm(0.0, 0.35, tu)[..., None]
     full = np.exp(-((tl - 0.5) / 0.28) ** 2) * np.exp(-(x / 0.045) ** 2) * (lower >= upper)
     col = col + (HI - col) * (0.75 * full)[..., None]
@@ -3516,7 +3524,7 @@ def build_head(body):
     # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
     feat = {}
     for s in (-1, 1):
-        x = s * 0.14 * HEAD_H
+        x = s * FACE['eyeSpacing'] * HEAD_H
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
     mouth_y = surface_y(hb, 0, MOUTH_Z * HEAD_H)
     head_tree = bvh_of(hb)
