@@ -777,7 +777,7 @@ def build_collar(body):
     sheet = grid(rows, n, lambda i, j: collar_pt(ang(1.0 - i / (rows - 1), j), 1.0 - i / (rows - 1)))
     mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
     # the rolled edge: up one front, round the top and down the other
-    vs_ = [k / 12 for k in range(2, 12)]
+    vs_ = [k / 12 for k in range(7, 12)]   # (the fronts' rolled edge only above the plate, where they stand free)
     path = [collar_pt(ang(v, 0), v, 0.03) for v in vs_]
     path += [collar_pt(ang(1.0, j), 1.0, 0.03) for j in range(n)]
     path += [collar_pt(ang(v, n - 1), v, 0.03) for v in reversed(vs_)]
@@ -849,6 +849,15 @@ def build_throat_plate(body):
     edge = [Vector(pt(i, 0)) for i in low] + [Vector(pt(rows - 1, cols // 2))] + [Vector(pt(i, cols - 1)) for i in reversed(low)]
     edge = [p + Vector((0, -0.04, 0)) for p in edge]
     mesh_obj('Collar plate edge', tube(edge, [0.09] * len(edge), flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    # the seam where the collar's fronts are stitched onto the plate: a row of stitches either side of the joint
+    sti = []
+    for sg in (1, -1):
+        for k in range(16):
+            v = lerp(0.02, VT - 0.03, k / 15)
+            a0 = sg * collar_open(v)
+            for da, o in ((0.07, 0.05), (-0.08, 0.07)):
+                sti.append(collar_pt(a0 + sg * da, v, o))
+    mesh_obj('Collar stitching', dots(sti, 0.1), M_STITCH, body, subdiv=0)
     # the three raised lines
     mid = [Vector(pt(i, cols // 2)) + Vector((0, -0.05, 0)) for i in range(0, rows - 2)]
     mesh_obj('Collar plate ridge', tube(mid, [0.05] * len(mid), flat=1.0, n=6), M_GOLD, body, subdiv=0)
@@ -1418,7 +1427,7 @@ def patina_closeup(name):
     nt.links.new(sc_.outputs['Vector'], b.inputs['Base Color'])
 
 
-def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66)):
+def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(0.55, 0.22)):
     """The greaves and the breastplate up close (the sprites keep the plain diffuse surface: see sprite_mode):
     hammered steel, a little worn. Shallow overlapping dents from the hammer break up the light; the tone drifts
     in broad patches; it is darker and duller down in the hollows, where grime collects, and polished brighter on
@@ -1457,8 +1466,8 @@ def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66)):
     col.inputs['B'].default_value = (*light, 1)
     nt.links.new(tone.outputs['Value'], col.inputs['Factor'])
     rough = nt.nodes.new('ShaderNodeMapRange')
-    rough.inputs['To Min'].default_value = 0.55
-    rough.inputs['To Max'].default_value = 0.22
+    rough.inputs['To Min'].default_value = rgh[0]
+    rough.inputs['To Max'].default_value = rgh[1]
     nt.links.new(tone.outputs['Value'], rough.inputs['Value'])
     pb = nt.nodes.new('ShaderNodeBsdfPrincipled')
     pb.name = 'close bsdf'
@@ -2218,7 +2227,9 @@ def build():
     # the rig, the camera and light, and the keyframes; then the hair kept clear of the clothes in every pose
     res = finish_figure(lambda: cape_on_arms(['Cape', 'Cape lining', 'Cape front -1', 'Cape front 1']))
     steel_closeup('plate')
-    steel_closeup('collar', dark=(0.035, 0.036, 0.04), light=(0.3, 0.31, 0.33))
+    # (the collar and its plate one dull, even finish: rougher, so the flat plate facing the light does not flare
+    # brighter than the band curving round the neck)
+    steel_closeup('collar', dark=(0.04, 0.041, 0.045), light=(0.2, 0.205, 0.22), rgh=(0.62, 0.48))
     velvet_closeup('robe')
     velvet_closeup('cape')
     patina_closeup('bracers')
