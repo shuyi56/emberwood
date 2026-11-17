@@ -120,6 +120,13 @@ def guide(knots, surface, lift0=0.0, samples=44, ride=None, hc=HC, over=None, sm
         lo.append(floor)
     # (smooth: eases the height along the lock, so the root's rise out from under the cap turns into its run over
     # the head in a curve, not at a corner; never below the ride)
+    # (the ride itself is eased too, by up to 0.02 under it, so a sudden step in what the lock lies on, such as the
+    # edge of a side lock, is taken in a curve instead of a corner)
+    if smooth:
+        lo2 = lo[:]
+        for _ in range(smooth):
+            lo2 = [lo2[0]] + [0.25 * lo2[i - 1] + 0.5 * lo2[i] + 0.25 * lo2[i + 1] for i in range(1, n - 1)] + [lo2[-1]]
+        lo = [max(a, b - 0.02) for a, b in zip(lo2, lo)]
     for _ in range(smooth):
         rs = [rs[0]] + [max(lo[i], 0.25 * rs[i - 1] + 0.5 * rs[i] + 0.25 * rs[i + 1]) for i in range(1, n - 1)] + [rs[-1]]
     path = [add(hc, scl(d, r)) for d, r in zip(ds, rs)]
@@ -301,7 +308,7 @@ def ranger_bangs(surface, s, frame=True):
             t = j / 4
             K = [(s * (0.28 + 0.4 * t), 1.02, 0.08), (s * (0.5 + 0.38 * t), 0.72, 0.3), (s * (0.68 + 0.36 * t), 0.4, 0.3),
                  (s * (0.82 + 0.34 * t), 0.08, 0.24), (s * (0.95 + 0.32 * t), -0.22, 0.18), (s * (1.05 + 0.3 * t), -0.45 + 0.08 * t, 0.12)]
-            path, O = guide(K, surface, 0.02 + 0.015 * (j % 2), ride=(0.12, 0.04 + 0.02 * (j % 2)), smooth=8)
+            path, O = guide(K, surface, 0.02 + 0.015 * (j % 2), ride=(0.12, 0.04 + 0.02 * (j % 2)), samples=56, smooth=16)
             guides.append((f'temple {s} {j}', path))
             strands += clump(path, O, lambda u: 0.42 * (1 - 0.3 * sm(0.6, 1, u)), 8, 980 + j + (50 if s > 0 else 0),
                                tip=0.24, stagger=0.2, spread=0.35)
