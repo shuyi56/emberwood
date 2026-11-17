@@ -42,9 +42,10 @@ female.FACE.update({
 })
 female.EYE_OPEN = 0.66
 female.EYE_TILT = 0.07
-# her make-up, as the creator's preset: a smoky plum shadow lined and winged at the outer corners, and wine lips
-female.MAKEUP.update({'shadow': (88, 54, 94), 'shadowDark': (36, 22, 42), 'shadowLow': (108, 78, 108), 'shadowAmt': 0.9,
-                      'liner': 0.85, 'wing': 0.75, 'lip': (124, 50, 64)})
+# her make-up, as the creator's preset: a light plum wash of shadow (a heavier one read as too much), lined and
+# winged at the outer corners, and wine lips
+female.MAKEUP.update({'shadow': (106, 74, 112), 'shadowDark': (52, 36, 58), 'shadowLow': (150, 118, 132), 'shadowAmt': 0.42,
+                      'liner': 0.7, 'wing': 0.7, 'lip': (124, 50, 64)})
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)
