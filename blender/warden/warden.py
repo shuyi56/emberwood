@@ -70,10 +70,9 @@ M_BELT = mat_def(40, 'belt', ramp(0x4b3123, 0.1), 0.2, surface='leather')
 M_GOLD = mat_def(41, 'gold', ramp(0xb08f4f, 0.09), 0.0, closeup='gold', shadow_on=(M_TABARD, M_BELT))
 M_STEEL = mat_def(42, 'steel', ramp(0x9a978f, 0.09), 0.0)
 M_STITCH = mat_def(43, 'stitching', ramp(0xa8927a, 0.08), 0.0, flat=2)
-# the scar: a little paler and pinker than the skin round it
-M_ROBE = mat_def(46, 'robe', ramp(0x4a3227, 0.1), 0.1, surface='wool', closeup='wool', form=True)
+M_ROBE = mat_def(46, 'robe', ramp(0x2e3d5c, 0.1), 0.1, surface='wool', closeup='wool', form=True)
 M_ROBE_TRIM = mat_def(47, 'robe trim', ramp(0x9c7c45, 0.09), 0.0, closeup='canvas')
-M_CAPE = mat_def(48, 'cape', ramp(0x3b2a21, 0.1), 0.12, surface='wool', closeup='wool', form=True)
+M_CAPE = mat_def(48, 'cape', ramp(0x243049, 0.1), 0.12, surface='wool', closeup='wool', form=True)
 M_LINING = mat_def(49, 'cape lining', ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
 M_COLLAR = mat_def(50, 'collar', ramp(0x3b3e45, 0.12), 0.0, closeup='steel')   # (blackened steel: steel_closeup)
 M_SCAR = mat_def(44, 'scar', [[178, 114, 100], [202, 142, 124], [216, 164, 144], [226, 182, 164], [236, 202, 186]], 0.0)
@@ -1912,7 +1911,7 @@ def velvet_closeup(name):
     b = nt.nodes['close bsdf']
     b.inputs['Sheen Weight'].default_value = 1.0
     b.inputs['Sheen Roughness'].default_value = 0.3
-    b.inputs['Sheen Tint'].default_value = (0.95, 0.72, 0.6, 1.0)
+    b.inputs['Sheen Tint'].default_value = (0.78, 0.84, 0.98, 1.0)   # (a cool sheen on the slate-blue velvet)
     b.inputs['Roughness'].default_value = 0.85
     b.inputs['Specular IOR Level'].default_value = 0.05
     # the base deepened (the sheen supplies the light) and patchily crushed

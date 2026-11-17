@@ -45,3 +45,12 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   one lit band and one dark crease. Many fine dots turn into noise.
 - A piece added to the head (bun, ponytail) needs a joining shape where it meets the skull, so it
   grows out of the head instead of sitting on it.
+
+## Game characters: Blender for clothes, the Face Creator for faces
+
+- In the game, a character's face and hair come only from the Face Creator. The Blender scripts
+  (`blender/<character>/`) are for the body and the clothes. Change a face or a hairstyle in the
+  creator, never in Blender.
+- Keep the clothes that frame the hair (cape, robe, hood, collar) clearly apart from the hair's colour
+  in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
+  into her cape from the side and back. Check the cape against the hair in the side and back views.
