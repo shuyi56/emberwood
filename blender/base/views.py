@@ -201,9 +201,17 @@ def prefixes(flag):
     return tuple(p.strip() for p in v.split(',') if p.strip()) if v else ()
 
 
+_ISOLATED = set()    # (the meshes isolate() itself hid)
+
+
 def isolate(only=None):
     """Hide what --only, --hide and --no-body leave out (hide_render: it neither shows nor casts shadows).
     Returns the meshes still showing."""
+    if only is not None:
+        # (--pieces picks from the whole figure, not from what --only left showing)
+        for o in bpy.data.objects:
+            if o.type == 'MESH' and o.name in _ISOLATED:
+                o.hide_render = False
     only, hide = (prefixes('--only') if only is None else only), prefixes('--hide')
     ids = {d['name']: mid for mid, d in female.MATERIALS.items()}
     meshes = [o for o in bpy.data.objects if o.type == 'MESH']
@@ -221,6 +229,8 @@ def isolate(only=None):
         base = base or q.parent is not None
         off = (only and not o.name.startswith(only)) or (hide and o.name.startswith(hide)) or \
             ('--no-body' in argv and base)
+        if off and not o.hide_render:
+            _ISOLATED.add(o.name)
         o.hide_render = bool(off) or o.hide_render
         if not o.hide_render:
             shown.append(o)
