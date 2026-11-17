@@ -1262,6 +1262,9 @@ FACE = {
     'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
     'noseProj': 1.0, 'noseWidth': 1.0, 'noseLen': 0.0, 'tipBall': 1.0, 'nostrils': 1.0,
     'browRidge': 1.0, 'sockets': 1.0, 'mouthWidth': 1.0, 'lipUpper': 1.0, 'lipLower': 1.0, 'smile': 1.0,
+    # (the face creator's: how the jaw runs in to the chin, + a V, - held wide to a square chin; the eyes' half-spacing,
+    # head heights)
+    'chinTaper': 0.0, 'eyeSpacing': 0.14,
 }
 
 
@@ -1280,16 +1283,19 @@ def face_relief(x, z):
     d = 0.0
     F = FACE
     nw, nl, cb = F['noseWidth'], F['noseLen'], F['cbHeight']
+    es = F['eyeSpacing'] / 0.14
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03 * F['browRidge'])       # brow ridge
-        d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
+        # brow ridge: falling away toward the middle and easing down into the sockets (a ridge that ran on across the
+        # bridge as a shelf threw a band of shade between the eyes)
+        d += gauss(x, z, s * 0.15 * es, 0.62, 0.075 if x * s < 0.15 * es else 0.12, 0.052, 0.03 * F['browRidge'])
+        d += gauss(x, z, s * 0.14 * es, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
         d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * F['cheekbones'])    # cheekbone, running back toward the ear
         d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * F['apples'])    # the apple of the cheek, under the eye by the nose
         d += gauss(x, z, s * 0.19, 0.28, 0.11, 0.11, 0.032 * F['cheekFull'])      # the cheek filled out under the cheekbone, no hollow
         d += gauss(x, z, s * 0.18, 0.2, 0.09, 0.09, 0.016 * F['cheekFull'])       # the soft fullness of the lower cheek
         d += gauss(x, z, s * 0.05 * nw, 0.37 + nl, 0.021 * nw, 0.02, 0.018 * F['nostrils'])    # wing of the nose (smaller: it read big from the game's camera)
         d += gauss(x, z, s * 0.037 * nw, 0.378 + nl, 0.008, 0.02, -0.004 * F['nostrils'])  # the groove between the wing and the tip
-        d += gauss(x, z, s * 0.235, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
+        d += gauss(x, z, s * 0.235 * es, 0.53, 0.035, 0.085, 0.016)   # the outer rim of the eye socket, brow to cheekbone
     # the nose: a narrow ridge rising from the bridge to the tip, then turning under sharply. Its cross-section is
     # a flat-topped ridge (the dorsum) with steep sides, narrow at the bridge and widening toward the tip (round 9).
     zt = 0.36 + nl
@@ -1458,7 +1464,9 @@ def _head_w(z):
         return t * t * (3 - 2 * t)
     jw = ss(-0.05, 0.08, z) * ss(0.42, 0.2, z)
     cw = math.exp(-((z - 0.42) / 0.12) ** 2)
-    return HEAD_W(z) * (1 + FACE['jawWidth'] * jw + FACE['cheekWidth'] * cw)
+    # (chinTaper works only below the mouth, where the jaw narrows, so the cheeks keep their width)
+    ct = math.exp(-((z - 0.1) / 0.075) ** 2) * ss(-0.06, 0.03, z)
+    return HEAD_W(z) * (1 + FACE['jawWidth'] * jw + FACE['cheekWidth'] * cw - 0.2 * FACE['chinTaper'] * ct)
 
 
 def _section(z, c, s):
@@ -3503,7 +3511,7 @@ def build_head(body):
     # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
     feat = {}
     for s in (-1, 1):
-        x = s * 0.14 * HEAD_H
+        x = s * FACE['eyeSpacing'] * HEAD_H
         feat[s] = (x, surface_y(hb, x, 0.525 * HEAD_H), surface_y(hb, x, 0.635 * HEAD_H))
     mouth_y = surface_y(hb, 0, MOUTH_Z * HEAD_H)
     head_tree = bvh_of(hb)

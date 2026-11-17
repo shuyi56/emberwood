@@ -31,23 +31,24 @@ from female import _profile, _gs, _torso_dims, _perlin2  # noqa: E402,F401
 import female  # noqa: E402
 
 # ---------------------------------------------------------------- her face
-# Designed in the face creator (/mnt/project-files/face-creator) on the base head: leaner than the ranger, with
-# high, sharp cheekbones over a hollow, a narrower jaw with a firmer edge, a neat pointed chin, a finer nose and a
-# thinner upper lip whose corners lift into a half-smile; the eyes a touch narrower and more tilted, a sly look.
+# Designed in the face creator (/mnt/project-files/face-creator, the head preset "Rogue") on the base head: a narrow,
+# heart-shaped face, a slim jaw running in to a neat tapered chin, high cheekbones over a hollow with the cheeks a
+# little plumper under them, a finer nose, a thinner upper lip whose corners lift into a half-smile; the eyes narrower
+# and more tilted, a sly look.
 female.FACE.update({
-    'jawWidth': -0.07, 'jawDef': 1.5, 'jawSharp': 0.6, 'jawAngle': 0.3, 'jawUnder': 0.1, 'chinProj': 1.2, 'chinWidth': 0.88,
-    'cheekWidth': -0.02, 'cheekbones': 1.6, 'cbHeight': 0.008, 'apples': 0.8, 'cheekFull': 0.55,
-    'noseProj': 1.05, 'noseWidth': 0.92, 'tipBall': 0.8, 'nostrils': 0.85,
-    'browRidge': 1.15, 'sockets': 1.1, 'lipUpper': 1.05, 'lipLower': 1.15, 'smile': 1.6,
+    'jawWidth': -0.1, 'jawDef': 1.6, 'jawSharp': 1.0, 'jawAngle': 0.2, 'jawUnder': 0.1, 'chinProj': 1.3, 'chinWidth': 0.82,
+    'chinHeight': 1.06, 'chinTaper': 0.3, 'cheekWidth': -0.01, 'cheekbones': 1.8, 'cbHeight': 0.014, 'apples': 0.9,
+    'cheekFull': 0.8, 'noseProj': 1.15, 'noseWidth': 0.88, 'noseLen': 0.005, 'tipBall': 0.65, 'nostrils': 0.8,
+    'browRidge': 1.1, 'sockets': 1.08, 'eyeSpacing': 0.137, 'mouthWidth': 0.95, 'lipUpper': 0.82, 'lipLower': 1.0, 'smile': 1.6,
 })
-female.EYE_OPEN = 0.68
-female.EYE_TILT = 0.105
+female.EYE_OPEN = 0.66
+female.EYE_TILT = 0.13
 female.EARS = True       # (her hair is drawn back into the tail, so they show)
 import ear  # noqa: E402
 ear.EAR_SU, ear.EAR_SV = 0.92 * 0.8, 0.78 * 0.8   # her ears a fifth smaller than the shared layout
 female.UNDER_JAW_SHADE = (0.0, 1.6, 0.75)   # (spread over the whole soft turn under her jaw: kept to the edge, it drew a line there)
-# makeup, from the face creator (Rogue preset + blush 0.7 '#d4706f', lipstick 0.6 '#a5434c', gloss 0.35)
-female.BLUSH = (0.7, (212, 112, 111))
+# makeup, from the face creator (Rogue preset: blush 0.35 '#d0766a', lipstick 0.6 '#a5434c', gloss 0.35)
+female.BLUSH = (0.35, (208, 118, 106))
 female.LIP_COLOURS = {'MID': [170, 82, 84], 'UP': [166, 77, 82], 'HI': [177, 90, 91], 'DEEP': [153, 65, 72]}
 female.LIP_GLOSS = 0.35
 female.SKIN_FRECKLES = 0.3      # (a light dusting, and the skin's colour much more even than the ranger's)

@@ -25,6 +25,20 @@ import bmesh  # noqa: E402
 from mathutils import Vector  # noqa: E402
 from female import *  # noqa: E402,F401,F403  (the base figure: shapes, materials, rig, walk and sprite pipeline)
 from female import _torso_dims, _profile, _gs  # noqa: E402,F401
+import female  # noqa: E402
+
+# ---------------------------------------------------------------- her face
+# Designed in the face creator (/mnt/project-files/face-creator, the head preset "Ranger"): round and soft, full cheeks
+# and apples, a gentle jaw running into a short rounded chin, a short rounded nose, open eyes, a soft rose blush.
+female.FACE.update({
+    'jawWidth': 0.05, 'jawDef': 0.7, 'jawSharp': 0.8, 'jawAngle': 0.05, 'jawUnder': 0.03, 'chinProj': 0.85, 'chinWidth': 1.12,
+    'chinHeight': 0.85, 'chinTaper': 0.15, 'cheekWidth': 0.08, 'cheekbones': 0.8, 'apples': 1.45, 'cheekFull': 1.4,
+    'noseProj': 0.88, 'noseWidth': 1.04, 'noseLen': 0.006, 'tipBall': 1.5, 'browRidge': 0.8, 'sockets': 0.8,
+    'lipUpper': 1.1, 'lipLower': 1.15,
+})
+female.EYE_OPEN = 0.78
+female.EYE_TILT = 0.085
+female.BLUSH = (0.45, (224, 138, 140))
 
 # ---------------------------------------------------------------- her materials (the base's skin, hair, eyes,
 # brows and lips are hers as they are)
