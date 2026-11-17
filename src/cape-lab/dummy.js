@@ -113,14 +113,28 @@ export function makeDummy({ columns = 7, rows = 5 } = {}) {
     foot.scale.set(1.1, 0.8, 1);
   }
 
-  const cape = makeCape(bones, { columns, rows });
-  root.add(cape.mesh, cape.lining);
-  return { root, rig, bones, cape };
+  const body = { root, rig, bones, cape: null, pose: (ph, w, t) => pose(bones, ph, w, t) };
+  body.setCape = (o) => setCape(body, o);
+  body.setCape({ columns, rows });
+  return body;
+}
+
+// (re)build a body's cape: `body` has root, bones (by joint name) and cape; the body must be at its rest pose
+export function setCape(body, { columns = 7, rows = 5 } = {}) {
+  if (body.cape) {
+    body.root.remove(body.cape.mesh, body.cape.lining);
+    for (const b of body.cape.bones) if (b.name.endsWith('_0')) b.parent.remove(b);
+    body.cape.mesh.geometry.dispose();
+    body.cape.lining.geometry.dispose();
+  }
+  body.cape = makeCape(body.bones, { columns, rows }, body.root);
+  body.root.add(body.cape.mesh, body.cape.lining);
 }
 
 // The cape: `columns` chains round her back, each of `rows + 1` bones: row 0 is the band from the collar to
 // the shoulders (it rides the chest), rows 1..rows swing. Named cape_<column>_<row>, parented to Chest.
-export function makeCape(bones, { columns = 7, rows = 5 } = {}) {
+// `root` is the character's root: the cape is laid out in its space, and the meshes go under it.
+export function makeCape(bones, { columns = 7, rows = 5 } = {}, root = null) {
   const { collarY, shoulderY, hemY, span } = CAPE;
   const chest = bones.Chest;
   const colA = (c) => -span + 2 * span * (c / (columns - 1));   // the outer chains run down the front edges
@@ -129,26 +143,37 @@ export function makeCape(bones, { columns = 7, rows = 5 } = {}) {
   for (let r = 0; r <= rows; r++) rowY.push(shoulderY - (shoulderY - hemY) * (r / rows));
   // rowY[k] is the head of row k (k = 0..rows), rowY[rows + 1] the hem
   const capeBones = [];
-  const chestW = new THREE.Vector3(...J.Chest);
+  // bones are placed from points in the root's space, whatever the chest bone's own roll (a glTF rig may have
+  // one); the cape's bones carry no rotation of their own at rest
+  let top = chest;
+  while (top.parent) top = top.parent;
+  top.updateMatrixWorld(true);
+  const rootM = root ? root.matrixWorld : new THREE.Matrix4();
+  const place = (b, parent, pRoot) => {
+    parent.add(b);
+    const w = pRoot.clone().applyMatrix4(rootM);
+    b.position.copy(parent.worldToLocal(w));
+    b.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert())
+      .multiply(root ? root.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion());
+    b.userData.rest = b.quaternion.clone();
+    b.updateMatrixWorld(true);
+  };
   for (let c = 0; c < columns; c++) {
-    let parent = chest, parentW = chestW;
+    let parent = chest;
     for (let r = 0; r <= rows; r++) {
       const b = new THREE.Bone();
       b.name = `cape_${c}_${r}`;
       // heads sit on the cloth's inner face
-      const w = capePoint(colA(c), rowY[r], 0.3);
-      b.position.copy(w).sub(parentW);
-      parent.add(b);
+      place(b, parent, capePoint(colA(c), rowY[r], 0.3));
       capeBones.push(b);
-      parent = b; parentW = w;
+      parent = b;
     }
     // a tip to give the last bone its length and direction
     const tip = new THREE.Object3D();
     tip.name = `cape_${c}_tip`;
-    tip.position.copy(capePoint(colA(c), hemY, 0.3)).sub(parentW);
-    parent.add(tip);
+    place(tip, parent, capePoint(colA(c), hemY, 0.3));
   }
-  const boneIndex = (c, r) => c * (rows + 1) + r;
+  const layout = { colA, rowY, hemY, columns, rows };
 
   // the cloth: a grid round the back (U) and down (V)
   const NU = 49, NV = 46;
@@ -162,17 +187,9 @@ export function makeCape(bones, { columns = 7, rows = 5 } = {}) {
         const p = capePoint(a, y, inset);
         pos.push(p.x, p.y, p.z);
         uv.push(iu / NU, t);
-        // columns: blend the two chains either side by angle
-        const fc = Math.min(columns - 1, Math.max(0, (a - colA(0)) / (colA(1) - colA(0))));
-        const c0 = Math.min(columns - 2, Math.floor(fc)), wc1 = fc - c0, wc0 = 1 - wc1;
-        // rows: rigid in the middle of a bone, blended at its joints
-        let fr;
-        if (y >= rowY[1]) fr = (rowY[0] - y) / (rowY[0] - rowY[1]);               // in the band: 0..1
-        else fr = 1 + (rowY[1] - y) / ((rowY[1] - hemY) / rows);                  // 1..rows+1
-        const s = Math.min(rows, Math.max(0, fr - 0.5));
-        const r0 = Math.min(rows - 1, Math.floor(s)), wr1 = Math.min(1, s - r0), wr0 = 1 - wr1;
-        si.push(boneIndex(c0, r0), boneIndex(c0, r0 + 1), boneIndex(c0 + 1, r0), boneIndex(c0 + 1, r0 + 1));
-        sw.push(wc0 * wr0, wc0 * wr1, wc1 * wr0, wc1 * wr1);
+        const k = capeSkin(a, y, layout);
+        si.push(...k.index);
+        sw.push(...k.weight);
       }
     }
     const W = NU + 1;
@@ -190,9 +207,7 @@ export function makeCape(bones, { columns = 7, rows = 5 } = {}) {
     g.computeVertexNormals();
     return g;
   };
-  // bind at rest: the bones' world matrices now (the stand-in stands at the origin)
-  let top = chest;
-  while (top.parent) top = top.parent;
+  // bind at rest: the bones' world matrices now
   top.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton(capeBones);
   const mesh = new THREE.SkinnedMesh(make(0, false), mat(0x3f5a78, { side: THREE.FrontSide, skinning: true }));
@@ -204,9 +219,27 @@ export function makeCape(bones, { columns = 7, rows = 5 } = {}) {
     m.receiveShadow = true;
     m.frustumCulled = false;
   }
-  mesh.bind(skeleton, new THREE.Matrix4());
-  lining.bind(skeleton, new THREE.Matrix4());
+  mesh.bind(skeleton, rootM.clone());
+  lining.bind(skeleton, rootM.clone());
   return { mesh, lining, bones: capeBones, skeleton, columns, rows };
+}
+
+// A cape vertex's bones and weights, from its angle round her (0 behind) and its height: the two chains either
+// side by angle, and along them rigid in the middle of a bone and blended at its joints. Bone c, r is at index
+// c * (rows + 1) + r. This is the weighting blender/warden/warden.py would give the cape and its lining.
+export function capeSkin(a, y, { colA, rowY, hemY, columns, rows }) {
+  const fc = Math.min(columns - 1, Math.max(0, (a - colA(0)) / (colA(1) - colA(0))));
+  const c0 = Math.min(columns - 2, Math.floor(fc)), wc1 = fc - c0, wc0 = 1 - wc1;
+  let fr;
+  if (y >= rowY[1]) fr = Math.max(0, (rowY[0] - y) / (rowY[0] - rowY[1]));      // in the band: 0..1
+  else fr = 1 + (rowY[1] - y) / ((rowY[1] - hemY) / rows);                        // 1..rows+1
+  const s = Math.min(rows, Math.max(0, fr - 0.5));
+  const r0 = Math.min(rows - 1, Math.floor(s)), wr1 = Math.min(1, s - r0), wr0 = 1 - wr1;
+  const bi = (c, r) => c * (rows + 1) + r;
+  return {
+    index: [bi(c0, r0), bi(c0, r0 + 1), bi(c0 + 1, r0), bi(c0 + 1, r0 + 1)],
+    weight: [wc0 * wr0, wc0 * wr1, wc1 * wr0, wc1 * wr1],
+  };
 }
 
 // ---- the walk, in code ----

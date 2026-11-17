@@ -15,6 +15,7 @@
 // The joint names and the collider sizes are the Warden's (blender/warden/warden.py, in model units: she is
 // 80 tall, her pelvis at 31, chest at 41, shoulders at 49, knees at 17). Her robe skirt reaches 6 units behind
 // the legs and 8.5 to the sides, and the cape hangs from the shoulders (52.7) to just under the knees (19).
+import { PropertyBinding } from 'three';
 import { SpringBones, Collider, findChains, DEFAULTS } from './springbones.js';
 
 export const CAPE_SETTINGS = {
@@ -54,8 +55,13 @@ export const WARDEN_COLLIDERS = [
 ];
 
 export function makeColliders(model, defs = WARDEN_COLLIDERS) {
+  // (a joint, not another node of the same name: a glTF export can have both. GLTFLoader also drops the dots
+  // from names, so `Thigh.L` arrives as `ThighL`.)
   const find = (name) => {
-    const o = model.getObjectByName(name);
+    const want = [name, PropertyBinding.sanitizeNodeName(name)];
+    let o = null;
+    model.traverse((n) => { if (!o && n.isBone && want.includes(n.name)) o = n; });
+    if (!o) model.traverse((n) => { if (!o && want.includes(n.name)) o = n; });
     if (!o) throw new Error('cape colliders: no joint named ' + name);
     return o;
   };

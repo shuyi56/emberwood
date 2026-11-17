@@ -4,7 +4,10 @@
 //   npm run dev
 //   node tools/cape-lab/capture.mjs --out /tmp/cape [--scenarios turn,startstop,walk] [--views back3q,side]
 //        [--seconds 7] [--every 3] [--size 420x520] [--settings '{"stiffness":300}'] [--columns 5] [--rows 5]
-//        [--colliders] [--no-springs]
+//        [--colliders] [--no-springs] [--body model]
+//
+// --body model hangs the cape on the Warden's own glb instead of the stand-in (the page loads models/warden.glb,
+// or the file given by ?model=<path under public/> in --url).
 //
 // The bench is opened with ?capture, which exposes window.__lab (see "Capture hook" in src/cape-lab/main.js):
 // the sim runs in fixed frames of 1/60 s, and only the frames captured are drawn, so a run is the same every
@@ -38,6 +41,7 @@ const every = Number(arg('every', 3));
 const [W, H] = arg('size', '420x520').split('x').map(Number);
 const settings = JSON.parse(arg('settings', '{}'));
 const columns = Number(arg('columns', 7)), rows = Number(arg('rows', 5));
+const body = arg('body', 'standin');          // standin, or model: the Warden's glb (the page's ?model=)
 const LENGTH = { walk: 4, startstop: 6, turn: 7, run: 5, spin: 4 };
 
 fs.mkdirSync(out, { recursive: true });
@@ -56,7 +60,7 @@ for (const sc of scenarios) {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
     await page.evaluate((o) => window.__lab.setup(o), {
-      settings, columns, rows,
+      settings, columns, rows, body,
       opts: { scenario: sc, view, showColliders: flag('colliders'), showBones: flag('bones'), springs: !flag('no-springs'), showBody: true },
     });
     // the loop check settles over a few cycles before the frames are kept

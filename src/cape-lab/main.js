@@ -6,6 +6,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applySettings } from '../world/springbones.js';
 import { CAPE_SETTINGS } from '../world/cape-rig.js';
 import { CapeSim, SCENARIOS, FRAME, PACE } from './sim.js';
+import { loadModelBody } from './model-body.js';
 
 const CAPTURE = new URLSearchParams(location.search).has('capture');
 
@@ -54,6 +55,20 @@ controls.enabled = false;
 const settings = { ...CAPE_SETTINGS, colliderScale: 1, slow: 1 };
 const opts = { columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true };
 let sim, colliderGroup, boneHelper;
+// the body: the stand-in, or the Warden's own model (?body=model, from ?model=<url>, models/warden.glb by default)
+const params = new URLSearchParams(location.search);
+const MODEL_URL = params.get('model') || 'models/warden.glb';
+let modelBody = null;
+async function setBody(kind) {
+  if (kind === 'model') {
+    flash('Loading the model…', 60000);
+    modelBody = modelBody || await loadModelBody(import.meta.env.BASE_URL + MODEL_URL);
+    flash('');
+  }
+  opts.bodyKind = kind;
+  opts.body = kind === 'model' ? modelBody : null;
+  build();
+}
 function build() {
   if (sim) scene.remove(sim.dummy.root);
   if (boneHelper) scene.remove(boneHelper);
@@ -186,6 +201,8 @@ function buildPanel() {
   sel('camview', [['back', 'Back'], ['back3q', 'Back 3/4'], ['side', 'Side'], ['front3q', 'Front 3/4'], ['front', 'Front'], ['orbit', 'Free (drag)']], 'view', () => {
     controls.enabled = opts.view === 'orbit';
   });
+  sel('bodysel', [['standin', 'Stand-in'], ['model', 'Warden model']], 'bodyKind', () => setBody(opts.bodyKind)
+    .catch((e) => flash('Model failed to load: ' + e.message)));
   sel('columns', [[5, '5 chains'], [7, '7 chains'], [9, '9 chains']], 'columns', build);
   sel('rows', [[3, '3 rows'], [4, '4 rows'], [5, '5 rows'], [6, '6 rows']], 'rows', build);
   const check = (id, key, after) => {
@@ -205,10 +222,12 @@ function buildPanel() {
     try { await navigator.clipboard.writeText(text); flash('Settings copied'); } catch { flash('Copy failed: ' + text); }
   });
 }
-function flash(text) {
+let flashTimer = 0;
+function flash(text, ms = 2500) {
   const el = document.getElementById('status');
   el.textContent = text;
-  setTimeout(() => { el.textContent = ''; }, 2500);
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.textContent = ''; }, ms);
 }
 function readout() {
   const el = document.getElementById('readout');
@@ -219,9 +238,14 @@ function readout() {
 }
 
 // ---- run ----
+opts.bodyKind = 'standin';
 build();
 if (!CAPTURE) {
   buildPanel();
+  if (params.get('body') === 'model') {
+    document.getElementById('bodysel').value = 'model';
+    setBody('model').catch((e) => flash('Model failed to load: ' + e.message));
+  }
   let last = performance.now(), acc = 0;
   const loop = (now) => {
     acc += Math.min(0.1, (now - last) / 1000) * settings.slow;
@@ -236,11 +260,13 @@ if (!CAPTURE) {
   // Capture hook (tools/cape-lab/capture.mjs): the script drives the sim and the frames
   document.body.classList.add('capture');
   window.__lab = {
-    setup(o = {}) {
+    async setup(o = {}) {
       Object.assign(settings, o.settings || {});
+      const kind = o.body || opts.bodyKind;
       const rebuild = (o.columns && o.columns !== opts.columns) || (o.rows && o.rows !== opts.rows);
       Object.assign(opts, o.opts || {}, o.columns ? { columns: o.columns } : {}, o.rows ? { rows: o.rows } : {});
-      if (rebuild) build(); else restart();
+      if (kind !== opts.bodyKind) await setBody(kind);
+      else if (rebuild) build(); else restart();
       colliderGroup.visible = opts.showColliders;
       boneHelper.visible = opts.showBones;
       showBody();

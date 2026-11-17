@@ -1,7 +1,7 @@
 // The cape bench's simulation, without any drawing: the stand-in, what she does over time, and the springs.
 // Shared by the bench page (main.js) and the numbers check (tools/cape-lab/check.mjs).
 import * as THREE from 'three';
-import { makeDummy, pose, CYCLE } from './dummy.js';
+import { makeDummy, CYCLE } from './dummy.js';
 import { SpringBones, findChains } from '../world/springbones.js';
 import { WARDEN_COLLIDERS, makeColliders } from '../world/cape-rig.js';
 
@@ -37,11 +37,21 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 export class CapeSim {
   constructor(settings, opts) {
     this.settings = settings;     // the springs' settings, plus colliderScale
-    this.opts = opts;             // columns, rows, scenario, springs (on or off)
+    this.opts = opts;             // columns, rows, scenario, springs (on or off), and the body (see build)
     this.build();
   }
+  // The body is the stand-in unless opts.body gives another: an object with root, bones (by joint name), cape,
+  // pose(phase, walkWeight, t), setCape({ columns, rows }) and restPose() (src/cape-lab/model-body.js).
   build() {
-    this.dummy = makeDummy({ columns: this.opts.columns, rows: this.opts.rows });
+    if (this.opts.body) {
+      this.dummy = this.opts.body;
+      this.dummy.root.position.set(0, 0, 0);
+      this.dummy.root.rotation.set(0, 0, 0);
+      this.dummy.restPose();
+      this.dummy.setCape({ columns: this.opts.columns, rows: this.opts.rows });
+    } else {
+      this.dummy = makeDummy({ columns: this.opts.columns, rows: this.opts.rows });
+    }
     this.restart();
   }
   colliderDefs() {
@@ -59,8 +69,8 @@ export class CapeSim {
     this.t = 0; this.frame = 0; this.x = 0; this.z = 0; this.heading = 0; this.speed = 0; this.phase = 0;
     this.loop = []; this.drift = null;
     this.place();
-    pose(this.dummy.bones, 0, 0, 0);
-    for (const b of this.dummy.cape.bones) b.quaternion.identity();
+    this.dummy.pose(0, 0, 0);
+    for (const b of this.dummy.cape.bones) b.quaternion.copy(b.userData.rest || b.quaternion);
     this.makeSprings();
   }
   place() {
@@ -88,10 +98,10 @@ export class CapeSim {
     this.place();
     const w = this.speed / PACE;
     if (w < 0.02) this.phase = 0;      // standing: back to the stance
-    pose(this.dummy.bones, this.phase, w, this.t);
+    this.dummy.pose(this.phase, w, this.t);
     this.dummy.root.updateMatrixWorld(true);
     if (this.opts.springs) this.springs.update(dt);
-    else for (const b of this.dummy.cape.bones) b.quaternion.identity();
+    else for (const b of this.dummy.cape.bones) b.quaternion.copy(b.userData.rest);
     // the loop check: on the straight walk, compare the cape one cycle apart (in her own space)
     if (this.opts.scenario === 'walk' && dt === FRAME && this.frame % CYCLE_FRAMES === 0) {
       const tails = this.tails();

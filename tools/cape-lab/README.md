@@ -12,6 +12,12 @@ The page has the motions (straight walk, start and stop, sharp turns, run, turn 
 and a free orbit, sliders for every setting, and toggles for the body, the colliders and the bones. "Copy
 settings" puts the tuned values on the clipboard as JSON, to paste into `CAPE_SETTINGS`.
 
+The Body menu swaps the stand-in for the Warden's own model (`public/models/warden.glb`, or another glb under
+`public/` given as `?model=<path>`), played the way the world plays it. Her own cape meshes are re-skinned in the
+page to `cape_<c>_<r>` chains under her Chest joint (`src/cape-lab/model-body.js`), the same layout and weights
+`warden.py` would give them, so the springs run on her real cape and body before the Blender side is ported.
+Captures take `--body model` (add `?model=...` to `--url` for another glb).
+
 ## The cape rig
 
 Each column of the cape is a chain `cape_<column>_0 … cape_<column>_<rows>` under `Chest`, plus an empty
