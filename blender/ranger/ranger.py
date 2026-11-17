@@ -467,16 +467,8 @@ def lock_bangs(trees, s, frame=True):
     bm = bmesh.new()
     L.to_bmesh(bm, verts, faces)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    rest = {}
-    for v, (k, u, ca) in zip(verts, info):
-        rest[Vector(v).freeze()] = (k * 2.3, 0.0, -u * 3.0)      # (one value across each fine strand: an across term read as steep slopes by the hair's bump)
-    from mathutils.kdtree import KDTree
-    keys = list(rest)
-    kd = KDTree(len(keys))
-    for k, co in enumerate(keys):
-        kd.insert(co, k)
-    kd.balance()
-    return bm, (lambda co: rest[keys[kd.find(co)[1]]]), [Vector(n_) for n_ in normals]
+    # (the pattern laid as on the cap, hair_flow: the locks' own coordinates glittered against it)
+    return bm, hair_flow, [Vector(n_) for n_ in normals]
 
 
 BANGS = 'locks'      # 'locks' (built as the face creator builds them) or 'strands' (curtain_bang); views.py --set BANGS=strands

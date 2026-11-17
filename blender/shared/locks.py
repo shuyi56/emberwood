@@ -162,9 +162,9 @@ def ribbons(strands, seg=6):
                 ca, sa = math.cos(a), math.sin(a)
                 ring.append(len(verts))
                 verts.append(add(p, add(scl(ax, rx * ca), scl(o, ry * sa))))
-                # (lit as part of the hair's outer surface: the normal leans out from the head, so a strand's
-                # underside does not turn dark against the forehead)
-                normals.append(norm(add(scl(o, 0.8), scl(add(scl(ax, ca), scl(o, sa)), 0.35))))
+                # (lit as part of the hair's outer surface: the normal is the outward one of the hair under it, so
+                # the strands shade as the cap does and their undersides do not turn dark against the forehead)
+                normals.append(norm(add(o, scl(add(scl(ax, ca), scl(o, sa)), 0.1))))      # (nearly the head's own outward normal: a rounder strand caught the light on every edge and glittered against the cap)
                 info.append((k, u, ca))
             rings.append(ring)
         # (wound so every face looks out of the strand: the ring runs from the across axis toward the out axis,

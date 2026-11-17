@@ -966,7 +966,6 @@ def lock_hair(head, head_tree, path):
     """The swept fringe with its hooked centre locks, the face-framing locks at the temples (locks.rogue_bangs), laid
     on the fused hair, and the tail as a hierarchy of locks round its core (locks.tail_locks)."""
     import locks as L
-    from mathutils.kdtree import KDTree
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     hair_tree = body_tree(dg, ('Hair',), Vector((0, 0, HEAD_Z)))
@@ -993,15 +992,9 @@ def lock_hair(head, head_tree, path):
         bm = bmesh.new()
         L.to_bmesh(bm, verts, faces)
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-        rest = {}
-        for v, (k, u, ca) in zip(verts, info):
-            rest[Vector(v).freeze()] = (k * 2.3, 0.0, -u * 3.0)      # (one value across each fine strand: an across term read as steep slopes by the hair's bump)
-        keys = list(rest)
-        kd = KDTree(len(keys))
-        for k, co in enumerate(keys):
-            kd.insert(co, k)
-        kd.balance()
-        o = mesh_obj(name, bm, M_HAIR, head, subdiv=0, rest=lambda co: rest[keys[kd.find(co)[1]]])
+        # (the pattern laid as on the hair they lie on, hair_rest: a lock's own coordinates gave its strands a
+        # pattern of their own, finer than the cap's, which glittered against it)
+        o = mesh_obj(name, bm, M_HAIR, head, subdiv=0, rest=hair_rest)
         if tn is None:
             o.data.normals_split_custom_set_from_vertices([Vector(n_) for n_ in normals])
             o.visible_shadow = False      # (fine strands throw no shadow of their own; see the ranger's bangs)
