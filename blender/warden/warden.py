@@ -2044,7 +2044,7 @@ BRONZE_LOOKS = {
     'aged': dict(metal=(0.45, 0.24, 0.10), tarnish=(0.07, 0.035, 0.015), mottle=0.55, rub=0.6, rgh=(0.4, 0.68)),
     'polished': dict(metal=(0.82, 0.5, 0.29), tarnish=(0.17, 0.075, 0.035), mottle=0.3, rub=0.2, rgh=(0.3, 0.6)),
 }
-BRONZE_LOOK = 'browned'
+BRONZE_LOOK = 'aged'
 
 
 def bronze_closeup(name, look=None):
@@ -2731,6 +2731,8 @@ def build():
         # the greave: a short steel shell round the shin over the boot, from under the knee to halfway down the shin,
         # shaped to the calf, with a ridge down the front; its top and bottom edges turned out a little
         GT, GB = -0.75, -6.6
+        # (height at the sides, how far it drops at the front, a V or a curve; clear of the straps at -2.2 and -5.4)
+        GROOVES = ((-1.0, 0.45, True), (-1.42, 0.45, True), (-3.9, 0.4, False), (-4.4, 0.4, False))
 
         def greave_pt(z, phi, out=0.0):
             rx, ry, cy = ring_r(rings, z)
@@ -2739,11 +2741,21 @@ def build():
             ridge = 0.14 * math.exp(-(wrap(phi) / 0.3) ** 2)
             # (shaped to the leg: swelling over the calf behind, drawn in toward its foot)
             calf = 0.16 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
-            ex = 0.12 + flare + out + calf - 0.02 * smoothstep(-3.5, GB, z)   # (not drawn in far: the boot's slack
+            ex = 0.17 + flare + out + calf - 0.02 * smoothstep(-3.5, GB, z)   # (not drawn in far: the boot's slack
             # wrinkles above the ankle came through the greave's foot)
+            # worked as the reference's: under the knee two grooves in nested Vs, their points down the front ridge;
+            # low on the shin two more curving across it like bands, sagging at the front; each a narrow channel where
+            # one plate laps the next, the plate below it sitting a hair lower. And a shallow flute down either side
+            # of the front ridge.
+            a_ = abs(wrap(phi))
+            for zs_, dip, vee in GROOVES:
+                zg = zs_ - dip * (max(0.0, 1.0 - a_ / 1.15) if vee else max(0.0, math.cos(a_)) ** 0.8)
+                ex -= 0.048 * math.exp(-((z - zg) / 0.085) ** 2) + 0.006 * smoothstep(zg + 0.1, zg - 0.1, z)
+            fl = smoothstep(GT - 0.5, GT - 1.1, z) * smoothstep(GB + 0.5, GB + 1.1, z)
+            ex -= 0.035 * fl * sum(math.exp(-((wrap(phi) - pf) / 0.11) ** 2) for pf in (-0.52, 0.52))
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
-        gz = [GT - (GT - GB) * i / 48 for i in range(49)]
-        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_BRONZE, loc=(x, 0, kz),
+        gz = [GT - (GT - GB) * i / 120 for i in range(121)]      # (fine enough to hold the grooves)
+        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=96, cap_top=False, cap_bot=False), M_BRONZE, loc=(x, 0, kz),
                  skin=w, solid=0.14)
         # the knee: a domed oval cop over the kneecap, its foot lapping over the greave's top; a fan-shaped wing on
         # the outside tucked under the cop's edge; a curved lame above, tucked under the cop's top. Each is a shell
@@ -2791,16 +2803,19 @@ def build():
                      loft_fn(rz, lambda z, p, z_=z_: greave_pt(z_, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
                              n=56, cap_top=False, cap_bot=False), M_BIND, loc=(x, 0, kz), skin=w, subdiv=0)
         grv = []
-        for k in range(3):
-            zr_ = lerp(GT - 0.95, GB + 0.95, k / 2)
-            for ph in (-0.62, 0.62):
-                gx, gy = greave_pt(zr_, ph, 0.06)
-                grv.append((gx, gy, zr_))
+        # (a row of domed rivets down the outside of the shin, one to each plate and two to the long ones, as the
+        # reference's; and a pair at the top either side of the ridge)
+        for zr_ in (-1.05, -1.95, -2.7, -3.7, -4.8, -5.9):
+            gx, gy = greave_pt(zr_, s * 1.0, 0.07)
+            grv.append((gx, gy, zr_))
+        for ph in (-0.62, 0.62):
+            gx, gy = greave_pt(GT - 0.45, ph, 0.07)
+            grv.append((gx, gy, GT - 0.45))
         for zs_ in (-2.2, GB + 1.2):
             for ph in (-1.35, 1.35):
                 gx, gy = greave_pt(zs_, ph, 0.14)
                 grv.append((gx, gy, zs_))
-        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.19), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the shoe: a toe cap of paler leather sewn over the front of the foot, its seam stitched in a double row,
         # and a strap round the ankle buckled on the outside
         YC = -3.85
