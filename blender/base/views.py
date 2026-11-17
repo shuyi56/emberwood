@@ -20,7 +20,9 @@ Rendering pieces on their own (any of the views above):
            of them or under them. Matching is case-sensitive and a prefix that matches nothing is an error.
 --hide     PREFIXES: hide these meshes and render the rest
 --no-body  hide the base figure itself (the body, head, face, eyes and hair: every mesh in a base material, below
-           FIGURE_MATS), leaving the clothes and gear standing as if on a dress form
+           FIGURE_MATS, and every mesh parented under the 'Head' empty: the face's paints and the hair), leaving the
+           clothes and gear standing as if on a dress form. So head-worn gear (a hood, circlet, earring, mask) must be
+           parented elsewhere, or it is hidden too.
 --fit      frame --turn and --head on what is left showing instead of the whole figure (the default with --only);
            --no-fit keeps the usual framing
 --pieces   PREFIXES: after the other views, from the same build, the same five-angle turn of just these meshes
