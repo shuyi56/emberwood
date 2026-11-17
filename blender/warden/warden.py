@@ -47,7 +47,7 @@ female.EYE_TILT = 0.07
 # full and set low, rising to a sharp high arch
 female.MAKEUP.update({'shadow': (106, 74, 112), 'shadowDark': (52, 36, 58), 'shadowLow': (150, 118, 132), 'shadowAmt': 0.42,
                       'shadowInner': 0.0, 'liner': 0.7, 'wing': 0.7, 'lip': (124, 50, 64),
-                      'browArch': 1.5, 'browThick': 1.3, 'browHeight': -0.04})
+                      'browArch': 1.5, 'browThick': 0.8, 'browHeight': -0.04})
 
 # ---------------------------------------------------------------- her materials
 # (her hair, brows and eyes are her own colours on the base figure's materials)

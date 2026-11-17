@@ -1272,7 +1272,9 @@ def face_relief(x, z):
     F = FACE
     nw, nl, cb = F['noseWidth'], F['noseLen'], F['cbHeight']
     for s in (-1, 1):
-        d += gauss(x, z, s * 0.15, 0.62, 0.12, 0.04, 0.03 * F['browRidge'])       # brow ridge
+        # brow ridge: falling away toward the middle and easing down into the sockets (a ridge that ran on across the
+        # bridge as a shelf threw a band of shade between the eyes)
+        d += gauss(x, z, s * 0.15, 0.62, 0.075 if x * s < 0.15 else 0.12, 0.052, 0.03 * F['browRidge'])
         d += gauss(x, z, s * 0.14, 0.525, 0.08, 0.05, -0.06 * F['sockets'])     # eye socket
         d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * F['cheekbones'])    # cheekbone, running back toward the ear
         d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * F['apples'])    # the apple of the cheek, under the eye by the nose
