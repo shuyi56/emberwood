@@ -11,6 +11,10 @@ const ROSTER = [
   // from export_glb.py); her sheet, for the bench, is the 3D render, copied in rather than painted, so she has no
   // hairstyle choice (the painted spec is only the fallback if the render is missing)
   { key: 'ranger', name: 'Ranger', note: 'Jerkin and mantle, modelled in 3D', spec: { ...RANGER, hairStyle: null }, rendered: 'blender/ranger/ranger-blender.png', model: 'models/ranger.glb' },
+  // the warden: her body and clothes from blender/warden/export_glb.py, her head, face and hair from the Face Creator
+  // (tools/creator-head); she walks the world as the model. She has no sheet of her own yet: the bench falls back
+  // to the ranger's painted card
+  { key: 'warden', name: 'Warden', note: 'Tabard, breastplate and cape, modelled in 3D', spec: { ...RANGER, hairStyle: null }, model: 'models/warden.glb' },
   { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC },
   // the rogue is modelled in Blender too (blender/rogue/): the world shows public/models/rogue.glb, from her export_glb.py
   { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger, modelled in 3D', spec: ROGUE, model: 'models/rogue.glb' }

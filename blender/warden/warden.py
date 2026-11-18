@@ -70,12 +70,12 @@ M_BELT = mat_def(40, 'belt', ramp(0x4b3123, 0.1), 0.2, surface='leather')
 M_GOLD = mat_def(41, 'gold', ramp(0xb08f4f, 0.09), 0.0, closeup='gold', shadow_on=(M_TABARD, M_BELT))
 M_STEEL = mat_def(42, 'steel', ramp(0x9a978f, 0.09), 0.0)
 M_STITCH = mat_def(43, 'stitching', ramp(0xa8927a, 0.08), 0.0, flat=2)
-# the scar: a little paler and pinker than the skin round it
-M_ROBE = mat_def(46, 'robe', ramp(0x4a3227, 0.1), 0.1, surface='wool', closeup='wool', form=True)
+M_ROBE = mat_def(46, 'robe', ramp(0x2e1d33, 0.1), 0.1, surface='wool', closeup='wool', form=True)
 M_ROBE_TRIM = mat_def(47, 'robe trim', ramp(0x9c7c45, 0.09), 0.0, closeup='canvas')
-M_CAPE = mat_def(48, 'cape', ramp(0x3b2a21, 0.1), 0.12, surface='wool', closeup='wool', form=True)
+M_CAPE = mat_def(48, 'cape', ramp(0x23162a, 0.1), 0.12, surface='wool', closeup='wool', form=True)
 M_LINING = mat_def(49, 'cape lining', ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
 M_COLLAR = mat_def(50, 'collar', ramp(0x3b3e45, 0.12), 0.0, closeup='steel')   # (blackened steel: steel_closeup)
+M_BRONZE = mat_def(51, 'bronze', ramp(0x9a6438, 0.12), 0.0, closeup='steel')   # (the knees and greaves: steel_closeup in bronze)
 M_SCAR = mat_def(44, 'scar', [[178, 114, 100], [202, 142, 124], [216, 164, 144], [226, 182, 164], [236, 202, 186]], 0.0)
 
 
@@ -311,6 +311,11 @@ def robe_pt(z, phi, lift=0.0):
     off, _ = robe_form(z, phi)
     # (close over the hips at the sides, where the arms hang against it)
     hug = math.sin(phi) ** 4 * smoothstep(38.0, 35.5, z) * smoothstep(23.0, 27.0, z)
+    # (behind, under the cape, the skirt falls nearly straight from the seat instead of flaring out in deep folds:
+    # flared, it stood out past the cape's fall below the seat and poked through it, and a cape laid over it belled
+    # out into a box)
+    tame = 1.0 - 0.8 * max(0.0, -math.cos(phi)) ** 2 * smoothstep(33.0, 30.0, z)
+    off *= tame
     extra = (R_SIDE - P_OFF + off) * (1.0 - 0.85 * hug) + lift
     if z >= 32.0:
         x, y = plate_pt(z, phi)
@@ -319,7 +324,7 @@ def robe_pt(z, phi, lift=0.0):
             x, y = lerp(x2, x, smoothstep(32.0, 36.0, z)), lerp(y2, y, smoothstep(32.0, 36.0, z))
     else:
         flare = (0.1 * (32.0 - z) * (0.5 + 0.5 * max(0.0, math.cos(phi))) + 0.05 * (32.0 - z) * max(0.0, -math.cos(phi))) \
-            * (1.0 - 0.8 * hug)
+            * (1.0 - 0.8 * hug) * tame
         x, y = torso_point(32.0, phi, P_OFF + flare, bust=0.0)
     r = math.hypot(x, y) or 1.0
     x, y = x + x / r * extra, y + y / r * extra
@@ -407,7 +412,8 @@ def _rings(R, z):
     return R[0][1:] if z > R[0][0] else R[-1][1:]
 
 
-CAPE_PLEATS = 14     # knife pleats round the whole cape (about six across the back)
+CAPE_PLEATS = 14     # (no longer used: see cape_fold)
+CAPE_FOLDS = 11      # hanging folds round the whole cape (five or six across the back)
 CAPE_PLEAT_FACE = 0.74   # (the broad face of each pleat; the rest of its width is the return folded under it)
 
 
@@ -416,37 +422,35 @@ def _pleat_t(phi):
 
 
 def pleat_w(z):
-    """How far the pleats stand open at height z: laid in at the collar, pressed and stitched over the shoulders
-    (where they still stand as ridges radiating from the neck), opening as they fall."""
-    return smoothstep(53.4, 52.7, z) * (0.5 + 0.5 * smoothstep(49.0, 38.0, z))
+    """(The cape was once knife-pleated from the collar; its folds are now hanging folds, see cape_fold.)"""
+    return 0.0
 
 
 def pleat_pl(phi):
-    """One pleat across (-1..1): a broad face leaning out to a rounded crest, then turning sharply back under."""
     t = _pleat_t(phi)
     a = CAPE_PLEAT_FACE
     return -1.0 + 2.0 * t / a if t < a else math.cos(math.pi * (t - a) / (1.0 - a))
 
 
+def _cape_swing(z, phi):
+    # (each fold a little off true and wandering as it falls, the row of them uneven in width)
+    return pinch(CAPE_FOLDS * phi + 0.9 + 0.45 * math.sin(2.0 * phi + 0.4) + 0.22 * math.sin(0.19 * z + 1.3 * phi))
+
+
 def cape_fold(z, phi):
-    """The cape's pleats: knife pleats from the collar, over the shoulders and down to the hem (a sawtooth round
-    the cape, its corners eased), over a slow swing of three deep folds that wander a little off true.
+    """The cape's folds as heavy wool hangs: smooth where it lies on the shoulders and shoulder blades, then a few
+    deep, rounded tubes that start where it leaves them and deepen all the way to the hem, pinched at each valley
+    (no knife pleats: pressed pleats stood as a row of shallow ridges, which read as stripes, and stiff).
     (offset in -1..1, depth)"""
     f = smoothstep(48.5, 30.0, z)
-    sw = pinch(3.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z))
-    g = smoothstep(46.0, 24.0, z)
-    return pleat_w(z) * 0.75 * pleat_pl(phi) + 0.4 * g * sw, f
+    hang = smoothstep(49.5, 22.0, z) ** 0.85
+    return hang * _cape_swing(z, phi), f
 
 
 def cape_crease(z, phi):
-    """(where the cape folds into shadow: the return under each pleat, deepest just under its crest, and the
-    valleys of the slow folds)"""
-    t = _pleat_t(phi)
-    a = CAPE_PLEAT_FACE
-    r = math.sin(math.pi * (t - a) / (1.0 - a)) ** 0.7 if t >= a else 0.3 * smoothstep(0.14, 0.0, t)
-    g = smoothstep(46.0, 24.0, z)
-    sw = pinch(3.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z))
-    return min(1.0, max((0.3 + 0.7 * pleat_w(z)) * smoothstep(53.4, 52.7, z) * 0.9 * r, 0.6 * g * max(0.0, -sw)))
+    """(where the cape folds into shadow: the valleys of its folds, deepening as they fall)"""
+    hang = smoothstep(49.5, 22.0, z) ** 0.85
+    return min(1.0, 0.85 * hang * max(0.0, -_cape_swing(z, phi)) ** 0.8)
 
 
 def cape_hem(phi):
@@ -534,7 +538,9 @@ def under_r(z, a):
     if CAPE_UNDER_BACK is None:
         return r
     wb = smoothstep(0.3, 0.6, -math.cos(a))
-    return lerp(r, _under(CAPE_UNDER_BACK, z, a), wb) if wb > 0 else r
+    # (never inside what is there now: the table the hair was laid on was taken before the robe's skirt, so below
+    # the seat the cape cut back in under it, a ledge across the back)
+    return lerp(r, max(r, _under(CAPE_UNDER_BACK, z, a)), wb) if wb > 0 else r
 
 
 CAPE_DROP = 0.85   # (how far the cape's neck is let down below the collar, so more of the collar stands clear)
@@ -566,9 +572,105 @@ def _cape_pt(z, phi, off=0.0):
     rd = max(lerp(rr, hull, dw), hull)
     if CAPE_UNDER is not None:
         rd = max(rd, under_r(z, a) + 0.32 + 0.12 * f + 0.25 * f * side)
+    # the drape: below the shoulders it hangs from the outermost thing it rests on above (the shoulder blades, the
+    # round of each arm), never tucking back in under it, and swings out a little as it falls; laid on what is
+    # under it all the way down, it showed the shoulder blades, the small of the back and the seat through the wool
+    rd = max(rd, cape_hang(z, a))
     # (the pleats stand out from what the cape lies on: their valleys rest on it, their crests are proud of it)
-    k = (rd + off) / rr * (1.0 + 0.1 * (fv + 0.6 * pleat_w(z)) * (1.0 - 0.4 * w))
+    k = (rd + off) / rr * (1.0 + 0.14 * fv * (1.0 - 0.2 * w))
     return xr * k, cy + yr * k
+
+
+CAPE_HANG_TOP = 49.5     # (above this the cape lies on the shoulders; below it, it hangs)
+CAPE_FLARE = 0.045       # (how far it swings out for each unit it has fallen)
+_HANG = {}
+
+
+def _support(z, a):
+    """How far out the cape would lie on what is under it at (z, a), as _cape_pt lays it (no folds)."""
+    cy = _rings(CAPE_RINGS, z)[2]
+    side = math.sin(a) ** 2
+    f = smoothstep(48.5, 30.0, z)
+    r = body_hull(z, a, cy) + lerp(0.3 + 0.3 * f, 0.18 + 0.2 * f, side)
+    if CAPE_UNDER is not None:
+        r = max(r, under_r(z, a) + 0.32 + 0.12 * f + 0.25 * f * side)
+    return r
+
+
+def _convex_radii(rs):
+    """Radii at evenly spaced angles (as phi), pushed out to the convex hull of the points they make."""
+    n = len(rs)
+    pts = [(-r * math.sin(2 * math.pi * k / n), -r * math.cos(2 * math.pi * k / n)) for k, r in enumerate(rs)]
+    poly = female._convex([(round(x, 5), round(y, 5)) for x, y in pts])
+    out = []
+    for k in range(n):
+        a = 2 * math.pi * k / n
+        dx, dy = -math.sin(a), -math.cos(a)
+        best = rs[k]
+        for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+            ex, ey = x1 - x0, y1 - y0
+            den = dx * ey - dy * ex
+            if abs(den) < 1e-9:
+                continue
+            t = (x0 * ey - y0 * ex) / den
+            u = (x0 * dy - y0 * dx) / den
+            if t > 0 and -1e-6 <= u <= 1 + 1e-6:
+                best = max(best, t)
+        out.append(best)
+    return out
+
+
+def cape_hang(z, a):
+    """The radius the hanging cape keeps to at (z, a): the most it lay out at any height between where it starts
+    to hang and z, plus its flare. Tabulated once per build of what lies under it."""
+    key = id(CAPE_UNDER)
+    if key not in _HANG:
+        zs = [CAPE_HANG_TOP - 0.25 * i for i in range(int((CAPE_HANG_TOP - 17.0) / 0.25) + 1)]
+        NA = 180
+        tab = []
+        run = [0.0] * NA
+        S = []
+        for z_ in zs:
+            # (bridging across what is under it, as cloth does: over the seat it spans the two sides in one curve
+            # instead of sinking in between them)
+            S.append(_convex_radii([_support(z_, 2 * math.pi * k / NA) for k in range(NA)]))
+        tab = [[0.0] * NA for _ in zs]
+        for k in range(NA):
+            # down each line of the cape, the cloth is drawn taut between what holds it out: from the shoulder
+            # blades it runs straight to the seat instead of sinking into the small of the back and swelling out
+            # again over the hips (the upper hull of the support down the line)
+            pts = [(-z_, S[i][k]) for i, z_ in enumerate(zs)]
+            hull = []
+            for p_ in pts:
+                while len(hull) >= 2 and ((hull[-1][0] - hull[-2][0]) * (p_[1] - hull[-2][1]) -
+                                          (hull[-1][1] - hull[-2][1]) * (p_[0] - hull[-2][0])) >= 0:
+                    hull.pop()
+                hull.append(p_)
+            j = 0
+            run = 0.0
+            for i, (u, r) in enumerate(pts):
+                while j < len(hull) - 2 and hull[j + 1][0] < u:
+                    j += 1
+                (u0, r0), (u1, r1) = hull[j], hull[min(j + 1, len(hull) - 1)]
+                h = r0 + (r1 - r0) * ((u - u0) / (u1 - u0) if u1 > u0 else 0.0)
+                run = max(run, h, r)
+                tab[i][k] = run + CAPE_FLARE * (CAPE_HANG_TOP - zs[i])
+        _HANG.clear()
+        _HANG[key] = (zs, NA, tab)
+    zs, NA, tab = _HANG[key]
+    if z >= CAPE_HANG_TOP:
+        return 0.0
+    fi = min(len(zs) - 1.001, (CAPE_HANG_TOP - z) / 0.25)
+    i = int(fi)
+    t = fi - i
+    fa = (a % (2 * math.pi)) / (2 * math.pi) * NA
+    j = int(fa) % NA
+    u = fa - int(fa)
+    j2 = (j + 1) % NA
+    r0 = tab[i][j] * (1 - u) + tab[i][j2] * u
+    r1 = tab[i + 1][j] * (1 - u) + tab[i + 1][j2] * u
+    # (eased in below the shoulders, so the lying and hanging cloth meet without a crease)
+    return (r0 * (1 - t) + r1 * t) * smoothstep(CAPE_HANG_TOP, CAPE_HANG_TOP - 1.5, z)
 
 
 CAPE_CREASE = []   # (the crease at each point of the last sheet built, in its vertex order)
@@ -1912,7 +2014,7 @@ def velvet_closeup(name):
     b = nt.nodes['close bsdf']
     b.inputs['Sheen Weight'].default_value = 1.0
     b.inputs['Sheen Roughness'].default_value = 0.3
-    b.inputs['Sheen Tint'].default_value = (0.95, 0.72, 0.6, 1.0)
+    b.inputs['Sheen Tint'].default_value = (0.92, 0.8, 0.94, 1.0)   # (a soft lilac sheen on the plum velvet)
     b.inputs['Roughness'].default_value = 0.85
     b.inputs['Specular IOR Level'].default_value = 0.05
     # the base deepened (the sheen supplies the light) and patchily crushed
@@ -2022,6 +2124,126 @@ def steel_closeup(name, dark=(0.13, 0.13, 0.14), light=(0.62, 0.63, 0.66), rgh=(
     nt.links.new(col.outputs['Result'], pb.inputs['Base Color'])
     nt.links.new(rough.outputs['Result'], pb.inputs['Roughness'])
     nt.links.new(bump.outputs['Normal'], pb.inputs['Normal'])
+    nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
+
+
+# The bronze of the knees, greaves and vambraces up close, as the reference's browned armour: not a polished
+# mirror but a dull satin metal, dark and warm, mottled in broad blotches where it has tarnished unevenly, darker
+# still down in the hollows where grime sits, and rubbed back toward the bright alloy on the edges and high places
+# that wear. (Metal reflectance stays metal, 0.2 to 0.45 linear in red; the tarnish is a dark warm brown, about
+# sRGB 60, 40, 25; satin roughness 0.4 to 0.75, rougher where it is tarnished.) BRONZE_LOOKS are the study's
+# candidates (bronze_study.py renders them side by side on stand-in shapes, without building the figure); BRONZE_LOOK is the one the figure wears.
+BRONZE_LOOKS = {
+    'browned': dict(metal=(0.30, 0.15, 0.06), tarnish=(0.045, 0.022, 0.011), mottle=0.65, rub=0.55, rgh=(0.45, 0.72)),
+    'russet': dict(metal=(0.22, 0.10, 0.04), tarnish=(0.032, 0.016, 0.008), mottle=0.75, rub=0.45, rgh=(0.5, 0.78)),
+    'aged': dict(metal=(0.45, 0.24, 0.10), tarnish=(0.07, 0.035, 0.015), mottle=0.55, rub=0.6, rgh=(0.4, 0.68)),
+    'polished': dict(metal=(0.82, 0.5, 0.29), tarnish=(0.17, 0.075, 0.035), mottle=0.3, rub=0.2, rgh=(0.3, 0.6)),
+}
+BRONZE_LOOK = 'aged'
+
+
+def bronze_closeup(name, look=None):
+    m = bpy.data.materials.get(name)
+    if m is None:
+        return
+    look = BRONZE_LOOK if look is None else look
+    # (by name, or by its place in the list: views.py --set BRONZE_LOOK=2, which needs no quoting)
+    L = BRONZE_LOOKS[look] if isinstance(look, str) else list(BRONZE_LOOKS.values())[int(look)]
+    nt = m.node_tree
+    out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
+    bsdf = next((n for n in nt.nodes if n.type == 'BSDF_DIFFUSE'), None)
+    if bsdf is not None:
+        bsdf.name = 'sprite bsdf'
+    N = nt.nodes.new
+    rest = N('ShaderNodeAttribute')
+    rest.attribute_name = 'rest'
+
+    def noise(scale, detail, rough=0.55):
+        t = N('ShaderNodeTexNoise')
+        t.inputs['Scale'].default_value = scale
+        t.inputs['Detail'].default_value = detail
+        t.inputs['Roughness'].default_value = rough
+        nt.links.new(rest.outputs['Vector'], t.inputs['Vector'])
+        return t.outputs['Fac']
+
+    def rng(sock, a, b, lo=0.0, hi=1.0):
+        r = N('ShaderNodeMapRange')
+        r.inputs['From Min'].default_value, r.inputs['From Max'].default_value = a, b
+        r.inputs['To Min'].default_value, r.inputs['To Max'].default_value = lo, hi
+        nt.links.new(sock, r.inputs['Value'])
+        return r.outputs['Result']
+
+    def math_(op, a, b, clamp=True):
+        k = N('ShaderNodeMath')
+        k.operation = op
+        k.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if isinstance(v, float):
+                k.inputs[i].default_value = v
+            else:
+                nt.links.new(v, k.inputs[i])
+        return k.outputs[0]
+    # the tarnish: broad blotches, broken by a finer speckle
+    blot = rng(noise(1.1, 4.0), 0.42, 0.62)     # (blotches a third of a greave across, not wider than the plate)
+    speck = rng(noise(7.0, 6.0, 0.6), 0.35, 0.7)
+    mott = math_('MULTIPLY', math_('ADD', math_('MULTIPLY', blot, 0.75), math_('MULTIPLY', speck, 0.25)), L['mottle'])
+    # grime down in the hollows
+    ao = N('ShaderNodeAmbientOcclusion')
+    ao.inputs['Distance'].default_value = 0.6
+    ao.samples = 8
+    dirt = rng(ao.outputs['AO'], 0.95, 0.45)
+    # rubbed bright on the edges and high places
+    # (where the surface turns sharply: a rounded normal against the true one. Pointiness is per vertex of the
+    # base mesh and sits at 0.5 all over a smooth lofted plate, so it found no edges)
+    geo = N('ShaderNodeNewGeometry')
+    bev = N('ShaderNodeBevel')
+    bev.samples = 4
+    bev.inputs['Radius'].default_value = 0.09
+    dot = N('ShaderNodeVectorMath')
+    dot.operation = 'DOT_PRODUCT'
+    nt.links.new(bev.outputs['Normal'], dot.inputs[0])
+    nt.links.new(geo.outputs['Normal'], dot.inputs[1])
+    edge = rng(dot.outputs['Value'], 0.995, 0.9)
+    rub = math_('MULTIPLY', math_('MULTIPLY', edge, rng(noise(3.0, 3.0), 0.3, 0.7, 0.4, 1.0)), L['rub'])
+    tf = math_('SUBTRACT', math_('ADD', mott, math_('MULTIPLY', dirt, 0.7)), rub)
+    col = N('ShaderNodeMix')
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (*L['metal'], 1)
+    col.inputs['B'].default_value = (*L['tarnish'], 1)
+    nt.links.new(tf, col.inputs['Factor'])
+    # (and the tone drifts a little, so no two plates match exactly)
+    var = N('ShaderNodeMix')
+    var.data_type, var.blend_type = 'RGBA', 'MULTIPLY'
+    var.inputs['Factor'].default_value = 1.0
+    nt.links.new(col.outputs['Result'], var.inputs['A'])
+    g = rng(noise(1.6, 2.0), 0.3, 0.7, 0.85, 1.12)
+    cmb = N('ShaderNodeCombineColor')
+    for c in ('Red', 'Green', 'Blue'):
+        nt.links.new(g, cmb.inputs[c])
+    nt.links.new(cmb.outputs['Color'], var.inputs['B'])
+    rough = N('ShaderNodeMapRange')
+    rough.inputs['To Min'].default_value, rough.inputs['To Max'].default_value = L['rgh']
+    nt.links.new(tf, rough.inputs['Value'])
+    # the surface: shallow hammer dents and a fine pitting of the tarnish
+    vor = N('ShaderNodeTexVoronoi')
+    vor.feature = 'SMOOTH_F1'
+    vor.inputs['Scale'].default_value = 2.6
+    nt.links.new(rest.outputs['Vector'], vor.inputs['Vector'])
+    b1 = N('ShaderNodeBump')
+    b1.inputs['Strength'].default_value = 0.25
+    b1.inputs['Distance'].default_value = 0.05
+    nt.links.new(vor.outputs['Distance'], b1.inputs['Height'])
+    b2 = N('ShaderNodeBump')
+    b2.inputs['Strength'].default_value = 0.12
+    b2.inputs['Distance'].default_value = 0.01
+    nt.links.new(noise(22.0, 4.0, 0.7), b2.inputs['Height'])
+    nt.links.new(b1.outputs['Normal'], b2.inputs['Normal'])
+    pb = N('ShaderNodeBsdfPrincipled')
+    pb.name = 'close bsdf'
+    pb.inputs['Metallic'].default_value = 1.0
+    nt.links.new(var.outputs['Result'], pb.inputs['Base Color'])
+    nt.links.new(rough.outputs['Result'], pb.inputs['Roughness'])
+    nt.links.new(b2.outputs['Normal'], pb.inputs['Normal'])
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
@@ -2341,7 +2563,8 @@ def build():
     # ---- the hair: the face creator's long waves with a centre parting (lifted clear of the clothes after the rig)
     global CAPE_UNDER
     CAPE_UNDER = under_table()     # (what is built so far, for the cape to lie over)
-    creator_hair(head)
+    if not female.MANNEQUIN:
+        creator_hair(head)
 
     # ---- the rig (the base figure's)
     build_rig(body)
@@ -2417,29 +2640,37 @@ def build():
         mesh_obj(f'Robe sleeve hem.{side}', loft_fn([SE + 0.55, SE + 0.25, SE - 0.02], lambda z, p: robe_sleeve_pt(z, p, 0.07),
                                                    n=NP * 10, cap_top=False, cap_bot=False),
                  M_ROBE_TRIM, loc=(x, 0.2, SH_Z), skin=w, solid=0.06, subdiv=0)
-        # the vambrace: moulded hardened leather, antique bronze-brown, as the reference: a tapered cone flared at
-        # the elbow and drawn in to the wrist, open up the inside of the forearm and laced shut there through brass
-        # grommets; every edge rolled into a raised border, a second raised line framing the panel down the outside
-        # and a two-strand plait tooled into it.
+        # the vambrace: bronze, as the reference: a tapered cone flared at the elbow and drawn in to the wrist, open
+        # up the inside of the forearm and laced shut there through brass grommets, its edge bound in a rolled
+        # border. It is built of lames, bands lapping one over the next: a deep cuff at the elbow and four bands
+        # below it, each band's upper edge turned out into a rounded rib that rides over the foot of the one above,
+        # with rivets under the rib. The steps and their ribs are what read as grooves.
+        VAM_EDGES = [BR_TOP, BR_TOP - 2.25] + [lerp(BR_TOP - 2.25, BR_BOT, k / 4) for k in range(1, 5)]
+        VLAP, VBEAD = 0.085, 0.045
+
+        def vam_rise(z, z0, z1):
+            t = min(1.0, max(0.0, (z0 - z) / (z0 - z1)))
+            return VLAP * (1.0 - t) ** 1.3 + VBEAD * math.exp(-((z0 - z - 0.13) / 0.075) ** 2)
+
+        def vam_lame(z):
+            for k in range(len(VAM_EDGES) - 1):
+                if z >= VAM_EDGES[k + 1] or k == len(VAM_EDGES) - 2:
+                    return k
         GAP = 0.3     # (the half-width of the laced opening up the inside, as an angle)
         P0, P1 = -s * math.pi / 2 + GAP, -s * math.pi / 2 + 2 * math.pi - GAP
 
-        def vam_pt(z, phi, out=0.0):
+        def vam_pt(z, phi, out=0.0, k=None):
             """(x, y, z) of the vambrace at its nominal height z and phi: the arm's own surface (arm_xy) a leather's
             thickness off it, so it is full where the forearm's muscle is and an oval at the wrist as the arm is;
             its elbow edge is cut to the arm, rising to a point over the elbow behind and dipping in the crook in
             front so the arm can bend, and its wrist edge runs a little down over the back of the hand."""
-            d = wrap(phi - s * math.pi / 2)
-            # (the plait: two strands swinging across the panel and crossing every 0.85 down it)
-            y1 = 0.42 * math.sin(2 * math.pi * (z - BR_TOP) / 1.7)
-            tool = math.exp(-((d - y1) / 0.11) ** 2) + math.exp(-((d + y1) / 0.11) ** 2)
-            tool *= smoothstep(BR_TOP - 0.25, BR_TOP - 0.7, z) * smoothstep(BR_BOT + 0.25, BR_BOT + 0.7, z)
-            frame = math.exp(-((abs(d) - 0.82) / 0.07) ** 2)
+            k = vam_lame(z) if k is None else k
+            rise = vam_rise(z, VAM_EDGES[k], VAM_EDGES[k + 1])
             t = (z - BR_BOT) / (BR_TOP - BR_BOT)
             c = math.cos(phi)
             zz = z + t * (0.8 * max(0.0, -c) ** 2 - 0.5 * max(0.0, c) ** 2) - (1.0 - t) * 0.12 * max(0.0, s * math.sin(phi)) ** 2
             lip = 0.05 * smoothstep(BR_BOT + 0.5, BR_BOT, z) + 0.03 * smoothstep(BR_TOP - 0.4, BR_TOP, z)
-            x_, y_ = arm_xy(zz, phi, s, 0.15 + lip + 0.035 * min(1.0, tool) + 0.045 * frame + out)
+            x_, y_ = arm_xy(zz, phi, s, 0.15 + lip + rise + out)
             return x_, y_, zz
 
         def vam_n(z, phi):
@@ -2448,14 +2679,18 @@ def build():
             p_ = vam_pt(z, phi)
             return n_ if n_.x * p_[0] + n_.y * p_[1] > 0 else -n_
 
-        rows = int((BR_TOP - BR_BOT) / 0.08) + 1
+        # (each lame has its own rows, closer together toward its ribbed upper edge; the lame above ends on the
+        # ground surface right over that edge, so the step is a clean wall)
+        VR = 22
+        rows = VR * (len(VAM_EDGES) - 1)
         cols = 150
 
         def vam_grid(i, j):
-            z = lerp(BR_TOP, BR_BOT, i / (rows - 1))
+            k, u = i // VR, (i % VR) / (VR - 1)
+            z = lerp(VAM_EDGES[k] - (0.012 if k else 0.0), VAM_EDGES[k + 1], u * u)
             ph = lerp(P0, P1, j / (cols - 1))
-            return vam_pt(z, ph)
-        mesh_obj(f'Bracer.{side}', face_out(grid(rows, cols, vam_grid), axis_y=0.0), M_BRACER, loc=(x, 0.2, SH_Z),
+            return vam_pt(z, ph, 0.0, k)
+        mesh_obj(f'Bracer.{side}', face_out(grid(rows, cols, vam_grid), axis_y=0.0), M_BRONZE, loc=(x, 0.2, SH_Z),
                       skin=fore, solid=0.12)
         # (the rolled border all round its edge: a rounded rectangle in (phi, z), the corners eased)
         cr, cz = 0.14, 0.25
@@ -2505,6 +2740,10 @@ def build():
                 grom.append(vam_pt(z, ph, 0.05))
         mesh_obj(f'Bracer grommets.{side}', dots(grom, 0.17), M_GOLD, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         hole = [vam_pt(z, ph, 0.09) for z, ph in ((z, ph) for z in gz for ph in (P0 + 0.17, P1 - 0.17))]
+        # (the rivets under each rib: on the outside of the forearm and a way round to either side of it)
+        vrv = [vam_pt(VAM_EDGES[k] - 0.42, s * math.pi / 2 + d_, 0.13)
+               for k in range(len(VAM_EDGES) - 1) for d_ in (-0.95, 0.0, 0.95)]
+        mesh_obj(f'Bracer rivets.{side}', dots(vrv, 0.15), M_GOLD, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         mesh_obj(f'Bracer grommet holes.{side}', dots(hole, 0.08), M_BELT, loc=(x, 0.2, SH_Z), skin=fore, subdiv=0)
         # (what shows through the opening: the dark lining of the vambrace, just inside it)
         def lin_pt(i, j):
@@ -2542,7 +2781,7 @@ def build():
                 bulge = 0.66 + lift - 0.38 * u * u
                 return (s * 0.23 - s * bulge, -0.03 + hw * u, z)
             return face_out(grid(rows, cols, pt), axis_y=0.0)
-        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.8, 1.15, 0.85, 0.22), M_BRACER,
+        mesh_obj(f'Gauntlet plate.{side}', hand_plate(hz0 - 0.1, hz0 - 1.8, 1.15, 0.85, 0.22), M_BRONZE,
                  loc=(x, 0.2, SH_Z), skin=w, solid=0.1, subdiv=1)
     build_arms(chest, sleeve)   # (the hands are the base figure's)
 
@@ -2604,26 +2843,68 @@ def build():
         # the greave: a short steel shell round the shin over the boot, from under the knee to halfway down the shin,
         # shaped to the calf, with a ridge down the front; its top and bottom edges turned out a little
         GT, GB = -0.75, -6.6
+        # Built as the reference's: not one shell with lines cut in it but lames, plates lapping one over the next
+        # down the shin like shingles. Each lame starts tucked under the one above and stands out further toward
+        # its own lower edge, which is turned out into a rounded bead; so every joint is a step with a rib on it
+        # and a shadow under it, and that is what reads as a groove. The joints (height at the sides, how far each
+        # drops at the front, a V or a curve): two nested Vs under the knee, their points down the front ridge, and
+        # two curving across low on the shin like bands.
+        JOINTS = ((-1.3, 1.6, True), (-1.9, 1.6, True), (-4.5, 0.5, False), (-5.1, 0.5, False))
+        LAP, BEAD = 0.1, 0.05     # (how far a lame stands off the next at its lower edge; its bead on top of that)
 
         def greave_pt(z, phi, out=0.0):
+            """The greave's ground surface, on which the lames are raised (see lame_off)."""
             rx, ry, cy = ring_r(rings, z)
-            flare = 0.14 * (smoothstep(GT - 0.7, GT, z) + smoothstep(GB + 0.7, GB, z))
-            ridge = 0.22 * math.exp(-(wrap(phi) / 0.32) ** 2)
+            # (slim: close over the boot, so the leg keeps its line instead of reading as a stovepipe)
+            flare = 0.08 * (smoothstep(GT - 0.7, GT, z) + smoothstep(GB + 0.7, GB, z))
+            ridge = 0.14 * math.exp(-(wrap(phi) / 0.3) ** 2)
             # (shaped to the leg: swelling over the calf behind, drawn in toward its foot)
-            calf = 0.32 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
-            ex = 0.22 + flare + out + calf - 0.1 * smoothstep(-3.5, GB, z)
+            calf = 0.16 * math.exp(-((z + 3.4) / 1.7) ** 2) * max(0.0, -math.cos(phi)) ** 2
+            ex = 0.17 + flare + out + calf - 0.02 * smoothstep(-3.5, GB, z)   # (not drawn in far: the boot's slack
+            # wrinkles above the ankle came through the greave's foot)
             return -(rx + ex) * math.sin(phi), cy - (ry + ex + ridge) * math.cos(phi)
-        gz = [GT - (GT - GB) * i / 48 for i in range(49)]
-        mesh_obj(f'Greave.{side}', loft_fn(gz, greave_pt, n=56, cap_top=False, cap_bot=False), M_BRACER, loc=(x, 0, kz),
-                 skin=w, solid=0.14)
+
+        def lame_edges(phi):
+            a_ = abs(wrap(phi))
+            return [GT] + [zs_ - dip * (max(0.0, 1.0 - a_ / 1.3) if vee else max(0.0, math.cos(a_)) ** 0.8)
+                           for zs_, dip, vee in JOINTS] + [GB]
+
+        def lame_rise(z, z0, z1):
+            """How far a lame running from z0 down to z1 stands off the ground surface at z."""
+            t = min(1.0, max(0.0, (z0 - z) / (z0 - z1)))
+            return LAP * t ** 1.3 + BEAD * math.exp(-((z - z1 - 0.13) / 0.075) ** 2)
+
+        def lame_off(z, phi):
+            e = lame_edges(phi)
+            for k in range(len(e) - 1):
+                if z >= e[k + 1] or k == len(e) - 2:
+                    return lame_rise(z, e[k], e[k + 1])
+
+        def lamed_pt(z, phi, out=0.0):
+            return greave_pt(z, phi, out + lame_off(z, phi))
+        # (one surface, its rows following the joints: each lame has its own rows, closer together toward its beaded
+        # edge, and the next lame's first row lies right under that edge on the ground surface, so the step is a
+        # clean wall along the joint however the joint slants)
+        LR, LC = 20, 128
+
+        def lame_grid(i, j):
+            k, u = i // LR, (i % LR) / (LR - 1)
+            phi = lerp(-math.pi, math.pi, j / LC)
+            e = lame_edges(phi)
+            z = lerp(e[k] - (0.012 if k else 0.0), e[k + 1], 1.0 - (1.0 - u) ** 2)
+            gx, gy = greave_pt(z, phi, lame_rise(z, e[k], e[k + 1]))
+            return gx, gy, z
+        gbm = face_out(grid(LR * (len(JOINTS) + 1), LC + 1, lame_grid), axis_y=0.0)
+        bmesh.ops.remove_doubles(gbm, verts=gbm.verts, dist=1e-4)      # (the seam, up the back)
+        mesh_obj(f'Greave.{side}', gbm, M_BRONZE, loc=(x, 0, kz), skin=w, solid=0.09)
         # the knee: a domed oval cop over the kneecap, its foot lapping over the greave's top; a fan-shaped wing on
         # the outside tucked under the cop's edge; a curved lame above, tucked under the cop's top. Each is a shell
         # lofted round the leg itself, so it wraps the knee instead of sitting on it.
         def knee_pt(z, ph, base, out=0.0):
             lx, ly = leg_pt(z - THIGH, ph)
             rl = math.hypot(lx, ly)
-            gx, gy = greave_pt(z, ph)
-            need = math.hypot(gx, gy - 0.0) - rl + 0.12
+            gx, gy = lamed_pt(z, ph)
+            need = math.hypot(gx, gy - 0.0) - rl + 0.11
             off = base + max(0.0, need - base) * smoothstep(GT + 0.7, GT - 0.1, z) + out
             return lx * (rl + off) / rl, ly * (rl + off) / rl, z
 
@@ -2638,19 +2919,20 @@ def build():
                 v = (ph - pc) / pw
                 return knee_pt(z, ph, base(u, v))
             return face_out(grid(rows, cols, pt), axis_y=0.0)
-        cop = lambda u, v: 0.2 + 0.32 * (1 - u * u) * (1 - v * v)    # noqa: E731
-        for nm, args in (('Knee wing', (0.95, -0.85, s * 1.5, 0.55, lambda u, v: 0.16 + 0.08 * (1 - v * v))),
-                         ('Knee lame', (2.05, 1.05, 0.0, 1.3, lambda u, v: 0.13 + 0.05 * (1 - v * v))),
+        cop = lambda u, v: 0.13 + 0.22 * (1 - u * u) * (1 - v * v)    # noqa: E731
+        for nm, args in (('Knee wing', (0.95, -0.85, s * 1.5, 0.55, lambda u, v: 0.11 + 0.06 * (1 - v * v))),
+                         ('Knee lame', (2.05, 1.05, 0.0, 1.3, lambda u, v: 0.09 + 0.04 * (1 - v * v))),
                          ('Knee cop', (1.35, -1.1, 0.0, 1.4, cop))):
-            mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_BRACER, loc=(x, 0, kz), skin=w,
+            mesh_obj(f'{nm}.{side}', knee_shell(*args, oval=nm != 'Knee lame'), M_BRONZE, loc=(x, 0, kz), skin=w,
                      solid=0.13, subdiv=1)
         rv = [knee_pt(0.05, s * 1.55, 0.3), knee_pt(1.55, -1.05, 0.2), knee_pt(1.55, 1.05, 0.2),
               knee_pt(0.0, -1.05, cop(0.0, 0.75) + 0.12), knee_pt(0.0, 1.05, cop(0.0, 0.75) + 0.12)]
         mesh_obj(f'Knee rivets.{side}', dots(rv, 0.17), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the leather straps holding the greave on, round the calf behind
-        for j_, zs_ in enumerate((-2.2, GB + 1.2)):
+        for j_, zs_ in enumerate((-3.2, -5.85)):
             def strap_pt(z, phi, zs_=zs_):
-                gx, gy = greave_pt(zs_, phi, 0.1)
+                # (over the metal behind; at the front it runs under the plate, between it and the boot)
+                gx, gy = greave_pt(zs_, phi, lerp(-0.13, lame_off(zs_, phi) + 0.11, smoothstep(1.2, 1.45, abs(wrap(phi)))))
                 return gx, gy
             mesh_obj(f'Greave strap {j_}.{side}', loft_fn([zs_ + 0.28, zs_, zs_ - 0.28], strap_pt, n=56, cap_top=False,
                                                          cap_bot=False), M_BELT, loc=(x, 0, kz), skin=w, solid=0.1, subdiv=0)
@@ -2659,19 +2941,24 @@ def build():
         for z_, sg in ((GT, -1), (GB, 1)):
             rz = [z_ + 0.17 * math.cos(math.pi * k / 4) for k in range(5)]
             mesh_obj(f'Greave roll {"top" if sg < 0 else "foot"}.{side}',
-                     loft_fn(rz, lambda z, p, z_=z_: greave_pt(z_, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
+                     loft_fn(rz, lambda z, p, z_=z_: lamed_pt(z_ + 0.02, p, 0.04 + 0.13 * max(0.0, 1 - ((z - z_) / 0.17) ** 2) ** 0.5),
                              n=56, cap_top=False, cap_bot=False), M_BIND, loc=(x, 0, kz), skin=w, subdiv=0)
         grv = []
-        for k in range(3):
-            zr_ = lerp(GT - 0.95, GB + 0.95, k / 2)
-            for ph in (-0.62, 0.62):
-                gx, gy = greave_pt(zr_, ph, 0.06)
+        # (domed rivets holding each lame to the next, set above its beaded edge: a pair either side of the front
+        # ridge and one on the outside of the shin; and one at each strap's ends)
+        for ph in (-0.6, 0.6, s * 1.25):
+            e = lame_edges(ph)
+            for k in range(len(e) - 1):
+                zr_ = e[k + 1] + 0.36
+                if zr_ > e[k] - 0.12:
+                    continue        # (no room on a lame this narrow here)
+                gx, gy = lamed_pt(zr_, ph, 0.07)
                 grv.append((gx, gy, zr_))
-        for zs_ in (-2.2, GB + 1.2):
-            for ph in (-1.35, 1.35):
-                gx, gy = greave_pt(zs_, ph, 0.14)
+        for zs_ in (-3.2, -5.85):
+            for ph in (-1.4, 1.4):
+                gx, gy = lamed_pt(zs_, ph, 0.14)
                 grv.append((gx, gy, zs_))
-        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.16), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
+        mesh_obj(f'Greave rivets.{side}', dots(grv, 0.17), M_GOLD, loc=(x, 0, kz), skin=w, subdiv=0)
         # the shoe: a toe cap of paler leather sewn over the front of the foot, its seam stitched in a double row,
         # and a strap round the ankle buckled on the outside
         YC = -3.85
@@ -2758,13 +3045,14 @@ def build():
     # the rig, the camera and light, and the keyframes; then the hair kept clear of the clothes in every pose
     res = finish_figure(lambda: cape_on_arms(['Cape', 'Cape lining', 'Cape front -1', 'Cape front 1']))
     steel_closeup('plate')
+    bronze_closeup('bronze')
     # (the collar and its plate one dull, even finish: rougher, so the flat plate facing the light does not flare
     # brighter than the band curving round the neck)
     steel_closeup('collar', dark=(0.04, 0.041, 0.045), light=(0.2, 0.205, 0.22), rgh=(0.62, 0.48), use_ao=False)
     velvet_closeup('robe')
     velvet_closeup('cape')
     patina_closeup('bracers')
-    if not os.environ.get('WARDEN_NO_CLEARANCE'):
+    if not os.environ.get('WARDEN_NO_CLEARANCE') and not female.MANNEQUIN:
         # (twice: the first pass's easing lets a little back in where a lock crosses the shoulder in the walk)
         import time
         t_ = time.time()
@@ -2774,8 +3062,125 @@ def build():
         t_ = time.time()
         creator_hair_trim()
         print(f'hair trim {time.time() - t_:.0f} s', flush=True)
+    hair_contact_shade()
     return res
 
+
+def hair_contact_shade(reach=1.3, near=0.25, depth=1.0):
+    """The shade the hair casts on the skin it lies over. The locks beside the face hang half a unit to a unit in
+    front of the cheek and the jaw; lit from the front, their shadow falls behind them, out of sight, and the face
+    stayed bright right up to the hair, a pale mask laid in front of it. (The creator's key casts the hair's shadow
+    generously onto the cheeks.) Each vertex of the head gets how near the hair is on its open side, as 'hair occ',
+    0 to 1, and the skin's close-up colour goes darker and warmer by it: deepest under a lock's edge, gone a hand's
+    breadth in. Meshes without the attribute read 0 and keep their colour."""
+    from mathutils.bvhtree import BVHTree
+    head = bpy.data.objects.get('Head shape')
+    if head is None:
+        return
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        # (the locks only: the cap lies right over the scalp, and with it the whole hairline went dark, a dirty band
+        # across the forehead)
+        if o.type != 'MESH' or not o.name.startswith('Hair locks'):
+            continue
+        b = len(vs)
+        vs += [o.matrix_world @ v.co for v in o.data.vertices]
+        ps += [[b + i for i in p.vertices] for p in o.data.polygons]
+    if not ps:
+        return
+    tree = BVHTree.FromPolygons(vs, ps)
+    # (the neck below takes no shade, so the head's own shade runs out where the head meets it, and no tone step
+    # shows along the join)
+    neck_t = None
+    nk = bpy.data.objects.get('Neck')
+    if nk is not None:
+        dg = bpy.context.evaluated_depsgraph_get()
+        nm = nk.evaluated_get(dg).to_mesh()
+        neck_t = BVHTree.FromPolygons([nk.matrix_world @ v.co for v in nm.vertices],
+                                      [list(p.vertices) for p in nm.polygons])
+        nk.evaluated_get(dg).to_mesh_clear()
+    # (the head and what is painted on it: the brows' paint and the eyeshadow are their own meshes, close-up only,
+    # coloured by their own materials; left unshaded, a brow under the fringe came out paler than the shaded skin
+    # round it, a light streak where the brow should be)
+    objs = [head] + [o for o in bpy.data.objects if o.type == 'MESH' and o.parent == head.parent
+                     and o.name.startswith(('Brow paint', 'Eyeshadow'))]
+    for ob in objs:
+        M = ob.matrix_world
+        N3 = M.to_3x3().inverted().transposed()
+        me = ob.data
+        occ = [0.0] * len(me.vertices)
+        for v in me.vertices:
+            p = M @ v.co
+            q, _n, _i, d = tree.find_nearest(p, reach)
+            if q is None:
+                continue
+            n = (N3 @ v.normal).normalized()
+            # (only hair out on the side the skin faces: hair behind the ear, past the edge of the jaw, shades
+            # nothing)
+            facing = smoothstep(-0.35, 0.25, (q - p).dot(n) / max(d, 1e-6))
+            # (but hair touching the skin shades it whichever side its nearest point lies: where a fringe lock grazes
+            # the brow ridge its nearest point is under the surface, and the shade had a hole there, a pale streak
+            # along the brow)
+            facing = max(facing, 1.0 - smoothstep(near, near + 0.35, d))
+            dn = neck_t.find_nearest(p, 0.8)[3] if neck_t is not None else None
+            seam = 1.0 if dn is None else smoothstep(0.1, 0.8, dn)
+            occ[v.index] = seam * facing * (1.0 - smoothstep(near, reach, d))
+        at = me.attributes.get('hair occ') or me.attributes.new('hair occ', 'FLOAT', 'POINT')
+        at.data.foreach_set('value', occ)
+        me.update()
+    for m in {s_.material for ob in objs for s_ in ob.material_slots if s_.material is not None}:
+        _hair_shade_material(m, depth)
+
+
+def _hair_shade_material(m, depth):
+    """Darken and warm a material's colour by the mesh's 'hair occ' (the close-up skin's base colour, or the colour
+    of a paint's or the brows' own shader)."""
+    nt = m.node_tree
+    if nt.nodes.get('hair occ') is not None:
+        return
+    bsdf = nt.nodes.get('close bsdf')
+    if bsdf is None:
+        out = next((n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL' and n.inputs['Surface'].links), None)
+        if out is None:
+            print(f'hair contact shade: no output in material {m.name!r}', flush=True)
+            return
+        bsdf = out.inputs['Surface'].links[0].from_node
+    sock = bsdf.inputs.get('Base Color') or bsdf.inputs.get('Color')
+    if sock is None:
+        print(f'hair contact shade: no colour to shade in material {m.name!r} ({bsdf.type})', flush=True)
+        return
+    if sock.links:
+        src = sock.links[0].from_socket
+    else:
+        rgb = nt.nodes.new('ShaderNodeRGB')
+        rgb.outputs[0].default_value = tuple(sock.default_value)
+        src = rgb.outputs[0]
+    a = nt.nodes.new('ShaderNodeAttribute')
+    a.name = a.label = 'hair occ'
+    a.attribute_type = 'GEOMETRY'
+    a.attribute_name = 'hair occ'
+    k = nt.nodes.new('ShaderNodeMath')
+    k.operation = 'MULTIPLY'
+    k.use_clamp = True
+    k.inputs[1].default_value = depth
+    nt.links.new(a.outputs['Fac'], k.inputs[0])
+    mix = nt.nodes.new('ShaderNodeMix')
+    mix.data_type, mix.blend_type = 'RGBA', 'MULTIPLY'
+    mix.inputs['B'].default_value = (0.4, 0.27, 0.23, 1.0)    # (a shadow on skin: darker, and warmer)
+    nt.links.new(k.outputs[0], mix.inputs['Factor'])
+    nt.links.new(src, mix.inputs['A'])
+    nt.links.new(mix.outputs['Result'], sock)
+    # (and the shine: a shadow takes the highlight too. Left at full, the brow ridge's top under the fringe kept
+    # its highlight in the shaded skin round it, a pale streak across the brows)
+    spec = bsdf.inputs.get('Specular IOR Level')
+    if spec is not None and not spec.links:
+        f = nt.nodes.new('ShaderNodeMath')
+        f.operation = 'MULTIPLY_ADD'
+        f.use_clamp = True
+        f.inputs[1].default_value = -0.9 * spec.default_value
+        f.inputs[2].default_value = spec.default_value
+        nt.links.new(k.outputs[0], f.inputs[0])
+        nt.links.new(f.outputs[0], spec)
 
 if __name__ == '__main__':
     run(build, 'warden', HERE)

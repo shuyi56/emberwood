@@ -14,6 +14,11 @@
            show (DIR/turn-clay.png, DIR/head-clay.png)
 --hair-only  with --turn or --head: only the hair is rendered (every mesh in the hair material, and the tie);
            the rest of the figure is still built, so the hair lies as it does on her
+--angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
+           comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
+--mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
+           a build), with the clothes, armour and gear built and fitted exactly as on the real figure. For clothes
+           changes that need a body under them.
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
 --face     FILE: a face from the face creator (tools/face-creator/export-face.cjs, e.g. blender/faces/rogue.json.gz)
            on this character's body: the creator's head, eyes, brows, lips, skin, make-up and hair colour in place
@@ -25,7 +30,9 @@ Rendering pieces on their own (any of the views above):
            of them or under them. Matching is case-sensitive and a prefix that matches nothing is an error.
 --hide     PREFIXES: hide these meshes and render the rest
 --no-body  hide the base figure itself (the body, head, face, eyes and hair: every mesh in a base material, below
-           FIGURE_MATS), leaving the clothes and gear standing as if on a dress form
+           FIGURE_MATS, and every mesh parented under the 'Head' empty: the face's paints and the hair), leaving the
+           clothes and gear standing as if on a dress form. So head-worn gear (a hood, circlet, earring, mask) must be
+           parented elsewhere, or it is hidden too.
 --fit      frame --turn and --head on what is left showing instead of the whole figure (the default with --only);
            --no-fit keeps the usual framing
 --pieces   PREFIXES: after the other views, from the same build, the same five-angle turn of just these meshes
@@ -52,6 +59,12 @@ import female  # noqa: E402
 F = importlib.import_module(FIGURE)
 
 VIEWS = [('front', 0), ('3/4', 45), ('profile', 90), ('back 3/4', 135), ('back', 180)]
+if opt('--angles'):
+    _want = [a.strip().replace(' ', '') for a in opt('--angles').split(',') if a.strip()]
+    _bad = [a for a in _want if a not in [n.replace(' ', '') for n, _ in VIEWS]]
+    if _bad or not _want:
+        sys.exit(f'views.py: --angles takes front, 3/4, profile, back3/4, back (got {",".join(_bad) or "nothing"})')
+    VIEWS = [v for v in VIEWS if v[0].replace(' ', '') in _want]
 
 
 def span(s, n):
@@ -204,9 +217,17 @@ def prefixes(flag):
     return tuple(p.strip() for p in v.split(',') if p.strip()) if v else ()
 
 
+_ISOLATED = set()    # (the meshes isolate() itself hid)
+
+
 def isolate(only=None):
     """Hide what --only, --hide and --no-body leave out (hide_render: it neither shows nor casts shadows).
     Returns the meshes still showing."""
+    if only is not None:
+        # (--pieces picks from the whole figure, not from what --only left showing)
+        for o in bpy.data.objects:
+            if o.type == 'MESH' and o.name in _ISOLATED:
+                o.hide_render = False
     only, hide = (prefixes('--only') if only is None else only), prefixes('--hide')
     ids = {d['name']: mid for mid, d in female.MATERIALS.items()}
     meshes = [o for o in bpy.data.objects if o.type == 'MESH']
@@ -217,8 +238,15 @@ def isolate(only=None):
     for o in meshes:
         m = o.active_material
         base = m is not None and ids.get(m.name.split('.')[0], FIGURE_MATS) < FIGURE_MATS
+        # (and all the head carries: the face's paints and the hair have materials of their own, not the figure's)
+        q = o
+        while q.parent is not None and q.parent.name != 'Head':
+            q = q.parent
+        base = base or q.parent is not None
         off = (only and not o.name.startswith(only)) or (hide and o.name.startswith(hide)) or \
             ('--no-body' in argv and base)
+        if off and not o.hide_render:
+            _ISOLATED.add(o.name)
         o.hide_render = bool(off) or o.hide_render
         if not o.hide_render:
             shown.append(o)
@@ -262,7 +290,12 @@ def main():
     if opt('--face'):
         import creator
         creator.apply(opt('--face'))
+    if '--mannequin' in argv:
+        female.MANNEQUIN = True
+    import time
+    t0 = time.time()
     F.build()
+    print(f'build {time.time() - t0:.0f} s' + (' (mannequin)' if female.MANNEQUIN else ''), flush=True)
     sc = bpy.context.scene
     sc.frame_set(1)
     if '--list' in argv:
@@ -289,6 +322,9 @@ def main():
                 else:
                     o.hide_render = True
             print('hair only:', ', '.join(sorted(kept)), flush=True)
+        if isolating:
+            # (again: the close-up look shows the face's paints, which the sprite look hides, over what was hidden)
+            shown = isolate()
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
             for look in ('', '-clay') if '--clay' in argv else ('',):
