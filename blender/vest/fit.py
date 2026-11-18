@@ -17,8 +17,9 @@ The garment is made as one piece and then cut:
                       cut through the finished shell along a measured line. A cut only removes: the surface that
                       is left is the shell's, so the edges need no seams or facings.
 
-build_vest() returns the one mesh, skinned to the body's own bones. Given a brass material it also lays the brass on
-it (brass_layer()): plates cut from the same shell, so they sit on the leather and re-fit with it."""
+build_vest() returns the one mesh, skinned to the body's own bones. Given a plate material, that mesh is the lining
+and the pattern: the plates are raised over it (brass_layer()), cut from the same shell, so they sit on it and re-fit
+with it."""
 import math
 
 import bpy
@@ -48,14 +49,17 @@ RATIOS = {
     'hem_point': 0.50,       # the front point of the hem below that, in w
     'shoulder': 0.94,        # the vest's shoulder ends at this share of the way out to the shoulder point: on the
                              # shoulder's flat top, short of where it rolls over into the arm
-    'brass_thick': 0.03,     # the brass plates' thickness, in w
-    'brass_band': 0.26,      # the width of the edging along the front line, in w
-    'brass_gap': 0.10,       # the leather left showing between two plates, in w
+    'brass_thick': 0.045,    # the brass plates' thickness, in w
+    'brass_band': 0.26,      # the border of leather left showing along the front line, in w (0.7 of it at the
+                             # armholes and the hem)
     'belt_z': 0.42,          # the belt under the bust: this share of the way from the bust line down to the waist
     'belt_half': 0.24,       # half its height, in w
     'belt_dip': 0.30,        # how far it dips to a point in front, in w
-    'chevron_period': 0.90,  # one chest band and the leather beside it, in w
-    'chevron_slope': 0.80,   # how steeply the chest bands rise from the middle outward
+    'roll': 0.9,             # the height of the plate's rolled edge, in plate thicknesses
+    'dome': 0.7,             # how far a lame is raised along its middle, in plate thicknesses
+    'lame': 0.85,            # the height of one lame showing, in w
+    'lame_lap': 0.22,        # how far a lame laps over the one below, in w
+    'lame_slope': 0.80,      # how steeply the lames rise from the middle outward
     'stud': 0.085,           # a stud's radius, in w
     'stud_step': 0.62,       # the studs' spacing along the belt, in w
     'scye_drop': 0.30,       # the armhole's bottom below the armpit, in w
@@ -482,11 +486,12 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
     th = ratios['thickness'] * M['w']
     o = _sheet(name, [(V, faces)], M, material, body, kd, rig, lift=0.0, thickness=th)
     if brass is not None:
-        pieces, studs = brass_layer(V, faces, M, lines, ratios, log)
-        lift = th + 0.2 * ratios['brass_thick'] * M['w']
-        _sheet(name + ' brass', pieces, M, brass, body, kd, rig, lift=lift, thickness=ratios['brass_thick'] * M['w'])
+        pieces, studs, binding = brass_layer(V, faces, M, lines, ratios, log)
+        _sheet(name + ' plates', pieces, M, brass, body, kd, rig, lift=0.0, thickness=ratios['brass_thick'] * M['w'])
         if studs:
             _sheet(name + ' studs', studs, M, brass, body, kd, rig, lift=0.0, thickness=0.0)
+        if binding:
+            _sheet(name + ' binding', binding, M, material, body, kd, rig, lift=0.0, thickness=0.6 * th)
     return o, M
 
 
@@ -494,24 +499,41 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
     """A mesh object from cut pieces [(points, faces)]: lifted off the shell square to it, given its thickness
     outward, and handed to the body's bones (each point takes the weights of the skin under it)."""
     bm = bmesh.new()
-    for V, faces in pieces:
-        vmap = {i: bm.verts.new(V[i]) for i in sorted({i for f in faces for i in f})}
+    for piece in pieces:
+        V, faces = piece[0], piece[1]
+        up = piece[2] if len(piece) > 2 else lift          # (a piece's own lift: a number, or a function of its points)
+        pb = bmesh.new()
+        vmap = {i: pb.verts.new(V[i]) for i in sorted({i for f in faces for i in f})}
         for f in faces:
             try:
-                bm.faces.new([vmap[i] for i in f])
+                pb.faces.new([vmap[i] for i in f])
             except ValueError:
                 pass
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.004)
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    bm.normal_update()
-    # (outward is away from the neck's axis and up: an open sheet has no inside of its own to tell it by)
-    flip = [f for f in bm.faces if f.normal.dot(Vector((f.calc_center_median().x, f.calc_center_median().y - M['yc'], 0.6 * abs(f.normal.z) + 0.05)).normalized()) < 0] if thickness else []
-    if flip:
-        bmesh.ops.reverse_faces(bm, faces=flip)
-        bm.normal_update()
-    if lift:
-        for v in bm.verts:
-            v.co += v.normal * lift
+        bmesh.ops.remove_doubles(pb, verts=pb.verts, dist=0.004)
+        bmesh.ops.recalc_face_normals(pb, faces=pb.faces)
+        pb.normal_update()
+        if thickness:
+            # (outward is away from the neck's axis and up: an open sheet has no inside of its own to tell it by)
+            flip = []
+            for f in pb.faces:
+                c = f.calc_center_median()
+                if f.normal.dot(Vector((c.x, c.y - M['yc'], 0.6 * abs(f.normal.z) + 0.05)).normalized()) < 0:
+                    flip.append(f)
+            if flip:
+                bmesh.ops.reverse_faces(pb, faces=flip)
+                pb.normal_update()
+        if callable(up):
+            hs = up(np.array([v.co[:] for v in pb.verts]))
+            for v, h in zip(pb.verts, hs):
+                v.co += v.normal * float(h)
+        elif up:
+            for v in pb.verts:
+                v.co += v.normal * up
+        tmp = bpy.data.meshes.new('piece')
+        pb.to_mesh(tmp)
+        pb.free()
+        bm.from_mesh(tmp)
+        bpy.data.meshes.remove(tmp)
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -556,17 +578,25 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
 
 
 def brass_layer(V, faces, M, lines, ratios=RATIOS, log=print):
-    """The brass, laid on the finished vest: every plate is the vest's own surface cut again along measured lines
-    (so it lies on the leather exactly and follows the body with it), then lifted by the leather's thickness.
+    """The plates, made as a smith makes them: the leather vest is the pattern, and the plate is raised over it.
+    Every plate is the vest's own surface cut again along measured lines (so it lies on the leather exactly and
+    follows the body with it), set in from the leather's edges so the lining shows as a border all round, its own
+    edges there rolled into a rounded bead.
 
-      the edging   a band along the front line: round the collar's top edge and down both sides of the opening
-      the belt     a band under the bust, dipping to a point in front, set with studs
-      the chevrons bands across the chest between the two, rising from the middle out toward the shoulders
+      the lames    bands of plate round the whole body from the hem up, rising from the middle of the chest (and of
+                   the back) out toward the shoulders, lapping like armour: each is tucked under the lame above at
+                   its top edge and stands a plate's thickness proud at its bottom edge, where it laps the one below,
+                   and each is raised into a shallow round across its width. The yoke and the collar are one plate,
+                   over the highest lame
+      the belt     a band of plate under the bust, dipping to a point in front, over the lames and set with studs
 
-    Returns the plates and the studs, each a list of (points, faces)."""
+    Returns the plates, each (points, faces, lift), the studs, and the leather binding's pieces."""
     w, yc = M['w'], M['yc']
     f_arm, f_front = dict(lines)['armholes'], dict(lines)['front and collar top']
-    band, gap = ratios['brass_band'] * w, ratios['brass_gap'] * w
+    band = ratios['brass_band'] * w
+    th, pl = ratios['thickness'] * w, ratios['brass_thick'] * w
+    lo = th + 0.15 * pl                 # a plate lying on the leather
+    hi = lo + 1.5 * pl                  # and lying on another plate
 
     def ang(p):
         return np.arctan2(-p[:, 0], -(p[:, 1] - yc))
@@ -580,43 +610,62 @@ def brass_layer(V, faces, M, lines, ratios=RATIOS, log=print):
         return v, f
 
     whole = (V, faces)
-    z_v = M['z_v']
-    # (below the cusp the two edgings run on together a little way and end in a point)
-    edging = cut(whole, lambda p: band - f_front(p),
-                 lambda p: np.where(p[:, 2] < z_v, (p[:, 2] - z_v) * 0.4 + band - np.abs(p[:, 0]), 1.0))
     z_belt = M['z_bust'] - ratios['belt_z'] * (M['z_bust'] - M['z_waist'])
     half = ratios['belt_half'] * w
 
     def belt_mid(a):
         return z_belt - ratios['belt_dip'] * w * np.exp(-(a / 0.3) ** 2)
 
-    belt = cut(whole, lambda p: half - np.abs(p[:, 2] - belt_mid(ang(p))))
-    period, slope = ratios['chevron_period'] * w, ratios['chevron_slope']
-    top = M['z_sh'] - gap
+    # the lames: t runs up the chest and falls away to the sides, so a line of equal t is a chevron
+    period, slope, lap = ratios['lame'] * w, ratios['lame_slope'], ratios['lame_lap'] * w
 
-    def stripes(p):
-        t = p[:, 2] - slope * np.abs(p[:, 0]) - (z_belt + half + gap)
-        return np.cos(2 * math.pi * (t / period - 0.25)) * period / (2 * math.pi)
+    def t_of(p):
+        return p[:, 2] - slope * np.abs(p[:, 0])
 
-    chevrons = cut(whole,
-                   lambda p: yc - p[:, 1],                                   # the front only, to the side seams
-                   lambda p: p[:, 2] - belt_mid(ang(p)) - half - gap,        # above the belt
-                   lambda p: top - p[:, 2],                                  # below the shoulders
-                   lambda p: f_front(p) - band - gap,                        # clear of the edging
-                   lambda p: f_arm(p) - 2 * gap,                             # and of the armholes
-                   stripes)
-    plates = [pc for pc in (edging, belt, chevrons) if pc[1]]
-    log('vest brass: edging %d, belt %d, chevrons %d faces' % (len(edging[1]), len(belt[1]), len(chevrons[1])))
+    # the plate stops short of the leather's edges, so the lining shows as a border all round it, and its own
+    # edges there are rolled: turned up into a rounded bead, as a smith finishes an edge that lies against the body
+    f_hem = dict(lines)['hem']
+
+    def inset(p):
+        return np.minimum(np.minimum(f_front(p) - band, f_arm(p) - 0.7 * band), f_hem(p) - 0.7 * band)
+
+    def roll(p):
+        return ratios['roll'] * pl * np.exp(-(inset(p) / (0.3 * band)) ** 2)
+
+    def dome(u):
+        # (a lame is not flat across: it is raised into a shallow round, highest along its middle)
+        return ratios['dome'] * pl * np.sin(math.pi * np.clip(u, 0.0, 1.0))
+
+    field = cut(whole, lambda p: f_front(p) - band, lambda p: f_arm(p) - 0.7 * band, lambda p: f_hem(p) - 0.7 * band)
+    tv = t_of(field[0][sorted({i for f in field[1] for i in f})])
+    t1 = M['z_pit'] - 0.5 * w                           # (above this the yoke and the collar are one plate)
+    n = int(math.ceil((t1 - float(tv.min())) / period))
+    t0 = t1 - n * period
+    plates = []
+    for k in range(n):
+        a, b = t0 + k * period - lap, t0 + (k + 1) * period
+        v, f = cut(field, lambda p, a=a: t_of(p) - a, lambda p, b=b: b - t_of(p))
+        if f:
+            plates.append((v, f, lambda p, a=a, b=b: lo + (hi - lo) * np.clip((b - t_of(p)) / (b - a), 0.0, 1.0)
+                           + dome((t_of(p) - a) / (b - a)) + roll(p)))
+    v, f = cut(field, lambda p: t_of(p) - (t1 - lap))
+    if f:
+        plates.append((v, f, lambda p: lo + (hi - lo) * np.clip((t1 + period - t_of(p)) / (period + lap), 0.0, 1.0) + roll(p)))
+    top = hi + (1.2 + ratios['dome']) * pl
+    belt = cut(field, lambda p: half - np.abs(p[:, 2] - belt_mid(ang(p))))
+    log('vest plates: %d lames, belt %d faces' % (len(plates), len(belt[1])))
+    if belt[1]:
+        plates.append((belt[0], belt[1], lambda p: top + dome(0.5 + 0.5 * (p[:, 2] - belt_mid(ang(p))) / half)))
+    binding = []
     # the studs: half-round heads along the belt's middle, evenly spaced along its length
     tris = []
     for f in faces:
         tris += [(f[0], f[i], f[i + 1]) for i in range(1, len(f) - 1)]
     tree = BVHTree.FromPolygons([Vector(p) for p in V], tris)
-    r_stud = ratios['stud'] * w
-    out = (ratios['thickness'] + 1.2 * ratios['brass_thick']) * w
+    out = top + (1.0 + ratios['dome']) * pl
     studs, a = [], 0.0
     ball = bmesh.new()
-    bmesh.ops.create_uvsphere(ball, u_segments=12, v_segments=8, radius=r_stud)
+    bmesh.ops.create_uvsphere(ball, u_segments=12, v_segments=8, radius=ratios['stud'] * w)
     bv = np.array([v.co[:] for v in ball.verts])
     bf = [[v.index for v in f.verts] for f in ball.faces]
     ball.free()
@@ -629,11 +678,9 @@ def brass_layer(V, faces, M, lines, ratios=RATIOS, log=print):
             continue
         if nrm.dot(d) < 0:
             nrm = -nrm
-        c = np.array((hit + nrm * out)[:])
-        sq = np.array([1.0, 1.0, 1.0])
-        studs.append((bv * sq + c, bf))
+        studs.append((bv + np.array((hit + nrm * out)[:]), bf))
         a += ratios['stud_step'] * w / max((hit - o).length, 0.5 * w)
-    return plates, studs
+    return plates, studs, binding
 
 
 def clearance(vest, body, head_objs=(), log=print):

@@ -24,10 +24,25 @@ import fit  # noqa: E402
 
 M_VEST = female.mat_def(70, 'vest leather', female.ramp(int(os.environ.get('VEST', '8a5a34'), 16), 0.12), 0.0,
                         surface='leather', closeup='leather')
-M_BRASS = female.mat_def(71, 'vest brass', female.ramp(int(os.environ.get('VEST_BRASS', 'b08d45'), 16), 0.12), 0.0,
-                         closeup='gold')
+# (the plate is the warden's bronze: the same ramp for the sprite, and for the 3D look her bronze_closeup itself,
+# read out of warden.py, so the two stay one material; importing her module would set her face and hair on this figure)
+M_BRASS = female.mat_def(71, 'vest bronze', female.ramp(0x9a6438, 0.12), 0.0, closeup='steel')
 BRASS = os.environ.get('VEST_PLAIN') is None     # (VEST_PLAIN=1: the leather alone)
 MEASURES = {}
+
+
+def warden_bronze():
+    """The warden's bronze_closeup and the looks it reads, without loading her figure."""
+    import ast
+    path = os.path.join(HERE, '..', 'warden', 'warden.py')
+    with open(path) as f:
+        tree = ast.parse(f.read())
+    keep = [n for n in tree.body
+            if (isinstance(n, ast.FunctionDef) and n.name == 'bronze_closeup')
+            or (isinstance(n, ast.Assign) and getattr(n.targets[0], 'id', '') in ('BRONZE_LOOKS', 'BRONZE_LOOK'))]
+    ns = {'bpy': bpy}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), path, 'exec'), ns)
+    return ns['bronze_closeup']
 
 
 def build():
@@ -43,6 +58,8 @@ def build():
     vest, m = fit.build_vest(body, heads, rig=bpy.data.objects.get('Rig'), material=female.mat(M_VEST),
                              brass=female.mat(M_BRASS) if BRASS else None)
     MEASURES.update(m)
+    if BRASS:
+        warden_bronze()('vest bronze')
     # the --head view on the bust and neck: from under the bust to the chin, centred between them
     lo, hi = m['z_bust'] - 2.0 * m['w'], m['z_chin'] + 1.1 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
