@@ -45,6 +45,17 @@ VEIN_BRANCH_SCALE = 1.5
 VEIN_BRANCH_WIDTH = 0.05
 VEIN_BRANCH_REACH = 0.55        # how far from its trunk a branch runs before it fades out
 VEIN_BRANCH_STRENGTH = 0.6
+# the surface of the combined skin. Set for a whole body as much as a face: little oil, an uneven roughness, a soft
+# down, and light that travels far enough under the skin to warm the edge of a shadow on a limb
+SPECULAR = 0.4
+ROUGH = (0.52, 0.7)             # the roughness, from its smoothest patches to its roughest
+COAT = (0.03, 0.45)             # the oil film: weight, roughness
+SHEEN = (0.2, 0.45)             # the down: weight, roughness
+SSS_SCALE = 0.2                 # how far light travels under the skin (red; 1 unit is about 2.7 cm)
+GRAIN = 0.35                    # the fine grain of the surface, beside the pores
+TONE_RED = [226, 150, 136]      # where the tone drifts redder, and yellower
+TONE_YELLOW = [232, 200, 160]
+TONE_DRIFT = 0.3
 FRECKLE = [150, 96, 66]
 BLEMISH = [168, 98, 84]
 
@@ -224,21 +235,40 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     L(combined, vt.inputs['A'])
     L(vs, vt.inputs['B'])
     combined = vt.outputs['Result']
+    # (the tone is never one flat colour: slow drifts a little redder and a little yellower, painted into the
+    # colour itself, so they are still there in shade, where the light does none of the work)
+    drift = tex('ShaderNodeTexNoise', 0.35)
+    drift.inputs['Detail'].default_value = 3.0
+    drift.inputs['Roughness'].default_value = 0.6
+    dn = node('ShaderNodeSeparateColor')
+    L(drift.outputs['Color'], dn.inputs['Color'])
+    combined = mix(combined, TONE_RED, ramp_(dn.outputs['Red'], 0.45, 0.75, 0.0, TONE_DRIFT))
+    combined = mix(combined, TONE_YELLOW, ramp_(dn.outputs['Green'], 0.5, 0.8, 0.0, TONE_DRIFT * 0.7))
     sb = node('ShaderNodeBsdfPrincipled', name='close bsdf')
     L(combined, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
     sb.inputs['Subsurface Weight'].default_value = 1.0
     sb.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.18)
-    sb.inputs['Subsurface Scale'].default_value = 0.12
+    sb.inputs['Subsurface Scale'].default_value = SSS_SCALE
     sb.inputs['Subsurface Anisotropy'].default_value = 0.8
     sb.inputs['IOR'].default_value = 1.4
-    sb.inputs['Specular IOR Level'].default_value = 0.45
-    sb.inputs['Roughness'].default_value = 0.5
-    sb.inputs['Coat Weight'].default_value = 0.1
-    sb.inputs['Coat Roughness'].default_value = 0.3
+    sb.inputs['Specular IOR Level'].default_value = SPECULAR
+    # (the surface is rougher in some patches than others, and rougher in the pores: an even gloss is what reads
+    # as plastic, most of all in shade, where the reflection is all there is to see)
+    rn = tex('ShaderNodeTexNoise', 2.2)
+    rn.inputs['Detail'].default_value = 4.0
+    rough = math_('ADD', ramp_(rn.outputs['Fac'], 0.3, 0.7, ROUGH[0], ROUGH[1], smooth=False), math_('MULTIPLY', pit, 0.1))
+    L(rough, sb.inputs['Roughness'])
+    sb.inputs['Coat Weight'].default_value = COAT[0]
+    sb.inputs['Coat Roughness'].default_value = COAT[1]
+    # (the fine down on skin: a soft light along every edge that turns from the eye, in place of a mirror's)
+    sb.inputs['Sheen Weight'].default_value = SHEEN[0]
+    sb.inputs['Sheen Roughness'].default_value = SHEEN[1]
+    grain = tex('ShaderNodeTexNoise', 60.0)
+    grain.inputs['Detail'].default_value = 2.0
     bump = node('ShaderNodeBump')
     bump.inputs['Strength'].default_value = 0.2
     bump.inputs['Distance'].default_value = 0.03
-    L(math_('MULTIPLY', pit, -1.0), bump.inputs['Height'])
+    L(math_('ADD', math_('MULTIPLY', pit, -1.0), math_('MULTIPLY', grain.outputs['Fac'], GRAIN)), bump.inputs['Height'])
     L(bump.outputs['Normal'], sb.inputs['Normal'])
     L(sb.outputs['BSDF'], out.inputs['Surface'])
