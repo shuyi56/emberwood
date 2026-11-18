@@ -17,7 +17,9 @@
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
            a build), with the clothes, armour and gear built and fitted exactly as on the real figure. For clothes
            changes that need a body under them.
---set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
+--set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable; a base
+           figure setting such as SKIN_LOOK=5 (by its place in female.SKIN_LOOKS) is set on the base module too
+--denoise  with --turn or --head: denoise the 3D look (OpenImageDenoise, albedo and normal passes)
 
 Rendering pieces on their own (any of the views above):
 --only     PREFIXES: render only the meshes whose names start with one of these (comma separated), e.g.
@@ -105,7 +107,12 @@ def look_3d(samples):
     female.sprite_mode(False)
     sc.render.use_persistent_data = False
     sc.cycles.samples = samples
-    sc.cycles.use_denoising = False
+    # (--denoise: OpenImageDenoise with the albedo and normal passes. Without it the skin's subsurface scattering
+    # stays grainy at these sample counts, which reads as a stucco texture that is not in the material)
+    sc.cycles.use_denoising = '--denoise' in argv
+    if sc.cycles.use_denoising:
+        sc.cycles.denoiser = 'OPENIMAGEDENOISE'
+        sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
     sc.cycles.max_bounces = 4
     sc.cycles.transparent_max_bounces = 16     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
@@ -271,6 +278,8 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
+            if hasattr(female, k):
+                setattr(female, k, eval(v))     # (a base figure setting, such as SKIN_LOOK)
     if '--mannequin' in argv:
         female.MANNEQUIN = True
     import time
