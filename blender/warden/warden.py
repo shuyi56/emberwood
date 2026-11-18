@@ -75,7 +75,8 @@ M_ROBE_TRIM = mat_def(47, 'robe trim', ramp(0x9c7c45, 0.09), 0.0, closeup='canva
 M_CAPE = mat_def(48, 'cape', ramp(0x23162a, 0.1), 0.12, surface='wool', closeup='wool', form=True)
 M_LINING = mat_def(49, 'cape lining', ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
 M_COLLAR = mat_def(50, 'collar', ramp(0x3b3e45, 0.12), 0.0, closeup='steel')   # (blackened steel: steel_closeup)
-M_BRONZE = mat_def(51, 'bronze', ramp(0x9a6438, 0.12), 0.0, closeup='steel')   # (the knees and greaves: steel_closeup in bronze)
+M_BRONZE = mat_def(51, 'bronze', ramp(0x80482a, 0.12), 0.0, closeup='steel')   # (the knees and greaves: russet bronze, a dark
+# red-brown, as BRONZE_LOOK; the game model takes this ramp's middle tone. It was 0x9a6438, a pale tan)
 M_SCAR = mat_def(44, 'scar', [[178, 114, 100], [202, 142, 124], [216, 164, 144], [226, 182, 164], [236, 202, 186]], 0.0)
 
 
@@ -2254,7 +2255,7 @@ BRONZE_LOOKS = {
     'aged': dict(metal=(0.45, 0.24, 0.10), tarnish=(0.07, 0.035, 0.015), mottle=0.55, rub=0.6, rgh=(0.4, 0.68)),
     'polished': dict(metal=(0.82, 0.5, 0.29), tarnish=(0.17, 0.075, 0.035), mottle=0.3, rub=0.2, rgh=(0.3, 0.6)),
 }
-BRONZE_LOOK = 'aged'
+BRONZE_LOOK = 'russet'
 
 
 def bronze_closeup(name, look=None):
