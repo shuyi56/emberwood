@@ -805,10 +805,162 @@ COLLAR_BASE = None   # (the cape's outer radius round the neck at the collar's f
 COLLAR_TIP = 54.45   # (how high the fronts' tips stand: clear of the jaw, lowered from 55.2, then 54.75)
 
 
+# ---- the head the gorget is fitted to, measured, so the gorget follows the head instead of numbers tuned by eye to
+# one head: the creator head's own surface, read straight from its glb (the band is built before the head is hung),
+# and the collar the creator lays her hair on (WARDEN_DRAPE in the creator's main.js), which the band must stay inside
+TIP_OVER_CHIN = 0.25    # (the fronts' tips stand this far above the underside of the chin)
+JAW_GAP = 0.25          # (the top edge keeps this far under the jaw, all round)
+NECK_CLEAR = 1.0        # (the band's top stands this far off the head below it, all round)
+HAIR_MARGIN = 0.15      # (and this far inside the hair's collar)
+TIP_FLARE = 0.35        # (the fronts' tips stand this much further out)
+CREATOR_MAIN = os.environ.get('CREATOR_MAIN', '/mnt/project-files/face-creator/main.js')
+_HM = {}
+
+
+def _glb_positions(path, name='head part 0'):
+    """(the vertices of one mesh in a glb, in Blender's frame: the creator's +y up is Blender's +z, its +z, toward the
+    face, Blender's -y)"""
+    import json
+    import struct
+    import numpy as np
+    with open(path, 'rb') as f:
+        f.read(12)
+        n, _ = struct.unpack('<II', f.read(8))
+        J = json.loads(f.read(n))
+        n, _ = struct.unpack('<II', f.read(8))
+        B = f.read(n)
+    node = next(nd for nd in J['nodes'] if nd.get('name') == name)
+    acc = J['accessors'][J['meshes'][node['mesh']]['primitives'][0]['attributes']['POSITION']]
+    bv = J['bufferViews'][acc['bufferView']]
+    st = bv.get('byteStride', 12)
+    raw = np.frombuffer(B, dtype=np.uint8, count=st * acc['count'], offset=bv.get('byteOffset', 0) + acc.get('byteOffset', 0))
+    a = raw.reshape(-1, st)[:, :12].copy().view('<f4').reshape(-1, 3)
+    return np.stack([a[:, 0], -a[:, 2], a[:, 1]], 1)
+
+
+def head_meas():
+    """The creator head round the neck's axis (0, GC_Y): its radius in bins of angle (7.5 degrees, 0 at the front) and
+    height (0.1, from 53 to 56), the outermost of it in each; the height its jaw (or chin) leaves the neck at, round
+    the head; and the hair's collar from the creator. None without the creator head."""
+    if 'r' in _HM:
+        return _HM
+    if not _CREATOR and not creator_head_wanted():
+        return None
+    import numpy as np
+    P = _glb_positions(CREATOR_HEAD)
+    P[:, 2] += female.HEAD_Z
+    x, y, z = P.T
+    r = np.hypot(x, y - GC_Y)
+    ang = np.arctan2(-x, -(y - GC_Y)) % (2 * math.pi)
+    NA, Z0, DZ, NZ = 48, 53.0, 0.1, 31
+    ia = (ang / (2 * math.pi) * NA).astype(int) % NA
+    iz = np.round((z - Z0) / DZ).astype(int)
+    ok = (iz >= 0) & (iz < NZ)
+    R = np.full((NA, NZ), np.nan)
+    for i, j, rr in zip(ia[ok], iz[ok], r[ok]):
+        if not rr <= R[i, j]:
+            R[i, j] = rr
+    for i in range(NA):        # (gaps up the column filled from the nearest height that has the surface)
+        row = R[i]
+        good = np.nonzero(~np.isnan(row))[0]
+        if len(good):
+            R[i] = np.interp(np.arange(NZ), good, row[good])
+    # (eased round the head, so the band drawn to it does not kink where the chin turns into the neck)
+    R = np.maximum.reduce([np.roll(R, k, axis=0) for k in (-1, 0, 1)])
+    for _ in range(2):
+        R = (np.roll(R, 1, axis=0) + 2 * R + np.roll(R, -1, axis=0)) / 4
+    # (the jaw: the lowest height, above the neck's narrowest, where the head stands 0.5 out past its neck there)
+    jaw = []
+    for i in range(NA):
+        lo = int(round((53.5 - Z0) / DZ))
+        hi = int(round((54.6 - Z0) / DZ))
+        k0 = lo + int(np.argmin(R[i, lo:hi]))
+        nk = R[i, k0]
+        k = next((k for k in range(k0, NZ) if R[i, k] > nk + 0.5), NZ - 1)
+        jaw.append(Z0 + DZ * k)
+    jaw = np.array(jaw)
+    jaw = np.minimum.reduce([np.roll(jaw, k) for k in (-1, 0, 1)])     # (the lowest of each and its neighbours)
+    # (where the creator's neck ends in its lip, turning in under the body's: the widest of its foot)
+    foot = (z < z.min() + 0.6)
+    zs = np.round(z[foot] / 0.05) * 0.05
+    lip = max(set(zs.tolist()), key=lambda v: r[foot][zs == v].mean())
+    _HM.update(r=R, jaw=jaw, NA=NA, Z0=Z0, DZ=DZ, NZ=NZ, chin=float(jaw[0]), lip=float(lip), drape=_drape_rings())
+    print(f'head measured: chin {_HM["chin"]:.2f}, neck lip {lip:.2f}', flush=True)
+    return _HM
+
+
+def _drape_rings():
+    """(the collar the creator lays the Warden's hair on: WARDEN_DRAPE's rings, [height, half-width, front, back] in
+    head heights from the chin, as Blender heights and radii)"""
+    import json
+    import re
+    try:
+        src = open(CREATOR_MAIN, encoding='utf-8').read()
+    except OSError:
+        return None
+    m = re.search(r'WARDEN_DRAPE\s*=\s*makeDrape\((\[\[.*?\]\])', src, re.S)
+    if not m:
+        return None
+    T = 0.032      # (makeDrape's THICK: the hair's inner surface stands this far off its body)
+    return [(female.HEAD_Z + h * HEAD_H, (w + T) * HEAD_H, (f + T) * HEAD_H, (b + T) * HEAD_H)
+            for h, w, f, b in json.loads(m.group(1))]
+
+
+def head_r(a, z0, z1):
+    """The most the head stands out at angle a between heights z0 and z1."""
+    M = head_meas()
+    f = (a % (2 * math.pi)) / (2 * math.pi) * M['NA']
+    i0, t = int(f) % M['NA'], f - int(f)
+    k0 = max(0, int((z0 - M['Z0']) / M['DZ']))
+    k1 = min(M['NZ'] - 1, int(math.ceil((z1 - M['Z0']) / M['DZ'])))
+    R = M['r']
+    return lerp(max(R[i0, k0:k1 + 1]), max(R[(i0 + 1) % M['NA'], k0:k1 + 1]), t)
+
+
+def jaw_z(a):
+    M = head_meas()
+    f = (a % (2 * math.pi)) / (2 * math.pi) * M['NA']
+    i0, t = int(f) % M['NA'], f - int(f)
+    return lerp(M['jaw'][i0], M['jaw'][(i0 + 1) % M['NA']], t)
+
+
+def hair_in(a, z):
+    """How far out the hair's inner surface is at angle a and height z (the creator's rounded-box section)."""
+    D = head_meas()['drape']
+    if not D:
+        return 9.0
+    if z >= D[0][0]:
+        k, t = 0, 0.0
+    else:
+        k = next((k for k in range(len(D) - 1) if z >= D[k + 1][0]), len(D) - 2)
+        t = smoothstep(0.0, 1.0, (D[k][0] - z) / (D[k][0] - D[k + 1][0]))
+    W, Fr, Bk = [lerp(D[k][q], D[k + 1][q], t) for q in (1, 2, 3)]
+    sx, sy = abs(math.sin(a)), math.cos(a)
+    dep = Fr if sy > 0 else Bk
+    return 1.0 / ((sx / W) ** 3 + (abs(sy) / dep) ** 3) ** (1.0 / 3.0)
+
+
+def collar_tip():
+    M = head_meas()
+    return M['chin'] + TIP_OVER_CHIN if M else COLLAR_TIP
+
+
 def collar_top(a):
     """The band's top edge, not level like a pipe's: its front corners stand up as the tips of two blades, it sweeps
-    down under the ears at the sides and rises again to the nape."""
-    return COLLAR_TIP + 0.05 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
+    down under the ears at the sides and rises again to the nape; and never closer than JAW_GAP under the jaw."""
+    zt = collar_tip() + 0.05 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
+    if head_meas():
+        zt = min(zt, jaw_z(a) - JAW_GAP)
+    return zt
+
+
+def band_top_r(a):
+    """The radius the band's top edge comes to: NECK_CLEAR off the head below it (its neck, or the jaw where the top
+    edge runs under it), and inside the hair's collar."""
+    zt = collar_top(a)
+    # (the fronts' tips flaring out a little past that, away from the jaw, as a soft collar's tips fall open)
+    ff = 1.0 - smoothstep(0.7, 1.7, abs(wrap(a)))
+    return min(head_r(a, zt - 0.4, zt + 0.1) + NECK_CLEAR + TIP_FLARE * ff, hair_in(a, zt) - HAIR_MARGIN)
 
 
 COLLAR_V = (53.0, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
@@ -823,10 +975,10 @@ def collar_open(v):
     """The half-angle of the opening at the throat, up the band. The fronts open in a V: one straight line each
     side from the point on the chest (see build_throat_plate, whose fronts carry it down there) up to the band's
     top corners under the jaw, so from the front the collar's outline is a V and not a ring."""
-    z = 53.0 + 0.5 * v / FOOT_V if v <= FOOT_V else lerp(COLLAR_STAND, COLLAR_TIP, (v - FOOT_V) / (1.0 - FOOT_V))
+    z = 53.0 + 0.5 * v / FOOT_V if v <= FOOT_V else lerp(COLLAR_STAND, collar_tip(), (v - FOOT_V) / (1.0 - FOOT_V))
     # (and each edge is a curve, not a ruled line, as a soft collar's is: drawn in a little through its middle,
     # sweeping wide to its tip)
-    t = max(0.0, (z - 53.0) / (COLLAR_TIP - 53.0))
+    t = max(0.0, (z - 53.0) / (collar_tip() - 53.0))
     return max(0.0, collar_v(z) + 0.2 * t ** 3 - 0.07 * math.sin(math.pi * min(1.0, t)))   # (never crossing)
 
 
@@ -899,11 +1051,11 @@ def collar_pt(a, v, out=0.0):
     # (it bends as it rises: the fronts' tips roll outward, away from the jaw, like the tips of a soft collar
     # falling open, and the whole top edge turns out a little, so it does not stand like a pipe)
     ff = 1.0 - smoothstep(0.7, 1.7, abs(wrap(a)))
-    r = neck + 0.45 * w ** 1.6 + (0.12 + 0.42 * ff) * w ** 2.6 + out
-    # (drawn in as it rises, to the creator's slimmer neck: it stood two units off it, and her hair, which lies on
-    # a collar the size of her neck, fell inside its top. The fronts' tips flare out as before, from the narrower
-    # band, still well clear of the chin)
-    r -= 0.95 * smoothstep(0.0, 1.0, w)
+    flare = 0.45 * w ** 1.6 + (0.12 + 0.42 * ff) * w ** 2.6
+    if head_meas():
+        # (drawn in or let out as it rises so its top comes to band_top_r: fitted to the head and inside the hair)
+        flare -= (neck + 0.57 + 0.42 * ff - band_top_r(a)) * smoothstep(0.0, 1.0, w)
+    r = neck + flare + out
     # (built as a gorget's neck is: not one stiff tube but three narrow lames riveted one above the other, which
     # is what lets a real one move with the neck; each joint a shallow crease round it)
     r -= 0.03 * sum(math.exp(-((w - wk) / 0.06) ** 2) for wk in LAME_JOINTS)
@@ -3197,6 +3349,7 @@ def build():
 CREATOR_HEAD = os.environ.get('WARDEN_HEAD_GLB', '/mnt/project-files/warden/creator-head/warden-head.glb')
 CREATOR_NECK_CUT = -1.0      # (where the creator's neck is cut, in its own frame (h 53.2): where it is as wide as the body's
 #  neck, which runs on up inside it to 53.45, so the two overlap instead of leaving a dark slit between them)
+NECK_OVERLAP = 0.3      # (the body's neck runs this far up inside the creator's)
 CREATOR_NECK_FADE = 0.6      # (its baked shade under the chin faded out from here down to the cut)
 _CREATOR = False
 
@@ -3241,7 +3394,9 @@ def hang_creator_head(path):
         bm = bmesh.new()
         bm.from_mesh(o.data)
         M = o.matrix_basis
-        bmesh.ops.delete(bm, geom=[v for v in bm.verts if (M @ v.co).z < CREATOR_NECK_CUT], context='VERTS')
+        # (at the widest of its foot, measured, so the lip below it goes and what is left meets the body's neck)
+        cut = head_meas()['lip'] - female.HEAD_Z if head_meas() else CREATOR_NECK_CUT
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if (M @ v.co).z < cut], context='VERTS')
         bm.to_mesh(o.data)
         bm.free()
         # (and the shade it bakes down its neck faded out, so the cut does not end in a hard line on the body's neck)
@@ -3249,11 +3404,28 @@ def hang_creator_head(path):
         if col is not None and col.domain == 'CORNER':
             for li, lp in enumerate(o.data.loops):
                 z = (M @ o.data.vertices[lp.vertex_index].co).z
-                t = min(1.0, max(0.0, (CREATOR_NECK_FADE - z) / (CREATOR_NECK_FADE - CREATOR_NECK_CUT)))
+                t = min(1.0, max(0.0, (CREATOR_NECK_FADE - z) / (CREATOR_NECK_FADE - cut)))
                 if t > 0:
                     t = t * t * (3 - 2 * t)
                     c = col.data[li].color
                     col.data[li].color = tuple(c[i] + (1.0 - c[i]) * t for i in range(3)) + (c[3],)
+    # (and the body's neck reaching up into the creator's, whatever height the head is set at: stretched, above
+    # h 52.5, so its top stands NECK_OVERLAP over the creator's cut. Measured, not assumed: with the head set
+    # higher, the two necks parted and left a slit of background between them)
+    nk = bpy.data.objects.get('Neck')
+    if nk is not None and head_meas():
+        mw = nk.matrix_world
+        top = max((mw @ v.co).z for v in nk.data.vertices)
+        want = head_meas()['lip'] + NECK_OVERLAP
+        if top < want:
+            inv = mw.inverted()
+            for v in nk.data.vertices:
+                p_ = mw @ v.co
+                if p_.z > 52.5:
+                    p_.z = 52.5 + (p_.z - 52.5) * (want - 52.5) / (top - 52.5)
+                    v.co = inv @ p_
+            nk.data.update()
+            print(f'body neck stretched from {top:.2f} to {want:.2f}', flush=True)
     done = set()
     for o in new:
         if o.type != 'MESH' or o.name.startswith('head part 0'):
