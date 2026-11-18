@@ -269,6 +269,108 @@ function clearOfCape(body, g) {
   p.needsUpdate = true;
 }
 
+// A ponytail (the creator's `ponytail` style): the strands that fall from the tie at the back of her crown to below
+// her nape, found as whole strands (the hair's connected pieces) that reach down past TAIL_BELOW behind her head
+// (head axes, her chin at 0). Null when there are too few for a tail.
+const TAIL_BELOW = -1;
+function findTail(g, pts) {
+  const n = pts.length / 3, up = new Int32Array(n).map((_, i) => i);
+  const find = (i) => { while (up[i] !== i) { up[i] = up[up[i]]; i = up[i]; } return i; };
+  const idx = g.index ? g.index.array : null, tris = idx ? idx.length : n;
+  for (let t = 0; t + 2 < tris; t += 3) {
+    const a = find(idx ? idx[t] : t), b = find(idx ? idx[t + 1] : t + 1), c = find(idx ? idx[t + 2] : t + 2);
+    up[b] = a; up[find(c)] = a;
+  }
+  const lo = new Map(), zs = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    lo.set(r, Math.min(lo.get(r) ?? Infinity, pts[i * 3 + 1]));
+    const z = zs.get(r) || [0, 0]; z[0] += pts[i * 3 + 2]; z[1]++; zs.set(r, z);
+  }
+  const tail = new Uint8Array(n);
+  let count = 0;
+  for (let i = 0; i < n; i++) {
+    const r = find(i), [zSum, zN] = zs.get(r);
+    if (lo.get(r) < TAIL_BELOW && zSum / zN < -1.5) { tail[i] = 1; count++; }
+  }
+  return count > 500 ? tail : null;
+}
+
+// The ponytail on one chain, `hairT_0_<row>`, from the tie down the tail: row 0 at the tie rides her head, as
+// does the rest of her hair (drawn back tight over the skull), and the rows under it swing. Each tail vertex
+// follows the bone its height falls on, blended with the next over BLEND either side of a joint.
+function reskinPonytail(body, { src, g, pts, tail, headInRoot }, { rows = 5 } = {}) {
+  const { root } = body;
+  const head = root.getObjectByName('Head');
+  const n = pts.length / 3;
+  let top = -Infinity, tip = Infinity;
+  for (let i = 0; i < n; i++) if (tail[i]) { tip = Math.min(tip, pts[i * 3 + 1]); top = Math.max(top, pts[i * 3 + 1]); }
+  // the middle of the tail at height y (head axes), from the tail's own strands
+  const at = (y) => {
+    for (let w = 0.6; w < 6; w *= 1.5) {
+      let x = 0, z = 0, k = 0;
+      for (let i = 0; i < n; i++) if (tail[i] && Math.abs(pts[i * 3 + 1] - y) < w) { x += pts[i * 3]; z += pts[i * 3 + 2]; k++; }
+      if (k >= 8) return new THREE.Vector3(x / k, y, z / k);
+    }
+    return new THREE.Vector3(0, y, -4);
+  };
+  // the tie (the strand-free piece the tail is gathered by sits at about two thirds of the way up the tail's
+  // loop): the chain starts just under where the tail turns down
+  const start = top - 2.5;
+  const rowY = [start + 1];
+  for (let r = 1; r <= rows + 1; r++) rowY.push(start - (start - (tip + 0.3)) * ((r - 1) / rows));
+  const place = (b, parent, ph) => {
+    parent.add(b);
+    b.position.copy(parent.worldToLocal(ph.clone().applyMatrix4(headInRoot).applyMatrix4(root.matrixWorld)));
+    b.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert())
+      .multiply(root.getWorldQuaternion(new THREE.Quaternion()));
+    b.userData.rest = b.quaternion.clone();
+    b.updateMatrixWorld(true);
+  };
+  const bones = [];
+  let parent = head;
+  for (let r = 0; r <= rows; r++) {
+    const b = new THREE.Bone();
+    b.name = `hairT_0_${r}`;
+    place(b, parent, at(rowY[r]));
+    bones.push(b);
+    parent = b;
+  }
+  const tipNode = new THREE.Object3D();
+  tipNode.name = 'hairT_0_tip';
+  place(tipNode, parent, at(rowY[rows + 1]));
+  root.updateMatrixWorld(true);
+  const skeleton = new THREE.Skeleton(bones);
+  const BLEND = 0.6;
+  const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    const y = pts[i * 3 + 1];
+    sw[i * 4] = 1;
+    if (!tail[i] || y >= rowY[1]) continue;
+    // the swinging bone r runs from rowY[r] down to rowY[r + 1]
+    let r = 1;
+    while (r < rows && y < rowY[r + 1]) r++;
+    let a = r, b = r, wb = 0;
+    if (rowY[r] - y < BLEND) { b = r - 1; wb = 0.5 - 0.5 * (rowY[r] - y) / BLEND; }
+    else if (r < rows && y - rowY[r + 1] < BLEND) { b = r + 1; wb = 0.5 - 0.5 * (y - rowY[r + 1]) / BLEND; }
+    si[i * 4] = a; si[i * 4 + 1] = b;
+    sw[i * 4] = 1 - wb; sw[i * 4 + 1] = wb;
+  }
+  g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+  g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+  const material = src.material.clone();
+  material.skinning = true;
+  const sm = new THREE.SkinnedMesh(g, material);
+  sm.name = 'Hair (springs)';
+  sm.castShadow = src.castShadow;
+  sm.receiveShadow = true;
+  sm.frustumCulled = false;
+  root.add(sm);
+  sm.updateMatrixWorld(true);
+  sm.bind(skeleton, sm.matrixWorld.clone());
+  body.hair = { bones, mesh: sm, skeleton, ponytail: true };
+}
+
 function reskinHair(body, { rows = 3 } = {}) {
   const { root } = body;
   const head = root.getObjectByName('Head');
@@ -297,6 +399,8 @@ function reskinHair(body, { rows = 3 } = {}) {
     pts.set([v.x, v.y, v.z], i * 3);
     hemY = Math.min(hemY, v.y);
   }
+  const tail = findTail(g, pts);
+  if (tail) return reskinPonytail(body, { src, g, pts, tail, headInRoot });
   const ang = (x, z) => Math.atan2(x, -z);
   const rowY = [1.5, -1.5];
   for (let r = 2; r <= rows + 1; r++) rowY.push(rowY[1] - (rowY[1] - hemY) * ((r - 1) / rows));

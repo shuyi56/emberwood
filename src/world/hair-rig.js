@@ -1,8 +1,9 @@
 // The Warden's hair on spring bones: the settings and the colliders it rests against, by joint name.
 //
-// Three groups of chains hang from her `Head`: `hair_<column>_<row>` across her back (linked into one sheet, like
-// the cape), and a lock in front of each shoulder, `hairL_<column>_<row>` and `hairR_<column>_<row>`. Row 0 of
-// each column sits on the scalp and rides the head; the rows under it swing.
+// Chains hang from her `Head`: `hair_<column>_<row>` across her back (linked into one sheet, like
+// the cape), and a lock in front of each shoulder, `hairL_<column>_<row>` and `hairR_<column>_<row>`; or, for a
+// ponytail, one chain `hairT_0_<row>` from the tie. Row 0 of each column sits on the scalp (or the tie) and
+// rides the head; the rows under it swing.
 //
 //     import { attachHairSprings } from './hair-rig.js';
 //     const hair = attachHairSprings(model);
@@ -12,11 +13,15 @@
 import { SpringBones, findChains, DEFAULTS } from './springbones.js';
 import { makeColliders } from './cape-rig.js';
 
-export const HAIR_GROUPS = ['hair', 'hairL', 'hairR'];
+export const HAIR_GROUPS = ['hair', 'hairL', 'hairR', 'hairT'];
 // the front locks lie on her chest, which rocks under them with every step: stiffer, and riding the head more,
 // they sway a little on it instead of being levered off it into spikes
 const FRONT_LOCK = { stiffness: 800, inherit: 0.95, maxAngle: 0.1 };
-export const HAIR_GROUP_SETTINGS = { hairL: FRONT_LOCK, hairR: FRONT_LOCK };
+// a ponytail (`hairT_0_<row>`, one chain from the tie): heavier and freer than loose hair, it swings as one rope,
+// carried less by the head so it lags each step and swings back across her nape
+const PONYTAIL = { stiffness: 40, damping: 0.08, airDrag: 0.03, gravity: 450, inherit: 0.2, maxAngle: 1.3, hitRadius: 0.8,
+  contactSoftness: 0.5, sheetBend: 0 };
+export const HAIR_GROUP_SETTINGS = { hairL: FRONT_LOCK, hairR: FRONT_LOCK, hairT: PONYTAIL };
 
 export const HAIR_SETTINGS = {
   ...DEFAULTS,

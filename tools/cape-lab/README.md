@@ -16,7 +16,9 @@ The Body menu swaps the stand-in for the Warden's own model (`public/models/ward
 `public/` given as `?model=<path>`), played the way the world plays it. Her own cape meshes are re-skinned in the
 page to `cape_<c>_<r>` chains under her Chest joint (`src/cape-lab/model-body.js`), the same layout and weights
 `warden.py` would give them, so the springs run on her real cape and body before the Blender side is ported.
-Captures take `--body model` (add `?model=...` to `--url` for another glb).
+Captures take `--body model` (add `?model=...` to `--url` for another glb). A head with the creator's `ponytail` style (exported with
+`FRONT_Z=-100`, so `export-head.js` keeps the tail's strands, and merged with `merge-head.mjs`) gets its tail on
+one chain, `hairT_0_<row>`, from the tie; the rest of her hair rides her head.
 
 ## The cape rig
 
