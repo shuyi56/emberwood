@@ -142,6 +142,9 @@ def look_3d(samples):
     area('Key', (-40, -48, 80), 52000, 24, (1, 0.96, 0.9))
     area('Fill', (46, -36, 50), 12000, 30, (0.85, 0.9, 1))
     area('Rim', (20, 60, 70), 26000, 18)
+    # light off the floor: big, warm and from below, so the shaded undersides (legs, jaw, the far side of the body)
+    # keep some colour instead of going grey. It is not seen by the camera.
+    area('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), aim=(0, 0, 20)).visible_camera = False
     cam_d = bpy.data.cameras.new('View')
     cam_d.clip_start, cam_d.clip_end = 1, 1000
     cam = bpy.data.objects.new('View', cam_d)
