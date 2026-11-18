@@ -810,7 +810,7 @@ def collar_top(a):
     return COLLAR_TIP + 0.05 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
 
 
-COLLAR_V = (53.5, 0.2)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
+COLLAR_V = (53.0, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
 # how fast they part above it, as an angle round the neck for each unit of height)
 
 
