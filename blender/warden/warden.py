@@ -805,10 +805,20 @@ def collar_top(a):
     return 55.1 + 0.6 * ((1.0 - math.cos(a)) / 2) ** 1.2
 
 
+COLLAR_V = (51.55, 0.233)   # (the V the collar's fronts open in: the height its two edges meet at on the chest, and
+# how fast they part above it, as an angle round the neck for each unit of height)
+
+
+def collar_v(z):
+    return max(0.0, COLLAR_V[1] * (z - COLLAR_V[0]))
+
+
 def collar_open(v):
-    """The half-angle of the opening at the throat, up the band: the plate fills it below, joined to the fronts,
-    and the fronts part a little wider as they rise."""
-    return lerp(0.4, 0.6, v ** 1.3)
+    """The half-angle of the opening at the throat, up the band. The fronts open in a V: one straight line each
+    side from the point on the chest (see build_throat_plate, whose fronts carry it down there) up to the band's
+    top corners under the jaw, so from the front the collar's outline is a V and not a ring."""
+    z = 53.0 + 0.5 * v / FOOT_V if v <= FOOT_V else lerp(COLLAR_STAND, 55.2, (v - FOOT_V) / (1.0 - FOOT_V))
+    return collar_v(z)
 
 
 def collar_base(a):
@@ -921,7 +931,7 @@ def build_collar(body):
     sheet = grid(rows, n, front)
     mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
     # the rolled edge: up one front, round the top and down the other
-    vs_ = [k / 12 for k in range(7, 12)]   # (the fronts' rolled edge only above the plate, where they stand free)
+    vs_ = [k / 12 for k in range(3, 12)]   # (the fronts' rolled edge, from where the fronts below take it over)
     path = [collar_pt(ang(v, 0), v, 0.03) for v in vs_]
     path += [collar_pt(ang(1.0, j), 1.0, 0.03) for j in range(n)]
     path += [collar_pt(ang(v, n - 1), v, 0.03) for v in reversed(vs_)]
@@ -940,48 +950,14 @@ def build_collar(body):
 
 
 def build_throat_plate(body):
-    """The choker, and the collar stitched to it. A band of the collar's steel round the front of the throat, a
-    true part of a ring (so it turns with the neck from any side), reaching in under the collar's fronts either
-    side, its top edge rolled in brass and dipping a little under the chin; from its lower edge hangs its plate,
-    a shield that leaves the ring's curve and comes to lie on the chest, drawing to a soft point. Three raised
-    lines run down band and plate in one, studs between them. The collar's fronts lie on the band and are
-    stitched down to it."""
-    T = clothes_bvh(('Hair', 'Collar', 'Medallion', 'Clasp'), head=True)   # (the plate lies over the cape too)
-    A = 0.95                 # (the band's half-angle: well in under the collar's fronts, which open at 0.4 to 0.6)
-    ZB, ZT = 52.7, 54.0
-    # the plate is joined to the collar: its top is as wide as the collar's fronts and their foot beside the opening,
-    # at the collar's own radius and height, so its edges run from the collar's lower rim straight down to the point
-    W0, L = 1.05, 2.95
-    ZP, RP = 53.1, 0.14
-
-    def ztop(a):
-        return ZT - 0.2 * math.exp(-(a / 0.3) ** 2)
-
-    def band(a, v, out=0.0):
-        r = g_neck(a) + 0.02 + 0.05 * math.sin(math.pi * v) + out
-        return Vector((-r * math.sin(a), GC_Y - r * math.cos(a), lerp(ZB, ztop(a), v)))
-
-    def surf(x, z):
-        hit = T.ray_cast(Vector((x, -12.0, z)), Vector((0, 1, 0)), 20.0)
-        return hit[0].y if hit[0] is not None else 0.0
-
-    n, rows = 49, 10
-    angs = [lerp(-A, A, j / (n - 1)) for j in range(n)]
-    mesh_obj('Collar choker', face_out(grid(rows, n, lambda i, j: band(angs[j], 1.0 - i / (rows - 1))), axis_y=GC_Y),
-             M_COLLAR, body, solid=0.08, subdiv=1)
-    top = [band(a, 1.0, 0.03) for a in angs[3:-3]]
-    mesh_obj('Collar choker edge', tube(top, [0.08] * len(top), flat=1.0, n=8), M_GOLD, body, subdiv=0)
-
-    # the plate hanging from the band, as the reference's: a pentagon (a square section going straight down, then
-    # drawn to a point), and behind it a yoke either side joining it to the collar: from the collar's lower rim
-    # beside the opening, its edge runs diagonally in and down to the square section's lower corners
-    prow, pcol = 28, 29
-    SQ, HWP = 0.55, 0.5       # (how far down the square section runs, and the pentagon's half-angle)
-    def w_pent(t):
-        return HWP * (1.0 if t < SQ else (1.0 - t) / (1.0 - SQ)) + 0.01
-
-    def w_yoke(t):
-        return lerp(W0, HWP, min(1.0, t / SQ)) + 0.01
+    """The collar's fronts, and the choker. Below the band the collar does not close into a plate: each front runs
+    on down as a tapering strip of the same steel, leaving the ring's curve to lie on the chest, the two drawing
+    together to a point on the breastbone, so the opening between them is a V from the jaw to the chest. Both
+    edges of each front are rolled in brass, and a small gold medallion sits on the point. In the V, on the neck
+    itself, the choker: a snug gold band, rimmed, with a boss at the throat."""
+    from mathutils.bvhtree import BVHTree
+    W0 = 1.05                 # (the fronts' outer edge at their top: at the collar's foot beside the opening)
+    ZT, ZP, RP = 53.3, 51.0, 0.14
 
     def lay(a, z, rad, out=0.0):
         """(a smooth surface, with no ray casts in it: the ring's curve where it leaves the collar, coming forward
@@ -996,44 +972,62 @@ def build_throat_plate(body):
         d = yr - lie
         y = min(yr, lie) - 0.12 * math.exp(-(d / 0.35) ** 2)
         return Vector((x, y - out, z))
+    rows, cols = 30, 12
 
-    def plate(i, j, out=0.0):
-        """The pentagon: it grows out of the band's lower edge (the band's own surface there, with no step), and
-        only stands proud of what is behind it further down."""
-        t = i / (prow - 1)
-        u = lerp(-1.0, 1.0, j / (pcol - 1))
-        k = smoothstep(0.0, 0.28, t)
-        return lay(u * w_pent(t), ZB + 0.04 - L * t, lerp(0.03, RP, k), out * k)
-    ZC = ZB + 0.04 - L * SQ     # (the height of the square section's lower corners)
-    yrow = 16
+    def front(i, j, sg, out=0.0):
+        """One front: its top tucked up under the collar's foot, inside it, so it comes out from under the band;
+        its inner edge the V's line, its outer edge running in from the collar's foot to the same point."""
+        t = i / (rows - 1)
+        z = lerp(ZT, ZP, t)
+        a = lerp(collar_v(z), W0 * (1.0 - t) + 0.004, j / (cols - 1))
+        return lay(sg * a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, t)), out)
+    for sg, nm in ((1, 'a'), (-1, 'b')):
+        mesh_obj(f'Collar front {nm}', face_out(grid(rows, cols, lambda i, j, sg=sg: front(i, j, sg))), M_COLLAR, body,
+                 solid=0.08, subdiv=1)
+        # (the brass edges swell in from nothing below the collar's rim, so no stub pokes out above it)
+        for jj, en in ((0, 'inner'), (cols - 1, 'outer')):
+            i0 = 1 if jj == 0 else 5
+            pe = [front(i, jj, sg, 0.03) for i in range(i0, rows)]
+            mesh_obj(f'Collar front edge {en} {nm}',
+                     tube(pe, [0.07 * smoothstep(0, 4, k) + 0.008 for k in range(len(pe))], flat=1.0, n=8),
+                     M_GOLD, body, subdiv=0)
+    tip = lay(0.0, ZP + 0.42, RP, 0.2)
+    mesh_obj('Collar medallion', medallion(), M_GOLD, body, loc=tuple(tip), subdiv=1).scale = (0.5, 0.5, 0.5)
 
-    def yoke(i, j, out=0.0):
-        """The yoke either side: its top tucked up under the collar's foot, inside it, so it comes out from under
-        the collar instead of ending at its rim; its edge runs in to the square section's lower corners."""
-        t = i / (yrow - 1)
-        u = lerp(-1.0, 1.0, j / (pcol - 1))
-        return lay(u * (lerp(W0, HWP, t) + 0.01), lerp(53.3, ZC, t), lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, t)), out)
-    mesh_obj('Collar yoke', face_out(grid(yrow, pcol, yoke)), M_COLLAR, body, solid=0.08, subdiv=1)
-    for jj, nm in ((0, 'a'), (pcol - 1, 'b')):
-        # (its brass edge starts below the collar's rim and swells in from nothing, so no stub pokes out above it)
-        ye = [yoke(i, jj, 0.03) for i in range(5, yrow)]
-        mesh_obj(f'Collar yoke edge {nm}', tube(ye, [0.07 * smoothstep(0, 4, k) + 0.008 for k in range(len(ye))], flat=1.0, n=8),
+    # ---- the choker, on the neck: cast onto the neck's own surface, so it is snug all the way round
+    dg = bpy.context.evaluated_depsgraph_get()
+    vs, ps = [], []
+    for o in bpy.data.objects:
+        if o.type == 'MESH' and o.name in ('Head shape', 'Neck'):
+            me = o.evaluated_get(dg).to_mesh()
+            b_ = len(vs)
+            vs += [o.matrix_world @ v.co for v in me.vertices]
+            ps += [[b_ + i for i in pl.vertices] for pl in me.polygons]
+            o.evaluated_get(dg).to_mesh_clear()
+    NT = BVHTree.FromPolygons(vs, ps)
+    NY, CZ0, CZ1 = 0.45, 53.12, 53.72
+    cn, cr = 72, 7
+
+    def neck_r(a, z):
+        d = Vector((-math.sin(a), -math.cos(a), 0.0))
+        hit = NT.ray_cast(Vector((0.0, NY, z)) + d * 8.0, -d, 8.0)
+        return 8.0 - hit[3] if hit[0] is not None else 1.7
+
+    def choker(a, v, out=0.0):
+        z = lerp(CZ0, CZ1, v)
+        # (a band, not a film: one radius down its width at each angle, the widest the neck is under it there)
+        r = max(neck_r(a, CZ0), neck_r(a, (CZ0 + CZ1) / 2), neck_r(a, CZ1)) + 0.05 + out
+        return Vector((-r * math.sin(a), NY - r * math.cos(a), z))
+    cang = [2 * math.pi * k / cn for k in range(cn + 1)]
+    cbm = face_out(grid(cr, cn + 1, lambda i, j: choker(cang[j], 1.0 - i / (cr - 1))), axis_y=NY)
+    bmesh.ops.remove_doubles(cbm, verts=cbm.verts, dist=1e-4)
+    mesh_obj('Choker', cbm, M_GOLD, body, solid=0.06, subdiv=1)
+    for v_, nm in ((1.0, 'top'), (0.0, 'foot')):
+        mesh_obj(f'Choker rim {nm}', tube([choker(a, v_, 0.05) for a in cang], [0.075] * (cn + 1), flat=1.0, n=8),
                  M_GOLD, body, subdiv=0)
-    mesh_obj('Collar plate', face_out(grid(prow, pcol, lambda i, j: plate(i, j, 0.12))), M_COLLAR, body, solid=0.08, subdiv=1)
-    # (the plate's brass edge likewise swells in below the band, down each side and round the point)
-    ei = list(range(2, prow))
-    edge = [plate(i, 0, 0.16) for i in ei] + [plate(i, pcol - 1, 0.16) for i in reversed(ei[:-1])]
-    rad = [0.08 * smoothstep(0, 4, min(k, len(edge) - 1 - k)) + 0.015 for k in range(len(edge))]
-    mesh_obj('Collar plate edge', tube(edge, rad, flat=1.0, n=8), M_GOLD, body, subdiv=0)
-    # studs in pairs down the middle of the plate, as the reference's, and a pair on the band
-    jl, jr = round(0.36 * (pcol - 1)), round(0.64 * (pcol - 1))
-    st = [band(sg * 0.14, 0.5, 0.06) for sg in (-1, 1)]
-    st += [plate(i, jj, 0.2) for i in (5, 10, 15, 19) for jj in (jl, jr)]
-    mesh_obj('Collar plate studs', dots(st, 0.16), M_GOLD, body, subdiv=0)
-    # (the plate stitched down onto the yoke, a row of stitches outside each side of the square section)
-    sti = [yoke(i, jj, 0.06) for i in range(4, yrow - 1) for jj in (round(0.16 * (pcol - 1)), round(0.84 * (pcol - 1)))]
-    # (the collar's fronts lie on the band with no seam drawn along them)
-    mesh_obj('Collar stitching', dots(sti, 0.1), M_STITCH, body, subdiv=0)
+    mesh_obj('Choker boss', ellipsoid(0.34, 0.16, 0.3, 14, 8), M_GOLD, body, loc=tuple(choker(0.0, 0.5, 0.1)), subdiv=1)
+    mesh_obj('Choker studs', dots([choker(sg * a, 0.5, 0.1) for a in (0.5, 0.95, 1.4) for sg in (-1, 1)], 0.13),
+             M_GOLD, body, subdiv=0)
 
 
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
