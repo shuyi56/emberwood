@@ -5,6 +5,7 @@ import { makeDummy, CYCLE } from './dummy.js';
 import { SpringBones, findChains } from '../world/springbones.js';
 import { WARDEN_COLLIDERS, makeColliders } from '../world/cape-rig.js';
 import { attachHairSprings } from '../world/hair-rig.js';
+import { HeadMotion } from '../world/head-motion.js';
 
 // the bench advances in fixed frames of 1/60 s whatever the display does, so every run is the same
 export const FRAME = 1 / 60;
@@ -70,6 +71,8 @@ export class CapeSim {
     this.springs.reset();
     // her hair, when the body has it (the Warden's model): its own springs, with its own settings
     this.hair = this.dummy.hair ? attachHairSprings(root) : null;
+    // her head on its spring over the neck (the Warden's model; the stand-in has no head)
+    this.head = this.opts.headMotion === false ? null : HeadMotion.attach(root);
   }
   restart() {
     this.t = 0; this.frame = 0; this.x = 0; this.z = 0; this.heading = 0; this.speed = 0; this.phase = 0;
@@ -106,6 +109,7 @@ export class CapeSim {
     const w = this.speed / PACE;
     if (w < 0.02) this.phase = 0;      // standing: back to the stance
     this.dummy.pose(this.phase, w, this.t);
+    if (this.head) this.head.update(dt);
     this.dummy.root.updateMatrixWorld(true);
     if (this.opts.springs) { this.springs.update(dt); if (this.hair) this.hair.update(dt); }
     else for (const b of [...this.dummy.cape.bones, ...(this.dummy.hair ? this.dummy.hair.bones : [])]) b.quaternion.copy(b.userData.rest);

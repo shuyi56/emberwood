@@ -78,7 +78,9 @@ cape at rest, or the cape puffs out where they overlap; the stand-in's cape is s
 2. In `src/world/main.js`, after the model loads: `hero.cape = attachCapeSprings(m)` and
    `hero.hair = attachHairSprings(m)` (after the cape, so the hair finds the cape's bones and rests on them).
    Each frame, after `poseModel(h)`: `m.updateMatrixWorld(true); hero.cape.update(dt); hero.hair.update(dt)`,
-   the cape first. Call `reset()` on both after a teleport.
+   the cape first. Call `reset()` on both after a teleport. Before them, `hero.headMotion = HeadMotion.attach(m)`
+   (`src/world/head-motion.js`) and `hero.headMotion.update(dt)` give her head a nod, a sway and a turn on a
+   spring over the neck (the walk holds it upright), which the hair then hangs from.
 3. Her hair from the Face Creator is modelled lying a little inside the cape's collar band at the back. The
    bench lifts it out over the band when it re-skins her hair (`clearOfCape` in `src/cape-lab/model-body.js`);
    the lasting fix is the hairstyle in the Face Creator, or the band sitting closer to her neck.
