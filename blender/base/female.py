@@ -816,7 +816,45 @@ def make_material(mid):
     return m
 
 
-def skin_surface(nt, bsdf, out):
+# The skin's close-up shading, as candidate looks (skin_study.py renders them side by side on stand-in shapes,
+# without building a figure); SKIN_LOOK is the one the figures wear. Each look lists only what it changes from the
+# one before it in the table, so the study shows what every step adds:
+# - fresnel: the reflection of real skin. Skin's surface is a dielectric of IOR about 1.4 (F0 about 2.8%), which
+#   is the Principled default at Specular IOR Level 0.5; turning that level down (0.38 before) cuts the grazing
+#   reflection that rims a face in light. And light inside skin scatters mostly forward (anisotropy about 0.8),
+#   which keeps the scattering from going milky.
+# - oil: a second, sharper highlight. Measured skin fits two specular lobes: a broad one from the skin itself and a
+#   tighter one from the thin film of sebum over it, strongest on the nose, the brow and the chin. The film is the
+#   coat here, weighted by the 'skin fx' gloss channel, and it alone carries the full pores and creases (Coat
+#   Normal), while the scattered light under it sees a softer relief, as light that has spread inside the skin does.
+# - fuzz: the vellus hair (peach fuzz): a faint sheen that lifts the skin where it turns away from the viewer, so
+#   the outline of the face goes soft instead of cut out.
+# - patchy: how glossy and how reflective the skin is drifts in patches a centimetre or two across, so a highlight
+#   breaks up instead of sliding over it as over moulded plastic.
+SKIN_LOOKS = {
+    'current': dict(spec=0.38, aniso=0.0, rough=(0.56, 0.38), coat=(0.0, 0.0), coat_rough=(0.35, 0.35),
+                    base_bump=1.0, sheen=0.0, patch=0.0),
+    'fresnel': dict(spec=0.5, aniso=0.8),
+    'oil': dict(rough=(0.62, 0.5), coat=(0.08, 0.4), coat_rough=(0.42, 0.26), base_bump=0.45),
+    'fuzz': dict(sheen=0.35),
+    'patchy': dict(patch=1.0),
+    # (the study's pick: all of the above, with the fuzz turned down, as at 0.35 it frosted the outline white, and
+    # the oil film thinner and less glossy: on the ranger's face (#125) the full film ran down the nose bridge and
+    # the far cheek as a wet streak)
+    'final': dict(sheen=0.15, coat=(0.05, 0.22), coat_rough=(0.46, 0.33)),
+    # the skin built in layers (skin_layers.py: a flesh base, veins, the epidermis over both), its epidermis the
+    # figure's baked 'skin' tone
+    'layered': dict(layers=True),
+}
+for _a, _b in zip(list(SKIN_LOOKS), list(SKIN_LOOKS)[1:]):
+    SKIN_LOOKS[_b] = {**SKIN_LOOKS[_a], **SKIN_LOOKS[_b]}
+SKIN_LOOK = 'current'
+# the face creator's Fair swatch (#efcfb9) for the figure's skin, in place of the ranger's tone: views.py --set SKIN_FAIR=1
+SKIN_FAIR = False
+SKIN_FAIR_TONE = [239, 207, 185]
+
+
+def skin_surface(nt, bsdf, out, look=None):
     """What the skin looks like up close (the sprite renders keep the plain diffuse surface; see sprite_mode). Its
     colour is the baked 'skin' tone (see skin_tones): rosier at the cheeks, nose, chin, knuckles and fingertips,
     cooler and a little darker under the eyes and the jaw, warmer where it is shut in. Light passes into it and
@@ -831,8 +869,18 @@ def skin_surface(nt, bsdf, out):
     - colour that is not even: blotches a little redder or sallower, a fine speckle, the grooves and pores a
       shade darker, and a light scatter of freckles over the nose and cheeks and the backs of the hands;
     - a sheen that breaks up over the relief: rougher in the grooves, glossier on the nose, chin and brow.
-    The 'skin tex' colour says where (red: freckles, green: creases, blue: pores)."""
+    The 'skin tex' colour says where (red: freckles, green: creases, blue: pores). The look (SKIN_LOOKS, by name
+    or by its place in the table) sets the reflection, the oil film, the fuzz and the patchiness."""
+    look = SKIN_LOOK if look is None else look
+    K = SKIN_LOOKS[look] if isinstance(look, str) else list(SKIN_LOOKS.values())[int(look)]
     L = nt.links.new
+    if K.get('layers'):
+        import skin_layers
+        bsdf.name = 'sprite bsdf'
+        col_ = nt.nodes.new('ShaderNodeVertexColor')
+        col_.layer_name = 'skin'
+        skin_layers.skin_layers(nt, out, 'all', col_.outputs['Color'])
+        return
 
     def node(kind, **props):
         n = nt.nodes.new(kind)
@@ -944,17 +992,48 @@ def skin_surface(nt, bsdf, out):
     L(c, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
     sb.inputs['Subsurface Weight'].default_value = 1.0
+    # (the mean free paths of measured skin, red 3.7, green 1.4, blue 0.7 mm: Jensen et al. 2001)
     sb.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.18)
     sb.inputs['Subsurface Scale'].default_value = 0.12      # (one unit is about 2.7 cm on her)
-    sb.inputs['Specular IOR Level'].default_value = 0.38
+    sb.inputs['Subsurface Anisotropy'].default_value = K['aniso']
     sb.inputs['IOR'].default_value = 1.4
+    # patches a centimetre or two across where the skin is a little glossier or duller, more or less reflective
+    pn = tex('ShaderNodeTexNoise', 0.9)
+    pn.inputs['Detail'].default_value = 2.0
+    patch = math_('MULTIPLY', math_('SUBTRACT', pn.outputs['Fac'], 0.5), 2.0 * K['patch'])     # about -0.3..0.3
+    spec = math_('MULTIPLY', K['spec'], math_('MULTIPLY_ADD', patch, 0.5, 1.0))
+    # (the pores and grooves hold less light to send back)
+    L(math_('MULTIPLY', spec, math_('SUBTRACT', 1.0, math_('MULTIPLY', pit, 0.5 * K['patch']))),
+      sb.inputs['Specular IOR Level'])
     # gloss: the 'skin fx' blue channel is how oily the skin is there (nose, chin, brow); the grooves, pores and
     # creases are duller than the plateaus between them, which breaks the highlight up into a skin-like sparkle
-    rough = ramp_(fx.outputs['Blue'], 0.0, 1.0, 0.56, 0.38, smooth=False)
+    rough = ramp_(fx.outputs['Blue'], 0.0, 1.0, K['rough'][0], K['rough'][1], smooth=False)
     rough = math_('ADD', rough, math_('MULTIPLY_ADD', math_('SUBTRACT', 1.0, net), 0.06,
                                       math_('MULTIPLY_ADD', pit, 0.14, math_('MULTIPLY', fine.outputs['Fac'], 0.08))))
+    rough = math_('MULTIPLY_ADD', patch, -0.25, rough)
     L(rough, sb.inputs['Roughness'])
-    L(bump.outputs['Normal'], sb.inputs['Normal'])
+    # the relief: in full for the surface reflections, softer for the light that has spread inside the skin
+    if K['base_bump'] < 1.0:
+        soft = node('ShaderNodeBump')
+        soft.inputs['Strength'].default_value = 0.2 * K['base_bump']
+        soft.inputs['Distance'].default_value = 0.03
+        L(height, soft.inputs['Height'])
+        L(soft.outputs['Normal'], sb.inputs['Normal'])
+    else:
+        L(bump.outputs['Normal'], sb.inputs['Normal'])
+    # the film of oil: a clear coat, thicker and glossier where the skin is oily, broken by the pores
+    if K['coat'][1] > 0.0:
+        cw = ramp_(fx.outputs['Blue'], 0.0, 1.0, K['coat'][0], K['coat'][1], smooth=False)
+        L(math_('MULTIPLY', cw, math_('SUBTRACT', 1.0, math_('MULTIPLY', pit, 0.6))), sb.inputs['Coat Weight'])
+        cr = ramp_(fx.outputs['Blue'], 0.0, 1.0, K['coat_rough'][0], K['coat_rough'][1], smooth=False)
+        L(math_('MULTIPLY_ADD', patch, -0.15, cr), sb.inputs['Coat Roughness'])
+        sb.inputs['Coat IOR'].default_value = 1.45
+        L(bump.outputs['Normal'], sb.inputs['Coat Normal'])
+    # the fuzz: a soft sheen at grazing angles, a little warm
+    if K['sheen'] > 0.0:
+        sb.inputs['Sheen Weight'].default_value = K['sheen']
+        sb.inputs['Sheen Roughness'].default_value = 0.4
+        sb.inputs['Sheen Tint'].default_value = (1.0, 0.86, 0.78, 1.0)
     L(sb.outputs['BSDF'], out.inputs['Surface'])
 
 
@@ -996,7 +1075,7 @@ def skin_tones():
     the jaw, between the fingers) it goes darker and warmer, the way light that has passed through skin comes
     out red."""
     from mathutils.bvhtree import BVHTree
-    base, flushc, cool = _srgb_lin(SKIN[2]), _srgb_lin([204, 128, 112]), _srgb_lin([164, 138, 126])
+    base, flushc, cool = _srgb_lin(SKIN_FAIR_TONE if SKIN_FAIR else SKIN[2]), _srgb_lin([204, 128, 112]), _srgb_lin([164, 138, 126])
     deep = _srgb_lin([150, 78, 64])
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
@@ -1028,6 +1107,7 @@ def skin_tones():
         n = len(co)
         flush, shade, gloss, cold = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
         freck, crease, pores = np.zeros(n), np.zeros(n), np.full(n, 0.3)
+        thin = np.zeros(n)       # how thin the skin is, so how much of the veins under it shows (skin_layers.py)
         if o.name == 'Head shape':
             u, w = co[:, 0] / HEAD_H, co[:, 2] / HEAD_H
             front = np.clip(-nr[:, 1] * 1.5, 0, 1)
@@ -1041,6 +1121,8 @@ def skin_tones():
                              + 0.5 * _g(u, w, 0, 0.66, 0.15, 0.06))
             # texture: freckles in a band over the nose and the tops of the cheeks, a few on the brow; pores on
             # the nose, the cheeks beside it, the chin and the brow
+            thin = front * np.clip(0.9 * (_g(u, w, -0.215, 0.5, 0.045, 0.075) + _g(u, w, 0.215, 0.5, 0.045, 0.075))
+                                   + 0.7 * _g(u, w, 0, 0.5, 0.03, 0.06) + 0.8 * cold, 0, 1)    # the temples, the bridge of the nose, under the eyes
             freck = front * np.clip(_g(u, w, 0, 0.42, 0.3, 0.075) + 0.3 * _g(u, w, 0, 0.68, 0.2, 0.06), 0, 1)
             pores = np.clip(0.3 + front * (gloss + 0.7 * (_g(u, w, -0.1, 0.39, 0.09, 0.07) + _g(u, w, 0.1, 0.39, 0.09, 0.07))), 0, 1)
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
@@ -1050,6 +1132,7 @@ def skin_tones():
             # the ears: rosier than the face, most of all round the rim and in the lobe, and dark in the bowl,
             # the groove inside the rim and the fold behind (see ear_tones); a faint crease along the rim's roll
             flush, shut = EAR_TONES[o.name]
+            thin = np.full(n, 0.6)
             gloss = 0.15 * (1 - shut)
             crease = 0.3 * shut
             occ = np.maximum(shut, _occlusion([o.matrix_world @ Vector(c) for c in co],
@@ -1057,6 +1140,7 @@ def skin_tones():
                                               world_tree(head_parts), dist=0.8))
         elif o.name == 'Neck':
             t = np.clip((co[:, 2] - 51.0) / 2.5, 0, 1)        # 0 at the collar, 1 where it meets the head's throat
+            thin = np.clip(0.5 * np.abs(nr[:, 0]), 0, 1)     # the sides of the neck
             cold = 0.35 + 0.5 * t ** 2       # the neck sits in the head's shade: cooler than the face throughout
             crease = np.full(n, 0.22)        # the faint rings round a neck
             occ = _occlusion([o.matrix_world @ Vector(c) for c in co],
@@ -1073,6 +1157,7 @@ def skin_tones():
             flush = 0.15 * outside + 0.35 * np.exp(-((z + UPPER) / 0.9) ** 2) * np.clip(nr[:, 1], 0, 1)
             cold = 0.3 * inside + 0.3 * np.clip((-z - UPPER - FORE + 2.0) / 2.0, 0, 1)
             crease = 0.2 * np.exp(-((z + UPPER) / 0.4) ** 2) * np.clip(-nr[:, 1], 0, 1)   # inside the elbow
+            thin = np.clip(0.5 * inside + 0.8 * np.clip((-z - UPPER - FORE + 2.0) / 2.0, 0, 1), 0, 1)   # the inside of the arm, the wrist
             pores = np.full(n, 0.08)     # (fine-grained skin: the face's pores read as red grain on an arm)
             local = BVHTree.FromPolygons([v.co for v in me.vertices], [list(p.vertices) for p in me.polygons])
             occ = _occlusion(co, nr, local, dist=0.9)
@@ -1088,6 +1173,7 @@ def skin_tones():
             flush += 0.35 * np.clip(s * nr[:, 0], 0, 1) * np.clip((-z - 0.5) / 2, 0, 1)   # the palm is pinker
             cold = 0.45 * np.clip(1 - np.abs(z + 0.2) / 1.2, 0, 1) * back                  # the thin skin at the wrist
             gloss = 0.3 * np.clip((-z - 5.3) / 0.8, 0, 1)
+            thin = np.clip(0.8 * back + 0.9 * np.clip(1 - np.abs(z + 0.2) / 1.5, 0, 1), 0, 1)   # the back of the hand and the wrist
             # texture: creases over each knuckle (on the back) and fainter all round the fingers' joints, a few
             # freckles on the back of the hand
             joints = np.exp(-((z + 3.15) / 0.4) ** 2) + np.exp(-((z + 4.5) / 0.34) ** 2)
@@ -1114,7 +1200,8 @@ def skin_tones():
         for name, rgb in (('skin', c), ('skin fx', np.stack([flush, shade, gloss], 1)),
                           ('skin tex', np.stack([freck, crease, pores], 1))):
             a = me.color_attributes.new(name, 'FLOAT_COLOR', 'POINT')
-            a.data.foreach_set('color', np.concatenate([rgb, np.ones((n, 1))], 1).astype(np.float32).ravel())
+            alpha = np.clip(thin, 0, 1)[:, None] if name == 'skin tex' else np.ones((n, 1))      # ('skin tex' alpha: thin skin)
+            a.data.foreach_set('color', np.concatenate([rgb, alpha], 1).astype(np.float32).ravel())
         me.color_attributes.active_color = me.color_attributes['skin']
         me.color_attributes.render_color_index = me.color_attributes.find('skin')
 
@@ -3853,6 +3940,11 @@ GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -30), (0.7, -4), 
 # folding to about 60 degrees as it swings forward, just behind the shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum. The arm
 # swings and folds in the plane of the walk, so it reads from the side camera: nothing swings in toward the body.
 ARM_LAG, ELBOW_LAG = 0.05, 0.03
+# How the arm hangs at rest: ARM_OUT, how far the upper arm is held out from the body at the shoulder; ARM_CARRY, the
+# forearm's own angle out from the upper arm at the elbow (the carrying angle, which takes the hand past the hip); and
+# for each side (1 her right, -1 her left) the upper arm's swing forward and the elbow's bend in the idle stance.
+ARM_OUT, ARM_CARRY = 0.17, 0.0
+IDLE_ARM = {1: (0.12, 0.32), -1: (-0.04, 0.2)}
 STANCE = 0.62
 # The trunk (in radians, and design pixels for the sway): the pelvis turns about its vertical axis with the legs, the
 # hip of the leg swinging through carried forward with it; it lists, the hip over the standing leg high and the
@@ -4078,12 +4170,11 @@ def pose(col):
             bend = 0.42 + 0.2 * fold
             flick = 0.08 + 0.05 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
-            a = 0.12 if s > 0 else -0.04
-            bend = 0.32 if s > 0 else 0.2
+            a, bend = IDLE_ARM[s]
             flick = 0.1
         # (held a little off the body, so the waist shows, and a little further out as it swings back, past the hip)
-        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
-        el.rotation_euler = (-bend, 0, 0)
+        sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
+        el.rotation_euler = (-bend, s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
 
 
@@ -4142,8 +4233,8 @@ def pose_locked(col):
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
-        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
-        el.rotation_euler = (-(L_BEND + L_FOLD * fold), 0, 0)
+        sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
+        el.rotation_euler = (-(L_BEND + L_FOLD * fold), s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
 
 
