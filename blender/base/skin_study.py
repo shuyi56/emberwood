@@ -4,7 +4,11 @@ finger. They stand under the figure views' own world and key, fill and rim light
 from behind the shapes as well as in front, so the scattering shows through the lobe and the finger. Nothing of a
 figure is built, so it renders in seconds: a skin material change is judged here, not on a figure render.
 
-    python3 blender/base/skin_study.py [--out DIR] [--size 300] [--samples 64] [--looks current,oil] [--denoise] [--dry]
+    python3 blender/base/skin_study.py [--out DIR] [--size 300] [--samples 64] [--looks current,oil] [--denoise]
+                                       [--tone fair] [--dry]
+
+--tone     the skin's base colour: a face creator swatch (ranger, fair, light, olive, tan, brown, deep) or a hex
+           colour such as efcfb9; default the figures' own (female.SKIN[2])
 
 Writes DIR/swatches.png (default DIR: the system temp dir + 'skin-study'), and with --denoise also
 DIR/swatches-denoised.png from the same scene, to show how much of the grain is render noise. --dry builds the
@@ -32,6 +36,19 @@ def opt(flag, default=None):
     return argv[argv.index(flag) + 1] if flag in argv else default
 
 
+# the face creator's skin swatches (SKIN_SWATCHES in its main.js)
+TONES = {'ranger': 'cf9f84', 'fair': 'efcfb9', 'light': 'e2b597', 'olive': 'c39a6e', 'tan': 'b07a55',
+         'brown': '8a573a', 'deep': '5c3826'}
+TONE = None
+
+
+def tone_rgb(t):
+    h = TONES.get(t.lower(), t).lstrip('#')
+    if len(h) != 6 or any(ch not in '0123456789abcdefABCDEF' for ch in h):
+        sys.exit(f'skin_study.py: --tone takes {", ".join(TONES)} or a hex colour (got {t})')
+    return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+
+
 def shape(name, bm, loc, mat, maps, scale=(1, 1, 1), rot=(0, 0, 0)):
     """A stand-in with the skin's point colours: maps(local co) -> (flush, shade, gloss, freckles, creases, pores)."""
     me = bpy.data.meshes.new(name)
@@ -47,7 +64,7 @@ def shape(name, bm, loc, mat, maps, scale=(1, 1, 1), rot=(0, 0, 0)):
     # ('rest': the figure's meshes carry their rest positions for the procedural textures to ride on)
     me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT').data.foreach_set('vector', [c for v in co for c in v])
     import female
-    base = female._srgb_lin(female.SKIN[2])
+    base = female._srgb_lin(TONE or female.SKIN[2])
     vals = np.array([maps(v.co) for v in me.vertices], dtype=np.float64)
     skin = np.tile([*base, 1.0], (len(co), 1))
     fx = np.column_stack([vals[:, 0], vals[:, 1], vals[:, 2], np.ones(len(co))])
@@ -70,6 +87,8 @@ def main():
     bad = [k for k in looks if k not in female.SKIN_LOOKS]
     if bad:
         sys.exit(f'skin_study.py: no such look {", ".join(bad)} (looks: {", ".join(female.SKIN_LOOKS)})')
+    global TONE
+    TONE = tone_rgb(opt('--tone')) if opt('--tone') else None
     out = opt('--out', os.path.join(tempfile.gettempdir(), 'skin-study'))
     os.makedirs(out, exist_ok=True)
     size, samples = int(opt('--size', 300)), int(opt('--samples', 64))
@@ -140,7 +159,7 @@ def main():
     if hasattr(sc.render.image_settings, 'media_type'):
         sc.render.image_settings.media_type = 'IMAGE'
     sc.render.image_settings.file_format = 'PNG'
-    print('swatches:', ', '.join(looks), flush=True)
+    print('swatches:', ', '.join(looks), 'tone', TONE or female.SKIN[2], flush=True)
     if '--dry' in argv:
         return
     files = ['swatches.png']
