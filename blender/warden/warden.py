@@ -2659,7 +2659,11 @@ def build():
     mesh_obj('Buckle', frame_bm(1.6, 1.7, 0.3, 0.3), M_GOLD, body, loc=(0, by_ - 0.42, 39.4), subdiv=0)
     mesh_obj('Buckle prong', box(0.9, 0.16, 0.16), M_GOLD, body, loc=(0.22, by_ - 0.56, 39.4), subdiv=0)
 
-    # ---- neck and head (the base figure's)
+    # ---- neck and head (the base figure's; with the creator's head, only the plain head shape, which it replaces)
+    global _CREATOR
+    _CREATOR = creator_head_wanted()
+    if _CREATOR:
+        female.MANNEQUIN = True     # (no Blender face, eyes or hair: the creator's head brings its own)
     head, head_tree = build_head(body)
 
     # ---- the hair: the face creator's long waves with a centre parting (lifted clear of the clothes after the rig)
@@ -3164,8 +3168,112 @@ def build():
         t_ = time.time()
         creator_hair_trim()
         print(f'hair trim {time.time() - t_:.0f} s', flush=True)
-    hair_contact_shade()
+    if _CREATOR:
+        female.MANNEQUIN = False
+        hang_creator_head(CREATOR_HEAD)
+    elif not female.MANNEQUIN:
+        hair_contact_shade()
     return res
+
+
+# ---- the Face Creator's own head and hair, in place of the Blender head (as the game model has them)
+# (exported by tools/creator-head/export-head.js from the creator's Warden preset, with the game's WORLD settings;
+# 70 MB, so it lives in the project files, not the repository. WARDEN_HEAD_GLB='' builds the Blender head instead)
+CREATOR_HEAD = os.environ.get('WARDEN_HEAD_GLB', '/mnt/project-files/warden/creator-head/warden-head.glb')
+CREATOR_NECK_CUT = -0.65     # (where the creator's neck is cut, in its own frame: about where it is as wide as the body's)
+CREATOR_NECK_FADE = 0.6      # (its baked shade under the chin faded out from here down to the cut)
+_CREATOR = False
+
+
+def creator_head_wanted():
+    return bool(CREATOR_HEAD) and os.path.exists(CREATOR_HEAD) and not female.MANNEQUIN
+
+
+def hang_creator_head(path):
+    """The creator's head and hair (a glb in the frame of the Head empty: chin at 0, face to the front) hung on the
+    Head empty in place of the plain head shape, as merge-head.mjs hangs them in the game model. Its unlit veil
+    over the locks left out; its neck cut a little under the jaw, where the body's neck carries on; its hair casts
+    no shadow on the face and its wisps fade instead of stepping (see hair_tip_cut)."""
+    head = bpy.data.objects['Head']
+    if 'Head shape' in bpy.data.objects:
+        bpy.data.objects.remove(bpy.data.objects['Head shape'])
+    before = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=path)
+    new = [o for o in bpy.data.objects if o not in before]
+    for o in new:
+        if o.parent is None:
+            o.parent = head
+            o.matrix_parent_inverse.identity()
+    # (the veil: a soft, unlit, blended layer the creator lays over the locks beside the face for its own light;
+    # here it fell over the cheeks as a speckled brown film)
+    for o in list(new):
+        mats = [s_.material for s_ in o.material_slots if s_.material] if o.type == 'MESH' else []
+        if mats and all(not any(n.type == 'BSDF_PRINCIPLED' for n in m_.node_tree.nodes) for m_ in mats):
+            new.remove(o)
+            bpy.data.objects.remove(o)
+    for o in new:
+        if o.type != 'MESH' or not o.name.startswith('head part 0'):
+            continue
+        # (the creator's neck turns in under the body's at its foot: cut off where the two are the same width)
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        M = o.matrix_basis
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if (M @ v.co).z < CREATOR_NECK_CUT], context='VERTS')
+        bm.to_mesh(o.data)
+        bm.free()
+        # (and the shade it bakes down its neck faded out, so the cut does not end in a hard line on the body's neck)
+        col = o.data.attributes.get('Color')
+        if col is not None and col.domain == 'CORNER':
+            for li, lp in enumerate(o.data.loops):
+                z = (M @ o.data.vertices[lp.vertex_index].co).z
+                t = min(1.0, max(0.0, (CREATOR_NECK_FADE - z) / (CREATOR_NECK_FADE - CREATOR_NECK_CUT)))
+                if t > 0:
+                    t = t * t * (3 - 2 * t)
+                    c = col.data[li].color
+                    col.data[li].color = tuple(c[i] + (1.0 - c[i]) * t for i in range(3)) + (c[3],)
+    done = set()
+    for o in new:
+        if o.type != 'MESH' or o.name.startswith('head part 0'):
+            continue
+        for m in {s_.material for s_ in o.material_slots if s_.material}:
+            if m.name in done:
+                continue
+            nt = m.node_tree
+            out = next((n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'), None)
+            bsdf = next((n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            if out is None or bsdf is None or not bsdf.inputs['Alpha'].links:
+                continue      # (only the hair carries a cut-out; the eyes and teeth do not)
+            done.add(m.name)
+            # (soft tips: the glTF MASK imports as alpha = 1 - (a < 0.5); ramped over 0..0.5 instead, so what the
+            # cut kept stays solid and only the wisps it dropped fade)
+            cut = bsdf.inputs['Alpha'].links[0].from_node
+            if cut.type == 'MATH' and cut.operation == 'SUBTRACT' and cut.inputs[1].links:
+                lt = cut.inputs[1].links[0].from_node
+                if lt.type == 'MATH' and lt.operation == 'LESS_THAN' and lt.inputs[0].links:
+                    ramp = nt.nodes.new('ShaderNodeMapRange')
+                    ramp.inputs['From Min'].default_value = 0.0
+                    ramp.inputs['From Max'].default_value = 0.5
+                    nt.links.new(lt.inputs[0].links[0].from_socket, ramp.inputs['Value'])
+                    nt.links.new(ramp.outputs['Result'], bsdf.inputs['Alpha'])
+            # (and no shadow on the face: shadow, diffuse and glossy rays see each lock as HAIR_SHADOW opaque)
+            src = out.inputs['Surface'].links[0].from_socket
+            lp = nt.nodes.new('ShaderNodeLightPath')
+            mx = [nt.nodes.new('ShaderNodeMath') for _ in range(3)]
+            mx[0].operation = mx[1].operation = 'MAXIMUM'
+            mx[2].operation = 'MULTIPLY'
+            nt.links.new(lp.outputs['Is Shadow Ray'], mx[0].inputs[0])
+            nt.links.new(lp.outputs['Is Diffuse Ray'], mx[0].inputs[1])
+            nt.links.new(mx[0].outputs[0], mx[1].inputs[0])
+            nt.links.new(lp.outputs['Is Glossy Ray'], mx[1].inputs[1])
+            nt.links.new(mx[1].outputs[0], mx[2].inputs[0])
+            mx[2].inputs[1].default_value = 1.0 - HAIR_SHADOW
+            tr = nt.nodes.new('ShaderNodeBsdfTransparent')
+            mix = nt.nodes.new('ShaderNodeMixShader')
+            nt.links.new(mx[2].outputs[0], mix.inputs['Fac'])
+            nt.links.new(src, mix.inputs[1])
+            nt.links.new(tr.outputs['BSDF'], mix.inputs[2])
+            nt.links.new(mix.outputs['Shader'], out.inputs['Surface'])
+    print(f'creator head: {len(new)} objects, hair shadow off on {len(done)} materials', flush=True)
 
 
 def hair_contact_shade(reach=1.3, near=0.25, depth=1.0):
