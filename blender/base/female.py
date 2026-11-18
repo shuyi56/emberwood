@@ -4142,6 +4142,10 @@ def locked_hips(tr):
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
+    # (the run carries the head forward on the leaning chest: every other pose has it at rest)
+    ob['Head'].location, ob['Head'].rotation_euler = (0, 0, HEAD_Z), (0, 0, 0)
+    if walking and RUN:
+        return pose_run(col)
     if walking and LOCKED_WALK:
         return pose_locked(col)
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
@@ -4265,6 +4269,161 @@ def pose_locked(col):
         sh.rotation_euler = (-a, s * (ARM_OUT + L_ARM_CLEAR + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-(L_BEND + L_FOLD * fold), s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
+
+
+# ---- the run
+# Built like the world's walk (planted feet, the legs solved to reach them), but a run is a different gait, not a
+# fast walk: each foot is on the ground for only about a third of the cycle, so between one foot pushing off and the
+# other landing she is in the air; the body is lowest in mid-stance, the standing knee bent well under it like a
+# spring, and highest in mid-flight; the foot lands nearly flat and close under the hip instead of reaching out onto
+# the heel; behind her the heel is whipped up toward the seat, the knee folding past a right angle, and the knee is
+# then driven forward and up before the lower leg reaches down for the ground, already moving back as it lands.
+# The trunk leans into it, the elbows are held at about a right angle, and the arms pump from the shoulder.
+RUN = False             # pose() plays the run instead of the walk (views.py --run; an exporter keying a run clip)
+RUN_STRIDE = 2.8        # the ground one cycle (two steps) covers, in leg lengths, thigh + shin (see run_stride)
+RUN_SECONDS = 0.64      # one cycle at that pace
+RUN_STANCE = 0.32       # the part of a leg's cycle its foot is on the ground (the other lands at 0.5: flight between)
+RUN_AHEAD = 0.30        # how much of the stance's travel lies ahead of the hip as the foot lands
+RUN_SINK = 46.0         # the standing knee's bend in mid-stance, degrees
+RUN_RISE = 0.075        # how far the hips rise from mid-stance to mid-flight, in leg lengths
+# the hips' height through one step (half a cycle: how far through it, how much of RUN_RISE): already coming down as
+# the foot lands, lowest as the standing knee takes the weight, driven up through the push-off (the leg straightening
+# and the foot rolling onto its ball lift her far more than the short flight does), and over the top in the air
+R_HIPS = [(0.0, 0.34), (0.3, 0.0), (0.64, 0.86), (0.82, 1.0)]
+# the foot's pitch from level (toes up positive): landing nearly flat, the heel peeling up from mid-stance and the
+# foot rolled far onto the ball as it pushes off; trailing, toes pointed back, as the heel comes up behind; then
+# drawn level as the knee drives through, and the toes lifted a little to meet the ground
+R_GAIT_FOOT = [(0.0, 6), (0.04, 0), (0.14, 0), (0.21, -14), (0.27, -38), (0.32, -62), (0.42, -70), (0.56, -52),
+               (0.72, -20), (0.84, 2), (0.94, 8)]
+# the ankle's path through the swing: (how far through the swing, forward of the hip, height above its standing
+# height), the last two in leg lengths (thigh + shin), between leaving the ground and landing. Trailing behind and
+# rising; the heel at its highest behind the seat; the knee driven through; the lower leg reaching down ahead
+R_SWING = [(0.20, -0.66, 0.36), (0.42, -0.30, 0.47), (0.64, 0.17, 0.27), (0.86, 0.33, 0.10)]
+RUN_LEAN, RUN_HEAD = 0.15, 0.3      # the chest's lean into the run, and how much of it the head follows
+R_PELVIS_TURN, R_PELVIS_LIST, R_SWAY = 0.12, 0.05, 0.35
+# the arms: the upper arm pumps R_ARM_SWING either way about a line R_ARM_BACK behind straight down (the elbow is
+# drawn well back past the ribs, the hand comes forward to about chest height); the elbow is held near a right angle,
+# closing a little as the arm comes forward and opening as it drives back
+R_ARM_SWING, R_ARM_BACK, R_ARM_LAG = 0.62, 0.12, 0.02
+R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.3, 0.07
+R_TOE_OUT, R_FOOT_X = 0.06, 0.8     # the feet point nearly straight ahead and land closer to the line of travel
+
+
+def run_stride():
+    """The ground one cycle of the run covers, in model units (what the world must move her by per cycle)."""
+    return RUN_STRIDE * (THIGH + SHIN)
+
+
+def run_foot(t):
+    """(forward of the hip's ground point, ankle height, foot pitch toes-up, on the ground) for a leg at point t of
+    its run cycle: on the ground for RUN_STANCE, moving back at the body's pace, then carried through R_SWING."""
+    t %= 1.0
+    S = run_stride()
+    a = RUN_AHEAD * RUN_STANCE * S
+    pitch = math.radians(cyclic(R_GAIT_FOOT, t))
+    if t < RUN_STANCE:
+        return a - S * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+    u = (t - RUN_STANCE) / (1 - RUN_STANCE)
+    L = THIGH + SHIN
+    off = math.radians(cyclic(R_GAIT_FOOT, RUN_STANCE))
+    keys = ([(0.0, a - RUN_STANCE * S + toe_roll(off), ANKLE_Z + foot_lift(off))]
+            + [(k, f * L, ANKLE_Z + z * L) for k, f, z in R_SWING]
+            + [(1.0, a, ANKLE_Z + foot_lift(math.radians(cyclic(R_GAIT_FOOT, 0.0))))])
+    # (a smooth curve through the keys that leaves the ground and meets it again at the ground's own pace)
+    span = S * (1 - RUN_STANCE)
+    tan = [(-0.3 * span, 0.8 * L)] + [((keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]),
+                                  (keys[i + 1][2] - keys[i - 1][2]) / (keys[i + 1][0] - keys[i - 1][0]))
+                                 for i in range(1, len(keys) - 1)] + [(-span, -0.12 * L)]
+    for i in range(len(keys) - 1):
+        if u <= keys[i + 1][0]:
+            break
+    d = keys[i + 1][0] - keys[i][0]
+    v = (u - keys[i][0]) / d
+    fwd = _hermite(keys[i][1], keys[i + 1][1], tan[i][0] * d, tan[i + 1][0] * d, v)
+    z = _hermite(keys[i][2], keys[i + 1][2], tan[i][1] * d, tan[i + 1][1] * d, v)
+    return fwd, max(z, ANKLE_Z + foot_lift(pitch)), pitch, False
+
+
+_RUN_HIPS = {}
+
+
+def run_hips(tr):
+    """The hip joints' height at run phase tr: lowest in each stance, where the standing knee is bent RUN_SINK
+    under the body, and RUN_RISE higher in each flight (R_HIPS). Never above what the standing leg can reach (a
+    soft minimum with that reach, as in locked_hips), so a planted foot stays planted on a figure whose legs or feet
+    are too short for the full rise at push-off."""
+    key = (RUN_STRIDE, RUN_STANCE, RUN_AHEAD, RUN_SINK, RUN_RISE, R_PELVIS_TURN, R_PELVIS_LIST, FOOT_BALL, THIGH, SHIN,
+           ANKLE_Z, BOB_JOIN, tuple(R_HIPS), tuple(R_GAIT_FOOT))
+    if key not in _RUN_HIPS:
+        n = 192
+        L = THIGH + SHIN
+        low = ANKLE_Z + math.sqrt(THIGH ** 2 + SHIN ** 2 + 2 * THIGH * SHIN * math.cos(math.radians(RUN_SINK)))
+        want, reach = np.zeros(n), np.full(n, 1e3)
+        for i in range(n):
+            t = i / n
+            want[i] = low + RUN_RISE * L * cyclic(R_HIPS, 2 * t)
+            turn, lst = run_turn(t), run_list(t)
+            for s, off in ((1, 0.0), (-1, 0.5)):
+                fwd, az, _, ground = run_foot(t + off)
+                if ground:
+                    f = fwd - s * LEG_X * math.sin(turn)
+                    reach[i] = min(reach[i], az + math.sqrt(max(0.0, (0.992 * L) ** 2 - f * f)) - s * LEG_X * math.sin(lst))
+        _RUN_HIPS[key] = -BOB_JOIN * np.logaddexp(-reach / BOB_JOIN, -want / BOB_JOIN)
+    h = _RUN_HIPS[key]
+    x = (tr % 1.0) * len(h)
+    i = int(x)
+    return float(h[i % len(h)] + (h[(i + 1) % len(h)] - h[i % len(h)]) * (x - i))
+
+
+def run_turn(tr):
+    """The pelvis's turn at run phase tr: the hip of the leg reaching forward carried forward with it."""
+    return R_PELVIS_TURN * math.cos(2 * math.pi * (tr - 0.04))
+
+
+def run_list(tr):
+    """The pelvis's list: it drops on the side of the leg in the air as the standing leg takes the landing."""
+    return R_PELVIS_LIST * math.sin(2 * math.pi * (tr + 0.07))
+
+
+def pose_run(col):
+    """The run at sheet column col (the same columns and phase as the walk: the right foot lands at the start of
+    the cycle). Same rig as pose_locked."""
+    ob = bpy.data.objects
+    ph = (col - 2 + 0.5) / WALK * 2 * math.pi
+    tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
+    hips = run_hips(tr)
+    turn, lst = run_turn(tr), run_list(tr)
+    sway = -R_SWAY * math.sin(2 * math.pi * (tr - 0.07))
+    ob['Body'].location = (sway, 0, hips - HIP_Z)
+    ob['Body'].rotation_euler = (0, 0, 0)
+    ob['Pelvis'].rotation_euler = (0, lst, turn)
+    # (the trunk folds a little further forward as each foot lands and comes up through the flight)
+    lean = RUN_LEAN + 0.02 * math.cos(4 * math.pi * (tr - 0.06))
+    ob['Chest'].rotation_euler = (lean, -CHEST_TILT * lst, -CHEST_TURN * turn)
+    # (the head is carried forward with the leaning chest, and stays nearly upright on it, looking where she runs)
+    up = HEAD_Z - CHEST_Z
+    ob['Head'].location = (0, -up * math.sin(lean), CHEST_Z + up * math.cos(lean))
+    ob['Head'].rotation_euler = (RUN_HEAD * lean, 0, 0)
+    for side, s in (('R', 1), ('L', -1)):
+        hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
+        sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
+        t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
+        fwd, az, pitch, _ = run_foot(t)
+        f = fwd - s * LEG_X * math.sin(turn)
+        hz = hips + s * LEG_X * math.sin(lst)
+        hip_x = sway - s * LEG_X * math.cos(lst)
+        roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * R_FOOT_X) / max(8.0, hz - az)))) - lst
+        th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
+        kb = th - shn
+        hip.location = (-s * LEG_X, 0, 0)
+        hip.rotation_euler = (-th, roll, 0)
+        kn.rotation_euler = (kb, 0, 0)
+        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * R_TOE_OUT)
+        c = math.cos(2 * math.pi * (t - 0.5 - R_ARM_LAG))
+        a = R_ARM_SWING * c - R_ARM_BACK
+        sh.rotation_euler = (-a, s * (ARM_OUT + R_ARM_CLEAR + 0.06 * max(0.0, -a)), 0)
+        el.rotation_euler = (-(R_BEND + R_FOLD * (0.5 + 0.5 * c)), s * ARM_CARRY, 0)
+        wr.rotation_euler = (0.04, 0, 0)
 
 
 # ---------------------------------------------------------------- render and pixel-art conversion
