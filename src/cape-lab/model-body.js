@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { capeSkin, CAPE } from './dummy.js';
+import { makeColliders, WARDEN_COLLIDERS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
 
 // the world's timing for a modelled hero: a walk cycle in frames 1-25 at 24 fps, the idle stance at frame 40
 const WALK_SECONDS = 24 / 24, IDLE_SECONDS = 39 / 24;
@@ -116,18 +117,29 @@ function reskinCape(body, { columns = 7, rows = 5 } = {}) {
     b.userData.rest = b.quaternion.clone();
     b.updateMatrixWorld(true);
   };
+  // where each bone's head (and each chain's tip) goes: on her cape's inner face, then out of her body's
+  // colliders as she stands. Her cape is modelled pressed against her sleeves, so those points start inside
+  // her arms; left there, the arm capsules would either shove the cape out into a bell or have to be shrunk
+  // to nothing, and then a swinging hand comes through. The mesh keeps its modelled shape either way: it is
+  // bound to the bones where they end up.
+  const spots = [];
+  for (let c = 0; c < columns; c++) {
+    for (let r = 0; r <= rows; r++) spots.push({ c, r, p: surface(colA(c), rowY[r]) });
+    spots.push({ c, r: 'tip', p: surface(colA(c), hemY + 0.5) });
+  }
+  clearOfBody(body, spots.filter((s) => s.r !== 0).map((s) => s.p));
   for (let c = 0; c < columns; c++) {
     let parent = bones.Chest;
     for (let r = 0; r <= rows; r++) {
       const b = new THREE.Bone();
       b.name = `cape_${c}_${r}`;
-      place(b, parent, surface(colA(c), rowY[r]));
+      place(b, parent, spots.find((s) => s.c === c && s.r === r).p);
       capeBones.push(b);
       parent = b;
     }
     const tip = new THREE.Object3D();
     tip.name = `cape_${c}_tip`;
-    place(tip, parent, surface(colA(c), hemY + 0.5));
+    place(tip, parent, spots.find((s) => s.c === c && s.r === 'tip').p);
   }
   root.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton(capeBones);
@@ -156,6 +168,34 @@ function reskinCape(body, { columns = 7, rows = 5 } = {}) {
     return sm;
   });
   body.cape = { bones: capeBones, meshes, mesh: meshes.find((m) => m.name === 'Cape (springs)') || meshes[0], lining: meshes.find((m) => /lining/.test(m.name)) || meshes[0], skeleton, columns, rows };
+}
+
+// Move points (in her space, at the pose the glb was exported in) out of her body's colliders, grown by the
+// margin the springs keep from them, as she stands idle; the points ride her chest. Leaves her at rest pose.
+function clearOfBody(body, points, settings = WARDEN_MODEL_SETTINGS) {
+  const { root, bones } = body;
+  const chest = bones.Chest;
+  root.updateMatrixWorld(true);
+  const toChest = new THREE.Matrix4().copy(chest.matrixWorld).invert().multiply(root.matrixWorld);
+  const local = points.map((p) => p.clone().applyMatrix4(toChest));
+  body.pose(0, 0);
+  root.updateMatrixWorld(true);
+  const colliders = makeColliders(root, WARDEN_COLLIDERS);
+  for (const c of colliders) c.refresh();
+  const extra = settings.hitRadius + settings.contactSoftness / 2 + 0.15;
+  const w = new THREE.Vector3();
+  for (const q of local) {
+    w.copy(q).applyMatrix4(chest.matrixWorld);
+    for (let it = 0; it < 12; it++) {
+      let moved = false;
+      for (const c of colliders) moved = c.push(w, extra) || moved;
+      if (!moved) break;
+    }
+    q.copy(w).applyMatrix4(new THREE.Matrix4().copy(chest.matrixWorld).invert());
+  }
+  body.restPose();
+  const fromChest = new THREE.Matrix4().copy(root.matrixWorld).invert().multiply(chest.matrixWorld);
+  points.forEach((p, i) => p.copy(local[i]).applyMatrix4(fromChest));
 }
 
 // Hang her hair on spring-bone chains from her Head (see src/world/hair-rig.js): a sheet of `columns` chains

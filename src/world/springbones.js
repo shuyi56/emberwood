@@ -52,6 +52,9 @@ const _v0 = new THREE.Vector3(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vect
 const _q0 = new THREE.Quaternion(), _qf = new THREE.Quaternion();
 const _m0 = new THREE.Matrix4();
 const _one = new THREE.Vector3(1, 1, 1), _zero = new THREE.Vector3();
+// how deep a point between columns may rest inside a capsule (model units): enough for the cloth to lie as
+// modelled against a limb, while a limb swinging into it still meets it (more lets a forearm through the cape)
+const REST_ALLOWANCE = 0.5;
 const BONE_SAMPLES = [0.5, 1];      // where along a bone it is tested against the colliders
 const _q1 = new THREE.Vector3(), _q2 = new THREE.Vector3();   // (Collider.push uses _v1.._v3)
 
@@ -95,7 +98,7 @@ export class Collider {
     t = Math.min(1, Math.max(0, t));
     const c = _v2.copy(this.wa).addScaledVector(ab, t);
     const d = _v3.subVectors(p, c);
-    const band = soft * this.scale, r = (this.radius + extra) * this.scale - band / 2;
+    const band = soft * this.scale, r = Math.max(0, (this.radius + extra) * this.scale - band / 2);
     const dist = d.length();
     if (dist >= r + band) return false;
     const x = r + band - dist;
@@ -104,6 +107,12 @@ export class Collider {
     p.copy(c).addScaledVector(d, to);
     return true;
   }
+}
+
+// a point on the cloth between two neighbouring joints: the heads and tails blended (at rest, from the tails)
+function linkPoint(ja, jb, wHead, wTail, out) {
+  return out.copy(ja.head).add(jb.head).multiplyScalar(wHead / 2)
+    .addScaledVector(ja.tail, wTail / 2).addScaledVector(jb.tail, wTail / 2).clone();
 }
 
 class Joint {
@@ -196,38 +205,45 @@ export class SpringBones {
     this.ready = true;
   }
 
-  // Shrink each collider until the cape, as it hangs at rest, is clear of its contact band. The cape as modelled
-  // is the statement of where the cloth sits on this body; a capsule sized for another body (or a generous one)
-  // that reaches into it would push the whole cape out into a stiff bell the moment the springs start. Run at
-  // rest pose, on the same points the solver tests (along each bone, the hem between columns, the panels).
+  // Fit the colliders to the cloth as it hangs at rest. The cloth as modelled is the statement of where it sits on
+  // this body; a capsule sized for another body (or a generous one) that reaches into it would push the whole
+  // cape out into a stiff bell the moment the springs start. Run at rest pose:
+  //  - each capsule is shrunk until the points along every bone are clear of it;
+  //  - the points between columns (the middle of the hem segment, and of the panel) may still start inside
+  //    one, where the cloth wraps closely round a limb and the straight line between two columns cuts through
+  //    it: each such point may rest up to REST_ALLOWANCE deep, for that capsule only, instead of the capsule
+  //    shrinking for every point (deeper than that, it is pushed out a little at rest).
   // Returns how much each radius came down (model units).
   fitColliders(mode = 'band', minShare = 0.35) {
+    const reach = (c, s) => c.radius + s.hitRadius + (mode === 'band' ? s.contactSoftness / 2 : 0);
+    const depth = (c, p) => {
+      const ab = _v1.subVectors(c.wb, c.wa), len2 = ab.lengthSq();
+      const t = len2 > 1e-9 ? Math.min(1, Math.max(0, _v2.subVectors(p, c.wa).dot(ab) / len2)) : 0;
+      return p.distanceTo(_v2.copy(c.wa).addScaledVector(ab, t)) / c.scale;
+    };
     const pts = [];
     for (const ch of this.chains) for (const j of ch.joints) {
       for (const t of BONE_SAMPLES) pts.push([j.head.clone().lerp(j.tail, t), ch.settings]);
     }
-    for (const L of this.links) {
-      L.a.joints.forEach((ja, i) => {
-        const jb = L.b.joints[i];
-        if (!jb) return;
-        pts.push([ja.tail.clone().add(jb.tail).multiplyScalar(0.5), L.a.settings]);
-        pts.push([ja.head.clone().add(jb.head).add(ja.tail).add(jb.tail).multiplyScalar(0.25), L.a.settings]);
-      });
-    }
-    return this.colliders.map((c) => {
-      const ab = _v1.subVectors(c.wb, c.wa), len2 = ab.lengthSq();
+    // ('band': clear of the whole soft band, so the cloth rests exactly as modelled; 'surface': only out of the
+    // surface the cloth is pushed to, so resting in the band is allowed, and the band holds it out a little)
+    const cuts = this.colliders.map((c) => {
       let over = 0;
-      for (const [p, s] of pts) {
-        const t = len2 > 1e-9 ? Math.min(1, Math.max(0, _v2.subVectors(p, c.wa).dot(ab) / len2)) : 0;
-        const dist = p.distanceTo(_v2.copy(c.wa).addScaledVector(ab, t)) / c.scale;
-        // 'band': clear of the whole soft band, so the cape rests exactly as modelled; 'surface': only out of the
-        // surface the cloth is pushed to (resting in the band is allowed, and the band holds it out a little)
-        over = Math.max(over, c.radius + s.hitRadius + (mode === 'band' ? s.contactSoftness / 2 : 0) - dist);
-      }
+      for (const [p, s] of pts) over = Math.max(over, reach(c, s) - depth(c, p));
       const cut = Math.min(over, c.radius * (1 - minShare));
       c.radius -= cut;
       return cut;
     });
+    for (const L of this.links) {
+      const s = L.a.settings;
+      L.allow = L.a.joints.map((ja, i) => {
+        const jb = L.b.joints[i];
+        if (!jb) return null;
+        return [linkPoint(ja, jb, 0, 1, _v3), linkPoint(ja, jb, 0.5, 0.5, _v3)]
+          .map((q) => this.colliders.map((c) => Math.min(REST_ALLOWANCE, Math.max(0, reach(c, s) - depth(c, q)))));
+      });
+    }
+    return cuts;
   }
 
   // the tail where the joint points at rest relative to its parent's current pose (world)
@@ -374,12 +390,15 @@ export class SpringBones {
           if (!ja || !jb) continue;
           const extra = Lk.a.settings.hitRadius;
           // (weights: how much of a push at that point the two tails take)
-          for (const [wHead, wTail] of [[0, 1], [0.5, 0.5]]) {
+          const allow = Lk.allow && Lk.allow[r];
+          for (const [k, [wHead, wTail]] of [[0, 1], [0.5, 0.5]].entries()) {
             const q = _q1.copy(ja.head).add(jb.head).multiplyScalar(wHead / 2)
               .addScaledVector(ja.next, wTail / 2).addScaledVector(jb.next, wTail / 2);
             const before = _q2.copy(q);
             let moved = false;
-            for (const c of this.colliders) moved = c.push(q, extra, Lk.a.settings.contactSoftness) || moved;
+            this.colliders.forEach((c, ci) => {
+              moved = c.push(q, extra - (allow ? allow[k][ci] : 0), Lk.a.settings.contactSoftness) || moved;
+            });
             if (!moved) continue;
             hit = true;
             const d = q.sub(before).multiplyScalar(1 / wTail);
