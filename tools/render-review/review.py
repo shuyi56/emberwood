@@ -55,6 +55,7 @@ sys.path.insert(0, RQ_DIR)
 import rq  # noqa: E402  (the render queue's own module)
 
 WORK = os.environ["RQ_WORK"]
+REQ_ENV = {}   # the request's "env" (string variables the job needs); set in main, used by smoke builds
 PITFALLS = os.environ.get("RQ_PITFALLS", os.path.join(HERE, "PITFALLS.md"))
 LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
 SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "1800"))
@@ -443,6 +444,8 @@ def smoke(commit, kind, param, hair_dir=None):
     With hair_dir, the hair is checked in the same run (hair_check.py) and its result left there."""
     key = rq.job_key(commit, "smoke-" + kind, param)
     key += "-" + hashlib.sha1(open(os.path.join(HERE, "smoke.py"), "rb").read()).hexdigest()[:6]
+    if REQ_ENV:
+        key += "-e" + hashlib.sha1(json.dumps(REQ_ENV, sort_keys=True).encode()).hexdigest()[:6]
     memo = os.path.join(WORK, "smoke", key + ".json")
     need_hair = hair_dir and not os.path.exists(os.path.join(hair_dir, "hair-check.json"))
     if os.path.exists(memo) and not need_hair:
@@ -454,7 +457,7 @@ def smoke(commit, kind, param, hair_dir=None):
     t0 = datetime.datetime.now()
     cmd = smoke_command(kind, param, out)
     try:
-        env = dict(os.environ, RQ_HAIRCHECK=hair_dir) if need_hair else None
+        env = dict(os.environ, **REQ_ENV, **({"RQ_HAIRCHECK": hair_dir} if need_hair else {})) if (need_hair or REQ_ENV) else None
         r = subprocess.run(cmd, shell=True, cwd=wt, capture_output=True, text=True, timeout=SMOKE_TIMEOUT, env=env)
         rc, log = r.returncode, r.stdout + r.stderr
     except subprocess.TimeoutExpired as e:
@@ -870,6 +873,7 @@ def review(req, thread, do_smoke=True):
 def cmd_check(a):
     try:
         req = json.loads(a.request if a.request != "-" else sys.stdin.read())
+        REQ_ENV.update({str(k): str(v) for k, v in (req.get("env") or {}).items()} if isinstance(req, dict) else {})
         if not isinstance(req, dict):
             raise ValueError("the request must be one JSON object")
     except ValueError as e:
