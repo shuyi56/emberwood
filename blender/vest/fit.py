@@ -32,12 +32,12 @@ from mathutils.kdtree import KDTree
 RATIOS = {
     'ease': 0.06,            # the gap between body and vest, in w (form fitting: about 3 mm on a 165 cm woman)
     'thickness': 0.05,       # the leather's thickness, in w
-    'neck_base': 1.2,        # the side neck point: where the neck's base is this many times the neck's width
+    'neck_base': 1.12,       # the side neck point: where the neck's base is this many times the neck's width
     'back_drop': 0.25,       # the back neck point below the side neck point, in w (a tailor's back neck rise)
     'collar_top': 0.95,      # the collar's top edge at the side: this share of L above the pit of the neck
     'collar_rise': 0.10,     # how much higher the top edge is at the back than at the side, in L
     'collar_gap': 0.15,      # the gap between the neck and the collar's top edge, in w
-    'collar_fillet': 0.55,   # the radius of the rounded run from shoulder into collar, in w
+    'collar_fillet': 0.42,   # the radius of the rounded run from shoulder into collar, in w
     'head_clear': 0.12,      # the least gap between the collar and the head (jaw, skull), in w
     'v_point': 0.35,         # the bottom of the V: this share of the way from the bust line up to the pit of the neck
     'v_top': 0.80,           # half the opening at the collar's top edge, in w
@@ -45,6 +45,8 @@ RATIOS = {
     'corner': 0.40,          # the radius of the collar's front corners, in w
     'hem_drop': 0.60,        # the hem below the waist, in w
     'hem_point': 0.50,       # the front point of the hem below that, in w
+    'shoulder': 0.94,        # the vest's shoulder ends at this share of the way out to the shoulder point: on the
+                             # shoulder's flat top, short of where it rolls over into the arm
     'scye_drop': 0.30,       # the armhole's bottom below the armpit, in w
     'scye_ease': 0.10,       # the armhole's ease round the arm, in w
 }
@@ -182,10 +184,14 @@ def scye(P, aw, M, ratios=RATIOS):
     low = band[band[:, 2] <= np.percentile(band[:, 2], 3)]
     x_pit = float(np.abs(low[:, 0]).mean()) - ratios['scye_ease'] * w
 
+    x_end = ratios['shoulder'] * M['x_sh']
+
     def x_at(z):
         z = np.asarray(z, dtype=float)
         t = np.clip((z - z_b) / (M['z_sh'] - z_b), 0.0, 1.0)
-        x = x_pit + (M['x_sh'] - x_pit) * t ** 1.3 + (x_side - x_pit) * (1.0 - t) ** 3
+        t_pit = (M['z_pit_arm'] - z_b) / (M['z_sh'] - z_b)
+        # (out under the arm only below the armpit: above it the line runs straight up to the shoulder's end)
+        x = x_pit + (x_end - x_pit) * t ** 1.3 + (x_side - x_pit) * np.clip(1.0 - t / t_pit, 0.0, 1.0) ** 2
         return np.where(z < z_b, 1e3, x)
     return x_at, z_b
 

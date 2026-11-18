@@ -40,7 +40,7 @@ def build():
     vest, m = fit.build_vest(body, heads, rig=bpy.data.objects.get('Rig'), material=female.mat(M_VEST))
     MEASURES.update(m)
     # the --head view on the bust and neck: from under the bust to the chin, centred between them
-    lo, hi = m['z_bust'] - 0.9 * m['w'], m['z_chin'] + 1.0 * m['w']
+    lo, hi = m['z_bust'] - 1.6 * m['w'], m['z_chin'] + 0.5 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()
