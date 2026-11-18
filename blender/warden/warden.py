@@ -3186,7 +3186,14 @@ _CREATOR = False
 
 
 def creator_head_wanted():
-    return bool(CREATOR_HEAD) and os.path.exists(CREATOR_HEAD) and not female.MANNEQUIN
+    if not CREATOR_HEAD or female.MANNEQUIN:
+        return False
+    if not os.path.exists(CREATOR_HEAD):
+        # (loud: a quiet fallback rendered the old Blender head where the creator's was wanted)
+        print(f'WARNING: creator head {CREATOR_HEAD} not found: building the Blender head instead '
+              '(set WARDEN_HEAD_GLB, or WARDEN_HEAD_GLB= for the Blender head on purpose)', file=sys.stderr, flush=True)
+        return False
+    return True
 
 
 def hang_creator_head(path):
