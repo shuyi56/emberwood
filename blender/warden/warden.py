@@ -412,7 +412,8 @@ def _rings(R, z):
     return R[0][1:] if z > R[0][0] else R[-1][1:]
 
 
-CAPE_PLEATS = 14     # knife pleats round the whole cape (about six across the back)
+CAPE_PLEATS = 14     # (no longer used: see cape_fold)
+CAPE_FOLDS = 11      # hanging folds round the whole cape (five or six across the back)
 CAPE_PLEAT_FACE = 0.74   # (the broad face of each pleat; the rest of its width is the return folded under it)
 
 
@@ -421,37 +422,35 @@ def _pleat_t(phi):
 
 
 def pleat_w(z):
-    """How far the pleats stand open at height z: laid in at the collar, pressed and stitched over the shoulders
-    (where they still stand as ridges radiating from the neck), opening as they fall."""
-    return smoothstep(53.4, 52.7, z) * (0.5 + 0.5 * smoothstep(49.0, 38.0, z))
+    """(The cape was once knife-pleated from the collar; its folds are now hanging folds, see cape_fold.)"""
+    return 0.0
 
 
 def pleat_pl(phi):
-    """One pleat across (-1..1): a broad face leaning out to a rounded crest, then turning sharply back under."""
     t = _pleat_t(phi)
     a = CAPE_PLEAT_FACE
     return -1.0 + 2.0 * t / a if t < a else math.cos(math.pi * (t - a) / (1.0 - a))
 
 
+def _cape_swing(z, phi):
+    # (each fold a little off true and wandering as it falls, the row of them uneven in width)
+    return pinch(CAPE_FOLDS * phi + 0.9 + 0.45 * math.sin(2.0 * phi + 0.4) + 0.22 * math.sin(0.19 * z + 1.3 * phi))
+
+
 def cape_fold(z, phi):
-    """The cape's pleats: knife pleats from the collar, over the shoulders and down to the hem (a sawtooth round
-    the cape, its corners eased), over a slow swing of three deep folds that wander a little off true.
+    """The cape's folds as heavy wool hangs: smooth where it lies on the shoulders and shoulder blades, then a few
+    deep, rounded tubes that start where it leaves them and deepen all the way to the hem, pinched at each valley
+    (no knife pleats: pressed pleats stood as a row of shallow ridges, which read as stripes, and stiff).
     (offset in -1..1, depth)"""
     f = smoothstep(48.5, 30.0, z)
-    sw = pinch(3.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z))
-    g = smoothstep(46.0, 24.0, z)
-    return pleat_w(z) * 0.75 * pleat_pl(phi) + 0.4 * g * sw, f
+    hang = smoothstep(49.5, 22.0, z) ** 0.85
+    return hang * _cape_swing(z, phi), f
 
 
 def cape_crease(z, phi):
-    """(where the cape folds into shadow: the return under each pleat, deepest just under its crest, and the
-    valleys of the slow folds)"""
-    t = _pleat_t(phi)
-    a = CAPE_PLEAT_FACE
-    r = math.sin(math.pi * (t - a) / (1.0 - a)) ** 0.7 if t >= a else 0.3 * smoothstep(0.14, 0.0, t)
-    g = smoothstep(46.0, 24.0, z)
-    sw = pinch(3.0 * phi + 0.7 + 0.3 * math.sin(0.3 * z))
-    return min(1.0, max((0.3 + 0.7 * pleat_w(z)) * smoothstep(53.4, 52.7, z) * 0.9 * r, 0.6 * g * max(0.0, -sw)))
+    """(where the cape folds into shadow: the valleys of its folds, deepening as they fall)"""
+    hang = smoothstep(49.5, 22.0, z) ** 0.85
+    return min(1.0, 0.85 * hang * max(0.0, -_cape_swing(z, phi)) ** 0.8)
 
 
 def cape_hem(phi):
@@ -573,9 +572,105 @@ def _cape_pt(z, phi, off=0.0):
     rd = max(lerp(rr, hull, dw), hull)
     if CAPE_UNDER is not None:
         rd = max(rd, under_r(z, a) + 0.32 + 0.12 * f + 0.25 * f * side)
+    # the drape: below the shoulders it hangs from the outermost thing it rests on above (the shoulder blades, the
+    # round of each arm), never tucking back in under it, and swings out a little as it falls; laid on what is
+    # under it all the way down, it showed the shoulder blades, the small of the back and the seat through the wool
+    rd = max(rd, cape_hang(z, a))
     # (the pleats stand out from what the cape lies on: their valleys rest on it, their crests are proud of it)
-    k = (rd + off) / rr * (1.0 + 0.1 * (fv + 0.6 * pleat_w(z)) * (1.0 - 0.4 * w))
+    k = (rd + off) / rr * (1.0 + 0.14 * fv * (1.0 - 0.2 * w))
     return xr * k, cy + yr * k
+
+
+CAPE_HANG_TOP = 49.5     # (above this the cape lies on the shoulders; below it, it hangs)
+CAPE_FLARE = 0.045       # (how far it swings out for each unit it has fallen)
+_HANG = {}
+
+
+def _support(z, a):
+    """How far out the cape would lie on what is under it at (z, a), as _cape_pt lays it (no folds)."""
+    cy = _rings(CAPE_RINGS, z)[2]
+    side = math.sin(a) ** 2
+    f = smoothstep(48.5, 30.0, z)
+    r = body_hull(z, a, cy) + lerp(0.3 + 0.3 * f, 0.18 + 0.2 * f, side)
+    if CAPE_UNDER is not None:
+        r = max(r, under_r(z, a) + 0.32 + 0.12 * f + 0.25 * f * side)
+    return r
+
+
+def _convex_radii(rs):
+    """Radii at evenly spaced angles (as phi), pushed out to the convex hull of the points they make."""
+    n = len(rs)
+    pts = [(-r * math.sin(2 * math.pi * k / n), -r * math.cos(2 * math.pi * k / n)) for k, r in enumerate(rs)]
+    poly = female._convex([(round(x, 5), round(y, 5)) for x, y in pts])
+    out = []
+    for k in range(n):
+        a = 2 * math.pi * k / n
+        dx, dy = -math.sin(a), -math.cos(a)
+        best = rs[k]
+        for (x0, y0), (x1, y1) in zip(poly, poly[1:] + poly[:1]):
+            ex, ey = x1 - x0, y1 - y0
+            den = dx * ey - dy * ex
+            if abs(den) < 1e-9:
+                continue
+            t = (x0 * ey - y0 * ex) / den
+            u = (x0 * dy - y0 * dx) / den
+            if t > 0 and -1e-6 <= u <= 1 + 1e-6:
+                best = max(best, t)
+        out.append(best)
+    return out
+
+
+def cape_hang(z, a):
+    """The radius the hanging cape keeps to at (z, a): the most it lay out at any height between where it starts
+    to hang and z, plus its flare. Tabulated once per build of what lies under it."""
+    key = id(CAPE_UNDER)
+    if key not in _HANG:
+        zs = [CAPE_HANG_TOP - 0.25 * i for i in range(int((CAPE_HANG_TOP - 17.0) / 0.25) + 1)]
+        NA = 180
+        tab = []
+        run = [0.0] * NA
+        S = []
+        for z_ in zs:
+            # (bridging across what is under it, as cloth does: over the seat it spans the two sides in one curve
+            # instead of sinking in between them)
+            S.append(_convex_radii([_support(z_, 2 * math.pi * k / NA) for k in range(NA)]))
+        tab = [[0.0] * NA for _ in zs]
+        for k in range(NA):
+            # down each line of the cape, the cloth is drawn taut between what holds it out: from the shoulder
+            # blades it runs straight to the seat instead of sinking into the small of the back and swelling out
+            # again over the hips (the upper hull of the support down the line)
+            pts = [(-z_, S[i][k]) for i, z_ in enumerate(zs)]
+            hull = []
+            for p_ in pts:
+                while len(hull) >= 2 and ((hull[-1][0] - hull[-2][0]) * (p_[1] - hull[-2][1]) -
+                                          (hull[-1][1] - hull[-2][1]) * (p_[0] - hull[-2][0])) >= 0:
+                    hull.pop()
+                hull.append(p_)
+            j = 0
+            run = 0.0
+            for i, (u, r) in enumerate(pts):
+                while j < len(hull) - 2 and hull[j + 1][0] < u:
+                    j += 1
+                (u0, r0), (u1, r1) = hull[j], hull[min(j + 1, len(hull) - 1)]
+                h = r0 + (r1 - r0) * ((u - u0) / (u1 - u0) if u1 > u0 else 0.0)
+                run = max(run, h, r)
+                tab[i][k] = run + CAPE_FLARE * (CAPE_HANG_TOP - zs[i])
+        _HANG.clear()
+        _HANG[key] = (zs, NA, tab)
+    zs, NA, tab = _HANG[key]
+    if z >= CAPE_HANG_TOP:
+        return 0.0
+    fi = min(len(zs) - 1.001, (CAPE_HANG_TOP - z) / 0.25)
+    i = int(fi)
+    t = fi - i
+    fa = (a % (2 * math.pi)) / (2 * math.pi) * NA
+    j = int(fa) % NA
+    u = fa - int(fa)
+    j2 = (j + 1) % NA
+    r0 = tab[i][j] * (1 - u) + tab[i][j2] * u
+    r1 = tab[i + 1][j] * (1 - u) + tab[i + 1][j2] * u
+    # (eased in below the shoulders, so the lying and hanging cloth meet without a crease)
+    return (r0 * (1 - t) + r1 * t) * smoothstep(CAPE_HANG_TOP, CAPE_HANG_TOP - 1.5, z)
 
 
 CAPE_CREASE = []   # (the crease at each point of the last sheet built, in its vertex order)

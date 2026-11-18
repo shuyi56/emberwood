@@ -3637,6 +3637,58 @@ def build_legs(pelvis, leg):
         leg(side, s, x, leg_weights(side))
 
 
+# How far the shoulder line is let down from the base of the neck to the arm. The body's table (TORSO) is wide for
+# its height there, so the line leaves the neck and runs nearly level to the arm (about 16 degrees, where a real
+# trapezius falls about twice as steeply), then turns down a square side with the arm's round cap on its corner:
+# a box with a ball on it. Everything worn on the shoulders is built from the torso's shape or from the arm's, so
+# the whole figure is let down together at the end of the build (see slope_shoulders).
+SHOULDER_SLOPE = float(os.environ.get('SHOULDER_SLOPE', '1.4'))
+
+
+def _ss(a, b, x):
+    t = min(1.0, max(0.0, (x - a) / (b - a)))
+    return t * t * (3 - 2 * t)
+
+
+def slope_shoulders(drop=None):
+    """Let the shoulder line down: nothing at the neck, `drop` units at the arm (eased in between, level over the
+    arm itself so it moves down whole), and the drop fading out down the chest and back (heights 45.4 to 50.8), so
+    the bodice line, the armpit and the arm's joint stay where they are. Applied to every mesh worn on the body
+    (skin, shirt, jerkin, mantle, collar, sleeves) in world space, after they are weighted to the rig, so each keeps
+    the weights it was given where it was; the head and what is on it are left alone."""
+    drop = SHOULDER_SLOPE if drop is None else drop
+    if drop <= 0:
+        return
+    bpy.context.view_layer.update()
+    for o in [o for o in bpy.data.objects if o.type == 'MESH']:
+        p = o.parent
+        on_head = False
+        while p is not None:
+            if p.name == 'Head':
+                on_head = True
+                break
+            p = p.parent
+        if on_head or o.data.shape_keys:
+            continue
+        mw = o.matrix_world
+        inv = mw.inverted()
+        moved = False
+        for v in o.data.vertices:
+            w = mw @ v.co
+            if w.z < 45.4 or abs(w.x) < 1.9:
+                continue
+            # (and none above the base of the neck: a collar or gorget standing round the neck stays where it is, and
+            # what lies on the shoulders under its edge, a cape's top, stays tucked under it)
+            d = drop * _ss(1.9, 6.4, abs(w.x)) * _ss(45.4, 50.8, w.z) ** 1.3 * (1.0 - _ss(51.6, 52.8, w.z))
+            if d <= 1e-4:
+                continue
+            w.z -= d
+            v.co = inv @ w
+            moved = True
+        if moved:
+            o.data.update()
+
+
 def finish_figure(after_skin=None):
     """Hand the trunk's meshes to the rig (then after_skin(), e.g. to let a mantle ride on the arms), finish the
     rig, set up the camera, the light and the render, and key the 10 sheet columns onto the timeline."""
@@ -3645,6 +3697,7 @@ def finish_figure(after_skin=None):
     skin_trunk(FIG['body'])
     if after_skin:
         after_skin()
+    slope_shoulders()
     finish_rig()
     skin_tones()
 

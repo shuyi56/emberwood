@@ -809,7 +809,7 @@ def build():
     # (the shoulder line slopes from the neck and rounds over the deltoids into the arms, one convex curve with no
     # shelf: the wool does not stand out flat at the height of the shoulder and stop, it falls over the round of
     # the arm and ends a little below it at the sides)
-    M_HEM = 47.6
+    M_HEM = 46.4      # (long enough to hang: a hem at the top of the arm made it a cap that followed the shoulder)
     MANTLE_RINGS = [(53.4, 2.3, 2.3, 0.35), (52.4, 3.7, 3.1, 0.35), (51.3, 5.55, 3.8, 0.3), (50.3, 7.0, 4.25, 0.3),
                     (49.3, 8.0, 4.55, 0.3), (48.4, 8.55, 4.7, 0.3), (M_HEM, 8.75, 4.75, 0.3)]
 
@@ -876,24 +876,37 @@ def build():
         # arms the wool squares the shoulders off into a wide shelf)
         side = math.sin(a) ** 2
         gap = lerp(0.25 + 0.4 * f, 0.1 + 0.12 * f, side)
-        hull = body_hull(z, a, cy) + gap
+        # the drape: the wool falls from the highest, outermost point it rests on above (the round of the shoulder,
+        # the chest, the shoulder blades) and does not tuck back in under it, so it hangs from the deltoid straight
+        # down past the arm instead of wrapping in under the round of it; and the further it has fallen, the more
+        # it swings out, so it hangs in a bell rather than a shell laid on the body
+        hull = max(body_hull(z + 0.3 * i, a, cy) for i in range(9)) + gap
+        fall = max(0.0, 50.0 - z)
+        hull += (0.16 - 0.08 * side) * fall ** 1.15
         dw = min(1.0, max(0.0, (53.2 - z) / 1.6))
         dw = dw * dw * (3 - 2 * dw)
         rd = max(lerp(rr, hull, dw), hull) if dw > 0 else rr
+        # the folds of heavy wool hanging: a few deep, rounded tubes that start where the cloth leaves its support
+        # (nothing over the tops of the shoulders, where it lies on her) and deepen as they fall, each a little off
+        # true and wandering as it runs down; fullest over the arms, where the cloth hangs free, and shallow across
+        # the back, where it lies on the shoulder blades under the hair. No fine ruffles: at the hem they read as a
+        # frill, and several shallow folds stack into stripes
+        hang = min(1.0, max(0.0, (50.4 - z) / (50.4 - M_HEM)))
+        depth = 0.62 * hang ** 1.1 * (0.55 + 0.45 * side) * (1 - 0.65 * w)
+        fold = pinch(7 * phi + 0.6 + 0.35 * math.sin(3 * phi) + 0.18 * math.sin(1.7 * z + phi))
+        rd += depth * fold
         rx, ry = rx * rd / rr, ry * rd / rr
-        # the folds: a few deep ones, and finer ruffles between them that grow toward the hem, all pinched at the
-        # valleys (gathered cloth, not padded), each wandering a little off true as it runs down
-        fold = (0.62 * pinch(6 * phi + 0.4 + 0.3 * math.sin(2.1 * z)) +
-                0.38 * f * pinch(14 * phi + 1.3 + 0.5 * z)) * (1 - 0.8 * w)
         pull, lift = brooch_pull(z, phi)
-        k = 1 + 0.085 * f * fold * (1 - 0.6 * side) - pull / max(ry, 1.0)
+        k = 1 - pull / max(ry, 1.0)
         # (the hem drops at the sides, falling over the round of the arm and ending below it, so the wool caps
-        # the shoulder instead of stopping at its corner)
+        # the shoulder instead of stopping at its corner; and it swings with the folds, a little lower under each
+        # crest, where more cloth hangs, than in the valleys)
         hem = (-2.0 * math.sin(phi) ** 4 - 0.5 * math.cos(phi)) * min(1.0, max(0.0, (49.6 - z) / 1.7))
-        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + 0.55 * f * fold + lift
+        hem += 0.3 * hang ** 2 * fold * (1 - 0.6 * w)
+        return -(rx + off) * k * math.sin(phi), cy - (ry + off) * k * math.cos(phi), hem + lift
 
     MN = 200     # (fine enough round for the pleats at the brooch)
-    mz = [53.4 - 0.2 * i for i in range(29)] + [M_HEM]
+    mz = [53.4 - 0.2 * i for i in range(int((53.4 - M_HEM) / 0.2))] + [M_HEM]
     mantle = mesh_obj('Mantle', loft_fn(mz, mantle_pt, n=MN, cap_top=False, cap_bot=False), M_MANTLE, body, solid=0.45)
     mesh_obj('Mail trim', loft_fn([M_HEM + 0.4, M_HEM + 0.1, M_HEM - 0.15], lambda z, p: mantle_pt(z, p, 0.08), n=MN, cap_top=False, cap_bot=False),
              M_MAIL, body, solid=0.25, subdiv=0)
