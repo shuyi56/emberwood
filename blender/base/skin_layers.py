@@ -15,10 +15,10 @@ figure. skin_study.py --layers renders the four side by side."""
 import numpy as np
 
 # how much of the colour of the epidermis lies over what is under it (0 clear, 1 opaque)
-EPIDERMIS_OPACITY = 0.6
+EPIDERMIS_OPACITY = 0.45
 # the layers' colours (sRGB)
-MUSCLE_RED = [150, 42, 40]
-MUSCLE_BROWN = [112, 66, 48]
+MUSCLE_RED = [162, 56, 50]
+MUSCLE_BROWN = [150, 82, 64]
 # (the veins' colours are what they let through, multiplied into what lies under them: blood in a vessel absorbs
 # the light that crosses it, as the thin absorbing layer between the epidermis and the dermis does in Donner and
 # Jensen's layered model, rather than adding paint on top. Lighter than the colour they leave.)
@@ -89,7 +89,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     patch = tex('ShaderNodeTexNoise', 1.5)
     patch.inputs['Detail'].default_value = 4.0
     patch.inputs['Roughness'].default_value = 0.6
-    c1 = mix(MUSCLE_RED, MUSCLE_BROWN, ramp_(patch.outputs['Fac'], 0.35, 0.65))
+    c1 = mix(MUSCLE_RED, MUSCLE_BROWN, ramp_(patch.outputs['Fac'], 0.4, 0.6))
     cap = tex('ShaderNodeTexNoise', 14.0)
     cap.inputs['Detail'].default_value = 3.0
     k = ramp_(cap.outputs['Fac'], 0.3, 0.7, 0.88, 1.1, smooth=False)
@@ -111,11 +111,17 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     wv = node('ShaderNodeVectorMath', operation='ADD')
     L(rest.outputs['Vector'], wv.inputs[0])
     L(off2.outputs['Vector'], wv.inputs[1])
-    big = ramp_(tex('ShaderNodeTexVoronoi', 1.1, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
-                0.0, 0.045, 1.0, 0.0)
-    fine = ramp_(tex('ShaderNodeTexVoronoi', 2.6, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
-                 0.0, 0.05, 1.0, 0.0)
-    veins = math_('MAXIMUM', big, math_('MULTIPLY', fine, 0.6))
+    big = ramp_(tex('ShaderNodeTexVoronoi', 0.7, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
+                0.0, 0.03, 1.0, 0.0)
+    fine = ramp_(tex('ShaderNodeTexVoronoi', 1.8, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
+                 0.0, 0.035, 1.0, 0.0)
+    # (a vein is not a closed cell: a second noise gates the edges, so each runs a while, then fades out; the
+    # finer branches are gated harder, so they spring off the main ones and end)
+    gate = tex('ShaderNodeTexNoise', 1.6)
+    gate.inputs['Detail'].default_value = 1.0
+    gate2 = tex('ShaderNodeTexNoise', 3.1)
+    veins = math_('MAXIMUM', math_('MULTIPLY', big, ramp_(gate.outputs['Fac'], 0.42, 0.58)),
+                  math_('MULTIPLY', fine, math_('MULTIPLY', 0.7, ramp_(gate2.outputs['Fac'], 0.55, 0.7))))
     # (some stretches show more than others, as veins lie deeper or nearer the surface)
     depth = tex('ShaderNodeTexNoise', 0.9)
     depth.inputs['Detail'].default_value = 2.0
@@ -126,15 +132,19 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     hue2 = tex('ShaderNodeTexNoise', 0.7)
     vc = mix(vc, VEIN_GREEN, ramp_(hue2.outputs['Fac'], 0.58, 0.75, 0.0, 0.8))
     l2 = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')
-    L(math_('MULTIPLY', veins, 0.9), l2.inputs['Factor'])
+    L(math_('MULTIPLY', veins, 0.7), l2.inputs['Factor'])
     L(layer1, l2.inputs['A'])
     L(vc, l2.inputs['B'])
     layer2 = l2.outputs['Result']
 
     # ---- layer 3: the epidermis. The skin tone, freckles (small soft flecks, each its own size and strength),
     # a few larger blemishes, and pores a shade darker
-    ep = node('ShaderNodeRGB')
-    ep.outputs[0].default_value = (*_lin(tone), 1.0)
+    if isinstance(tone, (tuple, list)):
+        ep = node('ShaderNodeRGB')
+        ep.outputs[0].default_value = (*_lin(tone), 1.0)
+        ep = ep.outputs[0]
+    else:
+        ep = tone       # (a colour output: the figure's baked 'skin' tone, with its blush and shade)
     fv = tex('ShaderNodeTexVoronoi', 5.5, feature='F1')
     fv.inputs['Randomness'].default_value = 1.0
     rnd = node('ShaderNodeSeparateColor')
@@ -151,7 +161,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
                  ramp_(brnd.outputs['Red'], 0.82, 0.9))
     pv = tex('ShaderNodeTexVoronoi', 13.0, feature='F1')
     pit = math_('MULTIPLY', ramp_(pv.outputs['Distance'], 0.05, 0.3, 1.0, 0.0), pored)
-    c3 = mix(ep.outputs[0], FRECKLE, math_('MULTIPLY', freckle, 0.85))
+    c3 = mix(ep, FRECKLE, math_('MULTIPLY', freckle, 0.85))
     c3 = mix(c3, BLEMISH, math_('MULTIPLY', blem, 0.55))
     sc3 = node('ShaderNodeVectorMath', operation='SCALE')
     L(c3, sc3.inputs[0])
@@ -170,7 +180,13 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
                                                                      math_('MULTIPLY', blem, 0.7)),
                                                      1.0 - EPIDERMIS_OPACITY))
     combined = mix(layer2, layer3, opacity)
-    sb = node('ShaderNodeBsdfPrincipled')
+    # (and the veins show through it, faintly, as they do under real skin)
+    vt = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')
+    L(math_('MULTIPLY', veins, 0.45), vt.inputs['Factor'])
+    L(combined, vt.inputs['A'])
+    L(vc, vt.inputs['B'])
+    combined = vt.outputs['Result']
+    sb = node('ShaderNodeBsdfPrincipled', name='close bsdf')
     L(combined, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
     sb.inputs['Subsurface Weight'].default_value = 1.0

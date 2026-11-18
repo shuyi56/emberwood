@@ -842,10 +842,16 @@ SKIN_LOOKS = {
     # the oil film thinner and less glossy: on the ranger's face (#125) the full film ran down the nose bridge and
     # the far cheek as a wet streak)
     'final': dict(sheen=0.15, coat=(0.05, 0.22), coat_rough=(0.46, 0.33)),
+    # the skin built in layers (skin_layers.py: a flesh base, veins, the epidermis over both), its epidermis the
+    # figure's baked 'skin' tone
+    'layered': dict(layers=True),
 }
 for _a, _b in zip(list(SKIN_LOOKS), list(SKIN_LOOKS)[1:]):
     SKIN_LOOKS[_b] = {**SKIN_LOOKS[_a], **SKIN_LOOKS[_b]}
 SKIN_LOOK = 'current'
+# the face creator's Fair swatch (#efcfb9) for the figure's skin, in place of the ranger's tone: views.py --set SKIN_FAIR=1
+SKIN_FAIR = False
+SKIN_FAIR_TONE = [239, 207, 185]
 
 
 def skin_surface(nt, bsdf, out, look=None):
@@ -868,6 +874,13 @@ def skin_surface(nt, bsdf, out, look=None):
     look = SKIN_LOOK if look is None else look
     K = SKIN_LOOKS[look] if isinstance(look, str) else list(SKIN_LOOKS.values())[int(look)]
     L = nt.links.new
+    if K.get('layers'):
+        import skin_layers
+        bsdf.name = 'sprite bsdf'
+        col_ = nt.nodes.new('ShaderNodeVertexColor')
+        col_.layer_name = 'skin'
+        skin_layers.skin_layers(nt, out, 'all', col_.outputs['Color'])
+        return
 
     def node(kind, **props):
         n = nt.nodes.new(kind)
@@ -1062,7 +1075,7 @@ def skin_tones():
     the jaw, between the fingers) it goes darker and warmer, the way light that has passed through skin comes
     out red."""
     from mathutils.bvhtree import BVHTree
-    base, flushc, cool = _srgb_lin(SKIN[2]), _srgb_lin([204, 128, 112]), _srgb_lin([164, 138, 126])
+    base, flushc, cool = _srgb_lin(SKIN_FAIR_TONE if SKIN_FAIR else SKIN[2]), _srgb_lin([204, 128, 112]), _srgb_lin([164, 138, 126])
     deep = _srgb_lin([150, 78, 64])
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
