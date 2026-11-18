@@ -24,6 +24,9 @@ import fit  # noqa: E402
 
 M_VEST = female.mat_def(70, 'vest leather', female.ramp(int(os.environ.get('VEST', '8a5a34'), 16), 0.12), 0.0,
                         surface='leather', closeup='leather')
+M_BRASS = female.mat_def(71, 'vest brass', female.ramp(int(os.environ.get('VEST_BRASS', 'b08d45'), 16), 0.12), 0.0,
+                         closeup='gold')
+BRASS = os.environ.get('VEST_PLAIN') is None     # (VEST_PLAIN=1: the leather alone)
 MEASURES = {}
 
 
@@ -37,10 +40,11 @@ def build():
             o.hide_render = True
             o.visible_camera = o.visible_shadow = o.visible_diffuse = o.visible_glossy = False
     bpy.context.view_layer.update()
-    vest, m = fit.build_vest(body, heads, rig=bpy.data.objects.get('Rig'), material=female.mat(M_VEST))
+    vest, m = fit.build_vest(body, heads, rig=bpy.data.objects.get('Rig'), material=female.mat(M_VEST),
+                             brass=female.mat(M_BRASS) if BRASS else None)
     MEASURES.update(m)
     # the --head view on the bust and neck: from under the bust to the chin, centred between them
-    lo, hi = m['z_bust'] - 1.6 * m['w'], m['z_chin'] + 1.1 * m['w']
+    lo, hi = m['z_bust'] - 2.0 * m['w'], m['z_chin'] + 1.1 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()

@@ -17,7 +17,8 @@ The garment is made as one piece and then cut:
                       cut through the finished shell along a measured line. A cut only removes: the surface that
                       is left is the shell's, so the edges need no seams or facings.
 
-build_vest() returns the one mesh, skinned to the body's own bones."""
+build_vest() returns the one mesh, skinned to the body's own bones. Given a brass material it also lays the brass on
+it (brass_layer()): plates cut from the same shell, so they sit on the leather and re-fit with it."""
 import math
 
 import bpy
@@ -47,6 +48,16 @@ RATIOS = {
     'hem_point': 0.50,       # the front point of the hem below that, in w
     'shoulder': 0.94,        # the vest's shoulder ends at this share of the way out to the shoulder point: on the
                              # shoulder's flat top, short of where it rolls over into the arm
+    'brass_thick': 0.03,     # the brass plates' thickness, in w
+    'brass_band': 0.26,      # the width of the edging along the front line, in w
+    'brass_gap': 0.10,       # the leather left showing between two plates, in w
+    'belt_z': 0.42,          # the belt under the bust: this share of the way from the bust line down to the waist
+    'belt_half': 0.24,       # half its height, in w
+    'belt_dip': 0.30,        # how far it dips to a point in front, in w
+    'chevron_period': 0.90,  # one chest band and the leather beside it, in w
+    'chevron_slope': 0.80,   # how steeply the chest bands rise from the middle outward
+    'stud': 0.085,           # a stud's radius, in w
+    'stud_step': 0.62,       # the studs' spacing along the belt, in w
     'scye_drop': 0.30,       # the armhole's bottom below the armpit, in w
     'scye_ease': 0.10,
     'scoop_front': 0.30,     # how far the armhole is hollowed in front of the arm, in w (a tailor's front scye curve)
@@ -432,7 +443,8 @@ def trim(V, faces, f, snap=0.012):
     return V, out
 
 
-def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=RATIOS, log=print, steps=None):
+def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=RATIOS, log=print, steps=None,
+               brass=None):
     """Measure the body, make the whole piece, cut it, and hand it to the body's bones. Returns (object, measures).
     steps, if a list, is filled with (name, points, faces) after the whole piece and after each cut."""
     P, T, aw = body_arrays(body)
@@ -463,16 +475,43 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
         log('vest: trimmed %s, %d faces left' % (nm, len(faces)))
         if steps is not None:
             steps.append((nm, V.copy(), faces))
+    kd = KDTree(len(P))
+    for i, p in enumerate(P):
+        kd.insert(Vector(p), i)
+    kd.balance()
+    th = ratios['thickness'] * M['w']
+    o = _sheet(name, [(V, faces)], M, material, body, kd, rig, lift=0.0, thickness=th)
+    if brass is not None:
+        pieces, studs = brass_layer(V, faces, M, lines, ratios, log)
+        lift = th + 0.2 * ratios['brass_thick'] * M['w']
+        _sheet(name + ' brass', pieces, M, brass, body, kd, rig, lift=lift, thickness=ratios['brass_thick'] * M['w'])
+        if studs:
+            _sheet(name + ' studs', studs, M, brass, body, kd, rig, lift=0.0, thickness=0.0)
+    return o, M
+
+
+def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
+    """A mesh object from cut pieces [(points, faces)]: lifted off the shell square to it, given its thickness
+    outward, and handed to the body's bones (each point takes the weights of the skin under it)."""
     bm = bmesh.new()
-    used = sorted({i for f in faces for i in f})
-    vmap = {i: bm.verts.new(V[i]) for i in used}
-    for f in faces:
-        try:
-            bm.faces.new([vmap[i] for i in f])
-        except ValueError:
-            pass
+    for V, faces in pieces:
+        vmap = {i: bm.verts.new(V[i]) for i in sorted({i for f in faces for i in f})}
+        for f in faces:
+            try:
+                bm.faces.new([vmap[i] for i in f])
+            except ValueError:
+                pass
     bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.004)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.normal_update()
+    # (outward is away from the neck's axis and up: an open sheet has no inside of its own to tell it by)
+    flip = [f for f in bm.faces if f.normal.dot(Vector((f.calc_center_median().x, f.calc_center_median().y - M['yc'], 0.6 * abs(f.normal.z) + 0.05)).normalized()) < 0] if thickness else []
+    if flip:
+        bmesh.ops.reverse_faces(bm, faces=flip)
+        bm.normal_update()
+    if lift:
+        for v in bm.verts:
+            v.co += v.normal * lift
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -484,11 +523,6 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
     bpy.context.scene.collection.objects.link(o)
     if material is not None:
         me.materials.append(material)
-    # the body's own bones carry it: each point takes the weights of the skin under it
-    kd = KDTree(len(P))
-    for i, p in enumerate(P):
-        kd.insert(Vector(p), i)
-    kd.balance()
     groups = {g.index: o.vertex_groups.new(name=g.name) for g in body.vertex_groups
               if g.name.split('.')[0] in ('Pelvis', 'Chest', 'Neck', 'UpperArm')}
     bverts = body.data.vertices
@@ -508,16 +542,98 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
         m = o.modifiers.new('rig', 'ARMATURE')
         m.object = rig
         m.use_deform_preserve_volume = True
-    m = o.modifiers.new('thickness', 'SOLIDIFY')
-    m.thickness = ratios['thickness'] * M['w']
-    m.offset = 1.0
-    m.use_rim = True
-    m = o.modifiers.new('edge', 'BEVEL')
-    m.width = 0.45 * ratios['thickness'] * M['w']
-    m.segments = 2
-    m.limit_method = 'ANGLE'
-    m.angle_limit = math.radians(50)
-    return o, M
+    if thickness:
+        m = o.modifiers.new('thickness', 'SOLIDIFY')
+        m.thickness = thickness
+        m.offset = 1.0
+        m.use_rim = True
+        m = o.modifiers.new('edge', 'BEVEL')
+        m.width = 0.45 * thickness
+        m.segments = 2
+        m.limit_method = 'ANGLE'
+        m.angle_limit = math.radians(50)
+    return o
+
+
+def brass_layer(V, faces, M, lines, ratios=RATIOS, log=print):
+    """The brass, laid on the finished vest: every plate is the vest's own surface cut again along measured lines
+    (so it lies on the leather exactly and follows the body with it), then lifted by the leather's thickness.
+
+      the edging   a band along the front line: round the collar's top edge and down both sides of the opening
+      the belt     a band under the bust, dipping to a point in front, set with studs
+      the chevrons bands across the chest between the two, rising from the middle out toward the shoulders
+
+    Returns the plates and the studs, each a list of (points, faces)."""
+    w, yc = M['w'], M['yc']
+    f_arm, f_front = dict(lines)['armholes'], dict(lines)['front and collar top']
+    band, gap = ratios['brass_band'] * w, ratios['brass_gap'] * w
+
+    def ang(p):
+        return np.arctan2(-p[:, 0], -(p[:, 1] - yc))
+
+    def cut(piece, *fields):
+        v, f = piece
+        for fn in fields:
+            if not f:
+                break
+            v, f = trim(v, f, fn)
+        return v, f
+
+    whole = (V, faces)
+    z_v = M['z_v']
+    # (below the cusp the two edgings run on together a little way and end in a point)
+    edging = cut(whole, lambda p: band - f_front(p),
+                 lambda p: np.where(p[:, 2] < z_v, (p[:, 2] - z_v) * 0.4 + band - np.abs(p[:, 0]), 1.0))
+    z_belt = M['z_bust'] - ratios['belt_z'] * (M['z_bust'] - M['z_waist'])
+    half = ratios['belt_half'] * w
+
+    def belt_mid(a):
+        return z_belt - ratios['belt_dip'] * w * np.exp(-(a / 0.3) ** 2)
+
+    belt = cut(whole, lambda p: half - np.abs(p[:, 2] - belt_mid(ang(p))))
+    period, slope = ratios['chevron_period'] * w, ratios['chevron_slope']
+    top = M['z_sh'] - gap
+
+    def stripes(p):
+        t = p[:, 2] - slope * np.abs(p[:, 0]) - (z_belt + half + gap)
+        return np.cos(2 * math.pi * (t / period - 0.25)) * period / (2 * math.pi)
+
+    chevrons = cut(whole,
+                   lambda p: yc - p[:, 1],                                   # the front only, to the side seams
+                   lambda p: p[:, 2] - belt_mid(ang(p)) - half - gap,        # above the belt
+                   lambda p: top - p[:, 2],                                  # below the shoulders
+                   lambda p: f_front(p) - band - gap,                        # clear of the edging
+                   lambda p: f_arm(p) - 2 * gap,                             # and of the armholes
+                   stripes)
+    plates = [pc for pc in (edging, belt, chevrons) if pc[1]]
+    log('vest brass: edging %d, belt %d, chevrons %d faces' % (len(edging[1]), len(belt[1]), len(chevrons[1])))
+    # the studs: half-round heads along the belt's middle, evenly spaced along its length
+    tris = []
+    for f in faces:
+        tris += [(f[0], f[i], f[i + 1]) for i in range(1, len(f) - 1)]
+    tree = BVHTree.FromPolygons([Vector(p) for p in V], tris)
+    r_stud = ratios['stud'] * w
+    out = (ratios['thickness'] + 1.2 * ratios['brass_thick']) * w
+    studs, a = [], 0.0
+    ball = bmesh.new()
+    bmesh.ops.create_uvsphere(ball, u_segments=12, v_segments=8, radius=r_stud)
+    bv = np.array([v.co[:] for v in ball.verts])
+    bf = [[v.index for v in f.verts] for f in ball.faces]
+    ball.free()
+    while a < 2 * math.pi - 1e-6:
+        d = Vector((-math.sin(a), -math.cos(a), 0.0))
+        o = Vector((0.0, yc, float(belt_mid(np.array([a if a < math.pi else a - 2 * math.pi]))[0])))
+        hit, nrm = tree.ray_cast(o, d)[:2]
+        if hit is None:
+            a += 0.05
+            continue
+        if nrm.dot(d) < 0:
+            nrm = -nrm
+        c = np.array((hit + nrm * out)[:])
+        sq = np.array([1.0, 1.0, 1.0])
+        studs.append((bv * sq + c, bf))
+        a += ratios['stud_step'] * w / max((hit - o).length, 0.5 * w)
+    return plates, studs
 
 
 def clearance(vest, body, head_objs=(), log=print):
