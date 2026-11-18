@@ -873,7 +873,7 @@ def collar_pt(a, v, out=0.0):
         x, y = -r * sa, GC_Y - r * ca
         z = lerp(53.0, COLLAR_STAND, t)
         if k > 0.0:
-            zt = cape_top_z(x, y) + 0.26
+            zt = cape_top_z(x, y) + 0.1     # (lying on the cloth, not standing off it)
             # (easing into the upright: the last of the foot rises off the cloth into the band's curve)
             z = lerp(z, zt + smoothstep(0.6, 1.0, t) * 0.25, k)
         r += out
@@ -996,32 +996,6 @@ def build_throat_plate(body):
         return Vector((x, y - out, z))
     rows, cols = 30, 12
 
-    def front(i, j, sg, out=0.0):
-        """One front: its top tucked up under the collar's foot, inside it, so it comes out from under the band;
-        its inner edge the V's line, its outer edge running in from the collar's foot to the same point."""
-        t = i / (rows - 1)
-        z = lerp(ZT, ZP, t)
-        a = lerp(collar_v(z), W0 * (1.0 - t) + 0.004, j / (cols - 1))
-        return lay(sg * a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, t)), out)
-    # (the fronts themselves are built as part of the throat plate below, one surface with it; here only their
-    # outer edges, rolled in brass)
-    for sg, nm in ((1, 'a'), (-1, 'b')):
-        # (the brass edges swell in from nothing below the collar's rim, so no stub pokes out above it)
-        # (the inner edge is joined to the throat plate, so only the outer one is rolled)
-        for jj, en in ((cols - 1, 'outer'),):
-            i0 = 5
-            pe = [front(i, jj, sg, 0.03) for i in range(i0, rows)]
-            mesh_obj(f'Collar front edge {en} {nm}',
-                     tube(pe, [0.07 * smoothstep(0, 4, k) + 0.008 for k in range(len(pe))], flat=1.0, n=8),
-                     M_GOLD, body, subdiv=0)
-    tip = lay(0.0, ZP + 0.42, RP, 0.2)
-    mb = medallion()
-    bmesh.ops.scale(mb, vec=(0.5, 0.5, 0.5), verts=mb.verts)
-    # (moved into place in the mesh itself: the collar's pieces are later rebuilt from their vertices alone, which
-    # dropped an object's own location and left the medallion at the origin)
-    bmesh.ops.translate(mb, vec=tip, verts=mb.verts)
-    mesh_obj('Collar medallion', mb, M_GOLD, body, subdiv=1)
-
     # ---- the plate below the neck, as the reference's: not a collar (it does not rise round the throat) but a V
     # band lying on the chest. Its top edge carries the collar's own V on down, at the same slope, from the fronts'
     # feet to the point where the two lines meet in the pit of the throat; its lower edge is the fronts' outer
@@ -1039,9 +1013,51 @@ def build_throat_plate(body):
         z0 = max(ptop(a), z1 + 0.02)
         z = lerp(z0, z1, t)
         tf = (ZT - z) / (ZT - ZP)
-        return lay(a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, tf)), out)
+        p_ = lay(a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, tf)))
+        if SETTLE is not None:
+            p_ = p_ + SETTLE[i][j]
+        return Vector((p_.x, p_.y - out, p_.z))
     cols2 = 61
+    # (laid on what is under it: lay() is a smooth guess at the chest, and over the tabard's yoke and the cape's
+    # fronts it stood up to 0.4 off them, so in the game the plate floated. Each point is drawn in to rest on the
+    # cloth beneath, a hair off it; the pull is spread over its neighbours, the most any of them needs, and then
+    # blurred, so the plate rests on the highest of what is under it and stays one smooth sheet)
+    SETTLE = None
+    T = clothes_bvh(('Hair', 'Collar', 'Medallion', 'Clasp'), head=True)
+    pull = [[0.0] * cols2 for _ in range(rows)]
+    for i in range(rows):
+        for j in range(cols2):
+            # (straight back, into the body: drawn in along its nearest point instead, each point went its own way
+            # and the plate's edge came out wavy)
+            p_ = tplate(i, j)
+            q = T.ray_cast(p_ - Vector((0, 0.3, 0)), Vector((0, 1, 0)), 1.5)
+            if q[0] is not None:
+                pull[i][j] = max(0.0, q[3] - 0.3 - 0.05)
+    for _ in range(2):    # (the least pull round each point: rest on the highest neighbour)
+        pull = [[min(pull[ii][jj] for ii in range(max(0, i - 2), min(rows, i + 3))
+                     for jj in range(max(0, j - 2), min(cols2, j + 3))) for j in range(cols2)] for i in range(rows)]
+    for _ in range(12):
+        pull = [[sum(pull[ii][jj] for ii in range(max(0, i - 1), min(rows, i + 2))
+                     for jj in range(max(0, j - 1), min(cols2, j + 2))) /
+                 len([1 for ii in range(max(0, i - 1), min(rows, i + 2)) for jj in range(max(0, j - 1), min(cols2, j + 2))])
+                 for j in range(cols2)] for i in range(rows)]
+    SETTLE = [[Vector((0.0, pull[i][j], 0.0)) for j in range(cols2)] for i in range(rows)]
     mesh_obj('Collar throat plate', face_out(grid(rows, cols2, tplate)), M_COLLAR, body, solid=0.08, subdiv=1)
+    # (its lower edge, the fronts' outer edges, rolled in brass from under the band's foot down to the point and
+    # up again, swelling in from nothing at each end so no stub pokes out above the band)
+    oe = [tplate(rows - 1, j, 0.03) for j in range(cols2)]
+    k0 = [k for k in range(cols2) if oe[k].z < ZT - 0.35]
+    oe = oe[k0[0]:k0[-1] + 1]
+    mesh_obj('Collar front edge', tube(oe, [0.07 * smoothstep(0, 4, min(k, len(oe) - 1 - k)) + 0.008
+                                            for k in range(len(oe))], flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    tip = tplate(rows - 6, cols2 // 2, 0.2)
+    mb = medallion()
+    bmesh.ops.scale(mb, vec=(0.5, 0.5, 0.5), verts=mb.verts)
+    # (moved into place in the mesh itself: the collar's pieces are later rebuilt from their vertices alone, which
+    # dropped an object's own location and left the medallion at the origin)
+    bmesh.ops.translate(mb, vec=tip, verts=mb.verts)
+    mesh_obj('Collar medallion', mb, M_GOLD, body, subdiv=1)
+
     # (its top edge rolled in brass where it shows, between the fronts' feet: the collar's V carried to its point)
     te = [tplate(0, j, 0.03) for j in range(cols2) if abs(lerp(-1.0, 1.0, j / (cols2 - 1))) * W0 < 0.36]
     mesh_obj('Collar throat plate edge', tube(te, [0.07 * smoothstep(0, 2, min(k, len(te) - 1 - k)) + 0.02
