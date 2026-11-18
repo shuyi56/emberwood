@@ -44,7 +44,7 @@ const settings = JSON.parse(arg('settings', '{}'));
 const columns = Number(arg('columns', 7)), rows = Number(arg('rows', 5));
 const zoom = Number(arg('zoom', 1)), lookY = arg('look-y') ? Number(arg('look-y')) : undefined;
 const body = arg('body', 'standin');
-const walk = arg('walk', 'clip');          // clip (the body's own), new or main (baked walks, src/cape-lab/baked-walk.js)          // standin, or model: the Warden's glb (the page's ?model=)
+const walk = arg('walk', 'clip');          // clip (the body's own), new or main (baked walks, src/cape-lab/baked-walk.js)          // standin, mannequin (the new mannequin's glb), or model: the Warden's glb (the page's ?model=)
 const LENGTH = { walk: 4, startstop: 6, turn: 7, run: 5, spin: 4 };
 
 fs.mkdirSync(out, { recursive: true });

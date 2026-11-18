@@ -7,7 +7,7 @@ import { applySettings } from '../world/springbones.js';
 import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS, CAPE_FABRIC_SETTINGS, WARDEN_FABRIC_SETTINGS } from '../world/cape-rig.js';
 import { WALKS, loadBakedWalk } from './baked-walk.js';
 import { CapeSim, SCENARIOS, FRAME, PACE } from './sim.js';
-import { loadModelBody } from './model-body.js';
+import { loadModelBody, loadMannequinBody } from './model-body.js';
 
 const CAPTURE = new URLSearchParams(location.search).has('capture');
 
@@ -61,7 +61,7 @@ let sim, colliderGroup, boneHelper;
 // the body: the stand-in, or the Warden's own model (?body=model, from ?model=<url>, models/warden.glb by default)
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') || 'models/warden.glb';
-let modelBody = null;
+let modelBody = null, mannequinBody = null;
 // the walk the body plays: its own (her clip, or the stand-in's walk made in code) or a baked one
 async function applyWalk(body = sim && sim.dummy) {
   if (!body) return;
@@ -73,8 +73,15 @@ async function setBody(kind) {
     modelBody = modelBody || await loadModelBody(import.meta.env.BASE_URL + MODEL_URL);
     flash('');
   }
+  if (kind === 'mannequin') {
+    flash('Loading the mannequin…', 60000);
+    mannequinBody = mannequinBody || await loadMannequinBody(import.meta.env.BASE_URL + 'models/mannequin.glb');
+    // (it has no walk of its own: the baked one)
+    if (opts.walk === 'clip') opts.walk = 'new';
+    flash('');
+  }
   opts.bodyKind = kind;
-  opts.body = kind === 'model' ? modelBody : null;
+  opts.body = kind === 'model' ? modelBody : kind === 'mannequin' ? mannequinBody : null;
   await applyWalk(opts.body);
   // each body's own tuning (her cape hangs closer to her than the stand-in's)
   const own = kind === 'model' ? (FABRIC ? WARDEN_FABRIC_SETTINGS : WARDEN_MODEL_SETTINGS) : (FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS);
@@ -222,7 +229,7 @@ function buildPanel() {
     controls.enabled = opts.view === 'orbit';
   });
   sel('walksel', Object.entries(WALKS), 'walk', async () => { await applyWalk(); restart(); });
-  sel('bodysel', [['standin', 'Stand-in'], ['model', 'Warden model']], 'bodyKind', () => setBody(opts.bodyKind)
+  sel('bodysel', [['standin', 'Stand-in'], ['model', 'Warden model'], ['mannequin', 'New mannequin']], 'bodyKind', () => setBody(opts.bodyKind)
     .catch((e) => flash('Model failed to load: ' + e.message)));
   sel('columns', [[5, '5 chains'], [7, '7 chains'], [9, '9 chains']], 'columns', build);
   sel('rows', [[3, '3 rows'], [4, '4 rows'], [5, '5 rows'], [6, '6 rows']], 'rows', build);
@@ -263,7 +270,10 @@ opts.bodyKind = 'standin';
 build();
 if (!CAPTURE) {
   buildPanel();
-  if (params.get('body') === 'model') {
+  if (params.get('body') === 'mannequin') {
+    document.getElementById('bodysel').value = 'mannequin';
+    setBody('mannequin').catch((e) => flash('Mannequin failed to load: ' + e.message));
+  } else if (params.get('body') === 'model') {
     document.getElementById('bodysel').value = 'model';
     setBody('model').catch((e) => flash('Model failed to load: ' + e.message));
   }

@@ -7,7 +7,7 @@
 // in the page so the springs can be tried on her real cape and body now.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { capeSkin, CAPE } from './dummy.js';
+import { capeSkin, CAPE, setCape } from './dummy.js';
 import { makeColliders, WARDEN_COLLIDERS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
 import { makeWalkPlayer } from './baked-walk.js';
 
@@ -472,4 +472,46 @@ function reskinHair(body, { rows = 3 } = {}) {
   sm.updateMatrixWorld(true);
   sm.bind(skeleton, sm.matrixWorld.clone());
   body.hair = { bones, mesh: sm, skeleton };
+}
+
+// The new mannequin as the bench's body (public/models/mannequin.glb: the bare figure of anatomy/mannequin-v14.blend,
+// its skin on its own rig, which has the Warden's joint names). It has no cape of its own, so it wears the
+// stand-in's (dummy.js), hung from its Chest, and no walk of its own, so it plays a baked one (?walk=new).
+export function loadMannequinBody(url) {
+  return new Promise((resolve, reject) => {
+    new GLTFLoader().load(url, (res) => {
+      const root = res.scene;
+      root.name = 'Mannequin';
+      const bones = {}, rest = [];
+      const skin = new THREE.MeshStandardMaterial({ color: 0xb9a79a, roughness: 0.85 });
+      root.traverse((o) => {
+        rest.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]);
+        if (o.isBone && !bones[o.name]) bones[o.name] = o;
+        if (!o.isMesh) return;
+        // (a skinned mesh needs its own material with skinning on, in this three.js)
+        o.material = o.isSkinnedMesh ? Object.assign(skin.clone(), { skinning: true }) : skin;
+        o.castShadow = o.receiveShadow = true;
+        o.frustumCulled = false;
+      });
+      root.updateMatrixWorld(true);
+      const body = {
+        root, bones, cape: null, hair: null, walkPlayer: null,
+        // (her legs are longer than the Warden's and her soles lie below her rig's origin: lifted to stand on the ground)
+        lift: -new THREE.Box3().setFromObject(root).min.y,
+        pose(ph, w) {
+          if (w > 0.02 && body.walkPlayer) body.walkPlayer.apply(ph); else body.restPose();
+        },
+        setWalk(walk) {
+          body.restPose();
+          body.walkPlayer = walk ? makeWalkPlayer(walk, root, [[root.getObjectByName('Head'), 'Neck']]) : null;
+        },
+        restPose() {
+          for (const [o, p, q, sc] of rest) if (o !== root) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(sc); }
+          root.updateMatrixWorld(true);
+        },
+      };
+      body.setCape = (o) => { body.restPose(); setCape(body, o); };
+      resolve(body);
+    }, undefined, reject);
+  });
 }

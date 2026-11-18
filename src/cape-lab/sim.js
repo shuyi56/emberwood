@@ -87,7 +87,7 @@ export class CapeSim {
     this.makeSprings();
   }
   place() {
-    this.dummy.root.position.set(this.x, 0, this.z);
+    this.dummy.root.position.set(this.x, this.dummy.lift || 0, this.z);      // (lift: a body whose soles lie below its origin)
     this.dummy.root.rotation.set(0, this.heading, 0);
   }
   scenarioTime() {

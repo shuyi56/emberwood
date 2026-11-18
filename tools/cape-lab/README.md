@@ -20,6 +20,10 @@ Captures take `--body model` (add `?model=...` to `--url` for another glb). A he
 `FRONT_Z=-100`, so `export-head.js` keeps the tail's strands, and merged with `merge-head.mjs`) gets its tail on
 one chain, `hairT_0_<row>`, from the tie; the rest of her hair rides her head.
 
+The Body menu also has the new mannequin (`?body=mannequin`, `--body mannequin` for captures):
+`public/models/mannequin.glb`, the bare figure of the project's `anatomy/mannequin-v14.blend` on its own rig. It wears
+the stand-in's cape and plays the baked walk (`--walk new`), as it has neither of its own.
+
 ## Springs or fabric
 
 The cape runs on either of two solvers over the same bones, colliders and fitting. Spring bones
