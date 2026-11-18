@@ -801,10 +801,13 @@ def g_neck(a):
 COLLAR_BASE = None   # (the cape's outer radius round the neck at the collar's foot, once the cape is built)
 
 
+COLLAR_TIP = 54.75   # (how high the fronts' tips stand: clear of the jaw, lowered from 55.2)
+
+
 def collar_top(a):
     """The band's top edge, not level like a pipe's: its front corners stand up as the tips of two blades, it sweeps
     down under the ears at the sides and rises again to the nape."""
-    return 55.25 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
+    return COLLAR_TIP + 0.05 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
 
 
 COLLAR_V = (52.25, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
@@ -819,10 +822,10 @@ def collar_open(v):
     """The half-angle of the opening at the throat, up the band. The fronts open in a V: one straight line each
     side from the point on the chest (see build_throat_plate, whose fronts carry it down there) up to the band's
     top corners under the jaw, so from the front the collar's outline is a V and not a ring."""
-    z = 53.0 + 0.5 * v / FOOT_V if v <= FOOT_V else lerp(COLLAR_STAND, 55.2, (v - FOOT_V) / (1.0 - FOOT_V))
+    z = 53.0 + 0.5 * v / FOOT_V if v <= FOOT_V else lerp(COLLAR_STAND, COLLAR_TIP, (v - FOOT_V) / (1.0 - FOOT_V))
     # (and each edge is a curve, not a ruled line, as a soft collar's is: drawn in a little through its middle,
     # sweeping wide to its tip)
-    t = max(0.0, (z - 53.0) / 2.2)
+    t = max(0.0, (z - 53.0) / (COLLAR_TIP - 53.0))
     return collar_v(z) + 0.2 * t ** 3 - 0.07 * math.sin(math.pi * min(1.0, t))
 
 
