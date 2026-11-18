@@ -11,7 +11,7 @@
     "prebuild": "node scripts/build-sprites.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "eslint src"
+    "lint": "eslint src && python3 scripts/lint-blender.py"
   },
   "license": "MIT",
   "dependencies": {
