@@ -19,7 +19,9 @@
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
            a build), with the clothes, armour and gear built and fitted exactly as on the real figure. For clothes
            changes that need a body under them.
---set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
+--set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable; a base
+           figure setting such as SKIN_LOOK=5 (by its place in female.SKIN_LOOKS) is set on the base module too
+--denoise  with --turn or --head: denoise the 3D look (OpenImageDenoise, albedo and normal passes)
 --face     FILE: a face from the face creator (tools/face-creator/export-face.cjs, e.g. blender/faces/rogue.json.gz)
            on this character's body: the creator's head, eyes, brows, lips, skin, make-up and hair colour in place
            of the character's own (her hairstyle and clothes stay); see blender/base/creator.py
@@ -110,18 +112,12 @@ def look_3d(samples):
     female.sprite_mode(False)
     sc.render.use_persistent_data = False
     sc.cycles.samples = samples
-    # (denoised: at these samples the skin's random-walk subsurface scattering and the fine hair strands came out
-    # as grain, the skin reading as noise)
-    sc.cycles.use_denoising = True
-    if hasattr(sc.cycles, 'denoiser'):
+    # (--denoise: OpenImageDenoise with the albedo and normal passes. Without it the skin's subsurface scattering
+    # stays grainy at these sample counts, which reads as a stucco texture that is not in the material)
+    sc.cycles.use_denoising = '--denoise' in argv
+    if sc.cycles.use_denoising:
         sc.cycles.denoiser = 'OPENIMAGEDENOISE'
-    # (guided by the albedo and normal passes, prefiltered accurately: the denoiser then keeps what is really on the
-    # surface, the freckles and make-up in the colour and the pores and fine creases in the bump, and removes only
-    # the sampling grain; unguided it smoothed them away with the grain)
-    if hasattr(sc.cycles, 'denoising_input_passes'):
         sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
-    if hasattr(sc.cycles, 'denoising_prefilter'):
-        sc.cycles.denoising_prefilter = 'ACCURATE'
     sc.cycles.max_bounces = 4
     sc.cycles.transparent_max_bounces = 16     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
@@ -287,6 +283,8 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
+            if hasattr(female, k):
+                setattr(female, k, eval(v))     # (a base figure setting, such as SKIN_LOOK)
     if opt('--face'):
         import creator
         creator.apply(opt('--face'))
