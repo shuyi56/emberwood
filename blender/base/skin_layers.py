@@ -56,6 +56,14 @@ GRAIN = 0.35                    # the fine grain of the surface, beside the pore
 TONE_RED = [226, 150, 136]      # where the tone drifts redder, and yellower
 TONE_YELLOW = [232, 200, 160]
 TONE_DRIFT = 0.3
+# the melanin in the epidermis: how much of each (0 none, 1 as built; freckles and sun spots follow the red of
+# 'skin tex', the freckle map; moles fall anywhere)
+FRECKLES = 1.0
+SUNSPOTS = 1.0
+MOLES = 1.0
+PIGMENT_HOLD = 0.9             # how far a pigmented mark is kept out of the scattering (0: blurred with the skin)
+SUNSPOT = [186, 138, 104]
+MOLE = [88, 54, 40]
 FRECKLE = [150, 96, 66]
 BLEMISH = [168, 98, 84]
 
@@ -198,7 +206,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     fv.inputs['Randomness'].default_value = 1.0
     rnd = node('ShaderNodeSeparateColor')
     L(fv.outputs['Color'], rnd.inputs['Color'])
-    size = math_('MULTIPLY_ADD', rnd.outputs['Green'], 0.1, 0.07)
+    size = math_('MULTIPLY_ADD', rnd.outputs['Green'], 0.25, 0.2)      # (of a cell: 1 to 2.2 mm)
     fleck = ramp_(math_('DIVIDE', fv.outputs['Distance'], size), 0.55, 1.0, 1.0, 0.0)
     some = math_('MULTIPLY', ramp_(rnd.outputs['Red'], 0.3, 0.4), math_('MULTIPLY_ADD', rnd.outputs['Blue'], 0.6, 0.4))
     freckle = math_('MULTIPLY', math_('MULTIPLY', fleck, some), freckly)
@@ -210,7 +218,40 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
                  ramp_(brnd.outputs['Red'], 0.82, 0.9))
     pv = tex('ShaderNodeTexVoronoi', 13.0, feature='F1')
     pit = math_('MULTIPLY', ramp_(pv.outputs['Distance'], 0.05, 0.3, 1.0, 0.0), pored)
+    # (the rest of the melanin. Freckles are never one size or evenly sown: a second, finer sowing between the first,
+    # both thinned and thickened in drifts by a slow noise, and every fleck's outline bent a little out of round)
+    bent = warped(9.0, 0.06)
+    fv2 = tex('ShaderNodeTexVoronoi', 11.0, bent, feature='F1')
+    fv2.inputs['Randomness'].default_value = 1.0
+    rnd2 = node('ShaderNodeSeparateColor')
+    L(fv2.outputs['Color'], rnd2.inputs['Color'])
+    fine = math_('MULTIPLY', ramp_(math_('DIVIDE', fv2.outputs['Distance'],
+                                         math_('MULTIPLY_ADD', rnd2.outputs['Green'], 0.15, 0.15)), 0.5, 1.0, 1.0, 0.0),
+                 math_('MULTIPLY', ramp_(rnd2.outputs['Red'], 0.45, 0.55), math_('MULTIPLY_ADD', rnd2.outputs['Blue'], 0.5, 0.25)))
+    sown = tex('ShaderNodeTexNoise', 1.4)
+    sown.inputs['Detail'].default_value = 2.0
+    drifts = ramp_(sown.outputs['Fac'], 0.3, 0.7, 0.35, 1.0)
+    freckle = math_('MULTIPLY', math_('MAXIMUM', freckle, math_('MULTIPLY', fine, freckly)), math_('MULTIPLY', drifts, FRECKLES))
+    # (sun spots: fewer, larger, paler and soft edged, where the freckles are and a little past them)
+    sv = tex('ShaderNodeTexVoronoi', 2.3, bent, feature='F1')
+    sv.inputs['Randomness'].default_value = 1.0
+    srnd = node('ShaderNodeSeparateColor')
+    L(sv.outputs['Color'], srnd.inputs['Color'])
+    spot = math_('MULTIPLY', ramp_(math_('DIVIDE', sv.outputs['Distance'],
+                                         math_('MULTIPLY_ADD', srnd.outputs['Green'], 0.2, 0.25)), 0.3, 1.0, 1.0, 0.0),
+                 math_('MULTIPLY', ramp_(srnd.outputs['Red'], 0.7, 0.8),
+                       math_('MULTIPLY', math_('MULTIPLY_ADD', freckly, 0.8, 0.2), SUNSPOTS)))
+    # (moles: a handful over the whole body, anywhere, small, dark, sharp edged, each its own size)
+    mv = tex('ShaderNodeTexVoronoi', 0.55, feature='F1')
+    mv.inputs['Randomness'].default_value = 1.0
+    mrnd = node('ShaderNodeSeparateColor')
+    L(mv.outputs['Color'], mrnd.inputs['Color'])
+    mole = math_('MULTIPLY', ramp_(math_('DIVIDE', mv.outputs['Distance'],
+                                         math_('MULTIPLY_ADD', mrnd.outputs['Green'], 0.035, 0.03)), 0.75, 1.0, 1.0, 0.0),
+                 math_('MULTIPLY', ramp_(mrnd.outputs['Red'], 0.5, 0.55), MOLES))
     c3 = mix(ep, FRECKLE, math_('MULTIPLY', freckle, 0.85))
+    c3 = mix(c3, SUNSPOT, math_('MULTIPLY', spot, 0.5))
+    c3 = mix(c3, MOLE, math_('MULTIPLY', mole, 0.92))
     c3 = mix(c3, BLEMISH, math_('MULTIPLY', blem, 0.55))
     sc3 = node('ShaderNodeVectorMath', operation='SCALE')
     L(c3, sc3.inputs[0])
@@ -225,7 +266,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
 
     # ---- the three together: the epidermis laid over layers 1 and 2, mostly clear, but opaque where it is
     # pigmented (freckles, blemishes)
-    opacity = math_('ADD', EPIDERMIS_OPACITY, math_('MULTIPLY', math_('MAXIMUM', math_('MULTIPLY', freckle, 1.0),
+    opacity = math_('ADD', EPIDERMIS_OPACITY, math_('MULTIPLY', math_('MAXIMUM', math_('MAXIMUM', math_('MULTIPLY', freckle, 1.0), math_('MAXIMUM', math_('MULTIPLY', spot, 0.6), mole)),
                                                                      math_('MULTIPLY', blem, 0.7)),
                                                      1.0 - EPIDERMIS_OPACITY))
     combined = mix(layer1, layer3, opacity)
@@ -247,7 +288,11 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     sb = node('ShaderNodeBsdfPrincipled', name='close bsdf')
     L(combined, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
-    sb.inputs['Subsurface Weight'].default_value = 1.0
+    # (melanin lies in the top of the skin, above where the light spreads: a freckle is a sharp little shadow on the
+    # surface. Left to the scattering, every mark smaller than the scatter's reach is blurred away, so where there
+    # is pigment the surface scatters less and keeps the mark's own colour and edge)
+    pigment = math_('MAXIMUM', freckle, math_('MAXIMUM', math_('MULTIPLY', spot, 0.5), mole))
+    L(math_('SUBTRACT', 1.0, math_('MULTIPLY', pigment, PIGMENT_HOLD)), sb.inputs['Subsurface Weight'])
     sb.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.18)
     sb.inputs['Subsurface Scale'].default_value = SSS_SCALE
     sb.inputs['Subsurface Anisotropy'].default_value = 0.8
