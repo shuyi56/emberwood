@@ -839,15 +839,27 @@ def collar_base(a):
 LAME_JOINTS = (0.36, 0.68)     # (where the neck's three lames meet, up the standing part)
 COLLAR_ON = None     # (a BVH of the cape and robe, for the collar's foot to lie on)
 COLLAR_STAND = 53.5  # (where the band turns upright, at the throat)
-FOOT_A0, FOOT_A1 = 0.62, 1.0   # (the foot spreads onto the cape only toward the yoke's edge, at about 0.97, and beyond)
+FOOT_A0, FOOT_A1 = 1.0, 1.35   # (the foot spreads onto the cape only past the throat plate's sides, at 1.05: before, it
+#  spread out through the plate's side and the two crossed, bent, at the front of each shoulder)
 FOOT_V = 0.36        # (the part of the band, from its foot, that lies down over the cape)
+FOOT_DROP = None     # (how far each part of the foot is let down to rest on what is under it, round (a) and up (v))
+
+
+def foot_drop(a, v):
+    if FOOT_DROP is None:
+        return 0.0
+    na, nv = len(FOOT_DROP), len(FOOT_DROP[0])
+    fa = (a % (2 * math.pi)) / (2 * math.pi) * na
+    fv = min(max(v / FOOT_V, 0.0), 1.0) * (nv - 1)
+    i0, j0 = int(fa) % na, min(int(fv), nv - 2)
+    i1, ta, tv = (i0 + 1) % na, fa - int(fa), fv - j0
+    return lerp(lerp(FOOT_DROP[i0][j0], FOOT_DROP[i1][j0], ta), lerp(FOOT_DROP[i0][j0 + 1], FOOT_DROP[i1][j0 + 1], ta), tv)
 
 
 def cape_top_z(x, y):
     """(the highest the cape or robe stands near (x, y): the pleats' crests over the shoulders included)"""
     best = None
-    for dx, dy in ((0, 0), (0.25, 0), (-0.25, 0), (0, 0.25), (0, -0.25), (0.18, 0.18), (-0.18, -0.18), (0.18, -0.18),
-                   (-0.18, 0.18)):
+    for dx, dy in ((0, 0), (0.1, 0), (-0.1, 0), (0, 0.1), (0, -0.1)):
         hit = COLLAR_ON.ray_cast(Vector((x + dx, y + dy, 60.0)), Vector((0, 0, -1)), 12.0)
         if hit[0] is not None:
             best = hit[0].z if best is None else max(best, hit[0].z)
@@ -877,7 +889,7 @@ def collar_pt(a, v, out=0.0):
             # (easing into the upright: the last of the foot rises off the cloth into the band's curve)
             z = lerp(z, zt + smoothstep(0.6, 1.0, t) * 0.25, k)
         r += out
-        return Vector((-r * sa, GC_Y - r * ca, z))
+        return Vector((-r * sa, GC_Y - r * ca, z - foot_drop(a, v)))
     w = (v - FOOT_V) / (1.0 - FOOT_V)
     zb = COLLAR_STAND
     if k > 0.0:
@@ -929,9 +941,12 @@ def cape_base(n=120):
 
 
 def build_collar(body):
-    global COLLAR_BASE
+    global COLLAR_BASE, FOOT_DROP
     COLLAR_BASE = cape_base()
     n, rows = 120, 40    # (rows enough to hold the neck lames' joints)
+    # (the plate below the neck first, so the band's foot can be laid on it as well as on the cloth)
+    build_throat_plate(body)
+    settle_foot()
 
     def ang(v, j):
         o = collar_open(v)
@@ -969,7 +984,38 @@ def build_collar(body):
                                                       for k in range(len(wl))], flat=1.0, n=6), M_GOLD, body, subdiv=0)
     studs = [collar_pt(ang(0.89, j), 0.89, 0.06) for j in range(4, n - 4, 6)]
     mesh_obj('Collar studs', dots(studs, 0.14), M_GOLD, body, subdiv=0)
-    build_throat_plate(body)
+
+
+def settle_foot(na=180, nv=10):
+    """Let the band's foot down onto what is under it. cape_top_z only guesses at the cloth's height, and beside the
+    throat, where the foot leaves the plate for the cape's fronts, it guessed high: the foot's outer edge stood
+    half a unit off the cloth there and bent where it turned, so in the 3/4 views the far side floated. Each point
+    of the foot is cast straight down onto the cloth and the throat plate and let down to rest a hair above
+    them (never lifted: by the opening the foot sinks into the plate on purpose). The drop is spread over its
+    neighbours, the least any of them needs, and blurred, so the foot rests on the highest of what is under it
+    and stays one smooth sheet; it fades out up the foot, so the band still turns up round the neck where it did."""
+    global FOOT_DROP
+    FOOT_DROP = None
+    # (the plate itself, not its brass lines, which run on under the foot where they cannot be seen)
+    # (and not the neck: the foot's inner edge stands on the neck's own base, which the cast would find first)
+    T = clothes_bvh(('Hair', 'Collar medallion', 'Collar front edge', 'Collar throat plate ', 'Medallion', 'Clasp'))
+    D = [[0.0] * nv for _ in range(na)]
+    for i in range(na):
+        a = 2 * math.pi * i / na
+        for j in range(nv):
+            p_ = collar_pt(a, FOOT_V * j / (nv - 1))
+            q = T.ray_cast(p_ + Vector((0.0, 0.0, 0.02)), Vector((0.0, 0.0, -1.0)), 4.0)   # (from the foot down: the plate's top, up round the neck under the foot, is not under it)
+            if q[0] is not None:
+                # (the steel's thickness hangs under the surface: rest that, plus a hair, on the cloth)
+                # (not by the opening, where the fronts' feet stand in the plate and their brass edges run on down)
+                D[i][j] = max(0.0, p_.z - (q[0].z + 0.09 + 0.04)) * smoothstep(0.5, 0.85, abs(wrap(a)))
+    for _ in range(1):    # (rest on the highest neighbour)
+        D = [[min(D[(i + di) % na][j] for di in range(-1, 2))
+              for j in range(nv)] for i in range(na)]
+    for _ in range(8):
+        D = [[(D[(i - 1) % na][j] + D[i][j] + D[(i + 1) % na][j]) / 3 for j in range(nv)] for i in range(na)]
+    D = [[D[i][j] * (1.0 - smoothstep(0.55, 1.0, j / (nv - 1))) for j in range(nv)] for i in range(na)]
+    FOOT_DROP = D
 
 
 def build_throat_plate(body):
