@@ -1,0 +1,9 @@
+00:02.610  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library
+rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER
+build 57 s (mannequin)
+01:22.563  render           | Saved: 'C:\Users\qiush\AppData\Local\Temp\tmpxde_gu5w\v0.png'
+rendered 3/4
+wrote C:\ai\rq\out\test-mannequin-2db9565\head.png
+Blender 5.3.0 (hash 02f0899d78e3 built 2026-11-10 01:33:43)
+
+Blender quit
