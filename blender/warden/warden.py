@@ -932,7 +932,8 @@ def build_collar(body):
     sheet = grid(rows, n, front)
     mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
     # the rolled edge: up one front, round the top and down the other
-    vs_ = [k / 12 for k in range(3, 12)]   # (the fronts' rolled edge, from where the fronts below take it over)
+    vs_ = [0.66 + 0.34 * k / 6 for k in range(6)]   # (the fronts' rolled edge only above the throat plate, which
+    # is joined to them below it)
     path = [collar_pt(ang(v, 0), v, 0.03) for v in vs_]
     path += [collar_pt(ang(1.0, j), 1.0, 0.03) for j in range(n)]
     path += [collar_pt(ang(v, n - 1), v, 0.03) for v in reversed(vs_)]
@@ -985,8 +986,9 @@ def build_throat_plate(body):
         mesh_obj(f'Collar front {nm}', face_out(grid(rows, cols, lambda i, j, sg=sg: front(i, j, sg))), M_COLLAR, body,
                  solid=0.08, subdiv=1)
         # (the brass edges swell in from nothing below the collar's rim, so no stub pokes out above it)
-        for jj, en in ((0, 'inner'), (cols - 1, 'outer')):
-            i0 = 1 if jj == 0 else 5
+        # (the inner edge is joined to the throat plate, so only the outer one is rolled)
+        for jj, en in ((cols - 1, 'outer'),):
+            i0 = 5
             pe = [front(i, jj, sg, 0.03) for i in range(i0, rows)]
             mesh_obj(f'Collar front edge {en} {nm}',
                      tube(pe, [0.07 * smoothstep(0, 4, k) + 0.008 for k in range(len(pe))], flat=1.0, n=8),
@@ -999,23 +1001,33 @@ def build_throat_plate(body):
     bmesh.ops.translate(mb, vec=tip, verts=mb.verts)
     mesh_obj('Collar medallion', mb, M_GOLD, body, subdiv=1)
 
-    # ---- the throat plate: the V's base filled with steel, standing round the throat like a gorget's, tucked in
-    # behind the fronts so their brass edges lap over it and the V still reads as the fronts' two lines; its top
-    # edge rolled in brass and dipping a little under the chin
+    # ---- the throat plate: the V's base filled with steel, one piece with the collar. Its sides are the band's own
+    # surface up to the band's front edges, and below the band the fronts' own surface up to their inner edges, so
+    # band, fronts and plate read as one shaped piece of steel tapering to the point on the chest, with no seam
+    # between them; only its top edge, the bottom of the opening under the chin, is rolled in brass
     PT = 54.25
 
     def ptop(a):
         return PT - 0.3 * math.exp(-(a / 0.28) ** 2)
 
+    def band_v(z):
+        """(the band's v at height z, at its front edge: the inverse of collar_open's mapping)"""
+        if z <= COLLAR_STAND:
+            return max(0.0, (z - 53.0) / 0.5) * FOOT_V
+        return FOOT_V + (z - COLLAR_STAND) / (55.2 - COLLAR_STAND) * (1.0 - FOOT_V)
+
     def tplate(i, j, out=0.0):
         t = i / (rows - 1)
         u = lerp(-1.0, 1.0, j / (cols2 - 1))
-        a0 = collar_v(lerp(PT, ZP, t)) + 0.14
+        a0 = collar_v(lerp(PT, ZP, t))
         z = lerp(ptop(u * a0), ZP + 0.25, t)
-        a = u * (collar_v(z) + 0.14)
-        return lay(a, z, lerp(0.0, RP - 0.1, smoothstep(0.3, 0.8, t)), out)
+        # (a hair past the edges it joins, and a hair behind them, so no crack opens along the join)
+        a = u * (collar_v(z) + 0.03)
+        if z >= ZT:
+            return collar_pt(a, band_v(z), out - 0.01)
+        tf = (ZT - z) / (ZT - ZP)
+        return lay(a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, tf)) - 0.01, out)
     cols2 = 25
-    # (it ends a little above the fronts' point, hidden behind them)
     mesh_obj('Collar throat plate', face_out(grid(rows, cols2, tplate)), M_COLLAR, body, solid=0.08, subdiv=1)
     te = [tplate(0, j, 0.03) for j in range(cols2)]
     mesh_obj('Collar throat plate edge', tube(te, [0.07] * cols2, flat=1.0, n=8), M_GOLD, body, subdiv=0)
