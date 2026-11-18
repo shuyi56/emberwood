@@ -4046,6 +4046,9 @@ L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
 # (and the swing is centred a little behind straight down, as a relaxed arm swings: further back past the hip than
 # it comes forward, where the bending elbow already carries the hand ahead)
 L_ARM_BACK = 0.07
+# (and held a touch further out from the body than at rest, so the forearm clears the hip as the pelvis sways and
+# turns under it: on the wide-hipped figures the arm hanging at ARM_OUT passed half a unit into the hip)
+L_ARM_CLEAR = 0.05
 # the feet in the locked walk: each turned out a little, as a relaxed walk sets them (pointing dead ahead they read as
 # turned in), and set nearly under the hips, so the legs do not lean in and the knees do not come together
 L_TOE_OUT, L_FOOT_X = 0.13, 0.97
@@ -4251,7 +4254,7 @@ def pose_locked(col):
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG)) - L_ARM_BACK
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
-        sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
+        sh.rotation_euler = (-a, s * (ARM_OUT + L_ARM_CLEAR + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-(L_BEND + L_FOLD * fold), s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
 

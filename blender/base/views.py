@@ -287,7 +287,8 @@ def walk(n, out):
         if o.animation_data:
             o.animation_data_clear()
     floor = bpy.data.meshes.new('Walk floor')
-    floor.from_pydata([(-60, -60, 0), (60, -60, 0), (60, 60, 0), (-60, 60, 0)], [], [(0, 1, 2, 3)])
+    fz = female.ANKLE_Z - 3.4      # (the sole is 3.4 under the ankle: the floor, wherever the figure's legs put it)
+    floor.from_pydata([(-60, -60, fz), (60, -60, fz), (60, 60, fz), (-60, 60, fz)], [], [(0, 1, 2, 3)])
     fo = bpy.data.objects.new('Walk floor', floor)
     sc.collection.objects.link(fo)
     fm = bpy.data.materials.new('walk floor')
@@ -296,14 +297,14 @@ def walk(n, out):
     fo.data.materials.append(fm)
     root = female.FIG['root']
     sc.render.resolution_x, sc.render.resolution_y = size, int(size * 1.75)
-    cam.data.type, cam.data.ortho_scale, cam.data.sensor_fit = 'ORTHO', 68.0, 'VERTICAL'
+    cam.data.type, cam.data.ortho_scale, cam.data.sensor_fit = 'ORTHO', (64.0 - fz) * 1.06, 'VERTICAL'
     grid = [[None] * n for _ in VIEWS]
     with tempfile.TemporaryDirectory() as tmp:
         for k in range(n):
             F.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
             for i, (name, yaw) in enumerate(VIEWS):
                 root.rotation_euler = (0, 0, math.radians(yaw))
-                cam.location = Vector((0, -200, 32.5))
+                cam.location = Vector((0, -200, (64.0 + fz) / 2))
                 cam.rotation_euler = (math.pi / 2, 0, 0)
                 p = os.path.join(tmp, f'w{k}-{i}.png')
                 sc.render.filepath = p

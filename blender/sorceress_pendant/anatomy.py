@@ -168,6 +168,10 @@ def patch():
     if LONG:
         # (the rig's legs are the canon's: the knee and the ankle joint where the body's are, the floor under them)
         female.THIGH, female.SHIN, female.ANKLE_Z = TH, SH, FLOOR_Z + 3.4
+        # (and the world walk's stride follows the longer legs: a cycle of 52 instead of the 46 the shorter-legged
+        # figures take, so the steps keep the same length against the leg and the standing knee stays nearly
+        # straight; a world model of this figure needs its own walk cycle in src/world/main.js to match)
+        female.STRIDE = 52.0
 
 
 # ---------------------------------------------------------------- pelvis
