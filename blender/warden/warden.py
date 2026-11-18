@@ -1025,12 +1025,21 @@ def build_throat_plate(body):
     SETTLE = None
     T = clothes_bvh(('Hair', 'Collar', 'Medallion', 'Clasp'), head=True)
     pull = [[0.0] * cols2 for _ in range(rows)]
+
+    def inward(i, j):
+        # (straight back in the middle; toward the sides, where it lies over the cape's fronts turning away, in
+        # toward the neck's axis: straight back, the cast there missed the cloth beside it and left the edge
+        # standing off the cape)
+        p_ = tplate(i, j)
+        rad = Vector((-p_.x, GC_Y - p_.y, 0.0)).normalized()
+        k = smoothstep(0.25, 0.9, abs(lerp(-1.0, 1.0, j / (cols2 - 1))) * W0)
+        return (Vector((0.0, 1.0, 0.0)).lerp(rad, k)).normalized()
     for i in range(rows):
         for j in range(cols2):
             # (straight back, into the body: drawn in along its nearest point instead, each point went its own way
             # and the plate's edge came out wavy)
             p_ = tplate(i, j)
-            q = T.ray_cast(p_ - Vector((0, 0.3, 0)), Vector((0, 1, 0)), 1.5)
+            q = T.ray_cast(p_ - inward(i, j) * 0.3, inward(i, j), 1.5)
             if q[0] is not None:
                 pull[i][j] = max(0.0, q[3] - 0.3 - 0.05)
     for _ in range(2):    # (the least pull round each point: rest on the highest neighbour)
@@ -1041,7 +1050,7 @@ def build_throat_plate(body):
                      for jj in range(max(0, j - 1), min(cols2, j + 2))) /
                  len([1 for ii in range(max(0, i - 1), min(rows, i + 2)) for jj in range(max(0, j - 1), min(cols2, j + 2))])
                  for j in range(cols2)] for i in range(rows)]
-    SETTLE = [[Vector((0.0, pull[i][j], 0.0)) for j in range(cols2)] for i in range(rows)]
+    SETTLE = [[inward(i, j) * pull[i][j] for j in range(cols2)] for i in range(rows)]
     mesh_obj('Collar throat plate', face_out(grid(rows, cols2, tplate)), M_COLLAR, body, solid=0.08, subdiv=1)
     # (its lower edge, the fronts' outer edges, rolled in brass from under the band's foot down to the point and
     # up again, swelling in from nothing at each end so no stub pokes out above the band)
