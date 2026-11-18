@@ -14,13 +14,13 @@ import { PropertyBinding } from 'three';
 
 export const HEAD_SETTINGS = {
   freq: 2.2,          // the spring's own frequency (Hz): low enough to lag a step, high enough not to wobble
-  damping: 0.55,      // share of critical damping
-  nod: 0.0004,        // radians of nod per unit/s^2 the neck speeds up or slows down (forward and down)
-  bob: 0.00018,       // radians of nod per unit/s^2 the neck rises or falls
-  sway: 0.0009,       // radians of tip per unit/s^2 of side-to-side acceleration
-  twist: 0.35,        // share of the chest's twist the head follows
-  lookAhead: 0.06,    // seconds of turning the head looks ahead into a turn
-  most: 0.14,          // no more than this (radians) from the pose on any axis
+  damping: 0.8,       // share of critical damping
+  nod: 0.0002,        // radians of nod per unit/s^2 the neck speeds up or slows down (forward and down)
+  bob: 0.0001,        // radians of nod per unit/s^2 the neck rises or falls
+  sway: 0.00045,      // radians of tip per unit/s^2 of side-to-side acceleration
+  twist: 0.12,        // share of the chest's twist the head follows
+  lookAhead: 0.02,    // seconds of turning the head looks ahead into a turn
+  most: 0.05,         // no more than this (radians) from the pose on any axis
 };
 
 const find = (root, name) => {
