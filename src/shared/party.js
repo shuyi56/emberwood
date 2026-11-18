@@ -16,7 +16,8 @@ const ROSTER = [
   // to the ranger's painted card
   { key: 'warden', name: 'Warden', note: 'Tabard, breastplate and cape, modelled in 3D', spec: { ...RANGER, hairStyle: null }, model: 'models/warden.glb' },
   { key: 'cleric', name: 'Cleric', note: 'White robe and black scapular', spec: CLERIC },
-  { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger', spec: ROGUE }
+  // the rogue is modelled in Blender too (blender/rogue/): the world shows public/models/rogue.glb, from her export_glb.py
+  { key: 'rogue', name: 'Rogue', note: 'Corset, blouse and dagger, modelled in 3D', spec: ROGUE, model: 'models/rogue.glb' }
 ];
 const DEFAULT_MEMBERS = ['knight', 'mage', 'ranger'];
 const STORE = 'emberwood.party';

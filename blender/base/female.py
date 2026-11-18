@@ -904,13 +904,13 @@ def skin_surface(nt, bsdf, out):
     # blotches (redder or sallower), then a fine speckle of lighter and darker
     blotch = tex('ShaderNodeTexNoise', 1.3)
     blotch.inputs['Detail'].default_value = 2.0
-    c = tint(col.outputs['Color'], [206, 124, 110], ramp_(blotch.outputs['Fac'], 0.52, 0.8, 0.0, 0.22))
-    c = tint(c, [212, 176, 128], ramp_(blotch.outputs['Fac'], 0.48, 0.2, 0.0, 0.2))
+    c = tint(col.outputs['Color'], [206, 124, 110], ramp_(blotch.outputs['Fac'], 0.52, 0.8, 0.0, 0.22 * SKIN_NOISE))
+    c = tint(c, [212, 176, 128], ramp_(blotch.outputs['Fac'], 0.48, 0.2, 0.0, 0.2 * SKIN_NOISE))
     fine = tex('ShaderNodeTexNoise', 9.0)
     fine.inputs['Detail'].default_value = 3.0
     fine.inputs['Roughness'].default_value = 0.65
     # (and the grooves and pores hold a little shade)
-    k = math_('MULTIPLY', ramp_(fine.outputs['Fac'], 0.25, 0.75, 0.92, 1.06, smooth=False),
+    k = math_('MULTIPLY', ramp_(fine.outputs['Fac'], 0.25, 0.75, 1 - 0.08 * SKIN_NOISE, 1 + 0.06 * SKIN_NOISE, smooth=False),
               math_('SUBTRACT', math_('MULTIPLY_ADD', net, 0.025, 0.975), math_('MULTIPLY_ADD', pit, 0.1, math_('MULTIPLY', fold, 0.12))))
     sc_ = node('ShaderNodeVectorMath', operation='SCALE')
     L(c, sc_.inputs[0])
@@ -996,7 +996,7 @@ def skin_tones():
     the jaw, between the fingers) it goes darker and warmer, the way light that has passed through skin comes
     out red."""
     from mathutils.bvhtree import BVHTree
-    base, flushc, cool = _srgb_lin(SKIN[2]), _srgb_lin([204, 128, 112]), _srgb_lin([164, 138, 126])
+    base, flushc, cool = _srgb_lin(SKIN[2]), _srgb_lin(FLUSH_TONE[0]), _srgb_lin([164, 138, 126])
     deep = _srgb_lin([150, 78, 64])
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
@@ -1035,7 +1035,12 @@ def skin_tones():
                              + 0.8 * _g(u, w, 0, 0.35, 0.05, 0.045) + 0.35 * _g(u, w, 0, 0.085, 0.07, 0.05)
                              + 0.3 * _g(u, w, 0, 0.66, 0.12, 0.05))
             cold = front * 0.8 * (_g(u, w, -0.14, 0.47, 0.065, 0.025) + _g(u, w, 0.14, 0.47, 0.065, 0.025))
-            cold += np.clip(-nr[:, 2] - 0.25, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * 1.1   # under the jaw
+            # blush (makeup, BLUSH): a soft wash over the apples of the cheeks, where the face creator lays it
+            blush = np.clip(0.55 * BLUSH[0] * front * (_g(u, w, -0.2, 0.375, 0.085, 0.055)
+                                                       + _g(u, w, 0.2, 0.375, 0.085, 0.055)), 0, 1)
+            # under the jaw (UNDER_JAW_SHADE: where it starts on the turn under, over how much of it, and how cool)
+            j0, jr, ja = UNDER_JAW_SHADE
+            cold += np.clip((-nr[:, 2] - j0) / jr, 0, 1) * np.clip((0.3 - w) / 0.2, 0, 1) * ja
             cold += np.clip((0.02 - w) / 0.1, 0, 1) * 0.7        # and down the throat, in the head's shade
             gloss = front * (_g(u, w, 0, 0.43, 0.04, 0.15) + 0.7 * _g(u, w, 0, 0.085, 0.06, 0.05)
                              + 0.5 * _g(u, w, 0, 0.66, 0.15, 0.06))
@@ -1097,7 +1102,10 @@ def skin_tones():
             occ = _occlusion(co, nr, local, dist=0.9)
         flush, cold, gloss = np.clip(flush, 0, 1), np.clip(cold, 0, 1), np.clip(gloss, 0, 1)
         c = base[None, :] * np.ones((n, 1))
-        c = c + (flushc - base)[None, :] * (0.6 * flush)[:, None]
+        c = c + (flushc - base)[None, :] * (0.6 * FLUSH_TONE[1] * flush)[:, None]
+        if o.name == 'Head shape' and BLUSH[0] > 0:
+            c = c + (np.array(_srgb_lin(BLUSH[1])) - c) * blush[:, None]
+            flush = np.clip(flush + blush, 0, 1)      # (and the sprite's rosier ramp)
         c = c + (cool - c) * (0.5 * cold)[:, None]
         # shut in: darker and warmer (a reddened shade rather than a grey one)
         k = np.clip(occ * 1.3, 0, 1)[:, None]
@@ -1109,8 +1117,9 @@ def skin_tones():
         # world model, whose skin is only this colour)
         from mathutils import noise
         drift = np.array([noise.noise(Vector(q) * 0.75 + Vector((3.1, 7.7, 1.3))) for q in rest_of(o, co)])
-        c = c + (_srgb_lin([206, 124, 110]) - c) * np.clip(drift, 0, 1)[:, None] * 0.3
-        c = c + (_srgb_lin([212, 176, 128]) - c) * np.clip(-drift, 0, 1)[:, None] * 0.3
+        c = c + (_srgb_lin([206, 124, 110]) - c) * np.clip(drift, 0, 1)[:, None] * 0.3 * SKIN_NOISE
+        c = c + (_srgb_lin([212, 176, 128]) - c) * np.clip(-drift, 0, 1)[:, None] * 0.3 * SKIN_NOISE
+        freck = freck * SKIN_FRECKLES
         for name, rgb in (('skin', c), ('skin fx', np.stack([flush, shade, gloss], 1)),
                           ('skin tex', np.stack([freck, crease, pores], 1))):
             a = me.color_attributes.new(name, 'FLOAT_COLOR', 'POINT')
@@ -1247,11 +1256,34 @@ GAIT, ARM_SWING = 1.0, 0.2
 # The face's shape, as the face creator's sliders (/mnt/project-files/face-creator): multipliers on face_relief's,
 # mouth_relief's and jaw_relief's forms, and offsets on the head's width and a few features' heights. These defaults
 # are the ranger's face; a figure changes the ones it wants with FACE.update({...}) before it builds.
+# the cool shade on the underside of the jaw (skin_tones): it begins where the surface turns down past j0 (the
+# normal's downward part), reaches full over jr more of the turn, and goes ja cool. A figure with a softly turned jaw
+# spreads it, so it does not draw a line along the jaw's edge.
+UNDER_JAW_SHADE = (0.25, 1.0, 1.1)
+# makeup, as the face creator sets it (all off for the ranger): BLUSH is the creator's (blush, blushTone), a rosy
+# wash over the apples of the cheeks; LIP_COLOURS its exported MID/UP/HI/DEEP lip tones (lipstick mixed in), over
+# the natural lip in lip_painting; LIP_GLOSS its lipGloss, which takes the lip paint's roughness down
+BLUSH = (0.0, (215, 122, 124))
+LIP_COLOURS = {}
+LIP_GLOSS = 0.0
+# how much of the skin's freckles, and of its uneven colour (redder or sallower blotches, the fine speckle), she has:
+# 1 is the ranger's
+SKIN_FRECKLES = 1.0
+SKIN_NOISE = 1.0
 # A mannequin: the same body and the same head shape, but the head left plain: no eyes, lids, ears, face paint or
 # mouth (and each figure skips its hair, see its build). The clothes, armour and gear build and fit exactly as on the
 # real figure, in a fraction of the time. For checking clothes that need a body under them (views.py --mannequin).
 MANNEQUIN = False
 EARS = False       # whether the head gets its sculpted ears (see ear_mesh); off for the ranger, whose hair covers them
+# the head built from a face creator export instead of from the sections and reliefs below (blender/base/creator.py
+# sets it: a Surface whose point(z, th) is the creator's own head; None, the default, is the head built here), and a
+# fingerprint of it as a plain setting
+HEAD_SOURCE = None
+HEAD_SOURCE_ID = ''
+# the skin's flush (skin_tones): its colour and how strongly it shows (the ranger's; the creator's flushTone, flushAmt)
+FLUSH_TONE = ([204, 128, 112], 1.0)
+# the brows' colour at the hairs' tips (brow_image; the roots are a darker shade of it): the ranger's warm brown
+BROW_TIP = [116, 66, 36]
 FACE = {
     'jawWidth': 0.0, 'jawDef': 1.0, 'jawSharp': 1.0, 'jawAngle': 0.0, 'chinProj': 1.0, 'chinWidth': 1.0, 'chinHeight': 1.0,
     'cheekWidth': 0.0, 'cheekbones': 1.0, 'cbHeight': 0.0, 'apples': 1.0, 'cheekFull': 1.0,
@@ -1507,6 +1539,18 @@ def sculpted_head():
     planes pushed out of the front (see face_relief). Units are head heights: chin at z 0, crown at z 1, the face
     toward -Y."""
     bm = bmesh.new()
+    if HEAD_SOURCE is not None:
+        # the face creator's own head: the same parameters per vertex, its surface looked up instead of built (on
+        # twice the rings: the creator's lips and nostrils are finer than this head's own, and need them)
+        bmesh.ops.create_uvsphere(bm, u_segments=200, v_segments=512, radius=1.0)
+        co = np.array([v.co for v in bm.verts])
+        r = np.hypot(co[:, 0], co[:, 1])
+        th = np.where(r > 1e-9, np.arctan2(co[:, 0], -co[:, 1]), 0.0)
+        pts = HEAD_SOURCE.points(HEAD_NECK_Z + (1.0 - HEAD_NECK_Z) * (0.5 + 0.5 * co[:, 2]), th)
+        for v, p in zip(bm.verts, pts):
+            v.co = p
+        bmesh.ops.scale(bm, vec=(HEAD_H, HEAD_H, HEAD_H), verts=bm.verts)
+        return bm
     bmesh.ops.create_uvsphere(bm, u_segments=160, v_segments=256, radius=1.0)
     for v in bm.verts:
         sx, sy, sz = v.co
@@ -1561,6 +1605,8 @@ def head_front_y(x, z):
 def _head_point(z, th):
     """A point of the head built from sections (head_section, face_relief, jaw_relief) at height parameter z and
     angle th round it (0 straight forward): the same displacement sculpted_head applies to each vertex."""
+    if HEAD_SOURCE is not None:
+        return HEAD_SOURCE.point(z, th)
     c, s = math.cos(th), math.sin(th)
     x, y = head_section(z, c, s)
     e = 1e-3
@@ -3153,9 +3199,9 @@ def brow_image():
     da = ImageDraw.Draw(alpha)
     paint = Image.new('RGB', (W * SS, H * SS), (0, 0, 0))
     dp = ImageDraw.Draw(paint)
-    ROOT = np.array([40, 24, 17], dtype=np.float32)
-    TIP = np.array([116, 66, 36], dtype=np.float32)
-    SHEEN = np.array([156, 104, 68], dtype=np.float32)
+    TIP = np.array(BROW_TIP, dtype=np.float32)
+    ROOT = np.round(TIP * np.array([40 / 116, 24 / 66, 17 / 36])).astype(np.float32)     # ([40, 24, 17] for the ranger's)
+    SHEEN = np.minimum(255, np.round(TIP * np.array([156 / 116, 104 / 66, 68 / 36]))).astype(np.float32)   # ([156, 104, 68])
 
     def slope(u):
         e = 0.02
@@ -3410,8 +3456,14 @@ def lip_painting(W=576, H=336):
     # (the colour stays inside the sculpted lips, which end at about 0.08: painted wider and taller, the lips read
     # too full and the colour ran out past the corners as dark wedges)
     pinch = np.sqrt(np.clip(1 - (ax / 0.081) ** 2, 0, 1))  # each lip tapers to nothing at the corner
-    top = zl + 0.75 * (top - zl) * pinch ** 0.8
-    bot = zl - 0.028 * pinch ** 1.4
+    # (a face from the creator (HEAD_SOURCE) has its lips sculpted as tall as its lipUpper and lipLower make them,
+    # narrower on a male face (sex), as the creator's lipHeights: the paint follows; the base head's lips keep theirs)
+    hu, hl = 1.0, 1.0
+    if HEAD_SOURCE is not None:
+        k = 1 - 0.2 * FACE.get('sex', 0)
+        hu, hl = (0.6 + 0.4 * FACE['lipUpper']) * k, (0.6 + 0.4 * FACE['lipLower']) * k
+    top = zl + 0.75 * hu * (top - zl) * pinch ** 0.8
+    bot = zl - 0.028 * hl * pinch ** 1.4
     upper = sm(top + 0.0022, top - 0.0022, w) * sm(zl - 0.002, zl + 0.001, w)
     lower = sm(bot - 0.007, bot + 0.005, w) * sm(zl + 0.002, zl - 0.001, w)
     # (past the corners both edges meet the line, which would leave a thin band of each running on out)
@@ -3483,7 +3535,7 @@ def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     tex.extension = 'EXTEND'
     nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
     nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
-    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
+    p.inputs['Roughness'].default_value = 0.55 - 0.2 * LIP_GLOSS      # (0.42 read as wet lipstick)
     p.inputs['Specular IOR Level'].default_value = 0.3
     nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
     m.surface_render_method = 'BLENDED'
@@ -3574,7 +3626,8 @@ def build_head(body):
     mesh_obj('Head shape', hb, M_SKIN, head, subdiv=0)
     # the ears, each sculpted as its own surface (blender/shared/ear.py) and set on the head's side
     if EARS:
-        for e in ear_grids(side_x_finder(head_section, jaw_relief), HEAD_H):
+        finder = side_x_finder(head_section, jaw_relief) if HEAD_SOURCE is None else side_x_finder(HEAD_SOURCE.section)
+        for e in ear_grids(finder, HEAD_H):
             name = 'Ear ' + ('L' if e['side'] > 0 else 'R')
             mesh_obj(name, ear_mesh(e, name), M_SKIN, head, subdiv=0)
     eye_makeup(head, final_tree, eyes)

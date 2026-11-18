@@ -12,12 +12,17 @@
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
+--hair-only  with --turn or --head: only the hair is rendered (every mesh in the hair material, and the tie);
+           the rest of the figure is still built, so the hair lies as it does on her
 --angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
            comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
            a build), with the clothes, armour and gear built and fitted exactly as on the real figure. For clothes
            changes that need a body under them.
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable
+--face     FILE: a face from the face creator (tools/face-creator/export-face.cjs, e.g. blender/faces/rogue.json.gz)
+           on this character's body: the creator's head, eyes, brows, lips, skin, make-up and hair colour in place
+           of the character's own (her hairstyle and clothes stay); see blender/base/creator.py
 
 Rendering pieces on their own (any of the views above):
 --only     PREFIXES: render only the meshes whose names start with one of these (comma separated), e.g.
@@ -105,7 +110,18 @@ def look_3d(samples):
     female.sprite_mode(False)
     sc.render.use_persistent_data = False
     sc.cycles.samples = samples
-    sc.cycles.use_denoising = False
+    # (denoised: at these samples the skin's random-walk subsurface scattering and the fine hair strands came out
+    # as grain, the skin reading as noise)
+    sc.cycles.use_denoising = True
+    if hasattr(sc.cycles, 'denoiser'):
+        sc.cycles.denoiser = 'OPENIMAGEDENOISE'
+    # (guided by the albedo and normal passes, prefiltered accurately: the denoiser then keeps what is really on the
+    # surface, the freckles and make-up in the colour and the pores and fine creases in the bump, and removes only
+    # the sampling grain; unguided it smoothed them away with the grain)
+    if hasattr(sc.cycles, 'denoising_input_passes'):
+        sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
+    if hasattr(sc.cycles, 'denoising_prefilter'):
+        sc.cycles.denoising_prefilter = 'ACCURATE'
     sc.cycles.max_bounces = 4
     sc.cycles.transparent_max_bounces = 16     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
@@ -271,6 +287,9 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
+    if opt('--face'):
+        import creator
+        creator.apply(opt('--face'))
     if '--mannequin' in argv:
         female.MANNEQUIN = True
     import time
@@ -292,6 +311,17 @@ def main():
         sc.frame_set(int(opt('--frame', 0)) + 1)
         size = int(opt('--size', 360))
         cam = look_3d(int(opt('--samples', 32)))
+        if '--hair-only' in argv:
+            hair = F.MATERIALS[F.M_HAIR]['name']
+            kept = []
+            for o in sc.objects:
+                if o.type != 'MESH':
+                    continue
+                if any(sl.material and sl.material.name == hair for sl in o.material_slots) or o.name.startswith('Hair'):
+                    kept.append(o.name)
+                else:
+                    o.hide_render = True
+            print('hair only:', ', '.join(sorted(kept)), flush=True)
         if isolating:
             # (again: the close-up look shows the face's paints, which the sprite look hides, over what was hidden)
             shown = isolate()
