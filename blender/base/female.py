@@ -3940,6 +3940,11 @@ GAIT_FOOT = [(0.0, 15), (0.08, 0), (0.4, 0), (0.5, -12), (0.6, -30), (0.7, -4), 
 # folding to about 60 degrees as it swings forward, just behind the shoulder, so the forearm follows through instead of the arm swinging stiff from the shoulder like a pendulum. The arm
 # swings and folds in the plane of the walk, so it reads from the side camera: nothing swings in toward the body.
 ARM_LAG, ELBOW_LAG = 0.05, 0.03
+# How the arm hangs at rest: ARM_OUT, how far the upper arm is held out from the body at the shoulder; ARM_CARRY, the
+# forearm's own angle out from the upper arm at the elbow (the carrying angle, which takes the hand past the hip); and
+# for each side (1 her right, -1 her left) the upper arm's swing forward and the elbow's bend in the idle stance.
+ARM_OUT, ARM_CARRY = 0.17, 0.0
+IDLE_ARM = {1: (0.12, 0.32), -1: (-0.04, 0.2)}
 STANCE = 0.62
 # The trunk (in radians, and design pixels for the sway): the pelvis turns about its vertical axis with the legs, the
 # hip of the leg swinging through carried forward with it; it lists, the hip over the standing leg high and the
@@ -4165,12 +4170,11 @@ def pose(col):
             bend = 0.42 + 0.2 * fold
             flick = 0.08 + 0.05 * math.cos(2 * math.pi * (t - 0.5 - ARM_LAG - 2 * ELBOW_LAG))
         else:
-            a = 0.12 if s > 0 else -0.04
-            bend = 0.32 if s > 0 else 0.2
+            a, bend = IDLE_ARM[s]
             flick = 0.1
         # (held a little off the body, so the waist shows, and a little further out as it swings back, past the hip)
-        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
-        el.rotation_euler = (-bend, 0, 0)
+        sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
+        el.rotation_euler = (-bend, s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
 
 
@@ -4229,8 +4233,8 @@ def pose_locked(col):
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
-        sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
-        el.rotation_euler = (-(L_BEND + L_FOLD * fold), 0, 0)
+        sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
+        el.rotation_euler = (-(L_BEND + L_FOLD * fold), s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
 
 
