@@ -13,13 +13,15 @@ import { SpringBones, findChains, DEFAULTS } from './springbones.js';
 import { makeColliders } from './cape-rig.js';
 
 export const HAIR_GROUPS = ['hair', 'hairL', 'hairR'];
-// the front locks lie on her chest, which leans and bobs under them in a run: they swing less than the back
-export const HAIR_GROUP_SETTINGS = { hairL: { maxAngle: 0.35 }, hairR: { maxAngle: 0.35 } };
+// the front locks lie on her chest, which rocks under them with every step: stiffer, and riding the head more,
+// they sway a little on it instead of being levered off it into spikes
+const FRONT_LOCK = { stiffness: 800, inherit: 0.95, maxAngle: 0.1 };
+export const HAIR_GROUP_SETTINGS = { hairL: FRONT_LOCK, hairR: FRONT_LOCK };
 
 export const HAIR_SETTINGS = {
   ...DEFAULTS,
-  stiffness: 2000,
-  damping: 0.5,
+  stiffness: 400,
+  damping: 0.3,
   airDrag: 0.05,
   gravity: 350,
   hitRadius: 0.3,
@@ -27,7 +29,8 @@ export const HAIR_SETTINGS = {
   linkStiffness: 0.4,
   linkSlack: 0.2,
   sheetBend: 0.3,
-  follow: 0.4,
+  follow: 0,
+  inherit: 0.85,
   maxAngle: 0.9,
 };
 

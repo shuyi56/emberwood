@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { capeSkin, CAPE } from './dummy.js';
 import { makeColliders, WARDEN_COLLIDERS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
+import { makeWalkPlayer } from './baked-walk.js';
 
 // the world's timing for a modelled hero: a walk cycle in frames 1-25 at 24 fps, the idle stance at frame 40
 const WALK_SECONDS = 24 / 24, IDLE_SECONDS = 39 / 24;
@@ -48,6 +49,14 @@ export function loadModelBody(url) {
         // standing or walking, as the world does it: the walk at its phase, or the idle stance
         pose(ph, w) {
           mixer.setTime(w > 0.05 ? (ph / (Math.PI * 2)) * WALK_SECONDS : IDLE_SECONDS);
+          // a baked walk (baked-walk.js) in place of her clip's
+          if (w > 0.05 && body.walkPlayer) body.walkPlayer.apply(ph);
+        },
+        walkPlayer: null,
+        // walk: baked walk data, or null for her own clip
+        setWalk(walk) {
+          body.restPose();
+          body.walkPlayer = walk ? makeWalkPlayer(walk, root, [[root.getObjectByName('Head'), 'Neck']]) : null;
         },
         // back to the pose the glb was exported in, which the cape is laid out and bound against
         restPose() {

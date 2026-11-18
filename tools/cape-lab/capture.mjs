@@ -4,7 +4,7 @@
 //   npm run dev
 //   node tools/cape-lab/capture.mjs --out /tmp/cape [--scenarios turn,startstop,walk] [--views back3q,side]
 //        [--seconds 7] [--every 3] [--size 420x520] [--settings '{"stiffness":300}'] [--columns 5] [--rows 5]
-//        [--colliders] [--no-springs] [--body model] [--zoom 2.6 --look-y 50]
+//        [--colliders] [--no-springs] [--body model] [--walk new] [--zoom 2.6 --look-y 50]
 //
 // --body model hangs the cape on the Warden's own glb instead of the stand-in (the page loads models/warden.glb,
 // or the file given by ?model=<path under public/> in --url). --zoom and --look-y frame a close-up (the head and
@@ -43,7 +43,8 @@ const [W, H] = arg('size', '420x520').split('x').map(Number);
 const settings = JSON.parse(arg('settings', '{}'));
 const columns = Number(arg('columns', 7)), rows = Number(arg('rows', 5));
 const zoom = Number(arg('zoom', 1)), lookY = arg('look-y') ? Number(arg('look-y')) : undefined;
-const body = arg('body', 'standin');          // standin, or model: the Warden's glb (the page's ?model=)
+const body = arg('body', 'standin');
+const walk = arg('walk', 'clip');          // clip (the body's own), new or main (baked walks, src/cape-lab/baked-walk.js)          // standin, or model: the Warden's glb (the page's ?model=)
 const LENGTH = { walk: 4, startstop: 6, turn: 7, run: 5, spin: 4 };
 
 fs.mkdirSync(out, { recursive: true });
@@ -63,7 +64,7 @@ for (const sc of scenarios) {
     fs.mkdirSync(dir, { recursive: true });
     await page.evaluate((o) => window.__lab.setup(o), {
       settings, columns, rows, body,
-      opts: { scenario: sc, view, showColliders: flag('colliders'), showBones: flag('bones'), springs: !flag('no-springs'), showBody: true, zoom, lookY },
+      opts: { scenario: sc, view, showColliders: flag('colliders'), showBones: flag('bones'), springs: !flag('no-springs'), showBody: true, zoom, lookY, walk },
     });
     // the loop check settles over a few cycles before the frames are kept
     if (sc === 'walk') await page.evaluate(() => window.__lab.advance(42 * 6));

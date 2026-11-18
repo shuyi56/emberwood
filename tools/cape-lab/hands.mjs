@@ -4,6 +4,7 @@
 //
 //   npm run dev
 //   node tools/cape-lab/hands.mjs [--url http://127.0.0.1:5173/cape-lab.html?model=models/warden.glb] [--scenarios walk,turn]
+//        [--walk new]
 import { createRequire } from 'module';
 import path from 'path';
 import { execSync } from 'child_process';
@@ -19,11 +20,12 @@ const arg = (name, def) => {
   return i > 0 ? process.argv[i + 1] : def;
 };
 const url = arg('url', 'http://127.0.0.1:5173/cape-lab.html');
+const walk = arg('walk', 'clip');   // clip (her own), new or main (baked walks)
 await (async () => {
   const b = await chromium.launch(); const p = await b.newPage();
   await p.goto(url + (url.includes('?') ? '&' : '?') + 'capture'); await p.waitForFunction(() => !!window.__lab);
   for (const sc of arg('scenarios', 'walk,startstop,turn,run').split(',')) {
-    await p.evaluate((sc) => window.__lab.setup({ body: 'model', opts: { scenario: sc, springs: true } }), sc);
+    await p.evaluate(([sc, walk]) => window.__lab.setup({ body: 'model', opts: { scenario: sc, springs: true, walk } }), [sc, walk]);
     const r = await p.evaluate((sc) => {
       const s = window.__lab.sim(), d = s.dummy, V = d.root.position.constructor;
       const cape = d.cape.mesh, hands = []; d.root.traverse(o => { if (o.isSkinnedMesh && /^(Hand|Bracer|Gauntlet)/.test(o.name) && o.visible) hands.push(o); });

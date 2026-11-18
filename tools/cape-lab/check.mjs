@@ -1,7 +1,7 @@
 // Numbers for the cape springs, without a browser: runs the cape bench's stand-in (src/cape-lab/sim.js) in node
 // and reports what a capture can't show at a glance.
 //
-//   node tools/cape-lab/check.mjs [--settings '{"stiffness":300}'] [--columns 5] [--rows 5]
+//   node tools/cape-lab/check.mjs [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--walk new]
 //
 //  - loop drift: on the straight walk, how far any tail lands from where it was one cycle earlier (0 means the
 //    cape repeats exactly with the walk, so a looping clip shows no seam)
@@ -13,6 +13,7 @@
 //    through the sharp turns, where an arm or a leg would show through
 //  - jitter: how much the cape shakes from frame to frame (the mean size of each tail's third difference over
 //    frames, in her own space: a smooth swing, however fast, scores low; a flicker scores high)
+import fs from 'fs';
 import * as THREE from 'three';
 import { CapeSim, FRAME, CYCLE_FRAMES } from '../../src/cape-lab/sim.js';
 import { CAPE_SETTINGS } from '../../src/world/cape-rig.js';
@@ -22,7 +23,10 @@ const arg = (name, def) => {
   return i > 0 ? process.argv[i + 1] : def;
 };
 const settings = { ...CAPE_SETTINGS, colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
-const base = { columns: Number(arg('columns', 7)), rows: Number(arg('rows', 5)), springs: true };
+// --walk new|main: a baked walk (public/cape-lab/walk-<name>.json) in place of the stand-in's walk made in code
+const walkName = arg('walk', null);
+const walkData = walkName ? JSON.parse(fs.readFileSync(new URL(`../../public/cape-lab/walk-${walkName}.json`, import.meta.url))) : null;
+const base = { columns: Number(arg('columns', 7)), rows: Number(arg('rows', 5)), springs: true, walkData };
 const sim = (scenario) => new CapeSim({ ...settings }, { ...base, scenario });
 // the hem: each chain's last tail, in her own space
 const hem = (s) => {

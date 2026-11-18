@@ -2,6 +2,7 @@
 // mannequin over them, a walk made in code, and a cape of spring-bone chains skinned like the one
 // blender/warden/warden.py will make. All in her model units (80 tall, +z her front).
 import * as THREE from 'three';
+import { makeWalkPlayer } from './baked-walk.js';
 
 // rest positions of her joints, from the Warden's glb
 const J = {
@@ -113,7 +114,20 @@ export function makeDummy({ columns = 7, rows = 5 } = {}) {
     foot.scale.set(1.1, 0.8, 1);
   }
 
-  const body = { root, rig, bones, cape: null, pose: (ph, w, t) => pose(bones, ph, w, t) };
+  const body = {
+    root, rig, bones, cape: null, walkPlayer: null,
+    pose(ph, w, t) {
+      pose(bones, ph, w, t);
+      // a baked walk (baked-walk.js) in place of the walk made in code (standing still stays the code's stance)
+      if (w > 0.02 && body.walkPlayer) body.walkPlayer.apply(ph);
+    },
+    // walk: baked walk data, or null for the walk made in code
+    setWalk(walk) {
+      for (const n of Object.keys(J)) { bones[n].position.copy(bones.rest[n]); bones[n].quaternion.identity(); }
+      root.updateMatrixWorld(true);
+      body.walkPlayer = walk ? makeWalkPlayer(walk, root) : null;
+    },
+  };
   body.setCape = (o) => setCape(body, o);
   body.setCape({ columns, rows });
   return body;

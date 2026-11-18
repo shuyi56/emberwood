@@ -52,12 +52,14 @@ export class CapeSim {
       this.dummy.setCape({ columns: this.opts.columns, rows: this.opts.rows });
     } else {
       this.dummy = makeDummy({ columns: this.opts.columns, rows: this.opts.rows });
+      // a baked walk in place of the walk made in code (the check's --walk; the page sets it on the body)
+      if (this.opts.walkData) this.dummy.setWalk(this.opts.walkData);
     }
     this.restart();
   }
   colliderDefs() {
     const k = this.settings.colliderScale ?? 1;
-    return WARDEN_COLLIDERS.map(([a, b, r]) => [a, b, r * k]);
+    return WARDEN_COLLIDERS.map(([a, b, r, o]) => [a, b, r * k, o]);
   }
   makeSprings() {
     const root = this.dummy.root;

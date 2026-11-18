@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applySettings } from '../world/springbones.js';
 import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
+import { WALKS, loadBakedWalk } from './baked-walk.js';
 import { CapeSim, SCENARIOS, FRAME, PACE } from './sim.js';
 import { loadModelBody } from './model-body.js';
 
@@ -53,12 +54,17 @@ controls.enabled = false;
 
 // ---- the character ----
 const settings = { ...CAPE_SETTINGS, colliderScale: 1, slow: 1 };
-const opts = { columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true };
+const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true };
 let sim, colliderGroup, boneHelper;
 // the body: the stand-in, or the Warden's own model (?body=model, from ?model=<url>, models/warden.glb by default)
 const params = new URLSearchParams(location.search);
 const MODEL_URL = params.get('model') || 'models/warden.glb';
 let modelBody = null;
+// the walk the body plays: its own (her clip, or the stand-in's walk made in code) or a baked one
+async function applyWalk(body = sim && sim.dummy) {
+  if (!body) return;
+  body.setWalk(opts.walk === 'clip' ? null : await loadBakedWalk(opts.walk, import.meta.env.BASE_URL));
+}
 async function setBody(kind) {
   if (kind === 'model') {
     flash('Loading the model…', 60000);
@@ -67,6 +73,7 @@ async function setBody(kind) {
   }
   opts.bodyKind = kind;
   opts.body = kind === 'model' ? modelBody : null;
+  await applyWalk(opts.body);
   // each body's own tuning (her cape hangs closer to her than the stand-in's)
   Object.assign(settings, { contactSoftness: (kind === 'model' ? WARDEN_MODEL_SETTINGS : CAPE_SETTINGS).contactSoftness });
   for (const f of syncSliders) f();
@@ -207,6 +214,7 @@ function buildPanel() {
   sel('camview', [['back', 'Back'], ['back3q', 'Back 3/4'], ['side', 'Side'], ['front3q', 'Front 3/4'], ['front', 'Front'], ['orbit', 'Free (drag)']], 'view', () => {
     controls.enabled = opts.view === 'orbit';
   });
+  sel('walksel', Object.entries(WALKS), 'walk', async () => { await applyWalk(); restart(); });
   sel('bodysel', [['standin', 'Stand-in'], ['model', 'Warden model']], 'bodyKind', () => setBody(opts.bodyKind)
     .catch((e) => flash('Model failed to load: ' + e.message)));
   sel('columns', [[5, '5 chains'], [7, '7 chains'], [9, '9 chains']], 'columns', build);
@@ -273,6 +281,8 @@ if (!CAPTURE) {
       Object.assign(opts, o.opts || {}, o.columns ? { columns: o.columns } : {}, o.rows ? { rows: o.rows } : {});
       if (kind !== opts.bodyKind) { await setBody(kind); Object.assign(settings, o.settings || {}); restart(); }
       else if (rebuild) build(); else restart();
+      // (the walk is set again whenever it is given: a new body needs it too)
+      if (o.opts && o.opts.walk) { await applyWalk(); restart(); }
       colliderGroup.visible = opts.showColliders;
       boneHelper.visible = opts.showBones;
       showBody();

@@ -38,7 +38,8 @@ export const CAPE_SETTINGS = {
 export const WARDEN_MODEL_SETTINGS = { ...CAPE_SETTINGS, contactSoftness: 0.5 };
 
 // [from joint, offset], [to joint, offset, beyond], radius: offsets are in the model's axes (+z is her front);
-// `beyond` carries the far end on past its joint by that share of the capsule's length
+// `beyond` carries the far end on past its joint by that share of the capsule's length; options { turns: true }
+// turn both offsets with their joints (see Collider)
 export const WARDEN_COLLIDERS = [
   // back and shoulders: the robe's back is 4 behind the spine, the shoulder blades a little more
   [['Pelvis', [0, 2, -0.5]], ['Chest', [0, 6, -0.5]], 4.5],
@@ -56,21 +57,28 @@ export const WARDEN_COLLIDERS = [
   // forearms and hands: on past the hand joint to the fingertips (her hand reaches 4 below it, 25.5)
   [['Forearm.L', [0, 0, 0]], ['Hand.L', [0, 0, 0], 0.42], 2.2],
   [['Forearm.R', [0, 0, 0]], ['Hand.R', [0, 0, 0], 0.42], 2.2],
+  // hands, from the wrist to the fingertips along the hand itself (turning with the hand joint, so the capsule
+  // follows the wrist as it bends back in the swing)
+  [['Hand.L', [0, 0, 0]], ['Hand.L', [-0.5, -3.6, 0.3]], 1.7, { turns: true }],
+  [['Hand.R', [0, 0, 0]], ['Hand.R', [0.5, -3.6, 0.3]], 1.7, { turns: true }],
 ];
 
 export function makeColliders(model, defs = WARDEN_COLLIDERS) {
   // (a joint, not another node of the same name: a glTF export can have both. GLTFLoader also drops the dots
-  // from names, so `Thigh.L` arrives as `ThighL`.)
+  // from names, so `Thigh.L` arrives as `ThighL`)
   const find = (name) => {
+    // (and adds `_1` when a joint shares its name with another node: her `Hand.R` joint is `HandR_1`, beside the
+    // `HandR` mesh)
     const want = [name, PropertyBinding.sanitizeNodeName(name)];
+    want.push(want[1] + '_1');
     let o = null;
     model.traverse((n) => { if (!o && n.isBone && want.includes(n.name)) o = n; });
     if (!o) model.traverse((n) => { if (!o && want.includes(n.name)) o = n; });
     if (!o) throw new Error('cape colliders: no joint named ' + name);
     return o;
   };
-  return defs.map(([a, b, r]) => new Collider(model,
-    { node: find(a[0]), offset: a[1] }, { node: find(b[0]), offset: b[1], beyond: b[2] || 0 }, r));
+  return defs.map(([a, b, r, o = {}]) => new Collider(model,
+    { node: find(a[0]), offset: a[1], turns: o.turns }, { node: find(b[0]), offset: b[1], beyond: b[2] || 0, turns: o.turns }, r));
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)
