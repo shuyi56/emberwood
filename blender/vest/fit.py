@@ -39,10 +39,10 @@ RATIOS = {
     'collar_gap': 0.15,      # the gap between the neck and the collar's top edge, in w
     'collar_fillet': 0.42,   # the radius of the rounded run from shoulder into collar, in w
     'head_clear': 0.12,      # the least gap between the collar and the head (jaw, skull), in w
-    'v_point': 0.35,         # the bottom of the V: this share of the way from the bust line up to the pit of the neck
-    'v_top': 0.80,           # half the opening at the collar's top edge, in w
-    'v_bow': 0.90,           # the V's edge: 1 straight, below 1 bowed outward
-    'corner': 0.40,          # the radius of the collar's front corners, in w
+    'v_point': 0.72,         # the bottom of the V: this share of the way from the bust line up to the pit of the neck
+    'v_top': 1.05,           # half the opening at the collar's top edge, in w
+    'v_bow': 2.00,           # the V's edge: 1 straight, below 1 bowed outward, above 1 drawn in to a cusp at the bottom
+    'corner': 0.08,          # the radius of the collar's front corners, in w
     'hem_drop': 0.60,        # the hem below the waist, in w
     'hem_point': 0.50,       # the front point of the hem below that, in w
     'shoulder': 0.94,        # the vest's shoulder ends at this share of the way out to the shoulder point: on the
