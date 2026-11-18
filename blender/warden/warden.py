@@ -802,11 +802,12 @@ COLLAR_BASE = None   # (the cape's outer radius round the neck at the collar's f
 
 
 def collar_top(a):
-    """The band's top edge: up under the jaw at the sides, highest at the nape."""
-    return 55.1 + 0.6 * ((1.0 - math.cos(a)) / 2) ** 1.2
+    """The band's top edge, not level like a pipe's: its front corners stand up as the tips of two blades, it sweeps
+    down under the ears at the sides and rises again to the nape."""
+    return 55.25 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
 
 
-COLLAR_V = (51.55, 0.233)   # (the V the collar's fronts open in: the height its two edges meet at on the chest, and
+COLLAR_V = (52.25, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
 # how fast they part above it, as an angle round the neck for each unit of height)
 
 
@@ -819,7 +820,10 @@ def collar_open(v):
     side from the point on the chest (see build_throat_plate, whose fronts carry it down there) up to the band's
     top corners under the jaw, so from the front the collar's outline is a V and not a ring."""
     z = 53.0 + 0.5 * v / FOOT_V if v <= FOOT_V else lerp(COLLAR_STAND, 55.2, (v - FOOT_V) / (1.0 - FOOT_V))
-    return collar_v(z)
+    # (and each edge is a curve, not a ruled line, as a soft collar's is: drawn in a little through its middle,
+    # sweeping wide to its tip)
+    t = max(0.0, (z - 53.0) / 2.2)
+    return collar_v(z) + 0.2 * t ** 3 - 0.07 * math.sin(math.pi * min(1.0, t))
 
 
 def collar_base(a):
@@ -829,6 +833,7 @@ def collar_base(a):
     return lerp(COLLAR_BASE[i], COLLAR_BASE[(i + 1) % n], f - int(f))
 
 
+LAME_JOINTS = (0.36, 0.68)     # (where the neck's three lames meet, up the standing part)
 COLLAR_ON = None     # (a BVH of the cape and robe, for the collar's foot to lie on)
 COLLAR_STAND = 53.5  # (where the band turns upright, at the throat)
 FOOT_A0, FOOT_A1 = 0.62, 1.0   # (the foot spreads onto the cape only toward the yoke's edge, at about 0.97, and beyond)
@@ -875,7 +880,13 @@ def collar_pt(a, v, out=0.0):
     if k > 0.0:
         zb = lerp(zb, cape_top_z(-neck * sa, GC_Y - neck * ca) + 0.45, k)
     z = lerp(zb, collar_top(a), w)
-    r = neck + 0.45 * w ** 1.6 + out
+    # (it bends as it rises: the fronts' tips roll outward, away from the jaw, like the tips of a soft collar
+    # falling open, and the whole top edge turns out a little, so it does not stand like a pipe)
+    ff = 1.0 - smoothstep(0.7, 1.7, abs(wrap(a)))
+    r = neck + 0.45 * w ** 1.6 + (0.12 + 0.42 * ff) * w ** 2.6 + out
+    # (built as a gorget's neck is: not one stiff tube but three narrow lames riveted one above the other, which
+    # is what lets a real one move with the neck; each joint a shallow crease round it)
+    r -= 0.04 * sum(math.exp(-((w - wk) / 0.035) ** 2) for wk in LAME_JOINTS)
     return Vector((-r * sa, GC_Y - r * ca, z))
 
 
@@ -917,7 +928,7 @@ def cape_base(n=120):
 def build_collar(body):
     global COLLAR_BASE
     COLLAR_BASE = cape_base()
-    n, rows = 120, 16
+    n, rows = 120, 40    # (rows enough to hold the neck lames' joints)
 
     def ang(v, j):
         o = collar_open(v)
@@ -928,12 +939,11 @@ def build_collar(body):
         # thickness there to draw a line with)
         v = 1.0 - i / (rows - 1)
         e = (1.0 - smoothstep(0.0, 5.0, min(j, n - 1 - j))) * (1.0 - smoothstep(0.42, 0.58, v))
-        return collar_pt(ang(v, j), v, -0.13 * e)
+        return collar_pt(ang(v, j), v, -0.0 * e)   # (no feather: the fronts stand free of the bare throat)
     sheet = grid(rows, n, front)
     mesh_obj('Collar', face_out(sheet, axis_y=GC_Y), M_COLLAR, body, solid=0.09, subdiv=1)
     # the rolled edge: up one front, round the top and down the other
-    vs_ = [0.66 + 0.34 * k / 6 for k in range(6)]   # (the fronts' rolled edge only above the throat plate, which
-    # is joined to them below it)
+    vs_ = [k / 12 for k in range(0, 12)]   # (the fronts' rolled edge, down to the plate below the neck)
     path = [collar_pt(ang(v, 0), v, 0.03) for v in vs_]
     path += [collar_pt(ang(1.0, j), 1.0, 0.03) for j in range(n)]
     path += [collar_pt(ang(v, n - 1), v, 0.03) for v in reversed(vs_)]
@@ -944,8 +954,16 @@ def build_collar(body):
     rr = [0.1 * smoothstep(FOOT_A0, FOOT_A1, abs(wrap(ang(0.0, j)))) + 0.005 for j in range(n)]
     mesh_obj('Collar rim', tube(rim, rr, flat=1.0, n=8), M_COLLAR, body, subdiv=0)
     # (a line tooled round it below the top, and a row of studs between)
-    line = [collar_pt(ang(0.78, j), 0.78, 0.035) for j in range(3, n - 3)]
-    mesh_obj('Collar line', tube(line, [0.045] * len(line), flat=1.0, n=6), M_GOLD, body, subdiv=0)
+    # (a gorget is two halves, front and back: hinged on her left side and closed by a stud on her right)
+    hinge = [collar_pt(math.pi / 2, v, 0.07) for v in (0.44, 0.52, 0.6, 0.68, 0.76)]
+    mesh_obj('Collar hinge', tube(hinge, [0.1] * len(hinge), n=8), M_GOLD, body, subdiv=0)
+    mesh_obj('Collar pin', dots([collar_pt(-math.pi / 2, 0.6, 0.07)], 0.2), M_GOLD, body, subdiv=1)
+    # (each front a blade, as the reference's: a second line tooled down it, a little back from its edge, running
+    # with the edge from the top corner to the foot)
+    for sg, nm in ((1, 'a'), (-1, 'b')):
+        wl = [collar_pt(sg * (collar_open(v) + 0.2 + 0.22 * v), v, 0.035) for v in [k / 24 for k in range(4, 24)]]
+        mesh_obj(f'Collar blade line {nm}', tube(wl, [0.045 * smoothstep(0, 3, min(k, len(wl) - 1 - k)) + 0.006
+                                                      for k in range(len(wl))], flat=1.0, n=6), M_GOLD, body, subdiv=0)
     studs = [collar_pt(ang(0.89, j), 0.89, 0.06) for j in range(4, n - 4, 6)]
     mesh_obj('Collar studs', dots(studs, 0.14), M_GOLD, body, subdiv=0)
     build_throat_plate(body)
@@ -1001,42 +1019,33 @@ def build_throat_plate(body):
     bmesh.ops.translate(mb, vec=tip, verts=mb.verts)
     mesh_obj('Collar medallion', mb, M_GOLD, body, subdiv=1)
 
-    # ---- the throat plate: the V's base filled with steel, one piece with the collar. Its sides are the band's own
-    # surface up to the band's front edges, and below the band the fronts' own surface up to their inner edges, so
-    # band, fronts and plate read as one shaped piece of steel tapering to the point on the chest, with no seam
-    # between them; only its top edge, the bottom of the opening under the chin, is rolled in brass
-    PT = 54.25
-
+    # ---- the plate below the neck, as the reference's: not a collar (it does not rise round the throat) but a V
+    # band lying on the chest. Its top edge carries the collar's own V on down, at the same slope, from the fronts'
+    # feet to the point where the two lines meet in the pit of the throat; its lower edge is the fronts' outer
+    # edges, drawing together to the point on the breastbone, where the medallion sits. Its sides run up under the
+    # band's foot, so it grows out of the collar. The throat above it is bare.
     def ptop(a):
-        return PT - 0.3 * math.exp(-(a / 0.28) ** 2)
-
-    def band_v(z):
-        """(the band's v at height z, at its front edge: the inverse of collar_open's mapping)"""
-        if z <= COLLAR_STAND:
-            return max(0.0, (z - 53.0) / 0.5) * FOOT_V
-        return FOOT_V + (z - COLLAR_STAND) / (55.2 - COLLAR_STAND) * (1.0 - FOOT_V)
+        return min(ZT, COLLAR_V[0] + abs(a) / COLLAR_V[1])
 
     def tplate(i, j, out=0.0):
         t = i / (rows - 1)
         u = lerp(-1.0, 1.0, j / (cols2 - 1))
-        a0 = collar_v(lerp(PT, ZP, t))
-        z = lerp(ptop(u * a0), ZP + 0.25, t)
-        # (a hair past the edges it joins, and a hair behind them, so no crack opens along the join)
-        a = u * (collar_v(z) + 0.03)
-        if z >= ZT:
-            return collar_pt(a, band_v(z), out - 0.01)
-        # below the band it is the fronts and the plate in one: as wide as the fronts' outer edges, tucked up
-        # under the band's foot at the sides; in the V's middle it stands out as far as the band does just above,
-        # so the hand-over from the band's surface to the fronts' leaves no step
+        # (its columns run straight down from the top edge to the lower one, the fronts' outer edge)
+        a = u * W0
+        z1 = ZT - (ZT - ZP) * (1.0 - abs(a) / W0)
+        z0 = max(ptop(a), z1 + 0.02)
+        z = lerp(z0, z1, t)
         tf = (ZT - z) / (ZT - ZP)
-        a = u * lerp(collar_v(z) + 0.03, W0 * (1.0 - tf) + 0.004, smoothstep(0.0, 0.12, tf))
-        mid = 1.0 - smoothstep(0.3, 0.5, abs(a))
-        return lay(a, z, lerp(lerp(0.06, 0.11, mid), RP - 0.04, smoothstep(0.0, 0.4, tf)), out)
-    cols2 = 41
+        return lay(a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, tf)), out)
+    cols2 = 61
     mesh_obj('Collar throat plate', face_out(grid(rows, cols2, tplate)), M_COLLAR, body, solid=0.08, subdiv=1)
-    te = [tplate(0, j, 0.03) for j in range(cols2)]
-    mesh_obj('Collar throat plate edge', tube(te, [0.07] * cols2, flat=1.0, n=8), M_GOLD, body, subdiv=0)
-    mesh_obj('Collar throat plate rivets', dots([tplate(4, j, 0.06) for j in (13, 27)], 0.15), M_GOLD, body, subdiv=0)
+    # (its top edge rolled in brass where it shows, between the fronts' feet: the collar's V carried to its point)
+    te = [tplate(0, j, 0.03) for j in range(cols2) if abs(lerp(-1.0, 1.0, j / (cols2 - 1))) * W0 < 0.36]
+    mesh_obj('Collar throat plate edge', tube(te, [0.07 * smoothstep(0, 2, min(k, len(te) - 1 - k)) + 0.02
+                                                   for k in range(len(te))], flat=1.0, n=8), M_GOLD, body, subdiv=0)
+    # (a second line tooled along the band, between its edges, as the reference's)
+    ml = [tplate(rows // 2, j, 0.035) for j in range(6, cols2 - 6)]
+    mesh_obj('Collar throat plate line', tube(ml, [0.04] * len(ml), flat=1.0, n=6), M_GOLD, body, subdiv=0)
 
 
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
