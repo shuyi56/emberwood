@@ -3984,10 +3984,14 @@ def leg_fk(th, kb):
     return THIGH * math.sin(th) + SHIN * math.sin(sh), THIGH * math.cos(th) + SHIN * math.cos(sh)
 
 
+# how far ahead of the ankle the foot pivots as the heel lifts (the ball of a boot; a longer bare foot sets its own)
+FOOT_BALL = 3.0
+
+
 def foot_lift(pitch):
     """How far the ankle stands above its flat height when the foot is tipped onto its toes (pitch < 0) or its
     heel (pitch > 0)."""
-    return 3.0 * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
+    return FOOT_BALL * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
 
 
 def pelvis_list(t):
@@ -4079,7 +4083,7 @@ def locked_foot(t):
 def toe_roll(pitch):
     """How far forward the ankle moves as the heel lifts and the foot rolls over the ball of the foot (3 ahead of
     the ankle, as in foot_lift), so the ball stays where it was planted instead of sliding back under her."""
-    return 3.0 * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
+    return FOOT_BALL * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
 
 
 def locked_turn(tr):
@@ -4098,7 +4102,7 @@ def locked_hips(tr):
     reach by a soft minimum, so the hips never sit above it and nowhere else sit far below it. (A path smoothed and
     lowered all round the cycle leaves every standing knee bent, a crouch.) The trailing leg, rolling up onto its
     ball to push off, carries no weight then and does not hold the body up."""
-    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_SOFT, BOB_BLUR, BOB_JOIN, L_PELVIS_TURN, PELVIS_LIST,
+    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_SOFT, BOB_BLUR, BOB_JOIN, L_PELVIS_TURN, PELVIS_LIST, FOOT_BALL,
            tuple(L_GAIT_FOOT))
     if key not in _LOCKED_HIPS:
         n = 192

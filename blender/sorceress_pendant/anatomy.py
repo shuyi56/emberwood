@@ -172,6 +172,9 @@ def patch():
         # figures take, so the steps keep the same length against the leg and the standing knee stays nearly
         # straight; a world model of this figure needs its own walk cycle in src/world/main.js to match)
         female.STRIDE = 52.0
+        # (the bare foot is longer than a boot and has no toe joint, so it rolls up nearly over the tips of its toes
+        # to push off: rolling over a boot's ball put the toes 1.9 into the floor; at 5.8 they stay within 0.1 of it)
+        female.FOOT_BALL = 5.8
 
 
 # ---------------------------------------------------------------- pelvis
