@@ -4046,7 +4046,11 @@ L_GAIT_FOOT = [(0.0, 16), (0.07, 0), (0.30, 0), (0.40, -8), (0.46, -16), (0.5, -
 L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reaching forward carried with it)
 # the arms in the locked walk: the upper arm swings ARM_SWING either way; the forearm follows a little later and
 # folds more as it comes forward, so the swing travels down the arm instead of the arm swinging stiff from the shoulder
-L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
+L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.04, 0.22, 0.16
+# (John, 2026-11-18: the arms read too loose, the forearm and hand flopping after the swing. So the elbow keeps a
+# small, nearly steady bend, 13 to 22 degrees, the forearm follows almost in step, and the wrist barely moves:
+# the arm swings from the shoulder as one piece)
+L_WRIST, L_WRIST_SWING = 0.05, 0.02
 # (and the swing is centred a little behind straight down, as a relaxed arm swings: further back past the hip than
 # it comes forward, where the bending elbow already carries the hand ahead)
 L_ARM_BACK = 0.07
@@ -4257,7 +4261,7 @@ def pose_locked(col):
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG)) - L_ARM_BACK
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
-        flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
+        flick = L_WRIST + L_WRIST_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
         sh.rotation_euler = (-a, s * (ARM_OUT + L_ARM_CLEAR + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-(L_BEND + L_FOLD * fold), s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
