@@ -21,8 +21,10 @@
            N evenly spaced frames of one cycle from each of --angles, on a ground plane, laid out with a row per angle
            (DIR/walk.png) and played as a loop per angle (DIR/walk-ANGLE.gif, one cycle in --walk-seconds, default
            0.69 s: the world's pace, 2.2 a second over a cycle of 46 model units). Use it with --mannequin.
---set      NAME=VALUE: set a module setting of the character (or of the base figure, if it is one of its settings)
-           before it builds (e.g. FUSE=False, AHEAD=0.4), repeatable
+--set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable; a base
+           figure setting such as SKIN_LOOK=5 (by its place in female.SKIN_LOOKS) or AHEAD=0.4 is set on the base
+           module too
+--denoise  with --turn or --head: denoise the 3D look (OpenImageDenoise, albedo and normal passes)
 
 Rendering pieces on their own (any of the views above):
 --only     PREFIXES: render only the meshes whose names start with one of these (comma separated), e.g.
@@ -110,7 +112,12 @@ def look_3d(samples):
     female.sprite_mode(False)
     sc.render.use_persistent_data = False
     sc.cycles.samples = samples
-    sc.cycles.use_denoising = False
+    # (--denoise: OpenImageDenoise with the albedo and normal passes. Without it the skin's subsurface scattering
+    # stays grainy at these sample counts, which reads as a stucco texture that is not in the material)
+    sc.cycles.use_denoising = '--denoise' in argv
+    if sc.cycles.use_denoising:
+        sc.cycles.denoiser = 'OPENIMAGEDENOISE'
+        sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
     sc.cycles.max_bounces = 4
     sc.cycles.transparent_max_bounces = 16     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
@@ -321,8 +328,8 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
-            if hasattr(female, k):        # (the walk's settings live in the base figure, which pose() reads)
-                setattr(female, k, eval(v))
+            if hasattr(female, k):
+                setattr(female, k, eval(v))     # (a base figure setting, such as SKIN_LOOK or the walk's)
     if opt('--walk'):
         female.LOCKED_WALK, female.ARM_SWING = True, 0.24     # (as export_glb.py sets them for the world model)
     if '--mannequin' in argv:
