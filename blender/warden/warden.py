@@ -801,7 +801,7 @@ def g_neck(a):
 COLLAR_BASE = None   # (the cape's outer radius round the neck at the collar's foot, once the cape is built)
 
 
-COLLAR_TIP = 54.75   # (how high the fronts' tips stand: clear of the jaw, lowered from 55.2)
+COLLAR_TIP = 54.45   # (how high the fronts' tips stand: clear of the jaw, lowered from 55.2, then 54.75)
 
 
 def collar_top(a):
@@ -810,7 +810,7 @@ def collar_top(a):
     return COLLAR_TIP + 0.05 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
 
 
-COLLAR_V = (53.0, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
+COLLAR_V = (53.5, 0.2)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
 # how fast they part above it, as an angle round the neck for each unit of height)
 
 
@@ -826,7 +826,7 @@ def collar_open(v):
     # (and each edge is a curve, not a ruled line, as a soft collar's is: drawn in a little through its middle,
     # sweeping wide to its tip)
     t = max(0.0, (z - 53.0) / (COLLAR_TIP - 53.0))
-    return collar_v(z) + 0.2 * t ** 3 - 0.07 * math.sin(math.pi * min(1.0, t))
+    return max(0.0, collar_v(z) + 0.2 * t ** 3 - 0.07 * math.sin(math.pi * min(1.0, t)))   # (never crossing)
 
 
 def collar_base(a):
@@ -905,7 +905,7 @@ def collar_pt(a, v, out=0.0):
     r -= 0.95 * smoothstep(0.0, 1.0, w)
     # (built as a gorget's neck is: not one stiff tube but three narrow lames riveted one above the other, which
     # is what lets a real one move with the neck; each joint a shallow crease round it)
-    r -= 0.04 * sum(math.exp(-((w - wk) / 0.035) ** 2) for wk in LAME_JOINTS)
+    r -= 0.03 * sum(math.exp(-((w - wk) / 0.06) ** 2) for wk in LAME_JOINTS)
     return Vector((-r * sa, GC_Y - r * ca, z))
 
 
@@ -947,7 +947,7 @@ def cape_base(n=120):
 def build_collar(body):
     global COLLAR_BASE, FOOT_DROP
     COLLAR_BASE = cape_base()
-    n, rows = 120, 40    # (rows enough to hold the neck lames' joints)
+    n, rows = 120, 64    # (rows enough to hold the neck lames' joints: at 40 each crease shaded in facets)
     # (the plate below the neck first, so the band's foot can be laid on it as well as on the cloth)
     build_throat_plate(body)
     settle_foot()
@@ -1029,8 +1029,7 @@ def build_throat_plate(body):
     edges of each front are rolled in brass, and a small gold medallion sits on the point. In the V, on the neck
     itself, a plate of the same steel fills the V's base, behind the fronts."""
     W0 = 1.05                 # (the fronts' outer edge at their top: at the collar's foot beside the opening)
-    ZT, ZP, RP = 53.3, 51.0, 0.14
-    THROAT_TOP = 54.3         # (how high it rises up the throat between the fronts: just under the chin)
+    ZT, ZP, RP = 53.3, 49.6, 0.14     # (its point on the breastbone lowered from 51.0: the gorget sat too high)
 
     def lay(a, z, rad, out=0.0):
         """(a smooth surface, with no ray casts in it: the ring's curve where it leaves the collar, coming forward
@@ -1053,9 +1052,7 @@ def build_throat_plate(body):
     # edges, drawing together to the point on the breastbone, where the medallion sits. Its sides run up under the
     # band's foot, so it grows out of the collar. The throat above it is bare.
     def ptop(a):
-        # (and between the fronts it rises on up the throat to just under the chin, so the opening above the V is
-        # steel too, not bare neck: behind the fronts, which lie over its sides)
-        return lerp(THROAT_TOP, min(ZT, COLLAR_V[0] + abs(a) / COLLAR_V[1]), smoothstep(0.45, 0.75, abs(a)))
+        return min(ZT, COLLAR_V[0] + abs(a) / COLLAR_V[1])
 
     def tplate(i, j, out=0.0):
         t = i / (rows - 1)
