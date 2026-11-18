@@ -421,6 +421,55 @@ def paint_body(body, hands=(), neck=None, wrists=(), floor=None):
         o.data.update()
 
 
+def paint_face(head, body=None, neck=None):
+    """Paint where the freckles and the pores sit on a bare figure's head, in the red and blue of its 'skin tex'
+    layer, for meshes that already carry it. Colours only: no point is moved. It sets values, so calling it twice is
+    harmless.
+
+    head  the head mesh, in its rest shape (face toward -Y), in world units
+    body  the skin mesh, for the freckles across the shoulders, the upper chest and the upper back
+    neck  the neck mesh, if it is its own (a few freckles)
+
+    Red is the freckle map: a band over the nose and the cheeks, a little on the forehead. Blue is the pore map: the
+    most on the nose, then the cheeks, the forehead and the chin, and a little everywhere. The head's thin skin is
+    held to 0.3 so the veins stay faint on the face."""
+    def world(o):
+        me = o.data
+        R = np.zeros(len(me.vertices) * 3)
+        me.vertices.foreach_get('co', R)
+        mw = np.array(o.matrix_world)
+        return R.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+
+    def g(v, c, w):
+        return np.exp(-((v - c) / w) ** 2)
+
+    P = world(head)
+    x, y, z = P[:, 0], P[:, 1], P[:, 2]
+    u = (z - z.min()) / (z.max() - z.min())
+    front = np.clip((np.median(y) - y) / 1.5, 0, 1)
+    t, c = _layer(head.data, 'skin tex')
+    c[:, 0] = front * np.maximum(g(u, 0.42, 0.13) * np.clip(1.15 - np.abs(x) / 3.4, 0, 1), 0.35 * g(u, 0.72, 0.1))
+    c[:, 2] = np.clip(0.15 + front * np.maximum.reduce([
+        g(x, 0, 0.9) * g(u, 0.43, 0.1),                     # the nose
+        0.7 * g(np.abs(x), 1.7, 1.0) * g(u, 0.4, 0.1),      # the cheeks
+        0.55 * g(x, 0, 2.2) * g(u, 0.68, 0.1),              # the forehead
+        0.5 * g(x, 0, 1.2) * g(u, 0.12, 0.08)]), 0, 1)      # the chin
+    c[:, 3] = np.minimum(c[:, 3], 0.3)
+    t.data.foreach_set('color', c.ravel())
+    head.data.update()
+    if neck is not None:
+        t, c = _layer(neck.data, 'skin tex')
+        c[:, 0] = 0.1
+        t.data.foreach_set('color', c.ravel())
+        neck.data.update()
+    if body is not None:
+        z = world(body)[:, 2]
+        t, c = _layer(body.data, 'skin tex')
+        c[:, 0] = 0.45 * np.clip((z - (z.max() - 7.0)) / 3.0, 0, 1)
+        t.data.foreach_set('color', c.ravel())
+        body.data.update()
+
+
 def apply(material, show='all'):
     """Make a figure's skin material the layered skin, its tone read from the baked 'skin' point colour (so the
     blush, the shade and paint_body's feet stay). Every mesh in the material takes it; nothing else changes."""

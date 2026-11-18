@@ -153,22 +153,24 @@ def main():
     sc.cycles.filter_width = 1.5
     names = [i.identifier for i in sc.view_settings.bl_rna.properties['view_transform'].enum_items]
     sc.view_settings.view_transform = 'AgX' if 'AgX' in names else 'Filmic'
-    # (the world and the three lights of views.py's look_3d, aimed at the swatches as they are at the figure)
+    # (the world and the lights of views.py's look_3d, aimed at the swatches as they are at the figure)
     sc.world = bpy.data.worlds.new('World')
     sc.world.use_nodes = True
     bg = sc.world.node_tree.nodes['Background']
     bg.inputs['Color'].default_value = (0.18, 0.19, 0.21, 1)
     bg.inputs['Strength'].default_value = 0.35
-    aim = Vector((0, 0, 40))
-    for name, loc, energy, size_, colour in (('Key', (-40, -48, 80), 52000, 24, (1, 0.96, 0.9)),
-                                             ('Fill', (46, -36, 50), 12000, 30, (0.85, 0.9, 1)),
-                                             ('Rim', (20, 60, 70), 26000, 18, (1, 1, 1))):
+    for name, loc, energy, size_, colour, aim in (
+            ('Key', (-40, -48, 80), 52000, 24, (1, 0.96, 0.9), (0, 0, 40)),
+            ('Fill', (46, -36, 50), 12000, 30, (0.85, 0.9, 1), (0, 0, 40)),
+            ('Rim', (20, 60, 70), 26000, 18, (1, 1, 1), (0, 0, 40)),
+            ('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), (0, 0, 20))):
         d = bpy.data.lights.new(name, 'AREA')
         d.energy, d.size, d.color = energy, size_, colour
         o = bpy.data.objects.new(name, d)
         sc.collection.objects.link(o)
         o.location = loc
-        o.rotation_euler = (aim - Vector(loc)).to_track_quat('-Z', 'Y').to_euler()
+        o.rotation_euler = (Vector(aim) - Vector(loc)).to_track_quat('-Z', 'Y').to_euler()
+        o.visible_camera = name != 'Bounce'
     step = 7.6
     x0 = -step * (len(looks) - 1) / 2
     for i, look in enumerate(looks):
