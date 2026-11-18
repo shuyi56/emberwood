@@ -7,6 +7,9 @@ figure is built, so it renders in seconds: a skin material change is judged here
     python3 blender/base/skin_study.py [--out DIR] [--size 300] [--samples 64] [--looks current,oil] [--denoise]
                                        [--tone fair] [--vs-main] [--dry]
 
+--layers   instead of the looks: the skin built in three layers, one column each, then all together (see
+           skin_layers.py): 1 the muscle and capillary base, 2 the veins over it, 3 the epidermis alone, and the
+           three combined on a subsurface surface
 --tone     the skin's base colour: a face creator swatch (ranger, fair, light, olive, tan, brown, deep) or a hex
            colour such as efcfb9; default the figures' own (female.SKIN[2])
 
@@ -126,7 +129,9 @@ def main():
     looks = [k.strip() for k in opt('--looks', ','.join(female.SKIN_LOOKS)).split(',')]
     if '--vs-main' in argv:
         looks = ['current']
-    bad = [k for k in looks if k not in female.SKIN_LOOKS]
+    if '--layers' in argv:
+        looks = ['1 base', '2 + veins', '3 epidermis', 'all three']
+    bad = [k for k in looks if k not in female.SKIN_LOOKS and '--layers' not in argv]
     if bad:
         sys.exit(f'skin_study.py: no such look {", ".join(bad)} (looks: {", ".join(female.SKIN_LOOKS)})')
     global TONE
@@ -170,7 +175,11 @@ def main():
         o_ = nt.nodes.new('ShaderNodeOutputMaterial')
         d_ = nt.nodes.new('ShaderNodeBsdfDiffuse')
         nt.links.new(d_.outputs['BSDF'], o_.inputs['Surface'])
-        female.skin_surface(nt, d_, o_, look)
+        if '--layers' in argv:
+            import skin_layers
+            skin_layers.skin_layers(nt, o_, ('1', '2', '3', 'all')[i], TONE or female.SKIN[2])
+        else:
+            female.skin_surface(nt, d_, o_, look)
         x = x0 + step * i
         bm = bmesh.new()
         bmesh.ops.create_uvsphere(bm, u_segments=96, v_segments=48, radius=1.0)
