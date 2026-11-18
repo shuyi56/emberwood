@@ -22,6 +22,9 @@ What `check` does, cheapest first:
             and the whole scene build. A crash here is a crash the queue would have hit minutes in.
   facecheck a request that only checks a face (face sculpt or face paint changed, face views asked) is not
             forwarded: blender/facecheck/facecheck.py draws and measures it here, without Blender, in seconds
+  hair      when the commit touches hair code, hair_check.py runs inside that same build: creases, ridges and
+            ledges in the hair in all 8 facings, clothes coming through it in the walk, and the strand paint.
+            New flags since the branch's last measured commit send the request back; old ones are listed.
   cache     jobs the queue already holds are reported, so the requester knows the answer is immediate
 
 Findings are 'block' (send back), 'warn' (forward, and tell the requester) or 'info'. The verdict is 'fix' when
@@ -52,12 +55,59 @@ sys.path.insert(0, RQ_DIR)
 import rq  # noqa: E402  (the render queue's own module)
 
 WORK = os.environ["RQ_WORK"]
+REQ_ENV = {}   # the request's "env" (string variables the job needs); set in main, used by smoke builds
 PITFALLS = os.environ.get("RQ_PITFALLS", os.path.join(HERE, "PITFALLS.md"))
 LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
-SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "900"))
+SMOKE_TIMEOUT = int(os.environ.get("RQ_SMOKE_TIMEOUT", "1800"))
 SHEET_ROWS, SHEET_COLS = 8, 10
 SHELL_META = re.compile(r"[;&|<>$`\\\n\r]")
-HAIR = re.compile(r"hair|bang|fringe|lock|pony|wisp|strand|braid|bun(?![a-z])", re.I)
+MATERIAL = re.compile(r"(_closeup|_material|_shade|_tones|_image|_tex|_painting|_paint|_LOOKS?|_TONE|_TINT|TEX)$"
+                      r"|^M_[A-Z0-9_]+$|^(mat_def|ramp|MATERIALS|MAKEUP|LIP_COLOURS|SKIN|SKIN_FLUSH)$")
+MATLINE = re.compile(r"mat_def\(|_closeup\(|\bramp\(|\bM_[A-Z0-9_]+\b|_LOOKS?\b|default_value|node_tree|\.nodes\b"
+                     r"|\.links\b|Sheen|Roughness|Metallic|Base Color|Specular|\bmaterials\b")
+
+
+def material_only(since, tip):
+    """The material things a diff changes, if it changes nothing else under blender/ (else []). A hunk inside a
+    material function counts whole; elsewhere every changed line must itself be a material line, a comment, or the
+    continuation of one (a look table's rows, the body of a new material function)."""
+    files = rq.git("diff", "--name-only", since, tip, "--", "blender/", check=False).stdout.split()
+    if not files or any(not f.endswith((".py", ".png", ".jpg", ".exr")) for f in files):
+        return []
+    found, skip, block = set(), False, None        # block: indent of the accepted line a continuation hangs from
+    for ln in rq.git("diff", "-U0", since, tip, "--", "blender/", check=False).stdout.splitlines():
+        if ln.startswith(("diff ", "index ", "--- ", "+++ ", "Binary ", "new file", "deleted file", "similarity")):
+            continue
+        if ln.startswith("@@"):
+            m = re.search(r"\bdef (\w+)", ln.split("@@")[-1])
+            skip, block = bool(m and MATERIAL.search(m.group(1))), None
+            if skip:
+                found.add(m.group(1))
+            continue
+        if skip or not ln[:1] in "+-":
+            continue
+        raw = ln[1:]
+        t = raw.strip()
+        ind = len(raw) - len(raw.lstrip())
+        if not t or t.startswith("#"):
+            continue
+        if block is not None and (ind > block or re.fullmatch(r"[)\]}]+,?", t)):
+            continue
+        block = None
+        m = re.match(r"def (\w+)", t)
+        if m and MATERIAL.search(m.group(1)):
+            found.add(m.group(1))
+            block = ind
+            continue
+        hit = MATLINE.search(t)
+        if not hit:
+            return []
+        found.add(hit.group(0).rstrip("("))
+        block = ind
+    return sorted(found)
+
+
+HAIR = re.compile(r"hair|bang|fringe|lock(?!ed)|pony|wisp|strand|braid|bun(?![a-z])", re.I)
 # what blender/facecheck/facecheck.py draws and measures without Blender: the sculpted face and its paintings
 FACE = re.compile(r"face|mouth|jaw|lid|eye|iris|sclera|brow|lash|lip|nose|nostril|chin|cheek|philtrum|"
                   r"head_section|head_front|sculpted_head|build_head", re.I)
@@ -66,6 +116,10 @@ FACE_VIEW_SCRIPTS = ("face_views.py", "sculpt_views.py")
 FACECHECK = "blender/facecheck/facecheck.py"
 FACECHECK_REFS = ("origin/main", "origin/claude/project-thread-k27az6")   # the second only until PR #26 merges
 FACECHECK_OUT = os.path.join(RQ_DIR, "facechecks")
+HAIR_DIR = os.path.join(RQ_DIR, "review", "hair")       # hair-check results, one folder per commit measured
+HAIR_NEW_PX = 25           # a flag this big that the branch's last measured commit did not have sends it back
+HAIR_SEMI = 0.45           # share of a strand texture's painted texels that are half-transparent
+HAIR_TONE = 0.045          # chromaticity distance between the strand paint and the hair's ramp
 KEEP_AT_MAIN = ("blender/ranger/ranger-blender.png", "blender/ranger/ranger.blend", "public/models/ranger.glb")
 
 
@@ -299,12 +353,102 @@ def smoke_command(kind, param, out):
     return f"{runner} {param} --out {q(out)}"
 
 
-def smoke(commit, kind, param):
-    """Run one job up to its first render in a worktree of `commit`. Returns {ok, seconds, tail, cached}."""
+def hair_findings(rep, now, before, before_tip, override):
+    """Turn a hair-check result into findings: clothes through the hair and flags the branch's last measured
+    commit did not have send the request back; flags that were already there are listed as warnings."""
+    def same(p, q):
+        return p["kind"] == q["kind"] and p["facing"] == q["facing"] and abs(p["height"] - q["height"]) < 0.7 \
+            and abs(p["x"] - q["x"]) < 0.9
+
+    def line(p):
+        return f"{p['kind']} in the {p['facing']} view, {p['pixels']} px at height {p['height']}, {p['side']} (x {p['x']:+.1f})"
+    level = rep.warn if override else rep.block
+    pic = f" Marked in {now['picture']} (red crease, blue ridge, yellow ledge)." if now.get("picture") else ""
+    if now.get("note"):
+        rep.info("hair", f"Hair check: {now['note']}.")
+        return
+    for c in now["clashes"]:
+        level("hair", f"In walk column {c['walk_column']}, {c['object']} comes out through the hair "
+              f"({c['faces']} faces, height {c['height'][0]} to {c['height'][1]}).",
+              "Move the hair clear of it in that pose, or weight the hair there to follow the body.", "P015")
+    probs = now["problems"]
+    old = (before or {}).get("problems")
+    if old is None:
+        if probs:
+            rep.warn("hair", f"Hair check, first measurement of this branch: {len(probs)} flag(s). "
+                     + "; ".join(line(p) for p in probs[:6]) + ("; ..." if len(probs) > 6 else "") + "." + pic,
+                     "A crease is a seam where two hair pieces meet: widen their overlap and relax the join after "
+                     "fusing. A ridge is a piece's corner: round it or sink it. A ledge is hair lying on hair: "
+                     "root it inside the mass it grows from.", "P015")
+    else:
+        new = [p for p in probs if p["pixels"] >= HAIR_NEW_PX and not any(same(p, q) for q in old)]
+        grown = [(p, q) for p in probs for q in old if same(p, q) and p["pixels"] >= max(HAIR_NEW_PX, 1.6 * q["pixels"])]
+        kept = [p for p in probs if p not in new and not any(p is g for g, _ in grown)]
+        if new or grown:
+            level("hair", f"This commit adds hair problems that {before_tip[:9]} (the last commit of this branch "
+                  "measured) did not have: " + "; ".join([line(p) for p in new[:6]] +
+                  [f"{line(p)}, up from {q['pixels']} px" for p, q in grown[:4]]) + "." + pic,
+                  "A crease is a seam where two hair pieces meet: widen their overlap and relax the join after "
+                  "fusing. A ridge is a piece's corner: round it or sink it. A ledge is hair lying on hair: root "
+                  "it inside the mass it grows from. Check with RQ_HAIRCHECK=/tmp/h python3 "
+                  "tools/render-review/smoke.py <view script> <args> --out /tmp/x before asking again.", "P015")
+        if kept:
+            rep.warn("hair", f"Hair check: {len(kept)} other flag(s), already there at {before_tip[:9]} or small: "
+                     + "; ".join(line(p) for p in kept[:5]) + ("; ..." if len(kept) > 5 else "") + "." + pic, None, "P015")
+        gone = [q for q in old if not any(same(p, q) for p in probs)]
+        if gone:
+            rep.info("hair", f"Hair check: {len(gone)} flag(s) from {before_tip[:9]} are gone.")
+    if not probs and not now["clashes"]:
+        rep.info("hair", "Hair check: no creases, ridges, ledges or clothes through the hair in any of the 8 facings.")
+    for name, p in (now.get("paint") or {}).items():
+        if p.get("half_transparent", 0) > HAIR_SEMI:
+            rep.warn("hair", f"Strand texture '{name}': {p['half_transparent']:.0%} of its painted texels are "
+                     "half-transparent, so the skin shows through and tints the strands.",
+                     "Paint each strand opaque and thin the lock by the gaps between strands.", "P016")
+        if p.get("tone_distance", 0) > HAIR_TONE:
+            rep.warn("hair", f"Strand texture '{name}': its colour {p['mean_rgb']} sits away from the hair's ramp "
+                     f"{p['hair_ramp_rgb']}, so the painted strands will not match the hair they grow from.",
+                     "Take the strand tones from MATERIALS[M_HAIR]['ramp'] unchanged.", "P016")
+
+
+def hair_before(branch, tip):
+    """(result, tip) of the newest hair check of this branch on a commit `tip` builds on, or (None, None)."""
+    try:
+        index = json.load(open(os.path.join(HAIR_DIR, "index.json")))
+    except (OSError, ValueError):
+        return None, None
+    # (entries from before baselines were kept per figure sit under the bare branch name)
+    for e in reversed(index.get(branch, []) or index.get(branch.split("#")[0], [])):
+        if e["tip"] != tip and rq.git("merge-base", "--is-ancestor", e["tip"], tip, check=False).returncode == 0:
+            try:
+                return json.load(open(os.path.join(e["dir"], "hair-check.json"))), e["tip"]
+            except (OSError, ValueError):
+                continue
+    return None, None
+
+
+def hair_record(branch, tip, folder):
+    os.makedirs(HAIR_DIR, exist_ok=True)
+    p = os.path.join(HAIR_DIR, "index.json")
+    try:
+        index = json.load(open(p))
+    except (OSError, ValueError):
+        index = {}
+    rows = [e for e in index.get(branch, []) if e["tip"] != tip] + [{"tip": tip, "dir": folder}]
+    index[branch] = rows
+    json.dump(index, open(p, "w"), indent=1)
+
+
+def smoke(commit, kind, param, hair_dir=None):
+    """Run one job up to its first render in a worktree of `commit`. Returns {ok, seconds, tail, cached}.
+    With hair_dir, the hair is checked in the same run (hair_check.py) and its result left there."""
     key = rq.job_key(commit, "smoke-" + kind, param)
     key += "-" + hashlib.sha1(open(os.path.join(HERE, "smoke.py"), "rb").read()).hexdigest()[:6]
+    if REQ_ENV:
+        key += "-e" + hashlib.sha1(json.dumps(REQ_ENV, sort_keys=True).encode()).hexdigest()[:6]
     memo = os.path.join(WORK, "smoke", key + ".json")
-    if os.path.exists(memo):
+    need_hair = hair_dir and not os.path.exists(os.path.join(hair_dir, "hair-check.json"))
+    if os.path.exists(memo) and not need_hair:
         return {**json.load(open(memo)), "cached": True}
     wt, out = os.path.join(WORK, "wt-" + key), os.path.join(WORK, "out-" + key)
     os.makedirs(out, exist_ok=True)
@@ -313,7 +457,8 @@ def smoke(commit, kind, param):
     t0 = datetime.datetime.now()
     cmd = smoke_command(kind, param, out)
     try:
-        r = subprocess.run(cmd, shell=True, cwd=wt, capture_output=True, text=True, timeout=SMOKE_TIMEOUT)
+        env = dict(os.environ, **REQ_ENV, **({"RQ_HAIRCHECK": hair_dir} if need_hair else {})) if (need_hair or REQ_ENV) else None
+        r = subprocess.run(cmd, shell=True, cwd=wt, capture_output=True, text=True, timeout=SMOKE_TIMEOUT, env=env)
         rc, log = r.returncode, r.stdout + r.stderr
     except subprocess.TimeoutExpired as e:
         rc, log = -1, ((e.stdout or b"").decode(errors="replace") + (e.stderr or b"").decode(errors="replace")
@@ -322,7 +467,11 @@ def smoke(commit, kind, param):
     subprocess.run(["rm", "-rf", out])
     res = {"ok": rc in (0, 77), "reached_render": rc == 77, "exit": rc,
            "seconds": round((datetime.datetime.now() - t0).total_seconds()),
-           "tail": "\n".join(log.strip().splitlines()[-8:]) if rc not in (0, 77) else ""}
+           "tail": "\n".join(log.strip().splitlines()[-8:]) if rc not in (0, 77) else "",
+           # (the lines the build's own hair checks print, blender/shared/locks.py report(): a line that does not
+           # say 'clean' is a fault)
+           "lock_lines": sorted({ln.split("hair lock check:", 1)[1].strip() for ln in log.splitlines()
+                                 if "hair lock check:" in ln})}
     os.makedirs(os.path.dirname(memo), exist_ok=True)
     if rc != -1:
         json.dump(res, open(memo, "w"))
@@ -369,6 +518,10 @@ def review(req, thread, do_smoke=True):
             rep.block("shape", '"frames" is requested without "cells".', 'Add "cells": "0-7:2,4,6".')
         else:
             check_cells(rep, cells, "cells")
+    if req.get("quality") not in (None, "check", "final"):
+        rep.block("shape", f'"quality" is {req.get("quality")!r}; the queue reads only "check" or "final".',
+                  'Use "quality": "check" for work in progress on a 3D look (8 samples, denoised, views only) and '
+                  'leave it out, or say "final", for anything John signs off on.')
     if req.get("mode") == "isolated":
         rep.info("shape", "mode: isolated is ignored; the queue combines every branch whose code does not overlap.")
     note = str(req.get("note") or "")
@@ -517,11 +670,22 @@ def review(req, thread, do_smoke=True):
                 rep.block("views", f"{tok[0]} does not read {', '.join(unknown)}. A script that parses its own "
                           "arguments ignores an unknown flag without a word and renders something else.",
                           f"Flags it reads: {' '.join(sorted(known - {'--out'}))}", "P010")
-        hair = sorted({d for defs in fresh.values() for d in defs if HAIR.search(d)})
+        # (a painted texture changes colour, not form: clay would show nothing new)
+        hair = sorted({d for defs in fresh.values() for d in defs
+                       if HAIR.search(d) and not re.search(r"(_image|_tex|_painting|_paint|_shade|_material|TEX)$", d)})
         if hair and known and "--clay" in known and not any("--clay" in t for _, t in parsed):
             rep.warn("views", "This commit changes hair code (" + ", ".join(hair[:6]) + ") but no view asks for "
                      "--clay. Seams, ledges and ridges where hair meets the head only show in clay.",
                      "Add --head --clay to the view command.", "P009")
+            break
+
+    # ---- a lit command beside its own --clay twin (--clay renders the lit views first, then the clay ones)
+    cmds = [shlex.split(v) for v in views if isinstance(v, str)]
+    for c in cmds:
+        if "--clay" in c and [t for t in c if t != "--clay"] in [o for o in cmds if "--clay" not in o]:
+            rep.block("views", "The same view command is asked with and without --clay. --clay already writes the "
+                      "lit views (turn.png, head.png) as well as the clay ones, so the second command builds and "
+                      "renders the lit views twice.", "Keep only the --clay command.", "P022")
             break
 
     # ---- pitfall patterns against the lines the branch adds
@@ -535,6 +699,62 @@ def review(req, thread, do_smoke=True):
             rep.warn("pitfalls", f"{p['id']} {p['title']}: " +
                      "; ".join(f"{path}:{ln} `{t.strip()[:90]}`" for path, ln, t in hits[:4]) +
                      (f" (+{len(hits) - 4} more)" if len(hits) > 4 else ""), p["fix"], p["id"])
+
+    # ---- a material change renders the material, not the figure (John's rule, 2026-11-17; P024)
+    mat_defs = material_only(since, tip)
+    figure_jobs = [v for v, tok in parsed if tok and tok[0].endswith("views.py")]
+    if mat_defs and figure_jobs:
+        if not req.get("needs_render"):
+            rep.block("material", "Since this branch was last rendered only material code changed (" +
+                      ", ".join(mat_defs[:6]) + "), and the request builds the whole figure to show it.",
+                      "Ask for a swatch render: a script in your branch that puts the material on a sphere and a "
+                      "cylinder or slab at the piece's size, under the figure's own light and world, with every look "
+                      "side by side in one picture from one run and no figure build. If the material must be seen on "
+                      'the figure, add "needs_render": "<what you need to see>" and ask for one figure job.', "P024")
+        elif len(figure_jobs) > 1:
+            rep.block("material", f"A material-only change with needs_render runs as one figure job, not "
+                      f"{len(figure_jobs)}.", "Keep one figure command; put the other looks on a swatch.", "P024")
+
+    # ---- one view first, then the turn (P025); clothes go on a mannequin (P026). John's rules, 2026-11-17
+    changed = sorted({d for path, defs in fresh.items() if path.startswith("blender/") for d in defs})
+    hairy = any(HAIR.search(d) for d in changed)
+    for v, tok in parsed:
+        if not tok or not tok[0].endswith("views.py"):
+            continue
+        known = flags_known_to(show(merged, tok[0]) or "") or set()
+        one = "--angles" in tok and tok.index("--angles") + 1 < len(tok) \
+            and "," not in tok[tok.index("--angles") + 1]
+        multi = [f for f in ("--turn", "--head", "--pieces") if f in tok]
+        if not any(f in tok for f in ("--turn", "--head", "--pieces", "--cells", "--list", "--walk", "--save")):
+            rep.block("views", "views.py command with none of --turn, --head, --pieces, --cells, --list, --walk or --save: it builds "
+                      "the figure and renders nothing (--angles only picks the angles of --turn, --head and --pieces).",
+                      "Add --turn (one view: --turn --angles front) or --head, --pieces, --cells, --walk N.", "P027")
+        if multi and not one and not str(req.get("confirmed") or "").strip():
+            if "--angles" in known:
+                rep.block("views", f"All five angles of {' '.join(multi)} with no \"confirmed\" in the request.",
+                          "Render one angle first, the one that shows the change best: add --angles front (or 3/4, "
+                          "profile, back3/4, back) to the command. When it is right, ask for all angles with "
+                          '"confirmed": "<what the one view showed>".', "P025")
+            else:
+                rep.warn("views", "All five angles with no \"confirmed\". views.py at this commit has no --angles yet, "
+                         "so one view cannot be asked for; let through with the gap noted.",
+                         "Merge the commit that adds --angles and ask for one angle first.", "P025")
+        clothes = changed and not hairy and not mat_defs and "--head" not in tok and "--face" not in tok \
+            and "--mannequin" not in tok and not req.get("needs_render")
+        if clothes:
+            pieces = "--only" in tok or "--no-body" in tok
+            if "--mannequin" in known and not pieces:
+                rep.block("views", "A clothes change rendered on the real figure, which builds the face sculpt, the "
+                          "face paints, the ears and the hair to show cloth.",
+                          "Add --mannequin to the command (the body shape with a plain head). Ask for the real figure "
+                          'only with "needs_render": "<why the hair or face must be there>".', "P026")
+            elif "--mannequin" in known:
+                rep.warn("views", "Pieces alone still build the whole figure under them.",
+                         "Add --mannequin: the pieces fit the same and the face and hair are not built.", "P026")
+            else:
+                rep.warn("views", "A clothes change on the real figure. views.py at this commit has no --mannequin "
+                         "yet; let through with the gap noted.", "Merge the commit that adds --mannequin.", "P026")
+        break
 
     # ---- a face-only request never reaches the queue: the face check API answers it here
     figure, face_defs = face_only(fresh, outs, parsed)
@@ -576,10 +796,35 @@ def review(req, thread, do_smoke=True):
         elif not rep.blocked:
             todo.append(j)
     smoked_ok = False
+    # the hair check rides on the first job's build, for every request whose commit touches hair code
+    hair_defs = sorted({d for defs in fresh.values() for d in defs if HAIR.search(d)})
+    # (measured on the figure the first job builds, and compared only with that figure's last measurement: a branch
+    # that carries two figures has two baselines)
+    # (a view that hides part of the figure, --hair-only, --only, --hide, --no-body, is no basis for the check: with
+    # the clothes hidden nothing can come through the hair and the hair's hidden parts count as flags)
+    whole = [j for j in (todo or facts["jobs"]) if not re.search(r"--(hair-only|only|hide|no-body)\b", j.get("param") or "")]
+    first = (whole or [{}])[0]
+    m = re.search(r"--figure\s+(\w+)", first.get("param") or "") or re.search(r"blender/(\w+)/", first.get("param") or "")
+    figure_ = m.group(1) if m and m.group(1) != "base" else "ranger"
+    hair_key = f"{branch}#{figure_}"
+    hair_dir = os.path.join(HAIR_DIR, f"{tip[:9]}-{merged[:9]}-{figure_}") if hair_defs and whole else None
+    if hair_dir and not todo and not rep.blocked and do_smoke and not os.path.exists(os.path.join(hair_dir, "hair-check.json")) \
+            and facts["jobs"]:
+        todo.append(first)          # the renders are cached, but this hair was never measured
     if do_smoke and todo:
-        with concurrent.futures.ThreadPoolExecutor(3) as ex:
-            for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"]), todo)):
+        with concurrent.futures.ThreadPoolExecutor(2) as ex:
+            for j, res in zip(todo, ex.map(lambda j: smoke(merged, j["kind"], j["param"],
+                                                           hair_dir if j is first else None), todo)):
                 j["smoke"] = res
+                faults = [ln for ln in res.get("lock_lines", []) if " clean (" not in ln]
+                if faults:
+                    rep.block("hair", f"{j['kind']} {j['param'] or ''}: the build's own hair lock check reports "
+                              + "; ".join(faults) + ".",
+                              "Fix what the line names (kink: smooth that lock's guide points so no one point bends it sharply; inward: rewind the strand faces; glint: give the strands "
+                              "the cap's outward normal; facing: flip normals that point at the head; bare: add "
+                              "locks or widen the cap where skin shows inside the hairline) and push.", "P021")
+                elif res.get("lock_lines"):
+                    rep.info("hair", f"{j['kind']} {j['param'] or ''}: hair lock check " + "; ".join(res["lock_lines"]) + ".")
                 if res["ok"]:
                     rep.info("smoke", f"{j['kind']} {j['param'] or ''}: built headless and "
                              f"{'reached its first render' if res['reached_render'] else 'finished'} in "
@@ -591,6 +836,18 @@ def review(req, thread, do_smoke=True):
                               f"python3 tools/render-review/smoke.py {j['param'] or '<script> <args>'} --out /tmp/x",
                               "P003")
         smoked_ok = all(j["smoke"]["ok"] for j in todo)
+        if hair_dir and os.path.exists(os.path.join(hair_dir, "hair-check.json")):
+            now = json.load(open(os.path.join(hair_dir, "hair-check.json")))
+            before, before_tip = hair_before(hair_key, tip)
+            facts["hair"] = {"dir": hair_dir, "changed": hair_defs, "problems": len(now.get("problems", [])),
+                             "clashes": len(now.get("clashes", [])), "compared_with": before_tip}
+            hair_findings(rep, now, before, before_tip, bool(req.get("needs_render")))
+            hair_record(hair_key, tip, hair_dir)
+        elif hair_dir and smoked_ok:
+            err = os.path.join(hair_dir, "hair-check-error.txt")
+            rep.warn("hair", "This commit changes hair code (" + ", ".join(hair_defs[:6]) + ") but the hair check "
+                     "left no result." + (" Its error: " + open(err).read().strip().splitlines()[-1] if os.path.exists(err) else ""), "Look at the build log; run RQ_HAIRCHECK=/tmp/h python3 "
+                     "tools/render-review/smoke.py <view script> <args> --out /tmp/x.")
     elif todo:
         rep.info("smoke", "Smoke run skipped.")
     for n, where in sorted(new_names.items()):
@@ -616,6 +873,7 @@ def review(req, thread, do_smoke=True):
 def cmd_check(a):
     try:
         req = json.loads(a.request if a.request != "-" else sys.stdin.read())
+        REQ_ENV.update({str(k): str(v) for k, v in (req.get("env") or {}).items()} if isinstance(req, dict) else {})
         if not isinstance(req, dict):
             raise ValueError("the request must be one JSON object")
     except ValueError as e:

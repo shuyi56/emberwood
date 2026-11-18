@@ -98,3 +98,83 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** John's rule since 2026-11-16: every figure face check goes through the face check API, not a render. Of the first 41 requests, 17 were face views of a face-only change (eyes, brows, lips, nose, jaw), each costing minutes of render time.
 - **Spot:** The change since the branch was last rendered touches only face sculpt or face paint (`face_relief`, `mouth_relief`, `jaw_relief`, lids, `eye_relief`, iris, sclera, eyeshadow, lashes, brows, lips) and the request asks only for face views (`face_views.py`, `sculpt_views.py`, or `views.py --head` without `--cells` or `--turn`).
 - **Fix:** Run `python blender/facecheck/facecheck.py <figure> --before origin/main` (no Blender, about 17 s, and a before is free there). Ask the queue only for what it cannot show: hair, cloth, final lighting, subsurface scattering and the sprite palette; say which in `"needs_render"`.
+
+## P015 Creases, ridges and ledges in fused hair, and clothes through the hair
+
+- **Seen:** John circled seams on the warden's hair where pieces met; the rogue's side locks leave creases of about 45 px where they join the cap at the temples (rounds 9 and 17). Fusing three wisps into the cap took the rogue from 1 flag to 21 in one commit (c2081d7), and nothing showed it until the render.
+- **Spot:** `hair_check.py` (run by the review inside the headless build whenever a commit touches hair code): a crease is a concave bend tighter than radius 0.3, a ridge a convex edge tighter than 0.15, a ledge hair stepping over hair by 0.3 or more, each as a blob of 10 or more pixels in one of the 8 facings; a clash is another mesh coming out through the hair's outside in a walk frame. The marked picture is `hair-check.png`. A flag of 25 px or more that the branch's last measured commit did not have sends the request back.
+- **Fix:** Crease: widen the overlap between the two pieces and relax the join after fusing. Ridge: round the piece's corner or sink it into the mass. Ledge: root the lock inside the hair it grows from instead of laying it on top. Clash: move the hair clear in that pose or weight it to follow the body. Check before asking: `RQ_HAIRCHECK=/tmp/h python3 tools/render-review/smoke.py <view script> <args> --out /tmp/x`.
+
+## P016 Painted strands that do not match the hair
+
+- **Seen:** Rogue rounds 13 to 15: the painted side locks were half-transparent, the skin showed through and tinted them pink (78% of the painted texels half-transparent at b14e416, 32% once each strand was opaque), and their colour had been shifted away from the hair's ramp to compensate. John rejected the painted locks after three render rounds.
+- **Spot:** The strand paint part of `hair_check.py`: more than 45% of a strand texture's painted texels with alpha between 0.08 and 0.7, or its mean colour further than 0.045 in chromaticity from `MATERIALS[M_HAIR]['ramp']`. The texture over a skin tone is saved as `paint-<name>.png`.
+- **Fix:** Paint each strand opaque and thin a lock by the gaps between its strands. Take the tones from the hair's ramp unchanged; if the lock renders darker or redder than the hair above it, fix the material or the lighting it sits in, not the paint.
+
+## P017 Turning one knob further when the last render barely moved
+
+- **Seen:** Rogue rounds 19 and 20 (2026-11-16): a crotch mound 'shrank only slightly' after the seat's front-centre recession went to 0.22, so round 20 doubled it to 0.42. Measured headless, the centre was already 0.1 behind the thigh fronts and round 20 made a trough 1 deep; the mound that stayed was the inner-thigh fill from another function (leg_pt), which neither round touched.
+- **Spot:** A request whose diff only raises the same constant again, with a note that the previous round changed little. Build both commits headless and ray-cast the surface profile where the problem is: if the last change already moved that surface, the visible problem is made by something else.
+- **Fix:** Before another round, measure which surface is actually forward at the spot (a ray-cast profile at a few x across it, from the built scene) and change the function that makes it. Do not raise the same number again.
+- **Also seen:** Round 22: the front factor went from 0.35 * inner to 0.55 * inner ** 3 and the surface moved 0.11; at the back the marked lobe and the columns beside it moved in together, so the lobe stood as proud as before between deeper grooves. Measure the problem relative to its neighbours (`tools/render-review/profile.py`), not by how far one point moved.
+
+## P018 A new part built under a shell that already covers its place
+
+- **Seen:** Rogue ears, request #56 (2026-11-16): the ears were added at th 1.45 to 1.95 while the hair cap's HAIRLINE still ran down past them, as it was drawn for a head without ears. The render showed only a lobe tip. The hair check passed, because a part hidden inside the hair is not a clash.
+- **Spot:** A commit adds a mesh (ears, jewellery, a collar) and leaves the shell over that spot unchanged: compare the new part's span with the curve that bounds the covering shell (HAIRLINE for the cap, hems for cloth) in the same coordinates. In the headless build, ray-cast from outside toward the new part in profile and 3/4: the first hit must be the new part over most of its area.
+- **Fix:** Open the covering shell round the new part in the same commit, with clearance, and state both spans in the request note (the part's and the opening's). Ask for the render only once the ray-cast shows the part outermost.
+
+## P019 A build that takes many minutes before the first render
+
+- **Seen:** Warden with the cape, db7668d (2026-11-16): the scene took 12 to 13 minutes to build on the requester's machine and 21 minutes in the review with the hair check (bb142f7, before the cape: 8 minutes; the rogue: 3). The review's limit was 15 minutes and reported a crash that was not one. The queue pays the same build before every render of that figure.
+- **Spot:** The smoke line in the review: 'reached its first render in N s' above 600, or 'no render reached' with no Python error in the log. In the diff: a dense grid built more than once (an outside and a lining), a per-vertex Python loop over every mesh for weights or clearance, a lookup table rebuilt per piece.
+- **Fix:** Profile one build (python3 -X importtime is no help; time each build step) and cut the slow step: build the sheet once and offset it for the lining, halve grid resolution where a subdivision follows, cache tables. A real crash shows a traceback; a timeout does not, so rerun with RQ_SMOKE_TIMEOUT raised before sending the request back as broken.
+
+## P020 A new skin mesh that falls into another part's tone branch
+
+- **Seen:** Warden bare arms, 02a9e43 (2026-11-16): skin_tones picks its colouring by object name (head, ears, neck, then everything else as a hand). The new Arm.R and Arm.L took the hand's branch and its fingertip flush turned the whole arm pink. It cost one render to see.
+- **Spot:** A commit adds a mesh in M_SKIN (mesh_obj(..., M_SKIN, ...)) under a name skin_tones has no branch for. Read the if and elif chain on o.name in skin_tones at that commit: an unnamed mesh lands in the last branch.
+- **Fix:** Add the new name's own branch to skin_tones in the same commit, and match its tone to the neighbours where they meet (wrist, shoulder, neck).
+
+## P021 Hair strands or ribbons wound inside out
+
+- **Seen:** Hair locks, f4f54d6 (2026-11-17): the strand ribbons of the new lock clumps were wound inward, so the fringe rendered black on one side and pale on the other on both figures. The build and the hair check passed, because both look at shape, not at which way a face points. It cost a render of four jobs.
+- **Spot:** A commit that builds hair (or any thin shell) from its own vertex loops: new grid, ribbon or tube code in blender/shared/locks.py or a figure's hair functions, with no recalc of normals after it. In the headless build, take each hair face's normal against the direction from the head's centre to the face: more than a few percent pointing inward on a piece means it is wound the wrong way.
+- **Fix:** Wind the faces so the normal points away from the head, or call bmesh.ops.recalc_face_normals on the piece before it is joined, and check the share of inward faces in the smoke build before asking.
+- **Also seen:** Rogue temple locks, f13d5e2 (2026-11-17): the lock check reported flap and float on every temple wisp after locks.hang_down, which makes them hang straight past the jaw at John's request. A lock meant to hang free below the jaw stands off the head by design, so those lines are not a fault: forward, and have the requester measure such locks against their hang line so the check stays quiet when right and loud when wrong. Kink, inward, glint, facing and bare lines still block.
+
+## P022 A lit view command beside its own --clay twin
+
+- **Seen:** Warden head turn, 37f53b3 and c75919e (2026-11-17): the reviewer itself added a second command, the same views with or without --clay, to get both looks. views.py --clay renders the lit views first and then the clay ones (turn.png, head.png, turn-clay.png, head-clay.png), so the pair built the figure twice and rendered the lit views twice. The queue caught it and dropped the duplicate.
+- **Spot:** Two commands in "views" that are equal once --clay is taken out.
+- **Fix:** Keep only the --clay command. To add clay to a request, add the flag to the existing command; never add a second command.
+
+## P023 A build killed for memory, read as a crash
+
+- **Seen:** Creator faces on the Warden, 44308e5 (2026-11-17): five Warden builds ran side by side in the review (four views of one request and one of another). Each peaks near 7 GB, the container has 15 GB, and two were killed (exit 137, the log ends in "Killed" with no traceback). The review reported them as build failures. Rerun two at a time, both passed.
+- **Spot:** Exit 137 or a bare "Killed" as the last log line, with no Python traceback. dmesg shows "Memory cgroup out of memory".
+- **Fix:** Never send this back as a broken build. Rerun the killed views with nothing else building (the review now runs two builds at a time, and a second review must wait for the first). Tell the queue the build's peak so it does not run three side by side, and tell the requester when one build passes about 5 GB.
+
+## P024 A material change shown by rendering the whole figure
+
+- **Seen:** Warden bronze study, c17da55, request #109 (2026-11-17): four looks of one bronze shader were asked as four views.py jobs. Each built the whole Warden (about four minutes and 7 GB), 15 minutes in all, to show armour that renders in seconds. The reviewer forwarded it. John then set the rule: a material change renders only the material, not the figure. The plum, green and blue robe colours before it cost a figure render each the same way.
+- **Spot:** The definitions changed since the branch's last render are all material code (a *_closeup or *_material function, M_* constants, mat_def, ramp, a look table such as BRONZE_LOOKS, textures), and the request runs views.py (with --turn, --only or --no-body).
+- **Fix:** Send it back and ask for a swatch script in the branch: the material on a sphere plus a cylinder or slab at the piece's size, the figure's own light and world, all looks side by side in one picture from one run, no figure build. The only way past is "needs_render" with what must be seen on the figure, and then it is one figure job, never one per look. Wording: render-queue README, "A material change renders the material, not the figure".
+
+## P025 The full turn asked before one view was looked at
+
+- **Seen:** Warden clothes and greaves, 2026-11-17: each tweak (slate blue, green, plum, slimmer greaves, grooves twice) went straight to a five-angle --turn, and several were wrong in a way one angle already showed (grooves hidden under the knee cop in #111). John set the rule: render one view first and confirm before scheduling the full turn.
+- **Spot:** A views.py command with --turn, --head or --pieces, no single --angles name, and no "confirmed" in the request. (--angles filters the angles those views use: --turn --angles front is one view.)
+- **Fix:** Send it back: one angle first (add --angles front, 3/4, profile, back3/4 or back to the command), the one that shows the change best. The turn goes through only with "confirmed": "<what the one view showed>", at the one view's commit or a later one that changes nothing it showed (read the diff between the two to check). While a branch's views.py has no --angles, let the turn through and note the gap.
+
+## P026 Clothes shown by building the real figure
+
+- **Seen:** Warden clothes-only renders, 2026-11-17: every robe, cape and armour change built the whole figure (face sculpt, face paints, ears, 771 hair strands; about four minutes and 7 GB) and then hid it with --no-body. John set the rule: changes to clothes that need a model use a mannequin.
+- **Spot:** The changes since the last render are clothes or gear (not hair, not face, not material-only) and the views.py command has no --mannequin and the request no "needs_render".
+- **Fix:** Send it back to add --mannequin (the body shape with a plain head). The real figure goes through only with "needs_render" saying why (clothes against the hair, a hood on the head). With --only or --no-body, advise --mannequin as well. Material-only changes still go to a swatch (P024). While a branch's views.py has no --mannequin, let it through and note the gap.
+
+## P027 A views.py command that builds the figure and renders nothing
+
+- **Seen:** Warden full front, 2026-11-18: `views.py --figure warden --angles front --size 480 --samples 48` was reviewed and queued as a job; --angles only picks the angles for --turn, --head and --pieces, so the build ran several minutes and wrote no image. The queue thread caught it and ran it as `--turn --angles front`.
+- **Spot:** A views.py command with none of --turn, --head, --pieces, --cells, --list, --walk or --save.
+- **Fix:** Send it back: a full figure front is `--turn --angles front`. The reviewer's smoke build only proves the build reaches its first render, so check that the command has an output flag.
