@@ -5,7 +5,7 @@ from behind the shapes as well as in front, so the scattering shows through the 
 figure is built, so it renders in seconds: a skin material change is judged here, not on a figure render.
 
     python3 blender/base/skin_study.py [--out DIR] [--size 300] [--samples 64] [--looks current,oil] [--denoise]
-                                       [--tone fair] [--dry]
+                                       [--tone fair] [--vs-main] [--dry]
 
 --tone     the skin's base colour: a face creator swatch (ranger, fair, light, olive, tan, brown, deep) or a hex
            colour such as efcfb9; default the figures' own (female.SKIN[2])
@@ -13,6 +13,11 @@ figure is built, so it renders in seconds: a skin material change is judged here
 Writes DIR/swatches.png (default DIR: the system temp dir + 'skin-study'), and with --denoise also
 DIR/swatches-denoised.png from the same scene, to show how much of the grain is render noise. --dry builds the
 scene and stops before rendering.
+
+--vs-main  the regression check: the 'current' look rendered once with this checkout's skin_surface and once,
+           in the same scene with the same samples, with origin/main's (read with git show), into
+           DIR/vs-main.png (branch | main | the difference, scaled up 8 times); the largest and mean difference
+           are printed. 0 means 'current' reproduces main's skin.
 
 The ball carries the skin's maps the way a face does: oily at the top (the brow and nose), drier at the bottom,
 pored all over, a light scatter of freckles on its right half, flushed a little in the middle. The finger is
@@ -81,9 +86,46 @@ def ball_maps(c):
             0.8 if c.x > 0.15 else 0.0, 0.0, 1.0)
 
 
+def vs_main(sc, out, female):
+    import importlib.util
+    import subprocess
+    root = os.path.dirname(os.path.dirname(HERE))
+    src = subprocess.run(['git', '-C', root, 'show', 'origin/main:blender/base/female.py'], check=True,
+                         capture_output=True, text=True).stdout
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, 'female_main.py')
+    with open(path, 'w') as f:
+        f.write(src)
+    spec = importlib.util.spec_from_file_location('female_main', path)
+    fm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fm)
+    if '--dry' in argv:
+        return
+    from PIL import Image
+    shots = []
+    for who in ('branch', 'main'):
+        if who == 'main':
+            m = bpy.data.materials['skin current']
+            nt = m.node_tree
+            nt.nodes.clear()
+            o_ = nt.nodes.new('ShaderNodeOutputMaterial')
+            d_ = nt.nodes.new('ShaderNodeBsdfDiffuse')
+            nt.links.new(d_.outputs['BSDF'], o_.inputs['Surface'])
+            fm.skin_surface(nt, d_, o_)
+        sc.render.filepath = os.path.join(tmp, f'{who}.png')
+        bpy.ops.render.render(write_still=True)
+        shots.append(np.asarray(Image.open(sc.render.filepath).convert('RGB')).astype(np.int16))
+    diff = np.abs(shots[0] - shots[1])
+    print(f'vs main: largest difference {int(diff.max())} of 255, mean {diff.mean():.4f}', flush=True)
+    row = np.concatenate([shots[0], shots[1], np.minimum(255, diff * 8)], axis=1).astype(np.uint8)
+    Image.fromarray(row).save(os.path.join(out, 'vs-main.png'))
+
+
 def main():
     import female       # (the module only: nothing of a figure is built)
     looks = [k.strip() for k in opt('--looks', ','.join(female.SKIN_LOOKS)).split(',')]
+    if '--vs-main' in argv:
+        looks = ['current']
     bad = [k for k in looks if k not in female.SKIN_LOOKS]
     if bad:
         sys.exit(f'skin_study.py: no such look {", ".join(bad)} (looks: {", ".join(female.SKIN_LOOKS)})')
@@ -160,6 +202,9 @@ def main():
         sc.render.image_settings.media_type = 'IMAGE'
     sc.render.image_settings.file_format = 'PNG'
     print('swatches:', ', '.join(looks), 'tone', TONE or female.SKIN[2], flush=True)
+    if '--vs-main' in argv:
+        vs_main(sc, out, female)
+        return
     if '--dry' in argv:
         return
     files = ['swatches.png']
