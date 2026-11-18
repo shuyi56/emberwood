@@ -730,7 +730,8 @@ def cape_on_arms(names):
                 out = smoothstep(SH_X - 1.6, SH_X + 1.0, -s_ * co.x)
                 top = smoothstep(SH_Z + 2.0, SH_Z - 0.5, co.z) * smoothstep(SH_Z - 9.0, SH_Z - 4.0, co.z) * 0.7
                 d = math.hypot(co.x + s_ * SH_X, co.y - 0.2)
-                near = smoothstep(5.0, 2.2, d) * smoothstep(SH_Z - 1.0, SH_Z - 5.0, co.z) * \
+                # (reaching well out from the arm: the cape hangs well off it, and a narrower reach let the hand swing back through it)
+                near = smoothstep(6.6, 3.0, d) * smoothstep(SH_Z - 1.0, SH_Z - 5.0, co.z) * \
                     smoothstep(SH_Z - UPPER - FORE - 8.0, SH_Z - UPPER - FORE - 3.0, co.z)
                 wa = max(out * top, near)
                 if wa <= 1e-4:
