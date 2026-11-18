@@ -271,6 +271,8 @@ def main():
         if a == '--set':
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
+            if hasattr(female, k):
+                setattr(female, k, eval(v))     # (a base figure setting, such as SKIN_LOOK)
     if '--mannequin' in argv:
         female.MANNEQUIN = True
     import time

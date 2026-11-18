@@ -816,7 +816,35 @@ def make_material(mid):
     return m
 
 
-def skin_surface(nt, bsdf, out):
+# The skin's close-up shading, as candidate looks (skin_study.py renders them side by side on stand-in shapes,
+# without building a figure); SKIN_LOOK is the one the figures wear. Each look lists only what it changes from the
+# one before it in the table, so the study shows what every step adds:
+# - fresnel: the reflection of real skin. Skin's surface is a dielectric of IOR about 1.4 (F0 about 2.8%), which
+#   is the Principled default at Specular IOR Level 0.5; turning that level down (0.38 before) cuts the grazing
+#   reflection that rims a face in light. And light inside skin scatters mostly forward (anisotropy about 0.8),
+#   which keeps the scattering from going milky.
+# - oil: a second, sharper highlight. Measured skin fits two specular lobes: a broad one from the skin itself and a
+#   tighter one from the thin film of sebum over it, strongest on the nose, the brow and the chin. The film is the
+#   coat here, weighted by the 'skin fx' gloss channel, and it alone carries the full pores and creases (Coat
+#   Normal), while the scattered light under it sees a softer relief, as light that has spread inside the skin does.
+# - fuzz: the vellus hair (peach fuzz): a faint sheen that lifts the skin where it turns away from the viewer, so
+#   the outline of the face goes soft instead of cut out.
+# - patchy: how glossy and how reflective the skin is drifts in patches a centimetre or two across, so a highlight
+#   breaks up instead of sliding over it as over moulded plastic.
+SKIN_LOOKS = {
+    'current': dict(spec=0.38, aniso=0.0, rough=(0.56, 0.38), coat=(0.0, 0.0), coat_rough=(0.35, 0.35),
+                    base_bump=1.0, sheen=0.0, patch=0.0),
+    'fresnel': dict(spec=0.5, aniso=0.8),
+    'oil': dict(rough=(0.62, 0.5), coat=(0.08, 0.4), coat_rough=(0.42, 0.26), base_bump=0.45),
+    'fuzz': dict(sheen=0.35),
+    'patchy': dict(patch=1.0),
+}
+for _a, _b in zip(list(SKIN_LOOKS), list(SKIN_LOOKS)[1:]):
+    SKIN_LOOKS[_b] = {**SKIN_LOOKS[_a], **SKIN_LOOKS[_b]}
+SKIN_LOOK = 'current'
+
+
+def skin_surface(nt, bsdf, out, look=None):
     """What the skin looks like up close (the sprite renders keep the plain diffuse surface; see sprite_mode). Its
     colour is the baked 'skin' tone (see skin_tones): rosier at the cheeks, nose, chin, knuckles and fingertips,
     cooler and a little darker under the eyes and the jaw, warmer where it is shut in. Light passes into it and
@@ -831,7 +859,10 @@ def skin_surface(nt, bsdf, out):
     - colour that is not even: blotches a little redder or sallower, a fine speckle, the grooves and pores a
       shade darker, and a light scatter of freckles over the nose and cheeks and the backs of the hands;
     - a sheen that breaks up over the relief: rougher in the grooves, glossier on the nose, chin and brow.
-    The 'skin tex' colour says where (red: freckles, green: creases, blue: pores)."""
+    The 'skin tex' colour says where (red: freckles, green: creases, blue: pores). The look (SKIN_LOOKS, by name
+    or by its place in the table) sets the reflection, the oil film, the fuzz and the patchiness."""
+    look = SKIN_LOOK if look is None else look
+    K = SKIN_LOOKS[look] if isinstance(look, str) else list(SKIN_LOOKS.values())[int(look)]
     L = nt.links.new
 
     def node(kind, **props):
@@ -944,17 +975,48 @@ def skin_surface(nt, bsdf, out):
     L(c, sb.inputs['Base Color'])
     sb.subsurface_method = 'RANDOM_WALK_SKIN'
     sb.inputs['Subsurface Weight'].default_value = 1.0
+    # (the mean free paths of measured skin, red 3.7, green 1.4, blue 0.7 mm: Jensen et al. 2001)
     sb.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.18)
     sb.inputs['Subsurface Scale'].default_value = 0.12      # (one unit is about 2.7 cm on her)
-    sb.inputs['Specular IOR Level'].default_value = 0.38
+    sb.inputs['Subsurface Anisotropy'].default_value = K['aniso']
     sb.inputs['IOR'].default_value = 1.4
+    # patches a centimetre or two across where the skin is a little glossier or duller, more or less reflective
+    pn = tex('ShaderNodeTexNoise', 0.9)
+    pn.inputs['Detail'].default_value = 2.0
+    patch = math_('MULTIPLY', math_('SUBTRACT', pn.outputs['Fac'], 0.5), 2.0 * K['patch'])     # about -0.3..0.3
+    spec = math_('MULTIPLY', K['spec'], math_('MULTIPLY_ADD', patch, 0.5, 1.0))
+    # (the pores and grooves hold less light to send back)
+    L(math_('MULTIPLY', spec, math_('SUBTRACT', 1.0, math_('MULTIPLY', pit, 0.5 * K['patch']))),
+      sb.inputs['Specular IOR Level'])
     # gloss: the 'skin fx' blue channel is how oily the skin is there (nose, chin, brow); the grooves, pores and
     # creases are duller than the plateaus between them, which breaks the highlight up into a skin-like sparkle
-    rough = ramp_(fx.outputs['Blue'], 0.0, 1.0, 0.56, 0.38, smooth=False)
+    rough = ramp_(fx.outputs['Blue'], 0.0, 1.0, K['rough'][0], K['rough'][1], smooth=False)
     rough = math_('ADD', rough, math_('MULTIPLY_ADD', math_('SUBTRACT', 1.0, net), 0.06,
                                       math_('MULTIPLY_ADD', pit, 0.14, math_('MULTIPLY', fine.outputs['Fac'], 0.08))))
+    rough = math_('MULTIPLY_ADD', patch, -0.25, rough)
     L(rough, sb.inputs['Roughness'])
-    L(bump.outputs['Normal'], sb.inputs['Normal'])
+    # the relief: in full for the surface reflections, softer for the light that has spread inside the skin
+    if K['base_bump'] < 1.0:
+        soft = node('ShaderNodeBump')
+        soft.inputs['Strength'].default_value = 0.2 * K['base_bump']
+        soft.inputs['Distance'].default_value = 0.03
+        L(height, soft.inputs['Height'])
+        L(soft.outputs['Normal'], sb.inputs['Normal'])
+    else:
+        L(bump.outputs['Normal'], sb.inputs['Normal'])
+    # the film of oil: a clear coat, thicker and glossier where the skin is oily, broken by the pores
+    if K['coat'][1] > 0.0:
+        cw = ramp_(fx.outputs['Blue'], 0.0, 1.0, K['coat'][0], K['coat'][1], smooth=False)
+        L(math_('MULTIPLY', cw, math_('SUBTRACT', 1.0, math_('MULTIPLY', pit, 0.6))), sb.inputs['Coat Weight'])
+        cr = ramp_(fx.outputs['Blue'], 0.0, 1.0, K['coat_rough'][0], K['coat_rough'][1], smooth=False)
+        L(math_('MULTIPLY_ADD', patch, -0.15, cr), sb.inputs['Coat Roughness'])
+        sb.inputs['Coat IOR'].default_value = 1.45
+        L(bump.outputs['Normal'], sb.inputs['Coat Normal'])
+    # the fuzz: a soft sheen at grazing angles, a little warm
+    if K['sheen'] > 0.0:
+        sb.inputs['Sheen Weight'].default_value = K['sheen']
+        sb.inputs['Sheen Roughness'].default_value = 0.4
+        sb.inputs['Sheen Tint'].default_value = (1.0, 0.86, 0.78, 1.0)
     L(sb.outputs['BSDF'], out.inputs['Surface'])
 
 
