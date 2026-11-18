@@ -17,16 +17,34 @@ figure. skin_study.py --layers renders the four side by side."""
 import numpy as np
 
 # how much of the colour of the epidermis lies over what is under it (0 clear, 1 opaque)
-EPIDERMIS_OPACITY = 0.45
+EPIDERMIS_OPACITY = 0.7
 # the layers' colours (sRGB)
 MUSCLE_RED = [162, 56, 50]
 MUSCLE_BROWN = [150, 82, 64]
 # (the veins' colours are what they let through, multiplied into what lies under them: blood in a vessel absorbs
 # the light that crosses it, as the thin absorbing layer between the epidermis and the dermis does in Donner and
-# Jensen's layered model, rather than adding paint on top. Lighter than the colour they leave.)
+# Jensen's layered model, rather than adding paint on top. Lighter than the colour they leave. These three are
+# the veins laid bare on layer 1.)
 VEIN_BLUE = [120, 150, 240]
 VEIN_PURPLE = [190, 130, 215]
 VEIN_GREEN = [140, 215, 160]
+# (and these are the same veins seen through the epidermis. A vein under skin is not blue paint: measured, it
+# sends back about as much blue as the skin beside it and clearly less red (Kienle and others, 1996), so it is
+# only a little darker and a little cooler than the skin, and the eye calls that blue. So: take out red, a
+# little green, almost no blue. Greenish where the skin over it is yellower, purplish where it lies shallow.)
+VEIN_SEEN_BLUE = [205, 234, 250]
+VEIN_SEEN_PURPLE = [222, 222, 248]
+VEIN_SEEN_GREEN = [212, 242, 236]
+VEIN_SEEN = 0.9                 # how much of that the thinnest skin shows
+# the network (1 unit is about 2.7 cm, so a trunk is about 3 mm across with its blur, a branch about 1.5 mm)
+VEIN_BEND = (0.35, 1.6)         # the slow bend of the space the veins run in: noise scale, how far it moves them
+VEIN_WIGGLE = (1.7, 0.22)       # the small wiggle on top
+VEIN_TRUNK_SCALE = 0.5          # trunks: one cell is about 2 units, so a trunk every 5 cm
+VEIN_TRUNK_WIDTH = 0.085
+VEIN_BRANCH_SCALE = 1.5
+VEIN_BRANCH_WIDTH = 0.05
+VEIN_BRANCH_REACH = 0.55        # how far from its trunk a branch runs before it fades out
+VEIN_BRANCH_STRENGTH = 0.6
 FRECKLE = [150, 96, 66]
 BLEMISH = [168, 98, 84]
 
@@ -101,51 +119,61 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     L(k, sc1.inputs['Scale'])
     layer1 = sc1.outputs['Vector']
 
-    # ---- layer 2: the veins. Cell edges of a Voronoi pattern, warped by noise so they wander and fork like a
-    # network, at two sizes (the finer branches thinner); each vein is blue, purple or green by where it runs
-    warp = tex('ShaderNodeTexNoise', 0.8)
-    warp.inputs['Detail'].default_value = 2.0
-    off = node('ShaderNodeVectorMath', operation='SUBTRACT')
-    L(warp.outputs['Color'], off.inputs[0])
-    off.inputs[1].default_value = (0.5, 0.5, 0.5)
-    off2 = node('ShaderNodeVectorMath', operation='SCALE')
-    L(off.outputs['Vector'], off2.inputs[0])
-    off2.inputs['Scale'].default_value = 1.1
-    wv = node('ShaderNodeVectorMath', operation='ADD')
-    L(rest.outputs['Vector'], wv.inputs[0])
-    L(off2.outputs['Vector'], wv.inputs[1])
-    big = ramp_(tex('ShaderNodeTexVoronoi', 0.7, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
-                0.0, 0.05, 1.0, 0.0)
-    fine = ramp_(tex('ShaderNodeTexVoronoi', 1.8, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
-                 0.0, 0.05, 1.0, 0.0)
-    # (a vein is not a closed cell: a second noise gates the edges, so each runs a while, then fades out; the
-    # finer branches are gated harder, so they spring off the main ones and end)
-    gate = tex('ShaderNodeTexNoise', 1.6)
+    # ---- layer 2: the veins. A hierarchy, as veins are: a few wide trunks that wander, and thin side branches
+    # that spring off the trunks and die out a little way from them. Both are cell edges of a Voronoi pattern
+    # read through a twice-warped space (a slow bend and a small wiggle), so no edge runs straight and no cell
+    # reads as a polygon; a noise gates the trunks so each runs a while and sinks out of sight
+    def warped(scale, amount, vec=None):
+        w = tex('ShaderNodeTexNoise', scale, vec)
+        w.inputs['Detail'].default_value = 2.0
+        o = node('ShaderNodeVectorMath', operation='SUBTRACT')
+        L(w.outputs['Color'], o.inputs[0])
+        o.inputs[1].default_value = (0.5, 0.5, 0.5)
+        o2 = node('ShaderNodeVectorMath', operation='SCALE')
+        L(o.outputs['Vector'], o2.inputs[0])
+        o2.inputs['Scale'].default_value = amount
+        a = node('ShaderNodeVectorMath', operation='ADD')
+        L(vec if vec is not None else rest.outputs['Vector'], a.inputs[0])
+        L(o2.outputs['Vector'], a.inputs[1])
+        return a.outputs['Vector']
+
+    wv = warped(VEIN_WIGGLE[0], VEIN_WIGGLE[1], warped(VEIN_BEND[0], VEIN_BEND[1]))
+    td = tex('ShaderNodeTexVoronoi', VEIN_TRUNK_SCALE, wv, feature='DISTANCE_TO_EDGE').outputs['Distance']
+    bd = tex('ShaderNodeTexVoronoi', VEIN_BRANCH_SCALE, wv, feature='DISTANCE_TO_EDGE').outputs['Distance']
+    # (seen through skin a vein has no edge: a soft core with a wide blurred fall-off, so a squared smooth ramp)
+    trunk = ramp_(td, 0.0, VEIN_TRUNK_WIDTH, 1.0, 0.0)
+    trunk = math_('MULTIPLY', trunk, trunk)
+    branch = ramp_(bd, 0.0, VEIN_BRANCH_WIDTH, 1.0, 0.0)
+    branch = math_('MULTIPLY', branch, branch)
+    gate = tex('ShaderNodeTexNoise', 1.1)
     gate.inputs['Detail'].default_value = 1.0
-    gate2 = tex('ShaderNodeTexNoise', 3.1)
-    veins = math_('MAXIMUM', math_('MULTIPLY', big, ramp_(gate.outputs['Fac'], 0.42, 0.58)),
-                  math_('MULTIPLY', fine, math_('MULTIPLY', 0.45, ramp_(gate2.outputs['Fac'], 0.6, 0.75))))
+    trunk = math_('MULTIPLY', trunk, ramp_(gate.outputs['Fac'], 0.4, 0.6))
+    # (a branch shows only near a live trunk, weaker the further it runs from it)
+    near = math_('MULTIPLY', ramp_(td, 0.0, VEIN_BRANCH_REACH, 1.0, 0.0), ramp_(gate.outputs['Fac'], 0.4, 0.6))
+    gate2 = tex('ShaderNodeTexNoise', 2.7)
+    branch = math_('MULTIPLY', math_('MULTIPLY', branch, near),
+                   math_('MULTIPLY', VEIN_BRANCH_STRENGTH, ramp_(gate2.outputs['Fac'], 0.45, 0.6)))
+    veins = math_('MAXIMUM', trunk, branch)
     # (some stretches show more than others, as veins lie deeper or nearer the surface)
     depth = tex('ShaderNodeTexNoise', 0.9)
     depth.inputs['Detail'].default_value = 2.0
-    veins = math_('MULTIPLY', veins, ramp_(depth.outputs['Fac'], 0.3, 0.6, 0.35, 1.0))
+    veins = math_('MULTIPLY', veins, ramp_(depth.outputs['Fac'], 0.3, 0.6, 0.45, 1.0))
     # (the veins are in the skin everywhere, but show only where it is thin: layer 2 on its own shows them all)
     shown = ramp_(thin_skin, 0.15, 0.6)
-    hue = tex('ShaderNodeTexNoise', 1.3)
+    hue = tex('ShaderNodeTexNoise', 0.6)
     hue.inputs['Detail'].default_value = 1.0
-    vc = mix(VEIN_BLUE, VEIN_PURPLE, ramp_(hue.outputs['Fac'], 0.4, 0.6))
-    hue2 = tex('ShaderNodeTexNoise', 0.7)
-    vc = mix(vc, VEIN_GREEN, ramp_(hue2.outputs['Fac'], 0.58, 0.75, 0.0, 0.8))
+    hue2 = tex('ShaderNodeTexNoise', 0.45)
+    vc = mix(VEIN_BLUE, VEIN_PURPLE, ramp_(hue.outputs['Fac'], 0.45, 0.65))
+    vc = mix(vc, VEIN_GREEN, ramp_(hue2.outputs['Fac'], 0.55, 0.75, 0.0, 0.8))
+    # (what the same veins take out of the light once the epidermis lies over them: far less, and mostly red)
+    vs = mix(VEIN_SEEN_BLUE, VEIN_SEEN_PURPLE, ramp_(hue.outputs['Fac'], 0.45, 0.65))
+    vs = mix(vs, VEIN_SEEN_GREEN, ramp_(hue2.outputs['Fac'], 0.55, 0.75, 0.0, 0.8))
     l2 = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')
-    L(math_('MULTIPLY', veins, 0.7), l2.inputs['Factor'])
+    L(math_('MULTIPLY', veins, 0.8), l2.inputs['Factor'])
     L(layer1, l2.inputs['A'])
     L(vc, l2.inputs['B'])
     layer2 = l2.outputs['Result']
     veins = math_('MULTIPLY', veins, shown)
-    l2m = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')      # (layer 2 as it lies in the skin)
-    L(math_('MULTIPLY', veins, 0.7), l2m.inputs['Factor'])
-    L(layer1, l2m.inputs['A'])
-    L(vc, l2m.inputs['B'])
 
     # ---- layer 3: the epidermis. The skin tone, freckles (small soft flecks, each its own size and strength),
     # a few larger blemishes, and pores a shade darker
@@ -189,12 +217,12 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     opacity = math_('ADD', EPIDERMIS_OPACITY, math_('MULTIPLY', math_('MAXIMUM', math_('MULTIPLY', freckle, 1.0),
                                                                      math_('MULTIPLY', blem, 0.7)),
                                                      1.0 - EPIDERMIS_OPACITY))
-    combined = mix(l2m.outputs['Result'], layer3, opacity)
+    combined = mix(layer1, layer3, opacity)
     # (and the veins show through it, faintly, as they do under real skin)
     vt = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')
-    L(math_('MULTIPLY', veins, 0.45), vt.inputs['Factor'])
+    L(math_('MULTIPLY', veins, VEIN_SEEN), vt.inputs['Factor'])
     L(combined, vt.inputs['A'])
-    L(vc, vt.inputs['B'])
+    L(vs, vt.inputs['B'])
     combined = vt.outputs['Result']
     sb = node('ShaderNodeBsdfPrincipled', name='close bsdf')
     L(combined, sb.inputs['Base Color'])
