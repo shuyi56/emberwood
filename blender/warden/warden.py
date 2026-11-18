@@ -2511,11 +2511,12 @@ def build():
     crease_attr(up, lambda co: tab_folds(co.x, co.z))
     # the red trim: a band down each edge, the yoke embroidered at the chest (a V from the collar), and a band
     # down the middle from the foot of the V
-    TL = 0.08      # (the embroidery stands this far off the cloth)
+    TL = 0.12      # (the embroidery stands this far off the cloth's own surface: clear of the tabard's thickness,
+    # or its straight runs sank into the cloth across the round of the chest and showed in patches)
     for s in (-1, 1):
         mesh_obj(f'Tabard edge {s}', strip(polyline(lambda z: (s * (robe_edge(z) - 0.42), z), 51.8, 38.9, 40), 0.24,
                                            tab_y, TL), M_TRIM, body, subdiv=0, solid=0.05)
-        mesh_obj(f'Tabard yoke {s}', strip(polyline(lambda t: (s * lerp(1.45, 0.0, t), lerp(52.3, 47.2, t)), 0.0, 1.0, 16),
+        mesh_obj(f'Tabard yoke {s}', strip(polyline(lambda t: (s * lerp(1.45, 0.0, t), lerp(52.3, 47.2, t)), 0.0, 1.0, 40),
                                            0.3, tab_y, TL), M_TRIM, body, subdiv=0, solid=0.05)
     mesh_obj('Tabard collar', strip(polyline(lambda u: (u * (tab_hw(52.3) - 0.1), 52.3), -1.0, 1.0, 14), 0.24, tab_y, TL),
              M_TRIM, body, subdiv=0, solid=0.05)
