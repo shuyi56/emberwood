@@ -19,6 +19,9 @@
 // fabric, not of the step. After the constraints each point is pushed out of the body, and the body's hold on it
 // takes away its slide along it (`friction`), so cloth and hair stay where they are laid on a shoulder instead of pouring off.
 //
+// Known limit: friction and held chains (`hold`) work against each other. With much friction a held sheet that lies
+// on a body keeps creeping instead of coming to rest; hair is draped with 0.05, the cape runs with 0.2.
+//
 // Nothing here knows about three.js, bones or a page: positions are a flat array of x, y, z, the body is a
 // function, and the units are the caller's. The cape and the hair in the game run it through fabric.js (on the
 // same bones, colliders and bench as the spring bones); the Face Creator runs it once, to rest, to drape a
