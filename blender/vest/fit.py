@@ -48,7 +48,9 @@ RATIOS = {
     'shoulder': 0.94,        # the vest's shoulder ends at this share of the way out to the shoulder point: on the
                              # shoulder's flat top, short of where it rolls over into the arm
     'scye_drop': 0.30,       # the armhole's bottom below the armpit, in w
-    'scye_ease': 0.10,       # the armhole's ease round the arm, in w
+    'scye_ease': 0.10,
+    'scoop_front': 0.30,     # how far the armhole is hollowed in front of the arm, in w (a tailor's front scye curve)
+    'scoop_back': 0.15,      # and behind it       # the armhole's ease round the arm, in w
 }
 STEP = 0.1                   # the shell's grid, in units
 COLS = 360
@@ -372,8 +374,16 @@ def trim_lines(M, z_top, x_scye, ratios=RATIOS):
         z = M['z_waist'] - ratios['hem_drop'] * w - ratios['hem_point'] * w * np.exp(-(a / 0.45) ** 2)
         return p[:, 2] - z
 
+    y0, y1 = M['scye_y']
+    ya, ay = 0.5 * (y0 + y1), 0.5 * (y1 - y0)
+
     def armholes(p):
-        return x_scye(p[:, 2]) - np.abs(p[:, 0])
+        # (seen from above the line is a curve too: furthest out over the top of the arm, hollowed in front of it
+        # and behind it, so the edge rounds the shoulder instead of turning a corner at its front)
+        u = (p[:, 1] - ya) / ay
+        scoop = np.where(u < 0, ratios['scoop_front'], ratios['scoop_back']) * w * np.minimum(u * u, 1.0)
+        scoop = scoop * _ss(M['z_pit_arm'], 0.5 * (M['z_pit_arm'] + M['z_sh']), p[:, 2])     # (none under the arm)
+        return x_scye(p[:, 2]) - scoop - np.abs(p[:, 0])
 
     z_v = M['z_bust'] + ratios['v_point'] * (M['z_pit'] - M['z_bust'])
     z_f = float(z_top[0])
