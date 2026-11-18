@@ -3882,14 +3882,25 @@ LOCKED_WALK = False     # export_glb.py turns it on for the world model; the she
 SKIRT_ON_THIGH = 0.45   # (with LOCKED_WALK) how much of the jerkin's hem each thigh carries: see trunk_weights
 STRIDE = 46.0           # ground covered by one cycle (two steps), in model units
 STANCE_L = 0.6          # the part of a leg's cycle its foot is on the ground (heel strike at 0, toe-off here)
-AHEAD = 0.46            # how much of the stance's travel lies ahead of the hip at the heel strike
+AHEAD = 0.42            # how much of the stance's travel lies ahead of the hip at the heel strike
 SWING_LIFT = 4.0        # how high the ankle is lifted as the foot is carried through (early in the swing)
-BOB_RANGE = 2.4         # the most the hips rise and fall through a step
-BOB_SOFT, BOB_BLUR = 0.06, 0.03  # how far round the cycle the hips' path is widened into each trough, and smoothed
+# how the hips' path is rounded off where one step hands over to the next: held low for BOB_SOFT of the cycle after
+# each heel strike (the new standing knee gives a little as it takes the weight), blurred by BOB_BLUR, and joined
+# back onto the standing leg's reach within BOB_JOIN, so through the rest of the stance the body rides the standing
+# leg with its knee nearly straight instead of crouching under a path lowered all round the cycle
+BOB_SOFT, BOB_BLUR, BOB_JOIN = 0.03, 0.02, 0.12
+# the foot's pitch from level (toes up positive) in the locked walk: up on the heel as it strikes, flat through the
+# stance, the heel peeling up from about halfway and rolling well up onto the ball to push off, then easing level
+# through the swing and lifting the toes again to reach for the next heel strike
+L_GAIT_FOOT = [(0.0, 16), (0.07, 0), (0.30, 0), (0.40, -8), (0.46, -16), (0.5, -24), (0.56, -48), (0.6, -60),
+               (0.68, -33), (0.78, -6), (0.88, 6), (0.95, 14)]
 L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reaching forward carried with it)
 # the arms in the locked walk: the upper arm swings ARM_SWING either way; the forearm follows a little later and
 # folds more as it comes forward, so the swing travels down the arm instead of the arm swinging stiff from the shoulder
 L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
+# (and the swing is centred a little behind straight down, as a relaxed arm swings: further back past the hip than
+# it comes forward, where the bending elbow already carries the hand ahead)
+L_ARM_BACK = 0.07
 # the feet in the locked walk: each turned out a little, as a relaxed walk sets them (pointing dead ahead they read as
 # turned in), and set nearly under the hips, so the legs do not lean in and the knees do not come together
 L_TOE_OUT, L_FOOT_X = 0.13, 0.97
@@ -3907,12 +3918,12 @@ def locked_foot(t):
     lifted most early on, as the toes leave the ground."""
     t %= 1.0
     a = AHEAD * STANCE_L * STRIDE
-    pitch = math.radians(cyclic(GAIT_FOOT, t))
+    pitch = math.radians(cyclic(L_GAIT_FOOT, t))
     if t < STANCE_L:
         return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
     u = (t - STANCE_L) / (1 - STANCE_L)
     span = STRIDE * (1 - STANCE_L)
-    off = toe_roll(math.radians(cyclic(GAIT_FOOT, STANCE_L)))
+    off = toe_roll(math.radians(cyclic(L_GAIT_FOOT, STANCE_L)))
     fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
     return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
 
@@ -3932,33 +3943,40 @@ _LOCKED_HIPS = {}
 
 
 def locked_hips(tr):
-    """The hip joints' height at walk phase tr. As high as both standing legs reach with the knee just off straight,
-    then smoothed (the step's own rhythm, twice a cycle, and its first two overtones) and kept under that reach by a
-    soft minimum, and held to BOB_RANGE of rise above the lowest point, so the body rises and falls in one easy wave."""
-    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_RANGE, BOB_SOFT, BOB_BLUR, L_PELVIS_TURN, PELVIS_LIST)
+    """The hip joints' height at walk phase tr. The body rides the standing leg: as high as each loaded leg reaches
+    with its knee just off straight (and the swing leg, at the end of its swing, reaching the ground with the knee
+    straight, so the heel lands where it is set down). Where one step hands over to the next that reach dips sharply
+    as the leading heel lands; there it is held low a little after the heel strike, blurred, and joined back onto the
+    reach by a soft minimum, so the hips never sit above it and nowhere else sit far below it. (A path smoothed and
+    lowered all round the cycle leaves every standing knee bent, a crouch.) The trailing leg, rolling up onto its
+    ball to push off, carries no weight then and does not hold the body up."""
+    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_SOFT, BOB_BLUR, BOB_JOIN, L_PELVIS_TURN, PELVIS_LIST,
+           tuple(L_GAIT_FOOT))
     if key not in _LOCKED_HIPS:
-        n = 96
+        n = 192
         reach = np.zeros(n)
         for i in range(n):
             t = i / n
             lst, turn, best = pelvis_list(t), locked_turn(t), 1e9
             for s, off in ((1, 0.0), (-1, 0.5)):
-                fwd, az, _, ground = locked_foot(t + off)
-                if ground:
-                    f = fwd - s * LEG_X * math.sin(turn)
+                tl = (t + off) % 1.0
+                fwd, az, _, ground = locked_foot(tl)
+                if ground and tl < 0.5:
                     leg = (THIGH + SHIN) * 0.997
-                    best = min(best, az + math.sqrt(max(0.0, leg * leg - f * f)) - s * LEG_X * math.sin(lst))
+                elif tl > 0.9:
+                    leg = (THIGH + SHIN) * 0.9995
+                else:
+                    continue
+                f = fwd - s * LEG_X * math.sin(turn)
+                best = min(best, az + math.sqrt(max(0.0, leg * leg - f * f)) - s * LEG_X * math.sin(lst))
             reach[i] = best
-        # (capped at the top of the rise, then each point lowered to the least reach around it, so the sharp dip
-        # as the leading heel lands is widened into a trough, then blurred round the cycle, and lowered by whatever
-        # the blur lifted above the reach)
-        h = np.minimum(reach, reach.min() + BOB_RANGE)
+        # (each point lowered to the least reach over the BOB_SOFT before it, so the dip at the heel strike lasts a
+        # little into the step; blurred; then the soft minimum with the reach itself)
         w = max(1, int(round(BOB_SOFT * n)))
-        h = np.min([np.roll(h, j) for j in range(-w, w + 1)], axis=0)
+        low = np.min([np.roll(reach, j) for j in range(w + 1)], axis=0)
         g = np.exp(-0.5 * (np.minimum(np.arange(n), n - np.arange(n)) / (BOB_BLUR * n)) ** 2)
-        h = np.real(np.fft.ifft(np.fft.fft(h) * np.fft.fft(g / g.sum())))
-        h -= max(0.0, float((h - reach).max()))
-        _LOCKED_HIPS[key] = h
+        low = np.real(np.fft.ifft(np.fft.fft(low) * np.fft.fft(g / g.sum())))
+        _LOCKED_HIPS[key] = -BOB_JOIN * np.logaddexp(-reach / BOB_JOIN, -low / BOB_JOIN)
     h = _LOCKED_HIPS[key]
     x = (tr % 1.0) * len(h)
     i = int(x)
@@ -4016,7 +4034,7 @@ def pose(col):
         kn.rotation_euler = (kb, 0, 0)
         # (the foot is held at its pitch from level: the ankle takes out the shin's lean, and the foot is turned
         # back against the pelvis's turn, so it points down the line of the walk)
-        an.rotation_euler = (th - kb + pitch, 0, -s * toe - turn)
+        an.rotation_euler = (th - kb - pitch, 0, -s * toe - turn)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
@@ -4049,7 +4067,7 @@ def foot_level(pelvis, hip, knee, pitch, toe=0.0):
     roll above it. (Taking each of those out one angle at a time, as pose() does, leaves the foot turned and rolled
     by a few degrees once the shin leans far over, most at push-off, where it shows as the foot twisting on its toes.)"""
     parent = _euler_m(pelvis) @ _euler_m(hip) @ _euler_m(knee)
-    m = parent.T @ _euler_m((pitch, 0.0, toe))
+    m = parent.T @ _euler_m((-pitch, 0.0, toe))
     return (math.atan2(m[2, 1], m[2, 2]), -math.asin(max(-1.0, min(1.0, m[2, 0]))), math.atan2(m[1, 0], m[0, 0]))
 
 
@@ -4086,7 +4104,7 @@ def pose_locked(col):
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
-        a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
+        a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG)) - L_ARM_BACK
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
         sh.rotation_euler = (-a, s * (0.17 + 0.05 * max(0.0, -a)), 0)
