@@ -810,7 +810,7 @@ def collar_top(a):
     return COLLAR_TIP + 0.05 + 0.3 * ((1.0 - math.cos(a)) / 2) ** 1.2 - 0.5 * math.sin(a) ** 2
 
 
-COLLAR_V = (52.25, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
+COLLAR_V = (53.0, 0.288)   # (the V the collar's fronts open in: the height its two edges meet at, the pit of the throat, and
 # how fast they part above it, as an angle round the neck for each unit of height)
 
 
@@ -899,6 +899,10 @@ def collar_pt(a, v, out=0.0):
     # falling open, and the whole top edge turns out a little, so it does not stand like a pipe)
     ff = 1.0 - smoothstep(0.7, 1.7, abs(wrap(a)))
     r = neck + 0.45 * w ** 1.6 + (0.12 + 0.42 * ff) * w ** 2.6 + out
+    # (drawn in as it rises, to the creator's slimmer neck: it stood two units off it, and her hair, which lies on
+    # a collar the size of her neck, fell inside its top. The fronts' tips flare out as before, from the narrower
+    # band, still well clear of the chin)
+    r -= 0.95 * smoothstep(0.0, 1.0, w)
     # (built as a gorget's neck is: not one stiff tube but three narrow lames riveted one above the other, which
     # is what lets a real one move with the neck; each joint a shallow crease round it)
     r -= 0.04 * sum(math.exp(-((w - wk) / 0.035) ** 2) for wk in LAME_JOINTS)
@@ -1026,6 +1030,7 @@ def build_throat_plate(body):
     itself, a plate of the same steel fills the V's base, behind the fronts."""
     W0 = 1.05                 # (the fronts' outer edge at their top: at the collar's foot beside the opening)
     ZT, ZP, RP = 53.3, 51.0, 0.14
+    THROAT_TOP = 54.3         # (how high it rises up the throat between the fronts: just under the chin)
 
     def lay(a, z, rad, out=0.0):
         """(a smooth surface, with no ray casts in it: the ring's curve where it leaves the collar, coming forward
@@ -1040,7 +1045,7 @@ def build_throat_plate(body):
         d = yr - lie
         y = min(yr, lie) - 0.12 * math.exp(-(d / 0.35) ** 2)
         return Vector((x, y - out, z))
-    rows, cols = 30, 12
+    rows, cols = 40, 12
 
     # ---- the plate below the neck, as the reference's: not a collar (it does not rise round the throat) but a V
     # band lying on the chest. Its top edge carries the collar's own V on down, at the same slope, from the fronts'
@@ -1048,7 +1053,9 @@ def build_throat_plate(body):
     # edges, drawing together to the point on the breastbone, where the medallion sits. Its sides run up under the
     # band's foot, so it grows out of the collar. The throat above it is bare.
     def ptop(a):
-        return min(ZT, COLLAR_V[0] + abs(a) / COLLAR_V[1])
+        # (and between the fronts it rises on up the throat to just under the chin, so the opening above the V is
+        # steel too, not bare neck: behind the fronts, which lie over its sides)
+        return lerp(THROAT_TOP, min(ZT, COLLAR_V[0] + abs(a) / COLLAR_V[1]), smoothstep(0.45, 0.75, abs(a)))
 
     def tplate(i, j, out=0.0):
         t = i / (rows - 1)
@@ -1060,6 +1067,14 @@ def build_throat_plate(body):
         z = lerp(z0, z1, t)
         tf = (ZT - z) / (ZT - ZP)
         p_ = lay(a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, tf)))
+        if z > 53.0:
+            # (up the throat, a little inside the band, which draws in as it rises: behind the fronts, not over them)
+            w = min(1.0, max(0.0, (z - COLLAR_STAND) / (collar_top(a) - COLLAR_STAND)))
+            q_ = collar_pt(a, FOOT_V + w * (1.0 - FOOT_V)) if z > COLLAR_STAND else collar_pt(a, FOOT_V)
+            rb = math.hypot(q_.x, q_.y - GC_Y) - 0.12
+            rp = math.hypot(p_.x, p_.y - GC_Y)
+            rn = lerp(rp, min(rp, rb), smoothstep(53.0, 53.4, z))
+            p_ = Vector((p_.x * rn / rp, GC_Y + (p_.y - GC_Y) * rn / rp, p_.z))
         if SETTLE is not None:
             p_ = p_ + SETTLE[i][j]
         return Vector((p_.x, p_.y - out, p_.z))
@@ -1096,7 +1111,9 @@ def build_throat_plate(body):
                      for jj in range(max(0, j - 1), min(cols2, j + 2))) /
                  len([1 for ii in range(max(0, i - 1), min(rows, i + 2)) for jj in range(max(0, j - 1), min(cols2, j + 2))])
                  for j in range(cols2)] for i in range(rows)]
-    SETTLE = [[inward(i, j) * pull[i][j] for j in range(cols2)] for i in range(rows)]
+    # (only below the neckline: up the throat it keeps to the ring behind the fronts, where the cast found the neck)
+    SETTLE = [[inward(i, j) * pull[i][j] * (1.0 - smoothstep(53.1, 53.5, tplate(i, j).z)) for j in range(cols2)]
+              for i in range(rows)]
     mesh_obj('Collar throat plate', face_out(grid(rows, cols2, tplate)), M_COLLAR, body, solid=0.08, subdiv=1)
     # (its lower edge, the fronts' outer edges, rolled in brass from under the band's foot down to the point and
     # up again, swelling in from nothing at each end so no stub pokes out above the band)
@@ -3180,7 +3197,8 @@ def build():
 # (exported by tools/creator-head/export-head.js from the creator's Warden preset, with the game's WORLD settings;
 # 70 MB, so it lives in the project files, not the repository. WARDEN_HEAD_GLB='' builds the Blender head instead)
 CREATOR_HEAD = os.environ.get('WARDEN_HEAD_GLB', '/mnt/project-files/warden/creator-head/warden-head.glb')
-CREATOR_NECK_CUT = -0.65     # (where the creator's neck is cut, in its own frame: about where it is as wide as the body's)
+CREATOR_NECK_CUT = -1.0      # (where the creator's neck is cut, in its own frame (h 53.2): where it is as wide as the body's
+#  neck, which runs on up inside it to 53.45, so the two overlap instead of leaving a dark slit between them)
 CREATOR_NECK_FADE = 0.6      # (its baked shade under the chin faded out from here down to the cut)
 _CREATOR = False
 
