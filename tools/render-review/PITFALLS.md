@@ -172,3 +172,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Warden clothes-only renders, 2026-11-17: every robe, cape and armour change built the whole figure (face sculpt, face paints, ears, 771 hair strands; about four minutes and 7 GB) and then hid it with --no-body. John set the rule: changes to clothes that need a model use a mannequin.
 - **Spot:** The changes since the last render are clothes or gear (not hair, not face, not material-only) and the views.py command has no --mannequin and the request no "needs_render".
 - **Fix:** Send it back to add --mannequin (the body shape with a plain head). The real figure goes through only with "needs_render" saying why (clothes against the hair, a hood on the head). With --only or --no-body, advise --mannequin as well. Material-only changes still go to a swatch (P024). While a branch's views.py has no --mannequin, let it through and note the gap.
+
+## P027 A views.py command that builds the figure and renders nothing
+
+- **Seen:** Warden full front, 2026-11-18: `views.py --figure warden --angles front --size 480 --samples 48` was reviewed and queued as a job; --angles only picks the angles for --turn, --head and --pieces, so the build ran several minutes and wrote no image. The queue thread caught it and ran it as `--turn --angles front`.
+- **Spot:** A views.py command with none of --turn, --head, --pieces, --cells or --list.
+- **Fix:** Send it back: a full figure front is `--turn --angles front`. The reviewer's smoke build only proves the build reaches its first render, so check that the command has an output flag.
