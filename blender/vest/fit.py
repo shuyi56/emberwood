@@ -502,6 +502,7 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
     for piece in pieces:
         V, faces = piece[0], piece[1]
         up = piece[2] if len(piece) > 2 else lift          # (a piece's own lift: a number, or a function of its points)
+        coord = piece[3] if len(piece) > 3 else None       # (and its own paint coordinate: a function of its points)
         pb = bmesh.new()
         vmap = {i: pb.verts.new(V[i]) for i in sorted({i for f in faces for i in f})}
         for f in faces:
@@ -522,6 +523,10 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
             if flip:
                 bmesh.ops.reverse_faces(pb, faces=flip)
                 pb.normal_update()
+        lay = pb.verts.layers.float.new('paint_u')          # (where each point lies across its plate, for the paint)
+        if coord is not None:
+            for v, c in zip(pb.verts, coord(np.array([v.co[:] for v in pb.verts]))):
+                v[lay] = float(c)
         if callable(up):
             hs = up(np.array([v.co[:] for v in pb.verts]))
             for v, h in zip(pb.verts, hs):
@@ -647,15 +652,17 @@ def brass_layer(V, faces, M, lines, ratios=RATIOS, log=print):
         v, f = cut(field, lambda p, a=a: t_of(p) - a, lambda p, b=b: b - t_of(p))
         if f:
             plates.append((v, f, lambda p, a=a, b=b: lo + (hi - lo) * np.clip((b - t_of(p)) / (b - a), 0.0, 1.0)
-                           + dome((t_of(p) - a) / (b - a)) + roll(p)))
+                           + dome((t_of(p) - a) / (b - a)) + roll(p), lambda p, a=a, b=b: (t_of(p) - a) / (b - a)))
     v, f = cut(field, lambda p: t_of(p) - (t1 - lap))
     if f:
-        plates.append((v, f, lambda p: lo + (hi - lo) * np.clip((t1 + period - t_of(p)) / (period + lap), 0.0, 1.0) + roll(p)))
+        plates.append((v, f, lambda p: lo + (hi - lo) * np.clip((t1 + period - t_of(p)) / (period + lap), 0.0, 1.0) + roll(p),
+                       lambda p: (t_of(p) - (t1 - lap)) / (period + lap)))
     top = hi + (1.2 + ratios['dome']) * pl
     belt = cut(field, lambda p: half - np.abs(p[:, 2] - belt_mid(ang(p))))
     log('vest plates: %d lames, belt %d faces' % (len(plates), len(belt[1])))
     if belt[1]:
-        plates.append((belt[0], belt[1], lambda p: top + dome(0.5 + 0.5 * (p[:, 2] - belt_mid(ang(p))) / half)))
+        plates.append((belt[0], belt[1], lambda p: top + dome(0.5 + 0.5 * (p[:, 2] - belt_mid(ang(p))) / half),
+                       lambda p: 0.5 + 0.5 * (p[:, 2] - belt_mid(ang(p))) / half))
     binding = []
     # the studs: half-round heads along the belt's middle, evenly spaced along its length
     tris = []
