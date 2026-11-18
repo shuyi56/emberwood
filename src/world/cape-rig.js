@@ -33,6 +33,10 @@ export const CAPE_SETTINGS = {
   maxAngle: 1.25,
 };
 
+// on her own model (src/cape-lab/model-body.js, and the game): her cape is modelled hugging her sleeves and
+// skirt, and a wider soft band would hold it out from them, so it stood off her back in a stiff bell
+export const WARDEN_MODEL_SETTINGS = { ...CAPE_SETTINGS, contactSoftness: 0.5 };
+
 // [from joint, offset], [to joint, offset, beyond], radius: offsets are in the model's axes (+z is her front);
 // `beyond` carries the far end on past its joint by that share of the capsule's length
 export const WARDEN_COLLIDERS = [
@@ -70,11 +74,11 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)
-export function attachCapeSprings(model, settings = CAPE_SETTINGS, colliders = WARDEN_COLLIDERS) {
+export function attachCapeSprings(model, settings = WARDEN_MODEL_SETTINGS, colliders = WARDEN_COLLIDERS) {
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;
-  const springs = new SpringBones({ chains, links, root: model, colliders: makeColliders(model, colliders), fit: true });
+  const springs = new SpringBones({ chains, links, root: model, colliders: makeColliders(model, colliders), fit: 'surface' });
   springs.reset();
   return springs;
 }

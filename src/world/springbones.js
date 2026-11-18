@@ -142,7 +142,7 @@ export class SpringChain {
 export class SpringBones {
   // root: the character's root object. With `follow` set, part of its movement in the world (walking and,
   // above all, turning) carries the cloth along directly instead of only through the springs.
-  // fit: shrink any collider the cape's rest shape already sits inside (see fitColliders)
+  // fit: shrink any collider the cape's rest shape already sits inside (see fitColliders): true or 'band', or 'surface'
   constructor({ chains = [], colliders = [], links = [], root = null, fit = false } = {}) {
     this.chains = chains;
     this.fit = fit;
@@ -185,7 +185,7 @@ export class SpringBones {
     for (const a of this.anchors) a.prev.copy(a.node.matrixWorld);
     if (this.root) this.root.prev.copy(this.root.node.matrixWorld);
     for (const c of this.colliders) { c.refresh(); c.pa.copy(c.wa); c.pb.copy(c.wb); }
-    if (this.fit && !this.fitCuts) this.fitCuts = this.fitColliders();
+    if (this.fit && !this.fitCuts) this.fitCuts = this.fitColliders(this.fit === true ? 'band' : this.fit);
     // let the cloth settle against the body as it stands, without gaining speed, so it doesn't jump on the
     // first frames
     for (let k = 0; k < SETTLE_STEPS; k++) {
@@ -201,7 +201,7 @@ export class SpringBones {
   // that reaches into it would push the whole cape out into a stiff bell the moment the springs start. Run at
   // rest pose, on the same points the solver tests (along each bone, the hem between columns, the panels).
   // Returns how much each radius came down (model units).
-  fitColliders(minShare = 0.35) {
+  fitColliders(mode = 'band', minShare = 0.35) {
     const pts = [];
     for (const ch of this.chains) for (const j of ch.joints) {
       for (const t of BONE_SAMPLES) pts.push([j.head.clone().lerp(j.tail, t), ch.settings]);
@@ -220,8 +220,9 @@ export class SpringBones {
       for (const [p, s] of pts) {
         const t = len2 > 1e-9 ? Math.min(1, Math.max(0, _v2.subVectors(p, c.wa).dot(ab) / len2)) : 0;
         const dist = p.distanceTo(_v2.copy(c.wa).addScaledVector(ab, t)) / c.scale;
-        // (resting in the soft band is fine: only a point held inside the surface the cloth is pushed out to)
-        over = Math.max(over, c.radius + s.hitRadius - dist);
+        // 'band': clear of the whole soft band, so the cape rests exactly as modelled; 'surface': only out of the
+        // surface the cloth is pushed to (resting in the band is allowed, and the band holds it out a little)
+        over = Math.max(over, c.radius + s.hitRadius + (mode === 'band' ? s.contactSoftness / 2 : 0) - dist);
       }
       const cut = Math.min(over, c.radius * (1 - minShare));
       c.radius -= cut;

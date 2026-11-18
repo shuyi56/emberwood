@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applySettings } from '../world/springbones.js';
-import { CAPE_SETTINGS } from '../world/cape-rig.js';
+import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
 import { CapeSim, SCENARIOS, FRAME, PACE } from './sim.js';
 import { loadModelBody } from './model-body.js';
 
@@ -67,6 +67,9 @@ async function setBody(kind) {
   }
   opts.bodyKind = kind;
   opts.body = kind === 'model' ? modelBody : null;
+  // each body's own tuning (her cape hangs closer to her than the stand-in's)
+  Object.assign(settings, { contactSoftness: (kind === 'model' ? WARDEN_MODEL_SETTINGS : CAPE_SETTINGS).contactSoftness });
+  for (const f of syncSliders) f();
   build();
 }
 function build() {
@@ -124,7 +127,8 @@ const VIEWS = { back: Math.PI, back3q: Math.PI * 0.75, side: Math.PI / 2, front3
 const camTarget = new THREE.Vector3();
 const lastOrbitRoot = new THREE.Vector3();
 function placeCamera() {
-  camTarget.set(sim.x, 34, sim.z);
+  // (opts.zoom and opts.lookY frame a close-up, such as the head: the capture's --zoom)
+  camTarget.set(sim.x, opts.lookY ?? 34, sim.z);
   const rel = VIEWS[opts.view];
   if (rel === null) {
     // orbit: the controls look at her, and the camera follows her movement
@@ -134,8 +138,8 @@ function placeCamera() {
     controls.update();
   } else {
     // the camera holds a fixed bearing from her heading, at the game's own slight tilt from above
-    const a = sim.heading + rel, dist = 135;
-    camera.position.set(sim.x + Math.sin(a) * dist, 34 + dist * 0.22, sim.z + Math.cos(a) * dist);
+    const a = sim.heading + rel, dist = 135 / (opts.zoom || 1);
+    camera.position.set(sim.x + Math.sin(a) * dist, camTarget.y + dist * 0.22, sim.z + Math.cos(a) * dist);
     camera.lookAt(camTarget);
   }
   lastOrbitRoot.set(sim.x, 0, sim.z);
@@ -173,6 +177,7 @@ const SLIDERS = [
   ['colliderScale', 'Collider size', 0.5, 1.5, 0.01, 'scales every body capsule'],
   ['slow', 'Playback speed', 0.1, 1, 0.05, 'slow motion'],
 ];
+const syncSliders = [];
 function buildPanel() {
   const host = document.getElementById('sliders');
   for (const [key, label, min, max, step, hint] of SLIDERS) {
@@ -183,6 +188,7 @@ function buildPanel() {
     input.value = settings[key];
     const show = () => { out.textContent = Number(settings[key]).toFixed(step < 0.05 ? (step < 0.01 ? 3 : 2) : step < 1 ? 2 : 0); };
     show();
+    syncSliders.push(() => { input.value = settings[key]; show(); });
     input.addEventListener('input', () => {
       settings[key] = Number(input.value);
       show();
@@ -265,7 +271,7 @@ if (!CAPTURE) {
       const kind = o.body || opts.bodyKind;
       const rebuild = (o.columns && o.columns !== opts.columns) || (o.rows && o.rows !== opts.rows);
       Object.assign(opts, o.opts || {}, o.columns ? { columns: o.columns } : {}, o.rows ? { rows: o.rows } : {});
-      if (kind !== opts.bodyKind) await setBody(kind);
+      if (kind !== opts.bodyKind) { await setBody(kind); Object.assign(settings, o.settings || {}); restart(); }
       else if (rebuild) build(); else restart();
       colliderGroup.visible = opts.showColliders;
       boneHelper.visible = opts.showBones;
