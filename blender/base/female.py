@@ -838,8 +838,10 @@ SKIN_LOOKS = {
     'oil': dict(rough=(0.62, 0.5), coat=(0.08, 0.4), coat_rough=(0.42, 0.26), base_bump=0.45),
     'fuzz': dict(sheen=0.35),
     'patchy': dict(patch=1.0),
-    # (the study's pick: all of the above, with the fuzz turned down; at 0.35 it frosted the outline white)
-    'final': dict(sheen=0.15),
+    # (the study's pick: all of the above, with the fuzz turned down, as at 0.35 it frosted the outline white, and
+    # the oil film thinner and less glossy: on the ranger's face (#125) the full film ran down the nose bridge and
+    # the far cheek as a wet streak)
+    'final': dict(sheen=0.15, coat=(0.05, 0.22), coat_rough=(0.46, 0.33)),
 }
 for _a, _b in zip(list(SKIN_LOOKS), list(SKIN_LOOKS)[1:]):
     SKIN_LOOKS[_b] = {**SKIN_LOOKS[_a], **SKIN_LOOKS[_b]}
