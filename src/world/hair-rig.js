@@ -6,7 +6,7 @@
 //
 //     import { attachHairSprings } from './hair-rig.js';
 //     const hair = attachHairSprings(model);
-//     ...each frame, after posing: model.updateMatrixWorld(true); hair.update(dt);
+//     ...each frame, after posing (and after the cape): model.updateMatrixWorld(true); hair.update(dt);
 //
 // Sizes are in her model units (she is 80 tall, her head node at 54.2, her hair ends at about 44.6).
 import { SpringBones, findChains, DEFAULTS } from './springbones.js';
@@ -42,9 +42,27 @@ export const HAIR_COLLIDERS = [
   [['Chest', [-5, 8, -1]], ['Chest', [5, 8, -1]], 5.5],
   [['Chest', [0, 2, -1.5]], ['Chest', [0, 8, -1.5]], 6.5],
   [['Chest', [-4, 6, 1]], ['Chest', [4, 6, 1]], 5],
+  // the band of the cape over her shoulder blades, which rides the chest (4.5 behind it from 44 to 51; these reach up to 47). Her hair
+  // is modelled a little inside it, so these are kept out of the fitting; they stop short of where the hair
+  // hinges (52.7), which would lever the hair off the cape
+  ...[-3, 0, 3].map((x) => [['Chest', [x, 1, 0]], ['Chest', [x, 6, 0]], 3.9, { fit: false }]),
 ];
 
-export function attachHairSprings(model, settings = HAIR_SETTINGS, colliders = HAIR_COLLIDERS) {
+// The cape's back, which her hair hangs over: a capsule down each of the three middle columns' first swinging
+// bones (`cape_<column>_1` to `cape_<column>_2`), turning with them, so the hair rides the cape as it swings
+// instead of sinking into it. Set 5 in toward her body and 3.7 round, so they hold the hair just off the cloth
+// and close the gaps between the columns. Kept out of the fitting: her hair is modelled a little inside the
+// cape. Only when the model has the cape's bones; update the cape before the hair each frame.
+export function capeBackColliders(model) {
+  const cols = [];
+  model.traverse((o) => { const m = /^cape_(\d+)_1$/.exec(o.name); if (m) cols.push(+m[1]); });
+  if (!cols.length) return [];
+  const mid = Math.round((Math.min(...cols) + Math.max(...cols)) / 2);
+  return [mid - 1, mid, mid + 1].filter((c) => cols.includes(c) && model.getObjectByName(`cape_${c}_2`))
+    .map((c) => [[`cape_${c}_1`, [0, 0, 5]], [`cape_${c}_2`, [0, 0, 5]], 3.7, { turns: true, fit: false }]);
+}
+
+export function attachHairSprings(model, settings = HAIR_SETTINGS, colliders = [...HAIR_COLLIDERS, ...capeBackColliders(model)]) {
   model.updateMatrixWorld(true);
   const chains = [], links = [];
   for (const g of HAIR_GROUPS) {

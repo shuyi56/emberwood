@@ -49,14 +49,18 @@ export const DEFAULTS = {
   // how far a bone may turn away from its rest direction (radians); keeps a cape from flipping up over the
   // shoulders in a hard turn
   maxAngle: 1.2,
+  // per row, from the first swinging row: how far (share of the span) the cloth between two columns may bow out
+  // off the straight line between them, following the columns either side (see linkPoint). For the rows where a
+  // cape wraps closely round the shoulders and arms; none by default
+  linkCurve: [],
 };
 
 const _v0 = new THREE.Vector3(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _q0 = new THREE.Quaternion(), _qf = new THREE.Quaternion(), _qn = new THREE.Quaternion();
 const _m0 = new THREE.Matrix4();
 const _one = new THREE.Vector3(1, 1, 1), _zero = new THREE.Vector3();
-// how deep a point between columns may rest inside a capsule (model units), and how far (model units, both ends
-// together, in the character's own space) the capsule may move from where it was at rest before that leave is
+// how deep a point between columns may rest inside a capsule (model units), and how far (model units, the two ends
+// together, in the character's own space; taken along the capsule, see Collider.leaveAt) the capsule may move from where it was at rest before that leave is
 // gone: the cloth lies as modelled against a limb that hangs where it was modelled, and a limb that swings away
 // meets the cloth at its full size (a fixed leave lets a swinging hand through between two columns)
 const REST_ALLOWANCE = 3, ALLOWANCE_FADE = 3;
@@ -104,6 +108,12 @@ export class Collider {
     }
     if (this.beyond) this.wb.add(_v1.subVectors(this.wb, this.wa).multiplyScalar(this.beyond));
   }
+  // how much of its rest leave holds where point p (world) is nearest it
+  leaveAt(p) {
+    const ab = _v1.subVectors(this.wb, this.wa), len2 = ab.lengthSq();
+    const t = len2 > 1e-9 ? Math.min(1, Math.max(0, _v2.subVectors(p, this.wa).dot(ab) / len2)) : 0;
+    return (this.leaveA ?? 1) * (1 - t) + (this.leaveB ?? 1) * t;
+  }
   // push point p (world) out of the surface grown by `extra`. With `soft`, the push eases in over a band `soft`
   // wide that ends at that surface (it starts half of `soft` outside it, and holds the point on the surface once
   // it would go deeper), so cloth meets a moving leg smoothly instead of being snapped flat against it every
@@ -132,11 +142,41 @@ export class Collider {
 // back meets the cloth wherever it comes between two columns
 const LINK_SAMPLES = [];
 for (const [wHead, wTail] of [[0, 1], [0.5, 0.5]]) for (const u of [0.25, 0.5, 0.75]) LINK_SAMPLES.push([wHead, wTail, u]);
-// such a point, from the joints' heads and their tails (`next` while solving, else the tails)
-function linkPoint(ja, jb, [wHead, wTail, u], out, solving = false) {
-  const ta = solving ? ja.next : ja.tail, tb = solving ? jb.next : jb.tail;
-  return out.copy(ja.head).multiplyScalar(wHead * (1 - u)).addScaledVector(jb.head, wHead * u)
-    .addScaledVector(ta, wTail * (1 - u)).addScaledVector(tb, wTail * u);
+// such a point, from the joints' heads and their tails (`next` while solving, else the tails). Where a cape wraps
+// closely round her shoulders and arms, the cloth between two columns isn't the straight line between them but
+// bows out round the body: on the rows the chains' `linkCurve` names, the point is taken on a curve through the
+// columns either side as well (Catmull-Rom; a column with no neighbour carries the line straight on), bowing no
+// further off the line than that share of the span. Taken on the straight line, the cape lay most of a unit
+// inside its own cloth over the shoulders, and an arm swinging back shoved it out that much further than the
+// sleeve reached, into a hump.
+const CR = (u) => [(-u + 2 * u * u - u * u * u) / 2, (2 - 5 * u * u + 3 * u * u * u) / 2,
+  (u + 4 * u * u - 3 * u * u * u) / 2, (-u * u + u * u * u) / 2];
+const _lp = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const curveOf = (L, r) => (L.a.settings.linkCurve && L.a.settings.linkCurve[r]) || 0;
+function linkPoint(L, r, [wHead, wTail, u], out, solving = false) {
+  const at = (j, o) => o.copy(j.head).multiplyScalar(wHead).addScaledVector(solving ? j.next : j.tail, wTail);
+  const [p0, p1, p2, p3] = _lp;
+  at(L.a.joints[r], p1); at(L.b.joints[r], p2);
+  const line = out.copy(p1).multiplyScalar(1 - u).addScaledVector(p2, u);
+  const most = curveOf(L, r) * p1.distanceTo(p2);
+  if (!most) return line;
+  const j0 = L.before && L.before.joints[r], j3 = L.after && L.after.joints[r];
+  if (j0) at(j0, p0); else p0.copy(p1).multiplyScalar(2).sub(p2);
+  if (j3) at(j3, p3); else p3.copy(p2).multiplyScalar(2).sub(p1);
+  const c = CR(u);
+  const off = p0.multiplyScalar(c[0]).addScaledVector(p1, c[1]).addScaledVector(p2, c[2]).addScaledVector(p3, c[3]).sub(line);
+  if (off.length() > most) off.setLength(most);
+  return out.add(off);
+}
+// the shares of the two columns' tails in such a point (what a push on it is split by)
+function linkShares(L, r, [, wTail, u]) {
+  if (!curveOf(L, r)) return [wTail * (1 - u), wTail * u];
+  const c = CR(u);
+  // (a missing neighbour is carried on from the two columns, so its share falls on them)
+  let a = c[1], b = c[2];
+  if (!(L.before && L.before.joints[r])) { a += 2 * c[0]; b -= c[0]; }
+  if (!(L.after && L.after.joints[r])) { b += 2 * c[3]; a -= c[3]; }
+  return [wTail * a, wTail * b];
 }
 
 class Joint {
@@ -187,6 +227,10 @@ export class SpringBones {
     this.colliders = colliders;
     // links: [chainA, chainB] pairs whose joints, row by row, keep their spacing
     this.links = links.map(([a, b]) => ({ a, b, rest: [] }));
+    for (const L of this.links) {
+      L.before = (this.links.find((K) => K.b === L.a) || {}).a || null;
+      L.after = (this.links.find((K) => K.a === L.b) || {}).b || null;
+    }
     // the objects the chains hang from: their pose is blended across a frame's steps
     this.anchors = [...new Set(chains.map((c) => c.joints[0].bone.parent))].map((node) => ({
       node, prev: new THREE.Matrix4(), cur: new THREE.Matrix4(), last: new THREE.Matrix4(),
@@ -253,6 +297,7 @@ export class SpringBones {
     // ('band': clear of the whole soft band, so the cloth rests exactly as modelled; 'surface': only out of the
     // surface the cloth is pushed to, so resting in the band is allowed, and the band holds it out a little)
     const cuts = this.colliders.map((c) => {
+      if (c.fit === false) return 0;
       let over = 0;
       for (const [p, s] of pts) over = Math.max(over, reach(c, s) - depth(c, p));
       const cut = Math.min(over, c.radius * (1 - minShare));
@@ -267,8 +312,8 @@ export class SpringBones {
       L.allow = L.a.joints.map((ja, i) => {
         const jb = L.b.joints[i];
         if (!jb) return null;
-        return LINK_SAMPLES.map((w) => linkPoint(ja, jb, w, new THREE.Vector3()))
-          .map((q) => this.colliders.map((c) => Math.min(REST_ALLOWANCE, Math.max(0, reach(c, s) - depth(c, q)))));
+        return LINK_SAMPLES.map((w) => linkPoint(L, i, w, new THREE.Vector3()))
+          .map((q) => this.colliders.map((c) => (c.fit === false ? 0 : Math.min(REST_ALLOWANCE, Math.max(0, reach(c, s) - depth(c, q))))));
       });
     }
     return cuts;
@@ -300,13 +345,14 @@ export class SpringBones {
       a.last.copy(a.prev);
     }
     for (const c of this.colliders) { c.refresh(); c.ca.copy(c.wa); c.cb.copy(c.wb); }
-    // how much of each capsule's rest leave still holds: none once it has moved ALLOWANCE_FADE from where it was
+    // how much of each capsule's rest leave still holds, at each end: none once that end has moved half of
+    // ALLOWANCE_FADE from where it was. (Taken along the capsule between its ends, so an arm swinging back from
+    // the shoulder keeps its leave at the shoulder, where it hasn't moved, and the cape there isn't shoved out)
     if (this.root) _m0.copy(this.root.node.matrixWorld).invert();
     for (const c of this.colliders) {
-      if (!c.restA) { c.leave = 1; continue; }
-      const moved = _v0.copy(c.ca).applyMatrix4(_m0).distanceTo(c.restA) / c.scale
-        + _v0.copy(c.cb).applyMatrix4(_m0).distanceTo(c.restB) / c.scale;
-      c.leave = Math.max(0, 1 - moved / ALLOWANCE_FADE);
+      if (!c.restA) { c.leaveA = c.leaveB = 1; continue; }
+      c.leaveA = Math.max(0, 1 - 2 * _v0.copy(c.ca).applyMatrix4(_m0).distanceTo(c.restA) / c.scale / ALLOWANCE_FADE);
+      c.leaveB = Math.max(0, 1 - 2 * _v0.copy(c.cb).applyMatrix4(_m0).distanceTo(c.restB) / c.scale / ALLOWANCE_FADE);
     }
     const R = this.root;
     if (R) {
@@ -440,17 +486,17 @@ export class SpringBones {
           const extra = Lk.a.settings.hitRadius;
           const allow = Lk.allow && Lk.allow[r];
           LINK_SAMPLES.forEach((w, k) => {
-            const q = linkPoint(ja, jb, w, _q1, true);
+            const q = linkPoint(Lk, r, w, _q1, true);
             const before = _q2.copy(q);
             let moved = false;
             this.colliders.forEach((c, ci) => {
-              moved = c.push(q, extra - (allow ? allow[k][ci] * (c.leave ?? 1) : 0), Lk.a.settings.contactSoftness) || moved;
+              moved = c.push(q, extra - (allow ? allow[k][ci] * c.leaveAt(q) : 0), Lk.a.settings.contactSoftness) || moved;
             });
             if (!moved) return;
             hit = true;
             // the push shared between the two tails so that the point moves by it: each takes it in proportion
             // to its share of the point (the heads are fixed)
-            const [, wTail, u] = w, ka = wTail * (1 - u), kb = wTail * u, kk = ka * ka + kb * kb;
+            const [ka, kb] = linkShares(Lk, r, w), kk = ka * ka + kb * kb;
             const d = q.sub(before);
             ja.next.addScaledVector(d, ka / kk); jb.next.addScaledVector(d, kb / kk);
           });
@@ -476,20 +522,27 @@ export class SpringBones {
 
   _smooth(r) {
     if (!this.links.length) return;
-    // the chains in link order (a strip: a cape's columns side by side)
-    const order = this._order || (this._order = [this.links[0].a, ...this.links.map((L) => L.b)]);
-    const js = order.map((ch) => ch.joints[r]);
-    if (js.some((j) => !j)) return;
-    const off = js.map((j) => j.next.clone().sub(j.head).addScaledVector(j.restDir, -j.worldLength));
-    for (let i = 0; i < js.length; i++) {
-      const k = order[i].settings.sheetBend;
-      if (!k) continue;
-      const nb = [off[i - 1], off[i + 1]].filter(Boolean);
+    // each chain with its neighbours in the sheet (a cape's columns side by side; hair has several sheets, each
+    // its own strip)
+    const order = this._order || (this._order = [...new Set(this.links.flatMap((L) => [L.a, L.b]))].map((ch) => ({
+      ch, nb: this.links.filter((L) => L.a === ch || L.b === ch).map((L) => (L.a === ch ? L.b : L.a)),
+    })));
+    const off = new Map();
+    for (const { ch } of order) {
+      const j = ch.joints[r];
+      if (j) off.set(ch, j.next.clone().sub(j.head).addScaledVector(j.restDir, -j.worldLength));
+    }
+    for (const { ch, nb: around } of order) {
+      const k = ch.settings.sheetBend;
+      const j = ch.joints[r];
+      if (!k || !j) continue;
+      const nb = around.map((c) => off.get(c)).filter(Boolean);
+      if (!nb.length) continue;
       const avg = nb.reduce((a, o) => a.add(o), new THREE.Vector3()).divideScalar(nb.length);
-      const d = avg.sub(off[i]).multiplyScalar(k * (nb.length === 1 ? 0.5 : 1));
-      js[i].next.add(d);
+      const d = avg.sub(off.get(ch)).multiplyScalar(k * (nb.length === 1 ? 0.5 : 1));
+      j.next.add(d);
       // the same shift to where it was a step ago: the sheet is evened out without being set swinging
-      js[i].prevTail.add(d);
+      j.prevTail.add(d);
     }
   }
 

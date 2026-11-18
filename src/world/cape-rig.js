@@ -34,12 +34,14 @@ export const CAPE_SETTINGS = {
 };
 
 // on her own model (src/cape-lab/model-body.js, and the game): her cape is modelled hugging her sleeves and
-// skirt, and a wider soft band would hold it out from them, so it stood off her back in a stiff bell
-export const WARDEN_MODEL_SETTINGS = { ...CAPE_SETTINGS, contactSoftness: 0.5 };
+// skirt, and a wider soft band would hold it out from them, so it stood off her back in a stiff bell. Over her
+// shoulders and upper arms (the first two swinging rows) it wraps round her, so the cloth between columns is
+// taken on that curve: on the straight line an arm swinging back pushed the cape out into a hump
+export const WARDEN_MODEL_SETTINGS = { ...CAPE_SETTINGS, contactSoftness: 0.5, linkCurve: [0.12, 0.12] };
 
 // [from joint, offset], [to joint, offset, beyond], radius: offsets are in the model's axes (+z is her front);
 // `beyond` carries the far end on past its joint by that share of the capsule's length; options { turns: true }
-// turn both offsets with their joints (see Collider)
+// turn both offsets with their joints (see Collider), { fit: false } keeps it out of the fitting at rest
 export const WARDEN_COLLIDERS = [
   // back and shoulders: the robe's back is 4 behind the spine, the shoulder blades a little more
   [['Pelvis', [0, 2, -0.5]], ['Chest', [0, 6, -0.5]], 4.5],
@@ -77,8 +79,14 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
     if (!o) throw new Error('cape colliders: no joint named ' + name);
     return o;
   };
-  return defs.map(([a, b, r, o = {}]) => new Collider(model,
-    { node: find(a[0]), offset: a[1], turns: o.turns }, { node: find(b[0]), offset: b[1], beyond: b[2] || 0, turns: o.turns }, r));
+  return defs.map(([a, b, r, o = {}]) => {
+    const c = new Collider(model, { node: find(a[0]), offset: a[1], turns: o.turns },
+      { node: find(b[0]), offset: b[1], beyond: b[2] || 0, turns: o.turns }, r);
+    // ({ fit: false }: a surface the cloth must stay out of even where it was modelled inside it, so fitting
+    // neither shrinks it nor lets the cloth rest inside it)
+    if (o.fit === false) c.fit = false;
+    return c;
+  });
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)

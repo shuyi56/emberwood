@@ -75,7 +75,8 @@ async function setBody(kind) {
   opts.body = kind === 'model' ? modelBody : null;
   await applyWalk(opts.body);
   // each body's own tuning (her cape hangs closer to her than the stand-in's)
-  Object.assign(settings, { contactSoftness: (kind === 'model' ? WARDEN_MODEL_SETTINGS : CAPE_SETTINGS).contactSoftness });
+  const own = kind === 'model' ? WARDEN_MODEL_SETTINGS : CAPE_SETTINGS;
+  Object.assign(settings, { contactSoftness: own.contactSoftness, linkCurve: own.linkCurve });
   for (const f of syncSliders) f();
   build();
 }
@@ -92,7 +93,11 @@ function build() {
 }
 function restart() { sim.restart(); drawColliders(); }
 function makeSprings() { sim.makeSprings(); drawColliders(); }
-function showBody() { sim.dummy.root.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh) o.visible = opts.showBody; }); }
+// (not the meshes the model body re-skinned to springs: her own hair under the head is a plain mesh, and showing
+// it again drew a rigid copy of her hair through the swinging one)
+function showBody() {
+  sim.dummy.root.traverse((o) => { if (o.isMesh && !o.isSkinnedMesh && !o.userData.replaced) o.visible = opts.showBody; });
+}
 
 // collider capsules, drawn see-through
 const colMat = new THREE.MeshBasicMaterial({ color: 0xd2502a, transparent: true, opacity: 0.28, depthWrite: false });

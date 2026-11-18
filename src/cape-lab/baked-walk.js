@@ -1,7 +1,8 @@
 // A walk baked from the base figure's Blender script (blender/base/female.py, through bake_walk.py) to JSON, played
 // on either bench body by phase. Each frame gives, per rig joint, `q`: its rotation in her space away from the
 // pose the rig was bound in (xyzw), and `p`: where its pivot is (model units). So the walk can be tried on the
-// cape and hair before a new warden.glb is exported.
+// cape and hair before a new warden.glb is exported. Only the root joint's pivot is taken from `p`; the others
+// hang from it at this body's own proportions.
 //
 //   public/cape-lab/walk-new.json   the planted-feet walk (PR #35): heel strike, a straighter stance leg
 //   public/cape-lab/walk-main.json  main's walk baked the same way (it reproduces warden.glb's clip)
@@ -13,6 +14,11 @@ export const WALKS = {
   new: 'New walk (planted feet)',
   main: 'Main walk (baked)',
 };
+
+// each joint's parent in the walk's rig (a sided joint's parent is on its own side, unless it is the chest or
+// pelvis)
+const UP = { Chest: 'Pelvis', Neck: 'Chest', Thigh: 'Pelvis', Shin: 'Thigh', Foot: 'Shin', UpperArm: 'Chest', Forearm: 'UpperArm', Hand: 'Forearm' };
+const UP_SIDED = new Set(['Shin', 'Foot', 'Forearm', 'Hand']);
 
 const cache = {};
 export function loadBakedWalk(kind, base = '') {
@@ -45,6 +51,15 @@ export function makeWalkPlayer(walk, root, followers = []) {
     return { name, node, q, s, p };
   }).filter(Boolean);
   const byName = Object.fromEntries(joints.map((j) => [j.name, j]));
+  // each joint's nearest driven ancestor: its pivot is carried from that one's by the walk's turn, at this body's
+  // own offset, not put where the walk had it. The walk was baked on the base figure, whose neck joint sits 3
+  // higher above the chest than the Warden's: taken as it was, her neck stretched and lifted her head and hair
+  // off her collar
+  // (her rig is flat, every joint a child of `Rig`, so the chain is by name)
+  for (const j of joints) {
+    j.up = byName[UP[j.name.replace(/\.[LR]$/, '')] + (/\.[LR]$/.exec(j.name) && UP_SIDED.has(j.name.slice(0, -2)) ? j.name.slice(-2) : '')] || null;
+    if (j.up) j.off = j.p.clone().sub(j.up.p);
+  }
   const follow = followers.map(([node, of]) => node && byName[of] && { node, of: byName[of], bind: inRoot(node) })
     .filter(Boolean);
   const n = walk.bones.length;
@@ -80,10 +95,13 @@ export function makeWalkPlayer(walk, root, followers = []) {
       const f = ((ph / (Math.PI * 2)) % 1 + 1) % 1 * n;
       for (const j of joints) {
         sample(j.name, f);
-        toLocal(j.node, new THREE.Matrix4().compose(p, q.clone().multiply(j.q), j.s));
+        j.wq = (j.wq || new THREE.Quaternion()).copy(q);
+        j.wp = (j.wp || new THREE.Vector3()).copy(p);
+        if (j.up) j.wp.copy(j.off).applyQuaternion(j.up.wq).add(j.up.wp);
+        toLocal(j.node, new THREE.Matrix4().compose(j.wp, q.clone().multiply(j.q), j.s));
       }
       for (const fl of follow) {
-        sample(fl.of.name, f);
+        q.copy(fl.of.wq); p.copy(fl.of.wp);
         // turn about the joint's pivot as it was bound, then carry it to where the pivot is now
         const mRoot = new THREE.Matrix4().makeTranslation(p.x, p.y, p.z)
           .multiply(T.makeRotationFromQuaternion(q))

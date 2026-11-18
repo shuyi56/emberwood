@@ -89,6 +89,7 @@ function reskinCape(body, { columns = 7, rows = 5 } = {}) {
   // her cape's vertices in her own space, at rest
   const sources = body.capeMeshes.map((m) => {
     m.visible = false;
+    m.userData.replaced = true;
     const g = m.geometry.clone();
     g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toRoot, m.matrixWorld));
     return { m, g };
@@ -217,6 +218,57 @@ const HAIR_GROUPS = [
   ['hairR', 2, -2.85, -2.15],
 ];
 const groupOf = (a) => (Math.abs(a) <= 1.65 ? 0 : a > 0 ? 1 : 2);
+// Her hair is modelled lying a little inside her cape's collar band at the back (from about 48 up to the collar),
+// so wherever it met the band the cloth showed through the hair, worse as her head moves on her chest while she
+// walks. Lift the hair there (geometry in her space, at rest) out over the cape's outer surface by CAPE_CLEAR,
+// moving every layer of the hair at that spot alike, so it keeps its depth. (A preview: the lasting fix is the
+// hairstyle in the Face Creator, or the band sitting closer to her neck in the cape.)
+const CAPE_CLEAR = 0.6, BACK_HAIR = 0.75;   // (radians either side of straight behind her)
+function clearOfCape(body, g) {
+  if (!body.cape) return;
+  const CZ = -0.5, NA = 96, NY = 2;     // bins: by angle round her, and half a unit of height
+  const ang = (x, z) => Math.atan2(x, -(z - CZ));
+  const bin = (x, y, z) => Math.floor((ang(x, z) + Math.PI) / (2 * Math.PI) * NA) + ':' + Math.round(y * NY);
+  const outer = new Map();
+  for (const m of body.cape.meshes) {
+    const p = m.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i), k = bin(x, y, z);
+      outer.set(k, Math.max(outer.get(k) ?? 0, Math.hypot(x, z - CZ)));
+    }
+  }
+  const p = g.attributes.position, need = new Map();
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    if (Math.abs(ang(x, z)) > BACK_HAIR + 0.25) continue;
+    const k = bin(x, y, z), rc = outer.get(k);
+    if (rc === undefined) continue;
+    need.set(k, Math.max(need.get(k) ?? 0, rc + CAPE_CLEAR - Math.hypot(x, z - CZ)));
+  }
+  // (each spot takes the most its neighbours need too, so the lifted hair stays smooth)
+  const lift = (x, y, z) => {
+    const a0 = Math.floor((ang(x, z) + Math.PI) / (2 * Math.PI) * NA), y0 = Math.round(y * NY);
+    let d = 0;
+    for (let da = -2; da <= 2; da++) for (let dy = -2; dy <= 2; dy++) {
+      const n = need.get(((a0 + da) % NA + NA) % NA + ':' + (y0 + dy));
+      if (n > 0) d = Math.max(d, n * (1 - (Math.abs(da) + Math.abs(dy)) / 6));
+    }
+    return d;
+  };
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    // (only the hair down her back: the hair past her shoulders is modelled tucked under the cape, and lifting
+    // it spread her hair out over the cape like a shawl)
+    const side = Math.min(1, Math.max(0, (Math.abs(ang(x, z)) - BACK_HAIR) / 0.25));
+    if (side >= 1) continue;
+    const d = lift(x, y, z) * (1 - side);
+    if (!d) continue;
+    const r = Math.hypot(x, z - CZ);
+    p.setXYZ(i, x * (r + d) / r, y, CZ + (z - CZ) * (r + d) / r);
+  }
+  p.needsUpdate = true;
+}
+
 function reskinHair(body, { rows = 3 } = {}) {
   const { root } = body;
   const head = root.getObjectByName('Head');
@@ -232,8 +284,10 @@ function reskinHair(body, { rows = 3 } = {}) {
   const headInRoot = new THREE.Matrix4().multiplyMatrices(toRoot, head.matrixWorld);
   const toHead = headInRoot.clone().invert();
   src.visible = false;
+  src.userData.replaced = true;   // (re-skinned below: the body toggle must not show it again)
   const g = src.geometry.clone();
   g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toRoot, src.matrixWorld));
+  clearOfCape(body, g);
   // her hair's vertices in the head's own axes (y up, +z her front)
   const p = g.attributes.position, v = new THREE.Vector3();
   const pts = new Float32Array(p.count * 3);

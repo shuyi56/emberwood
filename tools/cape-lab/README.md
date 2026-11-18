@@ -60,6 +60,10 @@ What the settings do, from sweeps with `check.mjs`:
 - Air drag sets how far it trails while walking. Stiffness hardly matters next to gravity on a cape this long; it
   matters more for short chains such as hair.
 
+- Link curve (her model only, the first two swinging rows): the cloth between two columns is taken on the
+  curve through the columns either side, as it wraps her shoulders and arms. On the straight line it lay most of
+  a unit inside its own cloth, and an arm swinging back pushed the cape out into a hump behind her.
+
 Collisions test each bone at its middle and its tip, and the cloth between neighbouring columns at the hem and
 the middle of each panel, so an arm or a leg can't slip between bone tips. The colliders must sit clear of the
 cape at rest, or the cape puffs out where they overlap; the stand-in's cape is shaped to clear them.
@@ -69,5 +73,10 @@ cape at rest, or the cape puffs out where they overlap; the stand-in's cape is s
 1. In `blender/warden/warden.py`, add the bones above with the same layout (the stand-in's `makeCape` places them
    on the cloth's inner face), and weight the cape and its lining to them alike: two columns either side by angle,
    rigid in the middle of a bone and blended at its joints, as `makeCape` does.
-2. In `src/world/main.js`, after the model loads: `hero.cape = attachCapeSprings(m)`. Each frame, after
-   `poseModel(h)`: `m.updateMatrixWorld(true); hero.cape.update(dt)`. Call `hero.cape.reset()` after a teleport.
+2. In `src/world/main.js`, after the model loads: `hero.cape = attachCapeSprings(m)` and
+   `hero.hair = attachHairSprings(m)` (after the cape, so the hair finds the cape's bones and rests on them).
+   Each frame, after `poseModel(h)`: `m.updateMatrixWorld(true); hero.cape.update(dt); hero.hair.update(dt)`,
+   the cape first. Call `reset()` on both after a teleport.
+3. Her hair from the Face Creator is modelled lying a little inside the cape's collar band at the back. The
+   bench lifts it out over the band when it re-skins her hair (`clearOfCape` in `src/cape-lab/model-body.js`);
+   the lasting fix is the hairstyle in the Face Creator, or the band sitting closer to her neck.
