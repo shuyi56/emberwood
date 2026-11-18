@@ -52,7 +52,15 @@ ROUGH = (0.52, 0.7)             # the roughness, from its smoothest patches to i
 COAT = (0.03, 0.45)             # the oil film: weight, roughness
 SHEEN = (0.2, 0.45)             # the down: weight, roughness
 SSS_SCALE = 0.2                 # how far light travels under the skin (red; 1 unit is about 2.7 cm)
-GRAIN = 0.35                    # the fine grain of the surface, beside the pores
+GRAIN = 0.0                     # a fine grain on the surface, beside the pores (off: it read as render noise)
+# the pores (sizes in cells of the sowing: at PORE_SCALE 27 a cell is about 1 mm)
+PORE_SCALE = 27.0
+PORE_SIZE = (0.14, 0.34)        # a pore's radius on fine skin, and where the glands are large
+PORES = 1.0                     # how deep the pits are (0 none)
+FURROWS = 0.3                   # how deep the net of fine lines between them is, beside a pit
+PORE_SHADE = 0.3                # how much darker the bottom of a pit is than the skin round it
+PORE_HOLD = 0.8                 # how far a pit is kept out of the scattering (0: blurred away with the skin)
+PORE_BUMP = (0.8, 0.012)        # the relief: strength, and its height in units (0.012 is a third of a millimetre)
 TONE_RED = [226, 150, 136]      # where the tone drifts redder, and yellower
 TONE_YELLOW = [232, 200, 160]
 TONE_DRIFT = 0.3
@@ -216,8 +224,32 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     L(bv.outputs['Color'], brnd.inputs['Color'])
     blem = math_('MULTIPLY', ramp_(math_('DIVIDE', bv.outputs['Distance'], 0.16), 0.4, 1.0, 1.0, 0.0),
                  ramp_(brnd.outputs['Red'], 0.82, 0.9))
-    pv = tex('ShaderNodeTexVoronoi', 13.0, feature='F1')
-    pit = math_('MULTIPLY', ramp_(pv.outputs['Distance'], 0.05, 0.3, 1.0, 0.0), pored)
+    # ---- the pores. A pore is a small pit at the mouth of a hair follicle or an oil gland, and three things about
+    # them make skin read as skin: they are not all one size (each its own, and larger where the glands are large:
+    # the nose, the cheeks beside it, the forehead and the chin; the blue of 'skin tex' says how much), they are
+    # sown at about one a millimetre and never on a grid, and they are joined by a net of very fine furrows (the
+    # skin's primary lines), so the surface between them is a field of tiny raised plates, not a smooth sheet.
+    # (the mouth of each pore is bent a little out of round, like the freckles)
+    pbent = warped(30.0, 0.012)
+    pv = tex('ShaderNodeTexVoronoi', PORE_SCALE, pbent, feature='F1')
+    pv.inputs['Randomness'].default_value = 1.0
+    prnd = node('ShaderNodeSeparateColor')
+    L(pv.outputs['Color'], prnd.inputs['Color'])
+    # (the pore's radius, as a part of its cell: from PORE_SIZE[0] on smooth skin to PORE_SIZE[1] on the nose, each
+    # pore somewhere between half that and all of it; a soft-sided pit, deepest at the middle)
+    prad = math_('MULTIPLY', math_('MULTIPLY_ADD', pored, PORE_SIZE[1] - PORE_SIZE[0], PORE_SIZE[0]),
+                 math_('MULTIPLY_ADD', prnd.outputs['Green'], 0.5, 0.5))
+    pcup = ramp_(math_('DIVIDE', pv.outputs['Distance'], prad), 0.0, 1.0, 1.0, 0.0)
+    # (not every follicle shows: fewer where the skin is fine)
+    pshow = ramp_(math_('ADD', prnd.outputs['Red'], math_('MULTIPLY', pored, 0.6)), 0.45, 0.6)
+    pit = math_('MULTIPLY', math_('MULTIPLY', pcup, pshow), math_('MULTIPLY_ADD', pored, 0.75, 0.25))
+    # (the furrows between them: the edges of the same sowing's cells and of a coarser one, very shallow)
+    fur = math_('MAXIMUM',
+                ramp_(tex('ShaderNodeTexVoronoi', PORE_SCALE, pbent, feature='DISTANCE_TO_EDGE').outputs['Distance'],
+                      0.0, 0.07, 1.0, 0.0),
+                ramp_(tex('ShaderNodeTexVoronoi', PORE_SCALE * 0.45, pbent, feature='DISTANCE_TO_EDGE').outputs['Distance'],
+                      0.0, 0.05, 1.0, 0.0))
+    relief = math_('ADD', math_('MULTIPLY', pit, PORES), math_('MULTIPLY', fur, FURROWS))
     # (the rest of the melanin. Freckles are never one size or evenly sown: a second, finer sowing between the first,
     # both thinned and thickened in drifts by a slow noise, and every fleck's outline bent a little out of round)
     bent = warped(9.0, 0.06)
@@ -255,7 +287,8 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     c3 = mix(c3, BLEMISH, math_('MULTIPLY', blem, 0.55))
     sc3 = node('ShaderNodeVectorMath', operation='SCALE')
     L(c3, sc3.inputs[0])
-    L(math_('SUBTRACT', 1.0, math_('MULTIPLY', pit, 0.12)), sc3.inputs['Scale'])
+    # (a pore is a little darker than the skin round it: a pit holds its own shadow)
+    L(math_('SUBTRACT', 1.0, math_('MULTIPLY', pit, PORE_SHADE * PORES)), sc3.inputs['Scale'])
     layer3 = sc3.outputs['Vector']
 
     if show in ('1', '2', '3'):
@@ -292,7 +325,11 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     # surface. Left to the scattering, every mark smaller than the scatter's reach is blurred away, so where there
     # is pigment the surface scatters less and keeps the mark's own colour and edge)
     pigment = math_('MAXIMUM', freckle, math_('MAXIMUM', math_('MULTIPLY', spot, 0.5), mole))
-    L(math_('SUBTRACT', 1.0, math_('MULTIPLY', pigment, PIGMENT_HOLD)), sb.inputs['Subsurface Weight'])
+    # (the pores the same: under the scatter a pit a third of a millimetre across is blurred to nothing, shadow,
+    # relief and all, which is why skin with pores built into it can still render as a smooth sheet. In the pit
+    # the surface is lit as a surface, so the pit's own shade and its relief show)
+    held = math_('MAXIMUM', math_('MULTIPLY', pigment, PIGMENT_HOLD), math_('MULTIPLY', relief, PORE_HOLD))
+    L(math_('SUBTRACT', 1.0, math_('MINIMUM', held, 1.0)), sb.inputs['Subsurface Weight'])
     sb.inputs['Subsurface Radius'].default_value = (1.0, 0.36, 0.18)
     sb.inputs['Subsurface Scale'].default_value = SSS_SCALE
     sb.inputs['Subsurface Anisotropy'].default_value = 0.8
@@ -302,7 +339,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     # as plastic, most of all in shade, where the reflection is all there is to see)
     rn = tex('ShaderNodeTexNoise', 2.2)
     rn.inputs['Detail'].default_value = 4.0
-    rough = math_('ADD', ramp_(rn.outputs['Fac'], 0.3, 0.7, ROUGH[0], ROUGH[1], smooth=False), math_('MULTIPLY', pit, 0.1))
+    rough = math_('ADD', ramp_(rn.outputs['Fac'], 0.3, 0.7, ROUGH[0], ROUGH[1], smooth=False), math_('MULTIPLY', pit, 0.18))
     L(rough, sb.inputs['Roughness'])
     sb.inputs['Coat Weight'].default_value = COAT[0]
     sb.inputs['Coat Roughness'].default_value = COAT[1]
@@ -312,9 +349,9 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     grain = tex('ShaderNodeTexNoise', 60.0)
     grain.inputs['Detail'].default_value = 2.0
     bump = node('ShaderNodeBump')
-    bump.inputs['Strength'].default_value = 0.2
-    bump.inputs['Distance'].default_value = 0.03
-    L(math_('ADD', math_('MULTIPLY', pit, -1.0), math_('MULTIPLY', grain.outputs['Fac'], GRAIN)), bump.inputs['Height'])
+    bump.inputs['Strength'].default_value = PORE_BUMP[0]
+    bump.inputs['Distance'].default_value = PORE_BUMP[1]
+    L(math_('ADD', math_('MULTIPLY', relief, -1.0), math_('MULTIPLY', grain.outputs['Fac'], GRAIN)), bump.inputs['Height'])
     L(bump.outputs['Normal'], sb.inputs['Normal'])
     L(sb.outputs['BSDF'], out.inputs['Surface'])
 
