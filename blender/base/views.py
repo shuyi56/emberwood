@@ -301,7 +301,7 @@ def walk(n, out):
     grid = [[None] * n for _ in VIEWS]
     with tempfile.TemporaryDirectory() as tmp:
         for k in range(n):
-            F.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
+            female.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
             for i, (name, yaw) in enumerate(VIEWS):
                 root.rotation_euler = (0, 0, math.radians(yaw))
                 cam.location = Vector((0, -200, (64.0 + fz) / 2))
