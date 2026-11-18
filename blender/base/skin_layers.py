@@ -272,3 +272,80 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     L(math_('ADD', math_('MULTIPLY', pit, -1.0), math_('MULTIPLY', grain.outputs['Fac'], GRAIN)), bump.inputs['Height'])
     L(bump.outputs['Normal'], sb.inputs['Normal'])
     L(sb.outputs['BSDF'], out.inputs['Surface'])
+
+
+# ---------------------------------------------------------------- a whole figure in the layered skin
+# The colour of the feet (linear): pinker and a little deeper than the leg's tone, most at the toes, the heel and
+# along the sole. A body baked in one tone from neck to toe has feet that read white beside the shins.
+FOOT_TONE = (0.80, 0.47, 0.42)
+
+
+def _ss(lo, hi, v):
+    t = np.clip((v - lo) / (hi - lo), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _layer(me, name):
+    a = me.color_attributes[name]
+    c = np.zeros(len(me.vertices) * 4)
+    a.data.foreach_get('color', c)
+    return a, c.reshape(-1, 4)
+
+
+def paint_body(body, hands=(), neck=None, wrists=(), floor=None):
+    """Paint what the layered skin reads from a bare figure's point colours, on meshes that already carry the base
+    figure's 'skin' and 'skin tex' layers. Colours only: no point is moved.
+
+    body    the skin mesh, in its rest shape (feet straight ahead, toes toward -Y), in world units
+    hands   the hand meshes (thin skin all over: the veins on the back of the hand)
+    neck    the neck mesh, if it is its own (a little thin at the sides)
+    wrists  the wrist joints' positions in the body's rest space, for the thin skin of the inner wrist
+    floor   the height of the soles (the body's lowest point if not given)
+
+    'skin' gets the feet's tint; the alpha of 'skin tex' gets how thin the skin is (0.04 over the body, more at the
+    wrists, on the top of the foot and across the upper chest), which is where the veins show. Call it after the
+    body is built and before the first render; calling it twice tints the feet twice."""
+    me = body.data
+    n = len(me.vertices)
+    R = np.zeros(n * 3)
+    me.vertices.foreach_get('co', R)
+    mw = np.array(body.matrix_world)
+    P = R.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+    x, y, z = P[:, 0], P[:, 1], P[:, 2]
+    h = z - (z.min() if floor is None else floor)
+    fm = h < 3.2
+    y0, y1 = y[fm].min(), y[fm].max()
+    # the feet: tinted all over, more by the floor, at the toes and at the heel, fading out above the ankle
+    a, c = _layer(me, 'skin')
+    k = (1 - _ss(2.5, 5.0, h)) * np.clip(0.22 + 0.38 * np.maximum(
+        1 - _ss(0.3, 1.4, h), np.maximum(1 - _ss(y0 + 0.8, y0 + 3.2, y), 0.8 * _ss(y1 - 2.2, y1 - 0.5, y))), 0, 1)
+    c[:, :3] = c[:, :3] * (1 - k[:, None]) + np.array(FOOT_TONE) * k[:, None]
+    a.data.foreach_set('color', c.ravel())
+    # thin skin
+    t, ct = _layer(me, 'skin tex')
+    thin = np.full(n, 0.04)
+    for w in wrists:
+        thin = np.maximum(thin, 0.5 * np.clip(1 - np.linalg.norm(P - np.array(w), axis=1) / 4.0, 0, 1))
+    thin = np.maximum(thin, 0.45 * _ss(0.9, 2.1, h) * (1 - _ss(y1 - 3.5, y1 - 1.5, y)) * fm)      # top of the foot
+    chest = np.clip(1 - np.abs(z - (z.max() - 9.0)) / 2.5, 0, 1) * (np.abs(x) < 4.0) * (y < 0)
+    thin = np.maximum(thin, 0.25 * chest)
+    ct[:, 3] = thin
+    t.data.foreach_set('color', ct.ravel())
+    me.update()
+    for o, v in [(o, 0.6) for o in hands] + ([(neck, 0.22)] if neck is not None else []):
+        t, ct = _layer(o.data, 'skin tex')
+        ct[:, 3] = v
+        t.data.foreach_set('color', ct.ravel())
+        o.data.update()
+
+
+def apply(material, show='all'):
+    """Make a figure's skin material the layered skin, its tone read from the baked 'skin' point colour (so the
+    blush, the shade and paint_body's feet stay). Every mesh in the material takes it; nothing else changes."""
+    import bpy  # noqa: F401
+    nt = material.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    tone = nt.nodes.new('ShaderNodeVertexColor')
+    tone.layer_name = 'skin'
+    skin_layers(nt, out, show, tone.outputs['Color'])
