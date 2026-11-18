@@ -1631,6 +1631,9 @@ TIP_GAIN = 1.4      # (the creator's tipGain, between 1 up close and 2.5 far off
 HAIR_ONSCREEN = 0.45
 
 
+HAIR_SHADOW = 0.0    # (how opaque the hair is to the light: 0, it casts no shadow; the camera sees it whole)
+
+
 def hair_tip_cut(objs):
     """The creator's layered hair ends on the Blender hair: its hair-tip map (red each hair's tone, green the top
     layer's cut-out, blue the wider hairs of the layers under it), read three times as the creator's shader reads it.
@@ -1675,7 +1678,19 @@ def hair_tip_cut(objs):
         return rgb.outputs[ch]
 
     a = m_('MAXIMUM', read(0.0, 0.0, 'Green'), m_('MAXIMUM', read(0.3713, 0.035, 'Blue'), read(0.7129, 0.08, 'Blue')))
-    keep = m_('GREATER_THAN', m_('MULTIPLY', a, TIP_GAIN), 0.5)
+    # (not a hard cut at 0.5, as the creator's alphaTest: that left the fine wisps at the hairline and the tips as
+    # hard blocky steps. Ramped over 0..0.5 instead, so all the cut kept stays solid (the crown still covers the
+    # scalp) and only the wisps it dropped fade out)
+    keep = m_('MINIMUM', m_('MULTIPLY', m_('MULTIPLY', a, TIP_GAIN), 2.0), 1.0)
+    # (and the hair casts no shadow of its own on the face: under the one hard key its locks shaded the cheeks near
+    # black, and light let through many overlapping strands ended black as a brown speckle down the jaw. Shadow,
+    # diffuse and glossy rays (the skin's sheen at the jaw mirrored the dark locks too) see each lock as
+    # HAIR_SHADOW opaque; the camera sees it as it is. The painted contact shade (hair_contact_shade) puts back a
+    # soft shade where the hair lies on the skin)
+    lp = nt.nodes.new('ShaderNodeLightPath')
+    seen = m_('MAXIMUM', m_('MAXIMUM', lp.outputs['Is Shadow Ray'], lp.outputs['Is Diffuse Ray']),
+              lp.outputs['Is Glossy Ray'])
+    keep = m_('MULTIPLY', keep, m_('SUBTRACT', 1.0, m_('MULTIPLY', seen, 1.0 - HAIR_SHADOW)))
     clear = nt.nodes.new('ShaderNodeBsdfTransparent')
     for out in [n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL']:
         if not out.inputs['Surface'].is_linked:
