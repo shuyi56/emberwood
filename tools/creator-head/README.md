@@ -1,5 +1,8 @@
 # The Face Creator's head on the world model
 
+The whole workflow for a new character (Blender for clothes, the Face Creator for face and hair) is in
+`WORKFLOW.md`.
+
 `public/models/ranger.glb` carries the Face Creator's Ranger head and hair in place of the Blender head. The body,
 clothes, skinning and the walk and idle animations are the Blender export (`blender/ranger/export_glb.py`) as before.
 

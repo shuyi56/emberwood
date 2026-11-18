@@ -559,14 +559,16 @@ void main() {
 }`, {}, { transparent: true, depthWrite: false });
 
   // Ground rings for the party and the move target; the target ring has marching dashes.
-  const ringMat = (hex, inner, outer, dash) => makeMat(false, `
+  // (pull: how far the ring's depth is pulled toward the camera. A modelled hero gets less: pulled the full 0.6, the
+  // ring drew over the lower legs of a 3D model, across her boots, wherever a leg stood within that distance of it)
+  const ringMat = (hex, inner, outer, dash, pull = 0.6) => makeMat(false, `
 varying vec2 vRing;
 void main() {
   vRing = position.xy;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vFogDepth = -mv.z;
   gl_Position = projectionMatrix * mv;
-` + GROUND_PULL + `
+` + GROUND_PULL.replace('0.6 /', pull.toFixed(2) + ' /') + `
 }`, `
 uniform vec3 uColor;
 uniform float uInner;
@@ -1510,7 +1512,7 @@ void main() {
       card.receiveShadow = true;
       g.add(card);
     }
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.62, 48), ringMat(ringColour, 0.44, 0.58, false));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.62, 48), ringMat(ringColour, 0.44, 0.58, false, model ? 0.12 : 0.6));
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.07;
     ring.renderOrder = 2;
