@@ -982,9 +982,9 @@ def build_throat_plate(body):
         z = lerp(ZT, ZP, t)
         a = lerp(collar_v(z), W0 * (1.0 - t) + 0.004, j / (cols - 1))
         return lay(sg * a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, t)), out)
+    # (the fronts themselves are built as part of the throat plate below, one surface with it; here only their
+    # outer edges, rolled in brass)
     for sg, nm in ((1, 'a'), (-1, 'b')):
-        mesh_obj(f'Collar front {nm}', face_out(grid(rows, cols, lambda i, j, sg=sg: front(i, j, sg))), M_COLLAR, body,
-                 solid=0.08, subdiv=1)
         # (the brass edges swell in from nothing below the collar's rim, so no stub pokes out above it)
         # (the inner edge is joined to the throat plate, so only the outer one is rolled)
         for jj, en in ((cols - 1, 'outer'),):
@@ -1025,13 +1025,18 @@ def build_throat_plate(body):
         a = u * (collar_v(z) + 0.03)
         if z >= ZT:
             return collar_pt(a, band_v(z), out - 0.01)
+        # below the band it is the fronts and the plate in one: as wide as the fronts' outer edges, tucked up
+        # under the band's foot at the sides; in the V's middle it stands out as far as the band does just above,
+        # so the hand-over from the band's surface to the fronts' leaves no step
         tf = (ZT - z) / (ZT - ZP)
-        return lay(a, z, lerp(0.06, RP - 0.04, smoothstep(0.0, 0.4, tf)) - 0.01, out)
-    cols2 = 25
+        a = u * lerp(collar_v(z) + 0.03, W0 * (1.0 - tf) + 0.004, smoothstep(0.0, 0.12, tf))
+        mid = 1.0 - smoothstep(0.3, 0.5, abs(a))
+        return lay(a, z, lerp(lerp(0.06, 0.11, mid), RP - 0.04, smoothstep(0.0, 0.4, tf)), out)
+    cols2 = 41
     mesh_obj('Collar throat plate', face_out(grid(rows, cols2, tplate)), M_COLLAR, body, solid=0.08, subdiv=1)
     te = [tplate(0, j, 0.03) for j in range(cols2)]
     mesh_obj('Collar throat plate edge', tube(te, [0.07] * cols2, flat=1.0, n=8), M_GOLD, body, subdiv=0)
-    mesh_obj('Collar throat plate rivets', dots([tplate(4, j, 0.06) for j in (8, 16)], 0.15), M_GOLD, body, subdiv=0)
+    mesh_obj('Collar throat plate rivets', dots([tplate(4, j, 0.06) for j in (13, 27)], 0.15), M_GOLD, body, subdiv=0)
 
 
 HC = Vector((0.0, 0.5, 4.8))     # the skull's centre, for laying the hair on it
