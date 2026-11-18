@@ -10,7 +10,9 @@ laid over layers 1 and 2 at EPIDERMIS_OPACITY (more where the pigment is: the fr
 with subsurface scattering, so what lies under the epidermis shows through it and the veins stay soft.
 
 Like the figure's own skin it reads its patterns from the 'rest' point attribute, and the freckle and pore
-masks from the 'skin tex' point colour (red: freckles, blue: pores); see female.skin_tones. Nothing here builds a
+masks from the 'skin tex' point colour (red: freckles, blue: pores, alpha: how thin the skin is, so how much of
+the veins shows: the temples, the bridge of the nose, under the eyes, the back of the hand); see
+female.skin_tones. Nothing here builds a
 figure. skin_study.py --layers renders the four side by side."""
 import numpy as np
 
@@ -84,6 +86,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     where = node('ShaderNodeSeparateColor')
     L(node('ShaderNodeVertexColor', layer_name='skin tex').outputs['Color'], where.inputs['Color'])
     freckly, pored = where.outputs['Red'], where.outputs['Blue']
+    thin_skin = node('ShaderNodeVertexColor', layer_name='skin tex').outputs['Alpha']
 
     # ---- layer 1: the base. Deep red and brown in broad mottled patches, and a fine speckle of capillaries
     patch = tex('ShaderNodeTexNoise', 1.5)
@@ -112,20 +115,22 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     L(rest.outputs['Vector'], wv.inputs[0])
     L(off2.outputs['Vector'], wv.inputs[1])
     big = ramp_(tex('ShaderNodeTexVoronoi', 0.7, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
-                0.0, 0.03, 1.0, 0.0)
+                0.0, 0.05, 1.0, 0.0)
     fine = ramp_(tex('ShaderNodeTexVoronoi', 1.8, wv.outputs['Vector'], feature='DISTANCE_TO_EDGE').outputs['Distance'],
-                 0.0, 0.035, 1.0, 0.0)
+                 0.0, 0.05, 1.0, 0.0)
     # (a vein is not a closed cell: a second noise gates the edges, so each runs a while, then fades out; the
     # finer branches are gated harder, so they spring off the main ones and end)
     gate = tex('ShaderNodeTexNoise', 1.6)
     gate.inputs['Detail'].default_value = 1.0
     gate2 = tex('ShaderNodeTexNoise', 3.1)
     veins = math_('MAXIMUM', math_('MULTIPLY', big, ramp_(gate.outputs['Fac'], 0.42, 0.58)),
-                  math_('MULTIPLY', fine, math_('MULTIPLY', 0.7, ramp_(gate2.outputs['Fac'], 0.55, 0.7))))
+                  math_('MULTIPLY', fine, math_('MULTIPLY', 0.45, ramp_(gate2.outputs['Fac'], 0.6, 0.75))))
     # (some stretches show more than others, as veins lie deeper or nearer the surface)
     depth = tex('ShaderNodeTexNoise', 0.9)
     depth.inputs['Detail'].default_value = 2.0
     veins = math_('MULTIPLY', veins, ramp_(depth.outputs['Fac'], 0.3, 0.6, 0.35, 1.0))
+    # (the veins are in the skin everywhere, but show only where it is thin: layer 2 on its own shows them all)
+    shown = ramp_(thin_skin, 0.15, 0.6)
     hue = tex('ShaderNodeTexNoise', 1.3)
     hue.inputs['Detail'].default_value = 1.0
     vc = mix(VEIN_BLUE, VEIN_PURPLE, ramp_(hue.outputs['Fac'], 0.4, 0.6))
@@ -136,6 +141,11 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     L(layer1, l2.inputs['A'])
     L(vc, l2.inputs['B'])
     layer2 = l2.outputs['Result']
+    veins = math_('MULTIPLY', veins, shown)
+    l2m = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')      # (layer 2 as it lies in the skin)
+    L(math_('MULTIPLY', veins, 0.7), l2m.inputs['Factor'])
+    L(layer1, l2m.inputs['A'])
+    L(vc, l2m.inputs['B'])
 
     # ---- layer 3: the epidermis. The skin tone, freckles (small soft flecks, each its own size and strength),
     # a few larger blemishes, and pores a shade darker
@@ -179,7 +189,7 @@ def skin_layers(nt, out, show='all', tone=(207, 159, 132)):
     opacity = math_('ADD', EPIDERMIS_OPACITY, math_('MULTIPLY', math_('MAXIMUM', math_('MULTIPLY', freckle, 1.0),
                                                                      math_('MULTIPLY', blem, 0.7)),
                                                      1.0 - EPIDERMIS_OPACITY))
-    combined = mix(layer2, layer3, opacity)
+    combined = mix(l2m.outputs['Result'], layer3, opacity)
     # (and the veins show through it, faintly, as they do under real skin)
     vt = node('ShaderNodeMix', data_type='RGBA', blend_type='MULTIPLY')
     L(math_('MULTIPLY', veins, 0.45), vt.inputs['Factor'])
