@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applySettings } from '../world/springbones.js';
-import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
+import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS, CAPE_FABRIC_SETTINGS, WARDEN_FABRIC_SETTINGS } from '../world/cape-rig.js';
 import { WALKS, loadBakedWalk } from './baked-walk.js';
 import { CapeSim, SCENARIOS, FRAME, PACE } from './sim.js';
 import { loadModelBody } from './model-body.js';
@@ -53,8 +53,10 @@ controls.enableDamping = false;
 controls.enabled = false;
 
 // ---- the character ----
-const settings = { ...CAPE_SETTINGS, colliderScale: 1, slow: 1 };
-const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true };
+// ?solver=fabric: the cape as cloth (src/world/fabric.js) instead of spring bones, on the same bones and colliders
+const FABRIC = new URLSearchParams(location.search).get('solver') === 'fabric';
+const settings = { ...(FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, slow: 1 };
+const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true, solver: FABRIC ? 'fabric' : 'springs' };
 let sim, colliderGroup, boneHelper;
 // the body: the stand-in, or the Warden's own model (?body=model, from ?model=<url>, models/warden.glb by default)
 const params = new URLSearchParams(location.search);
@@ -75,7 +77,7 @@ async function setBody(kind) {
   opts.body = kind === 'model' ? modelBody : null;
   await applyWalk(opts.body);
   // each body's own tuning (her cape hangs closer to her than the stand-in's)
-  const own = kind === 'model' ? WARDEN_MODEL_SETTINGS : CAPE_SETTINGS;
+  const own = kind === 'model' ? (FABRIC ? WARDEN_FABRIC_SETTINGS : WARDEN_MODEL_SETTINGS) : (FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS);
   Object.assign(settings, { contactSoftness: own.contactSoftness, linkCurve: own.linkCurve });
   for (const f of syncSliders) f();
   build();

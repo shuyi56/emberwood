@@ -17,6 +17,7 @@
 // the legs and 8.5 to the sides, and the cape hangs from the shoulders (52.7) to just under the knees (19).
 import { PropertyBinding } from 'three';
 import { SpringBones, Collider, findChains, DEFAULTS } from './springbones.js';
+import { FabricBones, FABRIC_SETTINGS } from './fabric.js';
 
 export const CAPE_SETTINGS = {
   ...DEFAULTS,
@@ -38,6 +39,11 @@ export const CAPE_SETTINGS = {
 // shoulders and upper arms (the first two swinging rows) it wraps round her, so the cloth between columns is
 // taken on that curve: on the straight line an arm swinging back pushed the cape out into a hump
 export const WARDEN_MODEL_SETTINGS = { ...CAPE_SETTINGS, contactSoftness: 0.5, linkCurve: [0.12, 0.12] };
+
+// The cape as fabric (fabric.js) instead of spring bones: the same bones, colliders and fitting, solved as one
+// sheet of cloth. It has no pull back to the modelled shape and no swing limit: its threads and the body shape it
+export const CAPE_FABRIC_SETTINGS = { ...FABRIC_SETTINGS, hitRadius: 0.6, contactSoftness: 2, follow: 0.5 };
+export const WARDEN_FABRIC_SETTINGS = { ...CAPE_FABRIC_SETTINGS, contactSoftness: 0.5, linkCurve: [0.12, 0.12] };
 
 // [from joint, offset], [to joint, offset, beyond], radius: offsets are in the model's axes (+z is her front);
 // `beyond` carries the far end on past its joint by that share of the capsule's length; options { turns: true }
@@ -90,11 +96,15 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)
-export function attachCapeSprings(model, settings = WARDEN_MODEL_SETTINGS, colliders = WARDEN_COLLIDERS) {
+// solver: 'springs' (spring bones) or 'fabric' (cloth, fabric.js; give it WARDEN_FABRIC_SETTINGS)
+export function attachCapeSprings(model, settings = WARDEN_MODEL_SETTINGS, colliders = WARDEN_COLLIDERS, solver = 'springs') {
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;
-  const springs = new SpringBones({ chains, links, root: model, colliders: makeColliders(model, colliders), fit: 'surface' });
+  const Solver = solver === 'fabric' ? FabricBones : SpringBones;
+  const springs = new Solver({ chains, links, root: model, colliders: makeColliders(model, colliders), fit: 'surface' });
   springs.reset();
   return springs;
 }
+export const attachCapeFabric = (model, settings = WARDEN_FABRIC_SETTINGS, colliders = WARDEN_COLLIDERS) =>
+  attachCapeSprings(model, settings, colliders, 'fabric');

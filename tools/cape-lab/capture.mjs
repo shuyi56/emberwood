@@ -3,7 +3,7 @@
 //
 //   npm run dev
 //   node tools/cape-lab/capture.mjs --out /tmp/cape [--scenarios turn,startstop,walk] [--views back3q,side]
-//        [--seconds 7] [--every 3] [--size 420x520] [--settings '{"stiffness":300}'] [--columns 5] [--rows 5]
+//        [--seconds 7] [--every 3] [--size 420x520] [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--solver fabric]
 //        [--colliders] [--no-springs] [--body model] [--walk new] [--zoom 2.6 --look-y 50]
 //
 // --body model hangs the cape on the Warden's own glb instead of the stand-in (the page loads models/warden.glb,
@@ -52,7 +52,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 page.on('pageerror', (e) => console.log('pageerror:', e.message));
 page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text()); });
-await page.goto(url + (url.includes('?') ? '&' : '?') + 'capture', { waitUntil: 'load' });
+await page.goto(url + (url.includes('?') ? '&' : '?') + 'capture' + (arg('solver') ? '&solver=' + arg('solver') : ''), { waitUntil: 'load' });
 await page.waitForFunction(() => !!window.__lab, null, { timeout: 30000 });
 
 const summary = [];

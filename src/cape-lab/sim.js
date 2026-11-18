@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { makeDummy, CYCLE } from './dummy.js';
 import { SpringBones, findChains } from '../world/springbones.js';
+import { FabricBones } from '../world/fabric.js';
 import { WARDEN_COLLIDERS, makeColliders } from '../world/cape-rig.js';
 import { attachHairSprings } from '../world/hair-rig.js';
 import { HeadMotion } from '../world/head-motion.js';
@@ -66,7 +67,9 @@ export class CapeSim {
     const root = this.dummy.root;
     root.updateMatrixWorld(true);
     const { chains, links } = findChains(root, 'cape', this.settings, 1);
-    this.springs = new SpringBones({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()),
+    // (opts.solver 'fabric': the cape as cloth, fabric.js, on the same bones and colliders)
+    const Solver = this.opts.solver === 'fabric' ? FabricBones : SpringBones;
+    this.springs = new Solver({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()),
       fit: 'surface' });
     this.springs.reset();
     // her hair, when the body has it (the Warden's model): its own springs, with its own settings

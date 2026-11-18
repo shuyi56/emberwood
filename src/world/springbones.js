@@ -140,7 +140,7 @@ export class Collider {
 // the hem segment between the two tails and across the middle of the panel the two bones span, each at a
 // quarter, the middle and three quarters of the way from one column to the other, so an arm or a hand swinging
 // back meets the cloth wherever it comes between two columns
-const LINK_SAMPLES = [];
+export const LINK_SAMPLES = [];
 for (const [wHead, wTail] of [[0, 1], [0.5, 0.5]]) for (const u of [0.25, 0.5, 0.75]) LINK_SAMPLES.push([wHead, wTail, u]);
 // such a point, from the joints' heads and their tails (`next` while solving, else the tails). Where a cape wraps
 // closely round her shoulders and arms, the cloth between two columns isn't the straight line between them but
@@ -153,7 +153,7 @@ const CR = (u) => [(-u + 2 * u * u - u * u * u) / 2, (2 - 5 * u * u + 3 * u * u 
   (u + 4 * u * u - 3 * u * u * u) / 2, (-u * u + u * u * u) / 2];
 const _lp = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 const curveOf = (L, r) => (L.a.settings.linkCurve && L.a.settings.linkCurve[r]) || 0;
-function linkPoint(L, r, [wHead, wTail, u], out, solving = false) {
+export function linkPoint(L, r, [wHead, wTail, u], out, solving = false) {
   const at = (j, o) => o.copy(j.head).multiplyScalar(wHead).addScaledVector(solving ? j.next : j.tail, wTail);
   const [p0, p1, p2, p3] = _lp;
   at(L.a.joints[r], p1); at(L.b.joints[r], p2);
@@ -169,7 +169,7 @@ function linkPoint(L, r, [wHead, wTail, u], out, solving = false) {
   return out.add(off);
 }
 // the shares of the two columns' tails in such a point (what a push on it is split by)
-function linkShares(L, r, [, wTail, u]) {
+export function linkShares(L, r, [, wTail, u]) {
   if (!curveOf(L, r)) return [wTail * (1 - u), wTail * u];
   const c = CR(u);
   // (a missing neighbour is carried on from the two columns, so its share falls on them)

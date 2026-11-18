@@ -20,6 +20,16 @@ Captures take `--body model` (add `?model=...` to `--url` for another glb). A he
 `FRONT_Z=-100`, so `export-head.js` keeps the tail's strands, and merged with `merge-head.mjs`) gets its tail on
 one chain, `hairT_0_<row>`, from the tie; the rest of her hair rides her head.
 
+## Springs or fabric
+
+The cape runs on either of two solvers over the same bones, colliders and fitting. Spring bones
+(`src/world/springbones.js`) swing each bone about its parent and pull it back to its modelled direction. Fabric
+(`src/world/fabric.js`, on the solver in `src/world/fabric-core.js`) solves every tail as a point of one sheet of
+cloth: threads that keep their length, diagonals, ties that make it roll into folds, and friction where it lies
+on the body. Open the page with `?solver=fabric`, and pass `--solver fabric` to `check.mjs` and `capture.mjs`.
+Its settings are `CAPE_FABRIC_SETTINGS` in `src/world/cape-rig.js`; in the game, `attachCapeFabric(model)` takes
+the place of `attachCapeSprings(model)`.
+
 ## The cape rig
 
 Each column of the cape is a chain `cape_<column>_0 … cape_<column>_<rows>` under `Chest`, plus an empty
