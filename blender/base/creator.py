@@ -138,6 +138,8 @@ def apply(src, shape=True, colours=True, hair_colour=True, quiet=False):
         # skin: the ranger's ramp (and her flushed one) scaled to the creator's tone, as its export does
         base = [207, 159, 132]
         r = [a / b for a, b in zip(_hex(P['skinTone']), base)]
+        if hasattr(f, 'SKIN_FAIR'):
+            f.SKIN_FAIR = False      # (the export's own skin tone wins over the Fair swatch switch)
         f.SKIN[:] = _scaled(f.SKIN, r)
         f.SKIN_FLUSH[:] = _scaled(f.SKIN_FLUSH, r)
         _recolour(f.M_SKIN, f.SKIN, f.SKIN_FLUSH)

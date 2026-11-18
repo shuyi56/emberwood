@@ -40,6 +40,8 @@ Rendering pieces on their own (any of the views above):
 --pieces   PREFIXES: after the other views, from the same build, the same five-angle turn of just these meshes
            framed on them (DIR/pieces.png): the full figure and its pieces alone for the cost of one build
 --list     print every mesh's name, material and vertex count after the build, and stop
+--save     PATH: with --turn or --head, save the built figure with the 3D look's camera and lights as a .blend
+           instead of rendering
 """
 import importlib
 import math
@@ -119,7 +121,7 @@ def look_3d(samples):
         sc.cycles.denoiser = 'OPENIMAGEDENOISE'
         sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
     sc.cycles.max_bounces = 4
-    sc.cycles.transparent_max_bounces = 16     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
+    sc.cycles.transparent_max_bounces = int(os.environ.get('TRANSP_BOUNCES', '16'))     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
     sc.cycles.filter_width = 1.5
     sc.render.film_transparent = False
@@ -147,6 +149,9 @@ def look_3d(samples):
     area('Key', (-40, -48, 80), 52000, 24, (1, 0.96, 0.9))
     area('Fill', (46, -36, 50), 12000, 30, (0.85, 0.9, 1))
     area('Rim', (20, 60, 70), 26000, 18)
+    # light off the floor: big, warm and from below, so the shaded undersides (legs, jaw, the far side of the body)
+    # keep some colour instead of going grey. It is not seen by the camera.
+    area('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), aim=(0, 0, 20)).visible_camera = False
     cam_d = bpy.data.cameras.new('View')
     cam_d.clip_start, cam_d.clip_end = 1, 1000
     cam = bpy.data.objects.new('View', cam_d)
@@ -323,6 +328,15 @@ def main():
         if isolating:
             # (again: the close-up look shows the face's paints, which the sprite look hides, over what was hidden)
             shown = isolate()
+        if opt('--save'):
+            # (the built figure with the 3D look's camera and lights, as a scene file, instead of rendering)
+            sb = bpy.data.objects.get('Skin body')
+            if sb is not None:
+                print('save: Skin body attributes', [(x.name, x.domain, x.data_type) for x in sb.data.attributes], flush=True)
+            print('save: objects', [(o.name, o.type) for o in bpy.data.objects if o.type in ('CAMERA', 'LIGHT', 'EMPTY') and o.parent is None], flush=True)
+            bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(opt('--save')), compress=True)
+            print('saved', opt('--save'), bpy.app.version_string, flush=True)
+            return
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
             for look in ('', '-clay') if '--clay' in argv else ('',):
@@ -331,7 +345,7 @@ def main():
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
                     row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), centre, h)
                 if '--head' in argv:
-                    centre, h = fit(shown, 1.0) if framed else ((0, 0, 55.5), 17.0)
+                    centre, h = fit(shown, 1.0) if framed else ((0, 0, float(os.environ.get('HEAD_CZ', 55.5))), float(os.environ.get('HEAD_H', 17.0)))
                     row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), centre, h)
             clay(False, saved)
     if opt('--pieces'):

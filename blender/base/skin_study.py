@@ -7,6 +7,9 @@ figure is built, so it renders in seconds: a skin material change is judged here
     python3 blender/base/skin_study.py [--out DIR] [--size 300] [--samples 64] [--looks current,oil] [--denoise]
                                        [--tone fair] [--vs-main] [--dry]
 
+--layers   instead of the looks: the skin built in three layers, one column each, then all together (see
+           skin_layers.py): 1 the muscle and capillary base, 2 the veins over it, 3 the epidermis alone, and the
+           three combined on a subsurface surface
 --tone     the skin's base colour: a face creator swatch (ranger, fair, light, olive, tan, brown, deep) or a hex
            colour such as efcfb9; default the figures' own (female.SKIN[2])
 
@@ -73,7 +76,8 @@ def shape(name, bm, loc, mat, maps, scale=(1, 1, 1), rot=(0, 0, 0)):
     vals = np.array([maps(v.co) for v in me.vertices], dtype=np.float64)
     skin = np.tile([*base, 1.0], (len(co), 1))
     fx = np.column_stack([vals[:, 0], vals[:, 1], vals[:, 2], np.ones(len(co))])
-    tx = np.column_stack([vals[:, 3], vals[:, 4], vals[:, 5], np.ones(len(co))])
+    thin = vals[:, 6] if vals.shape[1] > 6 else np.ones(len(co))      # (how thin the skin is: where veins show)
+    tx = np.column_stack([vals[:, 3], vals[:, 4], vals[:, 5], thin])
     for nm, arr in (('skin', skin), ('skin fx', fx), ('skin tex', tx)):
         me.color_attributes.new(nm, 'FLOAT_COLOR', 'POINT').data.foreach_set('color', arr.ravel())
     me.materials.append(mat)
@@ -82,8 +86,11 @@ def shape(name, bm, loc, mat, maps, scale=(1, 1, 1), rot=(0, 0, 0)):
 
 def ball_maps(c):
     up = max(0.0, min(1.0, 0.5 + c.z / 2.0))      # (c: the ball's own unit-sphere coordinates)
+    # (thin at a temple and a band under the eye, as on the face)
+    thin = min(1.0, 0.9 * math.exp(-((c.x + 0.7) / 0.18) ** 2 - ((c.z - 0.25) / 0.3) ** 2)
+               + 0.8 * math.exp(-((c.z - 0.05) / 0.12) ** 2) * max(0.0, -c.y))
     return (0.35 * math.exp(-(c.z / 0.5) ** 2), 0.0, 0.15 + 0.75 * up,
-            0.8 if c.x > 0.15 else 0.0, 0.0, 1.0)
+            0.8 if c.x > 0.15 else 0.0, 0.0, 1.0, thin)
 
 
 def vs_main(sc, out, female):
@@ -126,7 +133,9 @@ def main():
     looks = [k.strip() for k in opt('--looks', ','.join(female.SKIN_LOOKS)).split(',')]
     if '--vs-main' in argv:
         looks = ['current']
-    bad = [k for k in looks if k not in female.SKIN_LOOKS]
+    if '--layers' in argv:
+        looks = ['1 base', '2 + veins', '3 epidermis', 'all three']
+    bad = [k for k in looks if k not in female.SKIN_LOOKS and '--layers' not in argv]
     if bad:
         sys.exit(f'skin_study.py: no such look {", ".join(bad)} (looks: {", ".join(female.SKIN_LOOKS)})')
     global TONE
@@ -144,22 +153,24 @@ def main():
     sc.cycles.filter_width = 1.5
     names = [i.identifier for i in sc.view_settings.bl_rna.properties['view_transform'].enum_items]
     sc.view_settings.view_transform = 'AgX' if 'AgX' in names else 'Filmic'
-    # (the world and the three lights of views.py's look_3d, aimed at the swatches as they are at the figure)
+    # (the world and the lights of views.py's look_3d, aimed at the swatches as they are at the figure)
     sc.world = bpy.data.worlds.new('World')
     sc.world.use_nodes = True
     bg = sc.world.node_tree.nodes['Background']
     bg.inputs['Color'].default_value = (0.18, 0.19, 0.21, 1)
     bg.inputs['Strength'].default_value = 0.35
-    aim = Vector((0, 0, 40))
-    for name, loc, energy, size_, colour in (('Key', (-40, -48, 80), 52000, 24, (1, 0.96, 0.9)),
-                                             ('Fill', (46, -36, 50), 12000, 30, (0.85, 0.9, 1)),
-                                             ('Rim', (20, 60, 70), 26000, 18, (1, 1, 1))):
+    for name, loc, energy, size_, colour, aim in (
+            ('Key', (-40, -48, 80), 52000, 24, (1, 0.96, 0.9), (0, 0, 40)),
+            ('Fill', (46, -36, 50), 12000, 30, (0.85, 0.9, 1), (0, 0, 40)),
+            ('Rim', (20, 60, 70), 26000, 18, (1, 1, 1), (0, 0, 40)),
+            ('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), (0, 0, 20))):
         d = bpy.data.lights.new(name, 'AREA')
         d.energy, d.size, d.color = energy, size_, colour
         o = bpy.data.objects.new(name, d)
         sc.collection.objects.link(o)
         o.location = loc
-        o.rotation_euler = (aim - Vector(loc)).to_track_quat('-Z', 'Y').to_euler()
+        o.rotation_euler = (Vector(aim) - Vector(loc)).to_track_quat('-Z', 'Y').to_euler()
+        o.visible_camera = name != 'Bounce'
     step = 7.6
     x0 = -step * (len(looks) - 1) / 2
     for i, look in enumerate(looks):
@@ -170,7 +181,11 @@ def main():
         o_ = nt.nodes.new('ShaderNodeOutputMaterial')
         d_ = nt.nodes.new('ShaderNodeBsdfDiffuse')
         nt.links.new(d_.outputs['BSDF'], o_.inputs['Surface'])
-        female.skin_surface(nt, d_, o_, look)
+        if '--layers' in argv:
+            import skin_layers
+            skin_layers.skin_layers(nt, o_, ('1', '2', '3', 'all')[i], TONE or female.SKIN[2])
+        else:
+            female.skin_surface(nt, d_, o_, look)
         x = x0 + step * i
         bm = bmesh.new()
         bmesh.ops.create_uvsphere(bm, u_segments=96, v_segments=48, radius=1.0)
@@ -178,13 +193,13 @@ def main():
         # an ear's rim: a thin lobe, 0.2 thick (about 5 mm), turned a little to the light behind it
         bm = bmesh.new()
         bmesh.ops.create_uvsphere(bm, u_segments=64, v_segments=32, radius=1.0)
-        shape(f'Lobe {look}', bm, (x - 1.7, 0, 37.6), m, lambda c: (0.5, 0.0, 0.3, 0.0, 0.0, 0.4),
+        shape(f'Lobe {look}', bm, (x - 1.7, 0, 37.6), m, lambda c: (0.5, 0.0, 0.3, 0.0, 0.0, 0.4, 0.7),
               scale=(1.3, 0.1, 2.0), rot=(0, 0, math.radians(-30)))
         # a finger, 0.65 across (about 1.8 cm), creased at two joints
         bm = bmesh.new()
         bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=64, radius=1.0)
         shape(f'Finger {look}', bm, (x + 1.9, 0, 37.6), m,
-              lambda c: (0.6, 0.0, 0.2, 0.0, max(0.0, 1 - abs(abs(c.z) - 0.35) / 0.12), 0.3),
+              lambda c: (0.6, 0.0, 0.2, 0.0, max(0.0, 1 - abs(abs(c.z) - 0.35) / 0.12), 0.3, 0.8),
               scale=(0.33, 0.33, 2.3), rot=(0, math.radians(12), 0))
     cam_d = bpy.data.cameras.new('View')
     cam_d.type = 'ORTHO'
