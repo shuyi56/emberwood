@@ -4211,6 +4211,21 @@ def pose(col):
         wr.rotation_euler = (flick, 0, 0)
 
 
+# How far an ankle bends, degrees: toes drawn up toward the shin (ANKLE_UP) and pointed away from it (ANKLE_DOWN).
+# A foot in the air is posed by its pitch from level, which says nothing of the shin above it: with the shin swung
+# far back (the walk's swing, and far more the run's heel coming up behind) a nearly level foot was folded 50 to 60
+# degrees up against the shin, a bend no ankle makes (John, 2026-11-18, of the run: fix the ankles).
+ANKLE_UP, ANKLE_DOWN = 14.0, 38.0
+
+
+def ankle_limit(pitch, shn):
+    """The pitch (toes up positive) of a foot in the air, kept within what the ankle can bend from the shin, whose
+    angle forward of straight down is shn (as leg_ik gives it). The limits are eased into, not struck."""
+    w = 0.07
+    soft = lambda v: w * math.log1p(math.exp(min(30.0, v / w)))       # noqa: E731
+    return pitch - soft(pitch - shn - math.radians(ANKLE_UP)) + soft(shn - math.radians(ANKLE_DOWN) - pitch)
+
+
 def _euler_m(e):
     """The matrix of a Blender XYZ Euler (X applied first)."""
     (ca, sa), (cb, sb), (cc, sc) = [(math.cos(v), math.sin(v)) for v in e]
@@ -4251,7 +4266,7 @@ def pose_locked(col):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
         t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
-        fwd, az, pitch, _ = locked_foot(t)
+        fwd, az, pitch, ground = locked_foot(t)
         f = fwd - s * LEG_X * math.sin(turn)            # (the pelvis's turn carries the hip forward or back)
         hz = hips + s * LEG_X * math.sin(lst)           # (and its list lifts or drops it)
         # the leg leans in under the body so the foot keeps to its track; the lean lengthens the reach a little
@@ -4259,6 +4274,8 @@ def pose_locked(col):
         roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * L_FOOT_X) / (hz - az)))) - lst
         th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
         kb = th - shn
+        if not ground:
+            pitch = ankle_limit(pitch, shn)
         hip.location = (-s * LEG_X, 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
@@ -4306,6 +4323,11 @@ R_PELVIS_TURN, R_PELVIS_LIST, R_SWAY = 0.12, 0.05, 0.35
 # closing a little as the arm comes forward and opening as it drives back
 R_ARM_SWING, R_ARM_BACK, R_ARM_LAG = 0.62, 0.12, 0.02
 R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.3, 0.07
+# the ankle through the swing: (how far through the swing, the foot pointed away from the shin, degrees). In the air
+# the foot hangs from the shin, loose and pointed as the heel comes up behind, then drawn up to meet the ground. (It
+# is eased in from the push-off's pitch and out to the landing's over the first and last R_ANKLE_EASE of the swing.)
+R_SWING_ANKLE = [(0.0, 20), (0.2, 26), (0.5, 16), (0.75, 4), (0.9, -5), (1.0, -5)]
+R_ANKLE_EASE = 0.16
 R_TOE_OUT, R_FOOT_X = 0.06, 0.8     # the feet point nearly straight ahead and land closer to the line of travel
 
 
@@ -4408,13 +4430,19 @@ def pose_run(col):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
         t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
-        fwd, az, pitch, _ = run_foot(t)
+        fwd, az, pitch, ground = run_foot(t)
         f = fwd - s * LEG_X * math.sin(turn)
         hz = hips + s * LEG_X * math.sin(lst)
         hip_x = sway - s * LEG_X * math.cos(lst)
         roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * R_FOOT_X) / max(8.0, hz - az)))) - lst
         th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
         kb = th - shn
+        if not ground:
+            u = (t - RUN_STANCE) / (1 - RUN_STANCE)
+            hang = shn - math.radians(float(np.interp(u, [k for k, _ in R_SWING_ANKLE], [v for _, v in R_SWING_ANKLE])))
+            e = min(1.0, u / R_ANKLE_EASE, (1 - u) / R_ANKLE_EASE)
+            e = e * e * (3 - 2 * e)
+            pitch = ankle_limit(pitch + (hang - pitch) * e, shn)
         hip.location = (-s * LEG_X, 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
