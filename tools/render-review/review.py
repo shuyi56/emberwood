@@ -544,6 +544,23 @@ def review(req, thread, do_smoke=True):
         except ValueError as e:
             rep.block("views", f"View command {v!r} does not parse: {e}.", "Balance the quotes.")
             continue
+        if tok and tok[0] in ("pose-strip", "crop"):
+            # the queue's own views (README "Crops and the pose test strip"): checked as the views.py build they run on
+            rest = tok[1:]
+            if tok[0] == "crop" and rest and not rest[0].startswith("--"):
+                rest = rest[1:]                                  # the region list
+            clean, skip = [], 0
+            for t in rest:
+                if skip:
+                    skip -= 1
+                elif t in ("--poses", "--pose-angle", "--crop-size", "--crop-angles", "--crop"):
+                    skip = 1
+                else:
+                    clean.append(t)
+            if "--angles" not in clean:
+                clean += ["--angles", "3/4"]
+            tok = ["blender/base/views.py"] + clean + ["--turn"]
+            v = " ".join(shlex.quote(t) for t in tok)
         if not tok or not tok[0].endswith(".py") or os.path.isabs(tok[0]):
             rep.block("views", f"View command {v!r} must start with a .py path relative to the repo root.",
                       "For example blender/base/views.py --figure rogue --head.")
