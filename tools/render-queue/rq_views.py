@@ -14,7 +14,11 @@ build:
 --crop-size N  the crops' height in pixels (default 384; a wide region such as the hem is wider than it is high)
 --poses NAMES  the pose test strip: the clay figure at the joints' extremes, one tile per pose, from --pose-angle
                (default 3/4), on one fixed camera: DIR/poses.png and DIR/pose-NAME.png. NAMES is all, or some of
-               rest, arms-up, arms-fwd, elbows, step, crouch, twist.
+               rest, arms-up, arms-fwd, elbows, step, crouch, twist, and the head poses the base figure defines
+               (female.HEAD_POSES: nod, look-down, look-up, tilt, turn). The head rides the chest and is held
+               looking level ahead in the body poses (female.carry_head), as a real neck holds it.
+--pose-crop REGIONS  with --poses: also a crop of each region (as --crop names them) in every pose, from the same
+               camera as the strip: DIR/pose-crop-REGION.png, one tile per pose (default height 300, --pose-size)
 
 Regions (centred on the figure's axis, so one crop serves every angle; both sides show):
   neck, shoulder, armhole, bust, elbow, waist, wrist (the cuff), hips (the seat), hand, knee, hem (floor length),
@@ -42,7 +46,7 @@ exec(compile(src[:cut], VIEWS_PY, 'exec'), V)
 T_LOADED = time.time()
 bpy, female, opt, argv = V['bpy'], V['female'], V['opt'], V['argv']
 
-POSES = ('rest', 'arms-up', 'arms-fwd', 'elbows', 'step', 'crouch', 'twist')
+POSES = ('rest', 'arms-up', 'arms-fwd', 'elbows', 'step', 'crouch', 'twist') + tuple(getattr(female, 'HEAD_POSES', {}))
 ALL_VIEWS = [('front', 0), ('3/4', 45), ('profile', 90), ('back 3/4', 135), ('back', 180)]
 
 
@@ -137,8 +141,13 @@ def apply(name):
     elif name == 'twist':
         ob['Pelvis'].rotation_euler = (0, 0, -0.15)
         ob['Chest'].rotation_euler = (0, 0, 0.55)
-    elif name != 'rest':
+    elif name != 'rest' and name not in getattr(female, 'HEAD_POSES', {}):
         raise SystemExit(f'rq_views: no pose {name!r} (have {", ".join(POSES)})')
+    # (the head on the neck: a head pose, or held level ahead on whatever the chest is doing)
+    if name in getattr(female, 'HEAD_POSES', {}):
+        female.head_pose(name)
+    elif hasattr(female, 'carry_head'):
+        female.carry_head()
     bpy.context.view_layer.update()
 
 
@@ -174,6 +183,8 @@ def poses(out):
     saved = {}
     V['clay'](True, saved)
     ims = []
+    frames = crop_frames(opt('--pose-crop')) if opt('--pose-crop') else []
+    cims = {f[0]: [] for f in frames}
     with tempfile.TemporaryDirectory() as tmp:
         for name in names:
             apply(name)
@@ -181,18 +192,29 @@ def poses(out):
             # one fixed camera and framing for every pose: tall enough for the raised arms, low enough for the crouch
             V['row'](cam, p, tmp, (size, int(size * 1.5)), (0, 0, 35.0), 76.0)
             ims.append((name, Image.open(p).convert('RGB')))
+            for stem, centre, hh, aspect in frames:
+                # (the region follows the body down in the crouch and the step: the region's height on the pelvis)
+                z = centre[2] + bpy.data.objects['Body'].location.z
+                q = os.path.join(tmp, f'pc-{stem}-{name}.png')
+                V['row'](cam, q, tmp, (int(size * aspect), size), (centre[0], centre[1], z), hh)
+                cims[stem].append((name, Image.open(q).convert('RGB')))
             print(f'rq pose {name}', flush=True)
     V['clay'](False, saved)
     V['VIEWS'] = keep
     female.pose(0)
-    w, h = ims[0][1].size
-    strip = Image.new('RGB', (w * len(ims), h + 22), (40, 42, 48))
-    d = ImageDraw.Draw(strip)
-    for i, (name, im) in enumerate(ims):
-        strip.paste(im, (i * w, 22))
-        d.text((i * w + 6, 5), name, fill=(230, 230, 230))
-    strip.save(os.path.join(out, 'poses.png'))
-    print('wrote', os.path.join(out, 'poses.png'), flush=True)
+
+    def lay(row, path):
+        w, h = row[0][1].size
+        strip = Image.new('RGB', (w * len(row), h + 22), (40, 42, 48))
+        d = ImageDraw.Draw(strip)
+        for i, (name, im) in enumerate(row):
+            strip.paste(im, (i * w, 22))
+            d.text((i * w + 6, 5), name, fill=(230, 230, 230))
+        strip.save(path)
+        print('wrote', path, flush=True)
+    lay(ims, os.path.join(out, 'poses.png'))
+    for stem, row in cims.items():
+        lay(row, os.path.join(out, f'pose-crop-{stem}.png'))
 
 
 def garments():
