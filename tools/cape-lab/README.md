@@ -36,17 +36,18 @@ The cape runs on either of two solvers over the same bones, colliders and fittin
 (`src/world/springbones.js`) swing each bone about its parent and pull it back to its modelled direction. Fabric
 (`src/world/fabric.js`, on the solver in `src/world/fabric-core.js`) solves every tail as a point of one sheet of
 cloth: threads that keep their length, diagonals, ties that make it roll into folds, and friction where it lies
-on the body. Fabric is the game's cape and the bench's default; open the page with `?solver=springs`, and pass
-`--solver springs` to `check.mjs` and `capture.mjs`, for spring bones. Fabric's settings are `CAPE_FABRIC_SETTINGS`
-and `WARDEN_FABRIC_SETTINGS` in `src/world/cape-rig.js`; `attachCapeSprings(model)` gives the fabric cape, and
-`attachCapeSprings(model, null, WARDEN_COLLIDERS, 'springs')` the spring bones.
+on the body. Spring bones are the game's cape (see below); open the page with `?solver=fabric`, and pass
+`--solver fabric` to `check.mjs` and `capture.mjs`, for fabric. Fabric's settings are `CAPE_FABRIC_SETTINGS`
+and `WARDEN_FABRIC_SETTINGS` in `src/world/cape-rig.js`; `attachCapeSprings(model)` gives the game's cape, and
+`attachCapeSprings(model, null, WARDEN_COLLIDERS, 'fabric')` the fabric one.
 
-## Walking on fabric, running on springs
+## Walking and running on springs
 
-The game's cape is `CapeGait` (`src/world/fabric.js`, the default of `attachCapeSprings`): fabric while she walks or
-stands, spring bones while she runs, on the same bones, so it passes from one to the other without a jump. The game
-says which (`cape.setGait('run')` while her run plays, `'walk'` otherwise); left unsaid, it goes by her speed. The
-bench does the same (`?solver=gait`, the default; `fabric` or `springs` for one throughout).
+The game's cape is `CapeGait` (`src/world/fabric.js`, the default of `attachCapeSprings`): spring bones while she
+walks or stands (`WARDEN_MODEL_SETTINGS`) and while she runs (`CAPE_RUN_SETTINGS`), on the same bones, so it passes
+from one to the other without a jump. The game says which (`cape.setGait('run')` while her run plays, `'walk'`
+otherwise); left unsaid, it goes by her speed. The bench does the same (`?solver=gait`, the default;
+`gait-fabric` walks on fabric instead, and `fabric` or `springs` give one throughout).
 
 The running springs (`CAPE_RUN_SETTINGS`) are set from the physics she and the cape should have, worked out by
 `node tools/cape-lab/physics.mjs`:
