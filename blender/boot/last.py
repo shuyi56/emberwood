@@ -581,6 +581,44 @@ def reweight(boot, hose, k=4):
             groups[gi].add([v.index], float(ws[gi]), 'REPLACE')
 
 
+def relieve(boot, hose, frames, margin=0.08, radius=0.8, log=print):
+    """Let the leather out where a stride presses the hose through it. At each of the frames the hose points that are
+    through the leather are found (clearance); the boot's points within radius of where each lies at rest are pushed
+    out along their own normals by how far it was through, plus the margin, less with distance. The boot is the
+    object's rest shape, so the leather is as it was cut, with room where the foot needs it."""
+    scene = bpy.context.scene
+    me = boot.data
+    n = len(me.vertices)
+    rest = np.empty(n * 3)
+    me.vertices.foreach_get('co', rest)
+    rest = rest.reshape(-1, 3)
+    nrm = np.empty(n * 3)
+    me.vertices.foreach_get('normal', nrm)
+    nrm = nrm.reshape(-1, 3)
+    kd = KDTree(n)
+    for i, q in enumerate(rest):
+        kd.insert(q, i)
+    kd.balance()
+    push = np.zeros(n)
+    worst = 0.0
+    for f in frames:
+        scene.frame_set(f)
+        pts = clearance(boot, hose, log=lambda *a: None)['points']
+        for q, depth in pts:
+            worst = max(worst, depth)
+            for _, i, d in kd.find_range(q, radius):
+                push[i] = max(push[i], (depth + margin) * (1.0 - d / radius))
+    scene.frame_set(0)
+    out = rest + nrm * push[:, None]
+    me.vertices.foreach_set('co', out.ravel())
+    if 'rest' in me.attributes:
+        me.attributes['rest'].data.foreach_set('vector', out.ravel())
+    me.update()
+    log('boot relief %s: the stride pressed the hose up to %.2f through the leather; %d points let out by %.2f at most'
+        % (boot.name, worst, int((push > 0).sum()), push.max()))
+    return worst
+
+
 def clearance(boot, hose, log=print):
     """The gap between the hose and the boot's inner face, at the current frame: from every point of the hose under
     the boot (judged by where it lies at rest: on the boot's own leg, between the sole and the top), a ray straight
@@ -612,7 +650,7 @@ def clearance(boot, hose, log=print):
     side = -1 if boot.name.endswith('.R') else 1
     z_top, z_low = float(br[:, 2].max()) - 0.3, float(br[:, 2].min()) + 0.3
     gaps = []
-    where = []
+    where, through = [], []
     for p, nv, q in zip(hp, hn, hr):
         if q[0] * side <= 0 or q[2] > z_top or q[2] < z_low:
             continue
@@ -621,9 +659,10 @@ def clearance(boot, hose, log=print):
             continue
         gaps.append(d if fn.dot(nv) > 0 else -d)
         if fn.dot(nv) <= 0:
-            where.append((p[2], q[2], q[1], bt[ti][0]))      # (where it is through: posed height, rest height, rest y, the vertex it met)
+            where.append((p[2], q[2], q[1], bt[ti][0]))
+            through.append((q.copy(), d))                   # (how far through)      # (where it is through: posed height, rest height, rest y, the vertex it met)
     g = np.array(gaps)
-    out = {'min': float(g.min()), 'mean': float(g.mean()), 'through': int((g < 0).sum()), 'n': len(g)}
+    out = {'min': float(g.min()), 'mean': float(g.mean()), 'through': int((g < 0).sum()), 'n': len(g), 'points': through}
     log('boot clearance %s: hose to leather min %.3f mean %.3f, %d of %d hose points through the leather' % (
         boot.name, out['min'], out['mean'], out['through'], out['n']))
     if where:

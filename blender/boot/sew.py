@@ -434,7 +434,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     return eyelets, lace
 
 
-CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=1.2)  # (the ankle's bend in degrees, and the holds)
+CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=1.2, gain=0.4)  # (the ankle's bend in degrees, and the holds)
 
 
 def _deform(o, rig):
@@ -480,6 +480,7 @@ def crease(o, pieces, rig, colliders, ankle_bend=None, zone=None, P=LEATHER, C=C
     if os.path.exists(cache) and not os.environ.get('BOOT_NOCACHE'):
         Z = np.load(cache)
         if Z.shape == X.shape:
+            Z = X + (Z - X) * C.get('gain', 1.0)
             o.data.vertices.foreach_set('co', Z.ravel())
             if 'rest' in o.data.attributes:
                 o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
@@ -547,9 +548,14 @@ def crease(o, pieces, rig, colliders, ankle_bend=None, zone=None, P=LEATHER, C=C
     o.data.update()
     try:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
-        np.save(cache, Z)
+        np.save(cache, Z)                                          # (whole: the gain is taken on each use)
     except OSError as err:
         log('boot crease %s: the folds could not be cached (%s)' % (o.name, err))
+    Z = X + (Z - X) * C.get('gain', 1.0)
+    o.data.vertices.foreach_set('co', Z.ravel())
+    if 'rest' in o.data.attributes:
+        o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
+    o.data.update()
     kept = np.linalg.norm(Z - X, axis=1)
     log('boot crease %s: the folds kept over the front of the ankle: %.3f on average, %.3f at most'
         % (o.name, kept.mean(), kept.max()))
