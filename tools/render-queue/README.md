@@ -26,10 +26,24 @@ A view job is any script in the requesting branch, run through `rq_run.py` with 
 
 ## How to ask for a render
 
-Push your commit, then send the **reviewer thread**, "Review render requests before queueing"
-(cmsg_01CnnKqGvuWEUi2G9X9cb9nBJkqDv7Ktra4a31euzvMxpx), a message with `message_thread` holding one JSON block.
-Do not send requests straight to the render-queue thread any more. The reviewer reads every request first (see
-"Review before the queue" below) and passes it on to the queue, or sends it back to you with fixes:
+Run `rq.py ping --thread <your id>` first (see "Ping the queue before you ask for more" below). Then, by the kind of request
+(John, 2026-11-19, to cut the messages between sessions):
+
+* **Check quality** (`--quality check`: a crop, a pose strip, a clay or lit look you only need to see): add it yourself,
+  with no reviewer and no message to anyone. Push your commit and run
+
+  ```
+  python3 /mnt/project-files/render-queue/rq.py add --thread <your id> --branch <branch> --sha <sha> \
+      --outputs views --view "<views.py command>" --quality check --note "what you are checking"
+  ```
+
+  The request goes into the queue at once. The answer to `add` prints your warnings.
+* **Final quality, `frames`, `glb`, or `ready`**: send the **reviewer thread**, "Review render requests before queueing"
+  (cmsg_01CnnKqGvuWEUi2G9X9cb9nBJkqDv7Ktra4a31euzvMxpx), a message with `message_thread` holding one JSON block. The
+  reviewer reads it first (see "Review before the queue" below) and passes it on to the queue, or sends it back to you
+  with fixes. `rq.py add` refuses a final-quality request that the reviewer has not passed.
+
+Do not message the render-queue thread to ask for a render or to ask whether it is done. The JSON block:
 
 ```json
 {
@@ -66,6 +80,31 @@ hides your new layer. Ask only for your after views and compare them with a cach
 Every request is combined with the other waiting branches whenever it merges cleanly with them and changes
 different functions of the scripts (see "Batching" below for sets and the collation window). One render then covers all of them, and the reply says what else was in it.
 `mode: isolated` is still accepted but ignored. Up to three quick jobs render side by side.
+
+## Ping the queue before you ask for more
+
+Run this before every render request, and again before a second one (John, 2026-11-19). It is read-only, costs one
+tool call and wakes no other thread, so use it instead of asking the queue thread "is my render done?":
+
+```
+python3 /mnt/project-files/render-queue/rq.py ping --thread <your thread id>
+```
+
+It prints how busy the queue is (idle, light or busy), what is rendering and for how long, what is waiting and
+when each request should start, any announced intents, and about when a new request would start. With `--thread`
+it adds your own requests, your last result and where its files are, your hogging warnings, and advice. Add `--json`
+for a machine-readable answer.
+
+What to do with the answer:
+- If you already have a request rendering or waiting, wait for it, or send a newer one for the same views, which
+  replaces the waiting one. Do not stack a second request on the first.
+- If the queue is busy, send a check-quality crop first and keep full renders for when it has room.
+- If your last result is already back, read it before you send another request.
+- If you are flagged for hogging, change the request (a cheaper crop) or check that your edit changes the build.
+
+`rq.py add` reminds a thread that has not pinged in the last 15 minutes (it logs an `unpinged` event, which the
+nightly stats count). The reminder never blocks the request. The reviewer thread pings on a thread's behalf when it
+forwards a request, and tells the thread to ping when the queue is busy.
 
 ## Batching: sets, intents and the collation window
 
@@ -197,7 +236,8 @@ checked yet.
 
 ## Review before the queue
 
-The reviewer thread checks each request without rendering anything, in about two minutes:
+The reviewer thread checks each final-quality, `frames`, `glb` or `ready` request without rendering anything, in about
+two minutes. Check-quality requests skip it: a thread adds those itself with `rq.py add --quality check`.
 
 * the request itself: outputs, cells, view commands; no full sheet in any form (not as an output, not a character
   script run as a view, not `frames` covering most of the sheet); no before of main that is not cached
@@ -306,6 +346,26 @@ built deadlocks in the child (tested: the garment's build hangs in a thread wait
 scene saved after the body build, plus the base modules' Python state restored. That is the next speed-up to
 build.
 
+## Hogging warnings
+
+The queue warns, and never blocks or reorders, when one thread takes more than its share. `rq.py add` prints an
+`rq warning:` line to the thread that sent the request and logs a `hog` event; the dashboard shows the warnings in
+force under "Queue hogging"; and the nightly stats (`rq_stats.py`) list each thread's share of the day's render time
+and every warning it would have raised, replayed every 15 minutes. `rq.py hogs` prints the warnings in force now.
+
+The rules (`HOG` in `rq.py`), picked from the telemetry of 19 November, when the boots and the sleeves each sent the
+same view eight times in an afternoon:
+
+| Rule | Fires when |
+|------|------------|
+| `hour_share` | a thread used over 50% of the last hour's render time (and at least 10 minutes) while another thread waited 2 minutes or more for a slot |
+| `day_share` | the same over the last 24 hours, at 35% and at least 30 minutes |
+| `repeat` | a thread asked for the same views 4 times in 3 hours (superseded requests don't count) |
+| `streak` | a thread sent 5 requests in a row while another thread had one waiting or rendering (the parts of one set, sent within 15 s, count as one) |
+
+Render time is split among the requests a job served, so a shared set build is not charged twice. Being alone on the
+queue is never hogging: the share rules need a second thread that actually waited.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it
@@ -340,9 +400,12 @@ normally, so it fills on the first full-figure job that finishes there.
 
 ## What comes back
 
-A reply in your thread with the result folder `/mnt/project-files/render-queue/results/<key>/`: the images,
+**Your result is not sent to you as a message.** When a request finishes, it appears in `rq.py ping --thread <your id>`
+under "last result", with the result folder `/mnt/project-files/render-queue/results/<key>/`: the images,
 `render.log`, and `manifest.json` (the commit rendered, every branch combined into it, file sizes and git blob
-ids). Identical code is never rendered twice: an unchanged request is answered from the cache at once.
+ids). Ping, then open the images yourself. The render-queue thread messages you only when something needs a
+decision: a failed or killed job, a merge conflict, a hogging warning, or a request it had to refuse. Identical code
+is never rendered twice: an unchanged request is answered from the cache at once.
 
 ## Post-render flags
 
