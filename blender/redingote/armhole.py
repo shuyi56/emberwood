@@ -27,6 +27,8 @@ RATIOS = {
     'curve': 1.6,            # how the line bows from plumb at the underarm out to the shoulder point (1 straight)
     'tilt': 0.15,            # the turn forward in plan: x moves in by this much for each unit forward
     'smooth': 9,             # harmonics kept round the loop (rounds the bridged underarm into a curve)
+    'corner': 0.30,          # the radius the cut is rounded to where the seam meets the underarm's floor, in w (a
+                             # tailored scye is a smooth U there, not a flat edge with square corners)
 }
 N = 96                       # points round a loop
 
@@ -92,7 +94,9 @@ def armhole(P, aw, M, T=None, ratios=RATIOS):
         cross = near & ((g[a] > 0) != (g[b] > 0))
         t = g[a[cross]] / (g[a[cross]] - g[b[cross]])
         X = P[a[cross]] + t[:, None] * (P[b[cross]] - P[a[cross]])
-        X = X[X[:, 2] >= z_u]
+        # (the cut's rounded corner lifts its bottom by a quarter of its radius: the loop is clipped there too, so the
+        # bodice's edge and the sleeve's head still lie on one line)
+        X = X[X[:, 2] >= z_u + 0.25 * ratios['corner'] * w]
         # (taut: the hull of the crossing seen along the seam surface, i.e. by front-back and height)
         H = _hull(X[:, 1:3])
         H = _resample(H, 4 * N)
@@ -124,15 +128,23 @@ def armhole_cut(M, loops, ratios=RATIOS):
     x_u, x_s, z_u, y_ref = L['x_under'], L['x_top'], L['z_under'], L['y_ref']
     z_s = M['z_sh']
 
+    k = ratios['corner'] * M['w']
+
     def f(p):
         p = np.asarray(p, dtype=float)
-        return np.maximum(_seam_x(p) - np.abs(p[:, 0]), z_u - p[:, 2])
+        return _smax(_seam_x(p) - np.abs(p[:, 0]), z_u - p[:, 2], k)
 
     def _seam_x(p):
         t = np.clip((p[:, 2] - z_u) / (z_s - z_u), 0.0, 1.0)
         return x_u + (x_s - x_u) * t ** ratios['curve'] + ratios['tilt'] * (p[:, 1] - y_ref)
     f.seam_x = _seam_x
     return f
+
+
+def _smax(a, b, k):
+    """The larger of two, with the corner between them rounded to radius k (fit._smin turned round)."""
+    h = np.clip(0.5 + 0.5 * (a - b) / k, 0.0, 1.0)
+    return b + (a - b) * h + k * h * (1 - h)
 
 
 def sleeve_cut(M, loops, ratios=RATIOS):
@@ -142,7 +154,9 @@ def sleeve_cut(M, loops, ratios=RATIOS):
     seam_x = armhole_cut(M, loops, ratios).seam_x
     z_u = loops['L']['z_under']
 
+    k = ratios['corner'] * M['w']
+
     def f(p):
         p = np.asarray(p, dtype=float)
-        return np.maximum(np.abs(p[:, 0]) - seam_x(p), z_u - p[:, 2])
+        return _smax(np.abs(p[:, 0]) - seam_x(p), z_u - p[:, 2], k)
     return f
