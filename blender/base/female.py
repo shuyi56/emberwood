@@ -2084,6 +2084,14 @@ def finish_rig():
     arm.hide_render = True
 
 
+# The fingers, index to pinky: place across the palm, length as a share of the middle finger's, thickness, and the
+# height of the knuckle below the wrist. The shares and the knuckle arc are a real hand's (index 0.92, ring 0.95,
+# pinky 0.76 of the middle; the pinky's knuckle a tenth of the palm nearer the wrist).
+FINGER_L = 1.3
+FINGERS = ((-0.86, 0.92, 0.26, -2.52), (-0.29, 1.0, 0.27, -2.6), (0.27, 0.95, 0.25, -2.5), (0.8, 0.76, 0.22, -2.32))
+PHALANGES = (0.48, 0.30, 0.22)     # first, second and tip bone as shares of a finger's length
+
+
 def hand_mesh(s, fist=False):
     """A hand hanging relaxed from the wrist (at the origin, fingers down), made as one fused surface: metaball
     pieces for the palm, the four fingers (two segments each, curled loosely toward the palm, longest at the
@@ -2128,15 +2136,20 @@ def hand_mesh(s, fist=False):
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
-    # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
-    # size, slim fingers any longer read as spidery)
-    for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.8, 0.98, 0.22)):
+    # fingers, index at the front to pinky at the back. Lengths are shares of the middle finger's (itself shorter
+    # than the palm: on a figure this size, slim fingers any longer read as spidery), and the knuckles lie on an arc,
+    # the pinky's well back toward the wrist, so the four tips of the open hand fall on a curve and the four fingers
+    # of the fist fold to the same depth in the palm
+    for y0, share, r, zk in FINGERS:
+        L = FINGER_L * share
         if fist:
-            # (the knuckle a little proud of the back of the hand, the three bones in the ratio a finger's have)
-            k0 = Vector((-0.06 * inward, y0 * 0.94, -2.55))
-            k1 = k0 + Vector((inward * 0.52 * L, 0.0, -0.12 * L))
-            k2 = k1 + Vector((inward * 0.04 * L, 0.0, 0.36 * L))
-            k3 = k2 + Vector((-inward * 0.22 * L, 0.0, 0.12 * L))
+            # (the knuckle a little proud of the back of the hand; the first bone turns in square to the palm, the
+            # second folds back up along it, the tip tucks in against it, each its share of the finger's length)
+            b1, b2, b3 = (L * f for f in PHALANGES)
+            k0 = Vector((-0.06 * inward, y0 * 0.94, zk))
+            k1 = k0 + Vector((inward * 0.98 * b1, 0.0, -0.2 * b1))
+            k2 = k1 + Vector((inward * 0.1 * b2, 0.0, 0.995 * b2))
+            k3 = k2 + Vector((-inward * 0.9 * b3, 0.0, 0.43 * b3))
             blob(k0, (0.9, 0.9, 0.9), r * 1.12)
             capsule(k0, k1, r * 1.05)
             capsule(k1, k2, r * 0.98)
@@ -2144,7 +2157,7 @@ def hand_mesh(s, fist=False):
             continue
         # (the two pieces of each finger meet end to end at the middle joint with only a little overlap, and the
         # finger starts a touch lower in the palm: overlapping fully, their fields add up and swell into a knob)
-        p = Vector((0.05 * inward, y0, -2.6))
+        p = Vector((0.05 * inward, y0, zk - 0.05))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.85)):
             ang += extra
@@ -2159,10 +2172,12 @@ def hand_mesh(s, fist=False):
     blob((0.1 * inward, 0.5, -1.1), (0.4, 0.4, 0.75), 0.75)
     # the little-finger edge of the palm: one straight ridge from the wrist to the pinky knuckle, so the
     # outline runs smoothly down that side with no dip between the heel of the hand and the pinky
-    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, -2.3), 0.44)
-    # (tapering on into the pinky's first segment, so the edge narrows down into the finger instead of
-    # stepping in at the knuckle)
-    capsule((0.05 * inward, 0.72, -2.2), (0.15 * inward, 0.8, -2.95), 0.3)
+    zp = FINGERS[3][3]
+    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, zp + 0.2), 0.44)
+    # (tapering on into the open pinky's first segment, so the edge narrows down into the finger instead of
+    # stepping in at the knuckle; the fist has no finger hanging there, so its edge ends at the knuckle)
+    if not fist:
+        capsule((0.05 * inward, 0.72, zp + 0.3), (0.15 * inward, 0.8, zp - 0.4), 0.3)
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
