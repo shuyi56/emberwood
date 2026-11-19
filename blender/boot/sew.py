@@ -49,10 +49,16 @@ SEAMS = (
     ('inner quarter', ('vamp',), 'A inner', 'A inner'),
     ('outer quarter', ('vamp',), 'A outer', 'A outer'),
     ('outer quarter', ('inner quarter',), 'B', 'B'),
-    ('shaft', ('vamp', 'inner quarter', 'outer quarter'), 'C', 'C'),
-    ('shaft', ('shaft',), 'D top', 'D under'),
-    ('binding', ('shaft',), 'F', 'F'),
-    ('binding', ('shaft',), 'top', None),
+    ('tongue', ('vamp',), 'C', 'C'),
+    ('inner shaft', ('vamp', 'inner quarter', 'outer quarter'), 'C', 'C'),
+    ('outer shaft', ('vamp', 'inner quarter', 'outer quarter'), 'C', 'C'),
+    ('outer shaft', ('inner shaft',), 'D', 'D'),
+    ('inner shaft', ('tongue',), 'H', 'H'),
+    ('outer shaft', ('tongue',), 'H', 'H'),
+    ('inner binding', ('inner shaft',), 'F', 'F'),
+    ('outer binding', ('outer shaft',), 'F', 'F'),
+    ('inner binding', ('inner shaft',), 'top', None),
+    ('outer binding', ('outer shaft',), 'top', None),
 )
 REACH = 0.35                 # a point is sewn to the nearest point of the other piece, if that is this near (units)
 STITCH = {
@@ -306,7 +312,14 @@ def stitches(o, pieces, rig=None, material=None, name=None, log=print):
                 faces.append([n0 + 25, base + 16 + i, base + 16 + j])
             count += 1
     V = np.array(verts)
-    me = bpy.data.meshes.new(name or o.name.replace('Boot', 'Boot stitches'))
+    st = _on_boot(o, V, faces, name or o.name.replace('Boot', 'Boot stitches'), material, rig)
+    log('boot stitches %s: %d stitches in %d rows, %d points' % (o.name, count, len(rows), len(V)))
+    return st
+
+
+def _on_boot(o, V, faces, name, material, rig):
+    """V, faces as their own object on the boot o's bones: each point follows the leather nearest it."""
+    me = bpy.data.meshes.new(name)
     me.from_pydata(V.tolist(), [], faces)
     me.validate()
     for p in me.polygons:
@@ -328,7 +341,7 @@ def stitches(o, pieces, rig=None, material=None, name=None, log=print):
     Wk = W[near]
     for gi, g0 in enumerate(o.vertex_groups):
         w = Wk[:, gi]
-        if (w > 1e-4).any():
+        if g0.name != 'skive' and (w > 1e-4).any():
             g = st.vertex_groups.new(name=g0.name)
             for val in np.unique(np.round(w[w > 1e-4], 3)):
                 g.add([int(i) for i in np.nonzero(np.abs(np.round(w, 3) - val) < 1e-6)[0]], float(val), 'REPLACE')
@@ -338,5 +351,73 @@ def stitches(o, pieces, rig=None, material=None, name=None, log=print):
         m.object = rig
         if src is not None:
             m.use_deform_preserve_volume = src.use_deform_preserve_volume
-    log('boot stitches %s: %d stitches in %d rows, %d points' % (o.name, count, len(rows), len(V)))
     return st
+
+
+def _tube(path, rad, sides=6, ring=False):
+    """A round tube along path [m, 3], rad across, its ends closed (or, ring, the path a closed loop with its last
+    point its first). Returns (points, faces)."""
+    t = np.gradient(path, axis=0)
+    t /= np.maximum(np.linalg.norm(t, axis=1, keepdims=True), 1e-9)
+    ref = np.where(np.abs(t[:, 2:3]) < 0.9, [[0.0, 0.0, 1.0]], [[1.0, 0.0, 0.0]])
+    u = np.cross(t, ref)
+    u /= np.maximum(np.linalg.norm(u, axis=1, keepdims=True), 1e-9)
+    w = np.cross(t, u)
+    ang = np.linspace(0, 2 * np.pi, sides, endpoint=False)
+    V = (path[:, None, :] + rad * (np.cos(ang)[None, :, None] * u[:, None, :] + np.sin(ang)[None, :, None] * w[:, None, :]))
+    V = np.concatenate([V.reshape(-1, 3), path[:1], path[-1:]])
+    m = len(path)
+    F = [[k * sides + i, k * sides + (i + 1) % sides, (k + 1) * sides + (i + 1) % sides, (k + 1) * sides + i]
+         for k in range(m - 1) for i in range(sides)]
+    if ring:
+        return V[:-2], F
+    c0, c1 = m * sides, m * sides + 1
+    F += [[c0, (i + 1) % sides, i] for i in range(sides)]
+    F += [[c1, (m - 1) * sides + i, (m - 1) * sides + (i + 1) % sides] for i in range(sides)]
+    return V, F
+
+
+def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=print):
+    """The front's eyelets (a brass ring set through each panel at each of its eyelet points) and the lace crossing
+    between them over the tongue, as two objects on the boot's bones. Returns (eyelets, lace)."""
+    import last
+    r = {k: v * H for k, v in (ratios or last.RATIOS).items()}
+    X, Nv = _co(o), _normals(o)
+    tl = o.modifiers['thickness'].thickness if 'thickness' in o.modifiers else 0.0
+    by = {p['name']: p for p in pieces}
+    rows = {}
+    for q in ('inner', 'outer'):
+        p = by[q + ' shaft']
+        g = p['start'] + p['eyelets']
+        rows[q] = (X[g] + Nv[g] * tl, Nv[g])
+    # the eyelets: rings lying on the leather, a tube round the hole
+    R, tube = r['eyelet'], 0.32 * r['eyelet']
+    ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+    EV, EF = [], []
+    for P, N in rows.values():
+        for c, nrm in zip(P, N):
+            u = np.cross(nrm, [0.0, 0.0, 1.0])
+            u /= max(np.linalg.norm(u), 1e-9)
+            path = c[None, :] + (R - tube) * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * np.cross(nrm, u))
+            path = np.concatenate([path, path[:1]]) + nrm * 0.4 * tube
+            v, f = _tube(path, tube, 8, ring=True)
+            EF += [[i + len(EV) for i in ff] for ff in f]
+            EV += list(v)
+    eyelets = _on_boot(o, np.array(EV), EF, o.name.replace('Boot', 'Boot eyelets'), metal, rig)
+    # the lace: from each eyelet across the opening to the next one up on the other side, criss-cross, lying over
+    # the tongue between them
+    (Pi, Ni), (Po, No) = rows['inner'], rows['outer']
+    LV, LF = [], []
+    n = min(len(Pi), len(Po))
+    for k in range(n - 1):
+        for (A, NA), (B, NB) in (((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])), ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1]))):
+            s = np.linspace(0.0, 1.0, 9)[:, None]
+            up = 0.5 * (NA + NB)
+            mid = 0.5 * (A + B) + up * (r['lace'] * 2.0)
+            path = (1 - s) ** 2 * (A + NA * r['lace']) + 2 * s * (1 - s) * mid + s ** 2 * (B + NB * r['lace'])
+            v, f = _tube(path, r['lace'])
+            LF += [[i + len(LV) for i in ff] for ff in f]
+            LV += list(v)
+    lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
+    log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
+    return eyelets, lace

@@ -21,10 +21,14 @@ leather is worked over, and then the pieces are cut from it:
                the vamp      the instep, from the toe cap back to the side seams.
                two quarters  the inner and the outer, round the heel from the side seams to the heel's back seam;
                              their front edges lap over the vamp, and the outer laps over the inner at the back.
-               the shaft     one sheet wrapped round the leg from the ankle seam to the top. Its two edges meet
-                             down the back of the leg, one lapped over the other (the back seam), and its lower
-                             edge laps over the vamp and the quarters (the ankle seam).
-               the binding   a strip round the top edge.
+               the shaft     two long panels, the inner and the outer, each from the back of the leg round to the
+                             front, from the ankle seam to the top, cut to the calf. The outer laps over the inner
+                             down the back (the back seam), their lower edges lap over the vamp and the quarters (the
+                             ankle seam), and at the front they stop short of each other by the lacing's opening
+                             (lace_gap). Laced, the shaft does not have to pass the heel closed, so it can follow the
+                             calf and close in at the ankle.
+               the tongue    a long strip under the opening, its sides sewn under the panels.
+               the bindings  a strip along each panel's top edge.
                the sole      a slab under the foot, wider than the upper all round by the welt.
 
 Each piece is its own sheet with its own cut edges and its own thickness; a piece that laps over another lies on
@@ -35,7 +39,8 @@ them, stitch_in in from the edge), and the welt carries the row that holds the u
 The pieces are kept as they were cut (PIECES, for each side: every piece's points on the last, its faces, and its
 seam edges by letter, each edge paired with the edge of the same letter on the piece it is sewn to), so pattern.py
 can lay them flat. The seams: A the vamp to each quarter, B the quarters' back seam, C the ankle seam, D the
-shaft's back seam, E the upper to the sole, F the binding to the top, G the toe cap to the vamp.
+shaft's back seam, E the upper to the sole, F the binding to the top, G the toe cap to the vamp, H the tongue under
+the panels; L is each panel's front edge, the lacing's, with its eyelets (each panel's 'eyelets').
 
 The figure stands on the sole: its under face is M['boot_floor']."""
 import os
@@ -56,9 +61,9 @@ import fit  # noqa: E402     (the vest's cutter and hull)
 # Every size as a share of the head's height H (but the plain ratios, PLAIN).
 RATIOS = {
     'leather': 0.014,        # the leather's thickness (about 3.5 mm)
-    'ease': 0.045,           # the shaft's room over the leg's taut section (a finger's width all round)
-    'slope': 0.09,           # the most the shaft closes in on the leg for each unit it goes down
-    'ankle_girth': 1.30,     # the shaft's least girth, as a multiple of the ankle's (the heel goes in through it)
+    'ease': 0.035,           # the shaft's room over the leg's taut section (a finger's width all round)
+    'slope': 0.20,           # the most the shaft closes in on the leg for each unit it goes down
+    'ankle_girth': 1.05,     # the shaft's least girth, as a multiple of the ankle's (laced: the heel goes in open)
     'flare': 0.025,          # the top's flare
     'flare_span': 0.30,
     'room': 0.022,           # the foot's room over the hose
@@ -77,6 +82,13 @@ RATIOS = {
     'sole': 0.035,           # the sole's thickness (two layers of sole leather, about 9 mm)
     'welt': 0.022,           # how far the sole stands out past the upper
     'stitch_in': 0.012,      # the stitches' row, this far in from the edge
+    'lace_gap': 0.030,       # the lacing's opening down the front, between the panels' front edges (about 1.2 cm)
+    'tongue': 0.050,         # how far the tongue reaches under each panel past its front edge
+    'eyelet_in': 0.016,      # the eyelets' row, this far in from the front edge
+    'eyelet_pitch': 0.085,   # and this far apart up it (about 2.2 cm)
+    'eyelet_first': 0.045,   # the lowest, this far over the ankle seam
+    'eyelet': 0.0105,        # an eyelet's outer radius (its ring about 5 mm across)
+    'lace': 0.0028,          # the lace's radius (a round cord about 1.4 mm across)
 }
 PLAIN = ('slope', 'ankle_girth', 'toe_long', 'vamp_back', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
@@ -184,6 +196,58 @@ def _sheet(T, z0, z1, a0, turn, sgn, lift):
             q = [j * nc + i, j * nc + i + 1, (j + 1) * nc + i + 1, (j + 1) * nc + i]
             faces.append(q if sgn > 0 else q[::-1])                          # (the grain side out)
     return X, faces, zz, tt, rm
+
+
+def _panel(T, z0, z1, a0, dirn, reach, lift):
+    """A long panel of leather on the shaft: from height z0 to z1, from the direction a0 round (dirn, +1 or -1, which
+    way) by reach(z) radians at each height, lifted off the last by lift(z, t). Returns (points, faces, z, t)."""
+    nr = max(2, int(round((z1 - z0) / GRAIN)) + 1)
+    z = np.linspace(z0, z1, nr)
+    span = reach(z)
+    _, rad = _at(T, z, np.full(nr, a0))
+    nc = max(2, int(round(float((span * rad).max()) / GRAIN)) + 1)
+    f = np.linspace(0.0, 1.0, nc)
+    zz = np.repeat(z, nc)
+    tt = (span[:, None] * f[None, :]).ravel()
+    a = a0 + dirn * tt
+    c, rad = _at(T, zz, a)
+    rad = rad + lift(zz, tt)
+    X = np.stack([c[:, 0] + np.sin(a) * rad, c[:, 1] - np.cos(a) * rad, zz], 1)
+    faces = []
+    for j in range(nr - 1):
+        for i in range(nc - 1):
+            q = [j * nc + i, j * nc + i + 1, (j + 1) * nc + i + 1, (j + 1) * nc + i]
+            faces.append(q if dirn > 0 else q[::-1])                         # (the grain side out)
+    return X, faces, zz, tt
+
+
+def _strip(T, z0, z1, half, lift):
+    """A strip down the front of the shaft, half wide either side of it (round the last, in units), lifted by
+    lift(z, u), u the distance round from the front. Returns (points, faces, z, u)."""
+    nr = max(2, int(round((z1 - z0) / GRAIN)) + 1)
+    nc = max(3, int(round(2 * half / GRAIN)) + 1)
+    z = np.linspace(z0, z1, nr)
+    zz = np.repeat(z, nc)
+    uu = np.tile(np.linspace(-half, half, nc), nr)
+    _, r0 = _at(T, zz, np.zeros(len(zz)))
+    a = uu / r0
+    c, rad = _at(T, zz, a)
+    rad = rad + lift(zz, uu)
+    X = np.stack([c[:, 0] + np.sin(a) * rad, c[:, 1] - np.cos(a) * rad, zz], 1)
+    faces = [[j * nc + i, j * nc + i + 1, (j + 1) * nc + i + 1, (j + 1) * nc + i]
+             for j in range(nr - 1) for i in range(nc - 1)]
+    return X, faces, zz, uu
+
+
+def _eyelet_line(G, zz, df, r, z_low, z_top):
+    """Where a panel's eyelets go: a row eyelet_in in from its front edge, eyelet_pitch apart, from just over the
+    ankle seam to just under the top. Returns the indices of the panel's points nearest each."""
+    hs = np.arange(z_low + r['eyelet_first'], z_top - 0.6 * r['eyelet_pitch'], r['eyelet_pitch'])
+    out = []
+    for h in hs:
+        k = np.abs(zz - h) * 4.0 + np.abs(df - r['eyelet_in'])
+        out.append(int(np.argmin(k)))
+    return np.array(out, dtype=np.int64)
 
 
 def _weights(Pskin, Wskin, X, k=4):
@@ -445,12 +509,13 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                                edges=foot_edges(
                 Dq, **{'A ' + q: np.abs(d_front) < NEAR, 'B': np.abs(cut(Dq)) < NEAR})))
         n_foot = sum(len(v) for v in V)
-        # the shaft: one sheet from the ankle seam (lapped over the foot's pieces) to the top, its edges meeting down
-        # the back of the leg, the last of it lapped over the first
-        a0 = -sgn * np.pi
+        # the shaft: two long panels, the inner and the outer, each from the back of the leg round to the front, from
+        # the ankle seam (lapped over the foot's pieces) to the top. The outer laps over the inner down the back (the
+        # back seam); at the front they stop short of each other by the lacing's opening, and a tongue lies under it.
+        a0 = -sgn * np.pi                                  # (the back; the front is direction 0, and sgn turns inward)
         _, rad0 = _at(T, np.array([0.5 * (z_low + z_top)]), np.array([a0]))
         over = r['lap'] / float(rad0[0])
-        turn = 2 * np.pi + over
+        zb = z_top - r['binding']
 
         # what lies under the shaft's lap, each way round: how far the foot's pieces stand out past the last's shaft
         # at their top edge (their grain side, a thickness out), spread a little round so the shaft eases over a
@@ -466,29 +531,61 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             d = Q[:, :2] - cq
             aq = np.arctan2(d[:, 0], -d[:, 1])
             _, rq = _at(T, Q[:, 2], aq)
-            tq = np.mod((aq - a0) * sgn, 2 * np.pi)
-            np.maximum.at(under, (tq / (2 * np.pi) * nb).astype(int) % nb, np.linalg.norm(d, axis=1) + tl - rq)
+            np.maximum.at(under, (np.mod(aq + np.pi, 2 * np.pi) / (2 * np.pi) * nb).astype(int) % nb,
+                          np.linalg.norm(d, axis=1) + tl - rq)
         for _ in range(3):
             under = np.maximum(under, np.maximum(np.roll(under, 1), np.roll(under, -1)))
         under = np.convolve(np.concatenate([under[-4:], under, under[:4]]), np.ones(5) / 5.0, 'same')[4:-4]
 
-        def lift_shaft(zz, tt):
-            sit = np.interp(np.mod(tt, 2 * np.pi), (np.arange(nb) + 0.5) * 2 * np.pi / nb, under, period=2 * np.pi)
-            return ((sit + 0.1 * tl) * _ss(z_seam + 8.0 * r['lap'], z_seam, zz)  # (a thickness over what is beneath)
-                    + 1.1 * tl * _ss(turn - 6.0 * over, turn - over, tt))     # (and over its own first edge)
-        G, gf, zz, tt, rm = _sheet(T, z_low, z_top, a0, turn, sgn, lift_shaft)
-        d_side, d_low = rm * (turn - tt), zz - z_low
-        add(G, gf, np.minimum(d_side, d_low), np.where(d_side < d_low, zz, rm * tt), _weights(Pl, Wl, G))
-        pieces.append(dict(name='shaft', V=G, F=gf, up=(0, 0, 1), lift=lift_shaft(zz, tt), t=tt / turn, edges={
-            'C': zz < z_low + 1e-6, 'D': (tt < 1e-6) | (tt > turn - 1e-6), 'F': zz > z_top - 1e-6}))
-        # the binding: a strip round the top edge, over the shaft, stitched along its lower edge
-        zb = z_top - r['binding']
-        def lift_binding(zz, tt):
-            return 1.15 * tl + 1.1 * tl * _ss(turn - 6.0 * over, turn - over, tt)
-        G, gf, zz, tt, rm = _sheet(T, zb, z_top + 0.3 * tl, a0 + sgn * 0.5 * over, turn, sgn, lift_binding)
-        add(G, gf, zz - zb, rm * tt, _weights(Pl, Wl, G))
-        pieces.append(dict(name='binding', V=G, F=gf, up=(0, 0, 1), lift=lift_binding(zz, tt), t=tt / turn,
-                           edges={'F': zz < zb + 1e-6, 'top': zz > z_top + 0.29 * tl}))
+        def seat(zz, a):                                   # (a thickness over the foot's pieces, eased off above)
+            sit = np.interp(np.mod(a + np.pi, 2 * np.pi), (np.arange(nb) + 0.5) * 2 * np.pi / nb, under,
+                            period=2 * np.pi)
+            return (sit + 0.1 * tl) * _ss(z_seam + 8.0 * r['lap'], z_seam, zz)
+
+        def front_r(zz):                                   # (the last's radius at the front, at each height)
+            return _at(T, np.asarray(zz, dtype=float), np.zeros(np.size(zz)))[1]
+
+        def reach(zz, back):                               # (how far round a panel turns from its start, at each height)
+            return np.pi + back - 0.5 * r['lace_gap'] / front_r(zz)
+
+        def d_front(zz, tt, back):                         # (the distance in from the panel's front edge, round it)
+            return (reach(zz, back) - tt) * front_r(zz)
+        tongue_w = 0.5 * r['lace_gap'] + r['tongue']       # (the tongue's half width, round the front)
+
+        for q, dirn, back in (('inner', sgn, 0.0), ('outer', -sgn, over)):
+            start = a0 - dirn * back                       # (the outer starts past the back line, over the inner)
+
+            def lift_panel(zz, tt, dirn=dirn, back=back, start=start):
+                lp = seat(zz, start + dirn * tt)
+                lp = lp + 1.1 * tl * _ss(r['tongue'] + 3.0 * r['lap'], r['tongue'], d_front(zz, tt, back))  # (over the tongue)
+                if back:                                   # (over the inner panel's back edge, and its binding)
+                    lp = lp + 1.1 * tl * _ss(6.0 * over, over, tt) * (1.0 + _ss(zb - 2.0 * r['lap'], zb, zz))
+                return lp
+            G, gf, zz, tt = _panel(T, z_low, z_top, start, dirn, lambda z, back=back: reach(z, back), lift_panel)
+            rf = front_r(zz)
+            df = d_front(zz, tt, back)
+            d_back = tt * rf if back else np.full(len(G), FAR)
+            d_low = zz - z_low
+            sd = np.minimum(np.minimum(d_back, d_low), FAR)
+            add(G, gf, sd, np.where(d_back < d_low, zz, rf * tt), _weights(Pl, Wl, G))
+            pieces.append(dict(name=q + ' shaft', V=G, F=gf, up=(0, 0, 1), lift=lift_panel(zz, tt), edges={
+                'C': zz < z_low + 1e-6, 'D': tt < 1e-6, 'L': df < 1e-6, 'F': zz > z_top - 1e-6,
+                'H': np.abs(df - r['tongue']) < 0.5 * GRAIN}, eyelets=_eyelet_line(G, zz, df, r, z_low, z_top)))
+            # its binding: a strip along the top edge, over the panel, stitched along its lower edge
+            def lift_binding(zz, tt, lift_panel=lift_panel):
+                return lift_panel(np.full_like(zz, z_top), tt) + 1.15 * tl
+            G, gf, zz, tt = _panel(T, zb, z_top + 0.3 * tl, start, dirn, lambda z, back=back: reach(z, back) + 0.0,
+                                   lift_binding)
+            add(G, gf, zz - zb, front_r(zz) * tt, _weights(Pl, Wl, G))
+            pieces.append(dict(name=q + ' binding', V=G, F=gf, up=(0, 0, 1), lift=lift_binding(zz, tt),
+                               edges={'F': zz < zb + 1e-6, 'top': zz > z_top + 0.29 * tl}))
+        # the tongue: a long strip under the opening, from the vamp to the top, its sides sewn under the panels
+        def lift_tongue(zz, u):
+            return seat(zz, u / front_r(zz))
+        G, gf, zz, uu = _strip(T, z_low, z_top + 0.3 * tl, tongue_w, lift_tongue)
+        add(G, gf, np.full(len(G), FAR), np.zeros(len(G)), _weights(Pl, Wl, G))
+        pieces.append(dict(name='tongue', V=G, F=gf, up=(0, 0, 1), lift=lift_tongue(zz, uu), edges={
+            'C': zz < z_low + 1e-6, 'H': np.abs(np.abs(uu) - tongue_w) < 1e-6}))
         k0 = 0
         for p in pieces:
             p['start'] = k0
