@@ -54,6 +54,10 @@ SKIRT_OVER = tuple(x for x in os.environ.get('HABIT_UNDER', 'Corset,Petticoat').
 # 121621), and together the skirt read as a brighter blue than the bodice above it. They are dyed alike here (the
 # bodice's: the darkest navy, picked on its swatch bench); HABIT_DYE=rrggbb for another.
 DYE = int(os.environ.get('HABIT_DYE', '121621'), 16)
+# The skirt's stitches were 6.8 mm long with 3 mm gaps, twice the sleeves' (3 mm), and so far apart that from a distance
+# they read as black lines; set here to the sleeves' spacing (units are 2.62 cm: 0.115 = 3 mm), on the skirt's own
+# sewing module: {(piece, module): {NAME: value}}.
+OVERRIDES = {('skirt', 'sew'): {'STITCH': 0.115, 'GAP': 0.046, 'THREAD': 0.022}}
 SHARED = ('sorceress_pendant', 'shared', 'base')
 PIECE_DIRS = tuple(os.path.join(ROOT, p) + os.sep for p in {d for _, _, ds in ORDER for d in ds} | {'corset', 'gown'})
 
@@ -93,6 +97,10 @@ class Piece:
                 self._fit_over_layers()
             for k, v in SETTINGS.get(self.name, {}).items():
                 setattr(self.mod, k, v)
+            for (piece, modname), vals in OVERRIDES.items():
+                if piece == self.name and modname in sys.modules:
+                    for k, v in vals.items():
+                        setattr(sys.modules[modname], k, v)
             return self.mod.build()
         finally:
             self.owned = _strip()
