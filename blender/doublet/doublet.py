@@ -50,6 +50,21 @@ FUSTIAN = dict(colour=tuple(c ** 2.2 for c in _rgb(DYE)), streak=0.10, yarn=0.6,
                sheen=0.25, relief=0.6, pitch=chemise.PITCH * 70.0 / 42.0)
 
 
+def wear(body, heads, bare=BARE):
+    """The doublet (and, unless bare, the chemise under it) on a body already built. Returns the doublet, the
+    measures, and the height of the lowest hem."""
+    o, m, covered = cut.build_doublet(body, heads, rig=bpy.data.objects.get('Rig'), cloth=female.mat(M_CLOTH),
+                                      thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET))
+    MEASURES.update(m)
+    chemise.linen_closeup('doublet fustian', FUSTIAN)
+    lo = m['z_hem']
+    if not bare:
+        # (the shirt has half the doublet's ease to lie in: the rest is the doublet's own lining and the lacing's pull)
+        _, d = chemise.dress(body, m, under=dict(covered=covered, gap=0.5 * cut.RATIOS['ease'] * m['w'], garment=o))
+        lo = min(lo, d.z_hem_worn)
+    return o, m, lo
+
+
 def build():
     res = SP.build()
     body = bpy.data.objects['Skin body']
@@ -60,15 +75,7 @@ def build():
             o.hide_render = True
             o.visible_camera = o.visible_shadow = o.visible_diffuse = o.visible_glossy = False
     bpy.context.view_layer.update()
-    o, m, covered = cut.build_doublet(body, heads, rig=bpy.data.objects.get('Rig'), cloth=female.mat(M_CLOTH),
-                             thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET))
-    MEASURES.update(m)
-    chemise.linen_closeup('doublet fustian', FUSTIAN)
-    lo = m['z_hem']
-    if not BARE:
-        # (the shirt has half the doublet's ease to lie in: the rest is the doublet's own lining and the lacing's pull)
-        _, d = chemise.dress(body, m, under=dict(covered=covered, gap=0.5 * cut.RATIOS['ease'] * m['w'], garment=o))
-        lo = min(lo, d.z_hem_worn)
+    o, m, lo = wear(body, heads)
     # the --head view on the garments: from under the lowest hem to the chin
     lo, hi = lo - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))

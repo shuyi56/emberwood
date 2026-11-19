@@ -213,6 +213,28 @@ def scye(P, aw, M, ratios=RATIOS):
     return x_at, z_b
 
 
+def rest_tree(objs):
+    """A BVH tree of objects as they are in the rest shape (their armatures off, their other modifiers on): what a
+    garment worn over them is fitted to. Also returns the points and triangles."""
+    off = [m for o in objs for m in o.modifiers if m.type == 'ARMATURE' and m.show_viewport]
+    for m in off:
+        m.show_viewport = False
+    dg = bpy.context.evaluated_depsgraph_get()
+    pts, tris = [], []
+    for o in objs:
+        e = o.evaluated_get(dg)
+        me = e.to_mesh()
+        me.calc_loop_triangles()
+        base = len(pts)
+        pts += [o.matrix_world @ v.co for v in me.vertices]
+        tris += [tuple(base + i for i in t.vertices) for t in me.loop_triangles]
+        e.to_mesh_clear()
+    for m in off:
+        m.show_viewport = True
+    bpy.context.view_layer.update()
+    return BVHTree.FromPolygons(pts, tris), pts, tris
+
+
 def _hull(pts):
     """The convex hull of 2D points, counter-clockwise (monotone chain)."""
     pts = sorted(map(tuple, pts))
@@ -246,10 +268,12 @@ def _taut(r, sn, cs):
     return np.where(out > 0, out, r)
 
 
-def whole_piece(P, T, aw, M, head_bvh=None, ratios=RATIOS, log=print):
+def whole_piece(P, T, aw, M, head_bvh=None, ratios=RATIOS, log=print, over=None):
     """Step 1: the uncut shell, a grid of points [row, column]: rows from below the hem up the body to the neckline
     and on up the collar's stand, columns round from the front (-Y) toward the figure's right (-X).
-    Returns the grid, the row the neckline is at, and the collar's top edge (a height for each column)."""
+    Returns the grid, the row the neckline is at, and the collar's top edge (a height for each column).
+    over: what is worn under this garment (a BVH tree of it, in the body's rest shape): the piece is wrapped round
+    the body and that together, as a tailor measures over the clothes a coat is to go on."""
     w, yc = M['w'], M['yc']
     ease = ratios['ease'] * w
     phi = 2 * math.pi * np.arange(COLS) / COLS
@@ -278,6 +302,11 @@ def whole_piece(P, T, aw, M, head_bvh=None, ratios=RATIOS, log=print):
             if r > lim and bc is not None and z > M['z_pit_arm']:
                 hit = bc.ray_cast(o, d)[0]
                 r = (hit - o).length if hit is not None else 1e9
+            if over is not None:
+                # (the outermost of what is worn under: looked for from outside, coming in)
+                hit = over.ray_cast(o + d * 60.0, -d, 60.0)[0]
+                if hit is not None:
+                    r = max(r, (hit - o).length)
             R[i, j] = min(r, lim)
     if not np.isfinite(R).all() or R.max() > 1e8:
         raise RuntimeError('vest: the neck axis is not inside the body at every height')
@@ -448,7 +477,7 @@ def trim(V, faces, f, snap=0.012):
 
 
 def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=RATIOS, log=print, steps=None,
-               brass=None):
+               brass=None, over=None):
     """Measure the body, make the whole piece, cut it, and hand it to the body's bones. Returns (object, measures).
     steps, if a list, is filled with (name, points, faces) after the whole piece and after each cut."""
     P, T, aw = body_arrays(body)
@@ -464,7 +493,7 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
         hb = BVHTree.FromPolygons(pts, tris)
     M = measure(P, aw, hp, ratios)
     log('vest measures: ' + ', '.join('%s %s' % (k, ('%.2f' % v) if isinstance(v, float) else v) for k, v in M.items()))
-    G, neck_row, z_top, body_r, zs = whole_piece(P, T, aw, M, hb, ratios, log)
+    G, neck_row, z_top, body_r, zs = whole_piece(P, T, aw, M, hb, ratios, log, over=over)
     rows, cols = G.shape[:2]
     V = G.reshape(-1, 3)
     idx = np.arange(rows * cols).reshape(rows, cols)
