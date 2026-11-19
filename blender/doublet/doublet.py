@@ -18,6 +18,8 @@ for d in ('vest', 'chemise', 'sorceress_pendant', 'shared', 'base'):
 os.environ.setdefault('HEAD_GLB', '')
 os.environ.setdefault('NO_DRESS', '1')
 os.environ.setdefault('NO_ACC', '1')
+# (the chemise's settled shape is kept here and used again: see drape.build_chemise)
+os.environ.setdefault('CHEMISE_CACHE', os.path.join(HERE, '..', 'chemise', 'kept', 'under-doublet.npz'))
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 import female  # noqa: E402

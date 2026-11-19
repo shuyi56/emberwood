@@ -30,13 +30,15 @@ import fit  # noqa: E402
 
 RATIOS = dict(
     fit.RATIOS,
-    ease=0.16,               # the gap between body and doublet, in w: room for the shirt
+    ease=0.30,               # the gap between body and doublet, in w: room for the shirt, and a padded coat is
+                             # not worn tight (at 0.16 it sat like a corset)
     thickness=0.06,          # the cloth's own thickness (shell and lining), in w
-    pad=0.085,               # the padding's depth at a channel's crown, in w
+    pad=0.13,                # the padding's depth at a channel's crown, in w
     channel=0.46,            # a channel's width at the bust, in w (about 2.4 cm)
     collar_top=0.50,         # a low stand: this share of the neck's length above the pit of the neck
     collar_rise=0.08,
     collar_gap=0.20,
+    collar_pad=0.35,         # the collar's padding, as a share of the body's
     collar_rows=3,           # the rows of stitching round the collar
     v_point=1.0,             # the collar stands open from the pit of the neck up
     v_top=0.34,              # by this much each side at its top edge, in w
@@ -44,8 +46,12 @@ RATIOS = dict(
     corner=0.12,
     hem_drop=2.1,            # the skirt's hem below the waist, in w
     hem_point=0.0,           # (level all round)
+    span=0.60,               # how much of the waist's hollow the padded cloth spans instead of following:
+                             # this share of the bust's half-width over the waist's
+    lay=0.16,                # the shoulder's end lies down onto the shoulder by this much, in w, so the
+                             # looser coat does not stand out over the arm as a wing
     flare=0.22,              # how far the skirt stands out at the hem beyond the hips, in w
-    shoulder=0.90,           # the shoulder ends on the shoulder's flat top, short of where it rolls into the arm
+    shoulder=0.86,           # the shoulder ends on the shoulder's flat top, short of where it rolls into the arm
     scye_drop=0.38,          # a deep armhole: the arm must lift a sword
     border=0.30,             # the flat bound border along every edge, in w
     bind=0.030,              # how far the binding stands proud, in w
@@ -77,6 +83,8 @@ def quilting(M, lines, n, z_top, ratios):
     z_hem = M['z_waist'] - ratios['hem_drop'] * w
     row = (float(z_top.mean()) - float(neck(np.array([math.pi / 2]))[0])) / ratios['collar_rows']
 
+    arm = dict(lines)['armholes']
+
     def raised(p):
         ang = np.arctan2(-p[:, 0], -(p[:, 1] - yc))
         edge = np.min([f(p) for _, f in lines], axis=0)
@@ -84,12 +92,16 @@ def quilting(M, lines, n, z_top, ratios):
         pillow = np.sin(math.pi * ((ang * n / (2 * math.pi)) % 1.0)) ** 0.55
         rows = np.abs(np.sin(math.pi * above / max(row, 1e-6))) ** 0.55
         on_collar = fit._ss(-0.05 * w, 0.12 * w, above)
-        pad = pillow * (1.0 - on_collar) + rows * on_collar
-        seams = fit._ss(0.0, ratios['seam'] * w, np.abs(p[:, 2] - M['z_waist'])) * fit._ss(0.0, ratios['seam'] * w, np.abs(above))
+        # (the collar is thinly padded: a full pillow there crowds the hollow where the stand rises off the shoulder)
+        pad = pillow * (1.0 - on_collar) + ratios['collar_pad'] * rows * on_collar
+        seams = fit._ss(0.0, ratios['seam'] * w, np.abs(p[:, 2] - M['z_waist'])) * fit._ss(0.0, 2.5 * ratios['seam'] * w, np.abs(above))
         inside = fit._ss(0.5 * ratios['border'] * w, ratios['border'] * w, edge)
         bind = ratios['bind'] * w * np.exp(-((edge - 0.2 * ratios['border'] * w) / (0.22 * ratios['border'] * w)) ** 2)
+        # (a padded coat hangs from the chest and the hips and bridges the waist between them: it is not cinched)
+        span = ratios['span'] * max(M['bust_half'] - M['waist_half'], 0.0) * np.exp(-((p[:, 2] - M['z_waist']) / (1.3 * w)) ** 2)
+        lay = ratios['lay'] * w * np.exp(-(np.clip(arm(p), 0.0, None) / (0.7 * w)) ** 2) * fit._ss(M['z_pit_arm'], M['z_sh'], p[:, 2])
         skirt = ratios['flare'] * w * np.clip((M['z_waist'] - p[:, 2]) / (M['z_waist'] - z_hem), 0.0, 1.0) ** 1.5
-        return ratios['pad'] * w * pad * seams * inside + bind + skirt
+        return ratios['pad'] * w * pad * seams * inside + bind + skirt + span - lay
     return raised
 
 

@@ -491,40 +491,67 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
         m.object = rig
         m.use_deform_preserve_volume = True
         if settle:
-            # the fullness: all the cloth let out but a band at the neckline, which stays as drafted (the cloth is
-            # gathered into it), and a band at each sleeve's end, drawn in (a gathered cuff)
-            def near(pick, a_, b_):
-                E = V[edge[pick]]
-                d_ = np.concatenate([np.linalg.norm(V[i:i + 2000, None, :] - E[None, :, :], axis=2).min(1)
-                                     for i in range(0, len(V), 2000)])
-                return 1.0 - fit._ss(a_, b_, d_)
-            band = ratios['band'] * w
-            at_neck = near((share[edge] < 0.5) & (V[edge, 2] > M['z_bust']), 0.4 * band, 2.5 * band)
-            at_cuff = near((share[edge] >= 0.5) & (V[edge, 2] < D.z_cuff + 1.5 * VOXEL), 0.7 * band, 2.5 * band)
-            full = ratios['full'] * (1.0 - at_neck) * (1.0 - at_cuff) - ratios['cuff_in'] * at_cuff
-            solver.settle(o, rig, [body, *colliders], full=full, log=log)
-            if under is not None:
-                # tucked: where the outer garment covers the body's cloth, the cloth is pressed into the room under
-                # it (its folds flattened against the skin, as a shirt's are under a laced doublet), held there, and
-                # the rest let go again with the garment itself to fall against
-                now = np.array([v.co[:] for v in me.vertices])
-                # (held right out to the garment's edge and let go over a short way beyond it: cloth half held under
-                # the edge is caught between the garment and the body and torn about)
-                held = (1.0 - share) * fit._ss(-0.3 * w, 0.0, under['covered'](now))
-                moved = 0
-                for i in np.nonzero(held > 0)[0]:
-                    p = Vector(now[i])
-                    loc, nrm, _, dist = trees[0].find_nearest(p)
-                    d = dist if (p - loc).dot(nrm) >= 0 else -dist
-                    if d > under['gap']:
-                        now[i] = p + (loc + nrm * under['gap'] - p) * float(held[i])
-                        moved += 1
-                me.vertices.foreach_set('co', now.reshape(-1))
+            # The settled shape is kept (CHEMISE_CACHE, a file) and used again without the solver. With a garment
+            # over it the kept shape is always used if there is one: a layer is added over the cloth as it already
+            # hangs, and looked at, before any time is spent settling the two together (CHEMISE_SETTLE=1 does that).
+            cache = os.environ.get('CHEMISE_CACHE')
+            kept = None
+            if cache and os.path.exists(cache) and os.environ.get('CHEMISE_SETTLE') is None:
+                kept = np.load(cache)
+                if len(kept['co']) != len(me.vertices):
+                    log('chemise: the kept shape is of another draft (%d points, this one %d): settling' % (len(kept['co']), len(me.vertices)))
+                    kept = None
+            if kept is not None:
+                me.vertices.foreach_set('co', kept['co'].astype(float).reshape(-1))
+                me.attributes['rest'].data.foreach_set('vector', kept['co'].astype(float).reshape(-1))
+                if 'held' in kept:
+                    me.attributes.new('held', 'FLOAT', 'POINT').data.foreach_set('value', kept['held'].astype(np.float32))
                 me.update()
-                # (kept on the mesh: base/spots.py checks that every held point is still under the garment)
-                me.attributes.new('held', 'FLOAT', 'POINT').data.foreach_set('value', held.astype(np.float32))
-                log('chemise: %d points held under the %s, %d of them pressed in' % (int((held > 0).sum()), under['garment'].name, moved))
-                solver.settle(o, rig, [body, *colliders, under['garment']], pinned=held, P=dict(solver.LINEN, frames=60), log=log)
+                log('chemise: the kept settled shape used, the solver not run (%s)' % cache)
+            else:
+                # the fullness: all the cloth let out but a band at the neckline, which stays as drafted (the cloth is
+                # gathered into it), and a band at each sleeve's end, drawn in (a gathered cuff)
+                def near(pick, a_, b_):
+                    E = V[edge[pick]]
+                    d_ = np.concatenate([np.linalg.norm(V[i:i + 2000, None, :] - E[None, :, :], axis=2).min(1)
+                                         for i in range(0, len(V), 2000)])
+                    return 1.0 - fit._ss(a_, b_, d_)
+                band = ratios['band'] * w
+                at_neck = near((share[edge] < 0.5) & (V[edge, 2] > M['z_bust']), 0.4 * band, 2.5 * band)
+                at_cuff = near((share[edge] >= 0.5) & (V[edge, 2] < D.z_cuff + 1.5 * VOXEL), 0.7 * band, 2.5 * band)
+                full = ratios['full'] * (1.0 - at_neck) * (1.0 - at_cuff) - ratios['cuff_in'] * at_cuff
+                solver.settle(o, rig, [body, *colliders], full=full, log=log)
+                if under is not None:
+                    # tucked: where the outer garment covers the body's cloth, the cloth is pressed into the room under
+                    # it (its folds flattened against the skin, as a shirt's are under a laced doublet), held there, and
+                    # the rest let go again with the garment itself to fall against
+                    now = np.array([v.co[:] for v in me.vertices])
+                    # (held right out to the garment's edge and let go over a short way beyond it: cloth half held under
+                    # the edge is caught between the garment and the body and torn about)
+                    held = (1.0 - share) * fit._ss(-0.3 * w, 0.0, under['covered'](now))
+                    moved = 0
+                    for i in np.nonzero(held > 0)[0]:
+                        p = Vector(now[i])
+                        loc, nrm, _, dist = trees[0].find_nearest(p)
+                        d = dist if (p - loc).dot(nrm) >= 0 else -dist
+                        if d > under['gap']:
+                            now[i] = p + (loc + nrm * under['gap'] - p) * float(held[i])
+                            moved += 1
+                    me.vertices.foreach_set('co', now.reshape(-1))
+                    me.update()
+                    # (kept on the mesh: base/spots.py checks that every held point is still under the garment)
+                    me.attributes.new('held', 'FLOAT', 'POINT').data.foreach_set('value', held.astype(np.float32))
+                    log('chemise: %d points held under the %s, %d of them pressed in' % (int((held > 0).sum()), under['garment'].name, moved))
+                    solver.settle(o, rig, [body, *colliders, under['garment']], pinned=held, P=dict(solver.LINEN, frames=60), log=log)
+                if cache:
+                    os.makedirs(os.path.dirname(os.path.abspath(cache)), exist_ok=True)
+                    keep = dict(co=np.array([v.co[:] for v in me.vertices], dtype=np.float32))
+                    if 'held' in me.attributes:
+                        h = np.empty(len(me.vertices), dtype=np.float32)
+                        me.attributes['held'].data.foreach_get('value', h)
+                        keep['held'] = h
+                    np.savez_compressed(cache, **keep)
+                    log('chemise: settled shape kept in %s' % cache)
     m = o.modifiers.new('smooth', 'SUBSURF')
     m.levels = m.render_levels = 1
     m = o.modifiers.new('thickness', 'SOLIDIFY')

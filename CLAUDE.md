@@ -55,3 +55,14 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
   into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
   clashed, and forest green read badly (and vanished on the grass), so her robe and cape are a deep plum. Check the cape against the hair in the side and back views.
+
+## Layered clothes: add a layer over what is already settled
+
+- When a garment is added over another (or the outer one is changed), do not run the cloth solver on the stack.
+  Use the lower layer's settled shape as it was last kept (`CHEMISE_CACHE`, `blender/chemise/kept/`), build only
+  the new layer, without the solver, and show that render first.
+- Only after that render has been looked at, and only if it needs it, run another round with the solver on both
+  layers together (`CHEMISE_SETTLE=1`).
+- Check a layered figure with `blender/base/spots.py`: it measures where the under layer shows through and
+  renders only crops of those places. Render the full turn once, at the end.
+- Find a cloth's settings on `blender/chemise/swatch.py` (seconds a trial), not on the whole garment.
