@@ -50,6 +50,9 @@ RATIOS = {
     'blend': 0.85,           # the radius of the run from sleeve into body over the shoulder, in w
     'swell': 0.22,           # the slow in-and-out of the hanging cloth round the body and the sleeve, by the hem, in w
     'slit': 0.13,            # the gap left between the sleeve's cloth and the body's under the arm, in w
+    'slit_cut': 0.40,        # the width that gap is cut at on the grid (then closed up to 'slit'), in w: wide enough
+                             # for the grid to draw both its edges cleanly
+    'underarm': 0.18,        # the radius the cut's edges are rounded to, in w
     'thick': 0.008,          # the linen's thickness, in w
 }
 VOXEL = 0.2                  # the grid the whole piece is drawn on, in units (the cloth's own grain for the solver:
@@ -201,8 +204,11 @@ class Draft:
         # --- the gap between arm and side, below the armpit: midway between the body's side and the arm's inner face
         side = (Rb * np.abs(sn)[None, :]).max(1)
         inner = cx - Ra[:, 0]                      # (alpha = -pi is column 0)
-        self.xc = fit._blur(0.5 * (side + inner), 2.0, 0, False)
         self.z_slit = M['z_pit_arm'] - 0.25 * w
+        # (cut as a tailor cuts a side seam: one straight line, the best through that midway from the armpit down)
+        mid = 0.5 * (side + inner)
+        m = (zs > self.z_cuff) & (zs < self.z_slit)
+        self.xc = np.polyval(np.polyfit(zs[m], mid[m], 1), zs)
         log('chemise: neckline at %.2f front, %.2f side, %.2f back; hem %.2f; sleeve to %.2f; arm axis x %.2f; the body\'s cloth '
             '%.2f off the waist in front' % (z_neck[0], z_neck[NB // 4], z_neck[NB // 2], self.z_hem, self.z_cuff, cx,
                                             float(self.Rb[int(np.argmin(np.abs(zs - M['z_waist']))), 0] - Rb[int(np.argmin(np.abs(zs - M['z_waist']))), 0])))
@@ -245,8 +251,25 @@ class Draft:
         d = fit._smin(fit._smin(d_b, d_l, k), d_r, k)
         # parted under the arm
         xc = np.interp(X[:, 2], self.zs, self.xc)
-        gap = np.maximum(np.abs(np.abs(X[:, 0]) - xc) - 0.5 * self.r['slit'] * w, X[:, 2] - self.z_slit)
-        return -fit._smin(-d, gap, 0.06 * w)
+        # (the cut ends in a round at the underarm, and its edges are rounded: a slot, not a slash)
+        half = 0.5 * self.r['slit_cut'] * w
+        gap = np.hypot(np.abs(X[:, 0]) - xc, np.clip(X[:, 2] - (self.z_slit - half), 0.0, None)) - half
+        return -fit._smin(-d, gap, self.r['underarm'] * w)
+
+    def close_slit(self, V):
+        """Draw the cut under the arm up from the width it was made at to the gap the cloth really has there: the
+        points near the cut's line moved toward it, those further off less, none beyond three widths."""
+        w = self.M['w']
+        a, r = 0.5 * self.r['slit_cut'] * w + VOXEL, self.r['slit'] / self.r['slit_cut']
+        b = 3.0 * a
+        xc = np.interp(V[:, 2], self.zs, self.xc)
+        u = np.abs(V[:, 0]) - xc
+        au = np.abs(u)
+        g = np.where(au <= a, au * r, np.where(au < b, a * r + (au - a) * (b - a * r) / (b - a), au))
+        k = 1.0 - fit._ss(self.z_slit - a, self.z_slit + 0.6 * w, V[:, 2])       # (fading out above the underarm)
+        out = V.copy()
+        out[:, 0] = np.sign(V[:, 0]) * (xc + np.sign(u) * (au + k * (g - au)))
+        return out
 
     def sleeve_share(self, X):
         """How much of a point is the sleeve's cloth (1) and how much the body's (0)."""
@@ -350,7 +373,7 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
     X = np.stack(np.meshgrid(gx, gy, gz, indexing='ij'), 3).reshape(-1, 3)
     F = np.concatenate([D.field(X[a:a + 400000]) for a in range(0, len(X), 400000)]).reshape(n)
     V, faces = surface_nets(F, lo, VOXEL)
-    V = _relax(V, faces, 5)
+    V = D.close_slit(_relax(V, faces, 5))
     log('chemise: the whole piece, %d points on a %d x %d x %d grid' % (len(V), *n))
     # 2. the trims
     yc = M['yc']
