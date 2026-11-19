@@ -500,6 +500,39 @@ def _blend(w, mats):
     return M / tot
 
 
+# How far the thigh's bone carries the skin round the groin: nothing within GROIN[0] of the groin's line (the
+# midline, from the crotch up), all of it GROIN[1] away, measured across the body and (times GROIN[2]) down the
+# inside of the thigh below the crotch.
+GROIN = [0.6, 5.0, 0.8]
+
+
+def lower_weights(p, lw):
+    """The bones' shares of a point of the skin from the waist down (lw: the two legs' weight functions, by side,
+    1 her right). The thigh takes the skin from the hip joint down, eased over a long band so the leg's swing
+    stretches the skin over the hip instead of folding a step into it. Round the groin the pelvis keeps it: the
+    two thighs meet there a hair apart and swing opposite ways, so skin that followed its own thigh right up to the
+    midline was pulled out to several times its length across the gap in a long stride or a run. The thigh's share
+    grows with the distance from the groin instead, so that pull is spread down the top of the inner thigh. On the
+    midline itself what the thighs have is shared between the two by the distance from it."""
+    tw = female.trunk_weights(p)
+    s = 1 if p.x < 0 else -1
+    lg = lw[s](p)
+    cz = CANON['crotch']
+    band = 0.9 * _ss(cz - 1.6, cz + 0.4, p.z)
+    if band > 0.05 and abs(p.x) < band:
+        mL = _ss(-band, band, p.x)
+        lgR, lgL = lw[1](p), lw[-1](p)
+        lg = {k: v * (1.0 - mL) for k, v in lgR.items()}
+        for k, v in lgL.items():
+            lg[k] = lg.get(k, 0.0) + v * mL
+    a = _ss(female.HIP_Z + 1.5, female.HIP_Z - 3.5, p.z)
+    a *= _ss(GROIN[0], GROIN[1], math.hypot(p.x, GROIN[2] * max(0.0, cz - p.z)))
+    w_ = {k: v * (1 - a) for k, v in tw.items()}
+    for k, v in lg.items():
+        w_[k] = w_.get(k, 0.0) + v * a
+    return w_
+
+
 def fuse_lower():
     """Join the pelvis, legs and feet to the upper body's skin. Called after the gown's build, before anything else
     reads 'Skin body'."""
@@ -663,27 +696,7 @@ def fuse_lower():
         if (p.z >= CUT_Z or armw[j] > 0.5) and (dist < 0.35 or p.z > KEEP_Z + 1.0):
             w_ = dict(W0[j])
         else:
-            tw = female.trunk_weights(p)
-            s = 1 if p.x < 0 else -1
-            lg = lw[s](p)
-            # (between the legs the skin belongs to both thighs: split at the midline, each side went wholly to
-            # its own leg, and with one foot forward the crotch tore along the middle. Across a band at the crotch
-            # the two thighs share it by distance from the midline; the band closes below, where the thighs part.)
-            band = 0.9 * _ss(CANON['crotch'] - 1.6, CANON['crotch'] + 0.4, p.z)
-            if band > 0.05 and abs(p.x) < band:
-                mL = _ss(-band, band, p.x)
-                lgR, lgL = lw[1](p), lw[-1](p)
-                lg = {k: v * (1.0 - mL) for k, v in lgR.items()}
-                for k, v in lgL.items():
-                    lg[k] = lg.get(k, 0.0) + v * mL
-            # (the thigh takes the skin from the hip joint down, eased over a long band so the leg's swing
-            # stretches the skin over the hip instead of folding a step into it; in the crotch both thighs share)
-            a = _ss(female.HIP_Z + 1.5, female.HIP_Z - 3.5, p.z)
-            # (and the pelvis keeps half of it there, down to under the crotch, not only to a fixed height above it)
-            a *= 1.0 - 0.5 * (1.0 - _ss(0.0, 1.6, abs(p.x))) * _ss(CANON['crotch'] - 1.6, CANON['crotch'] - 0.4, p.z)
-            w_ = {k: v * (1 - a) for k, v in tw.items()}
-            for k, v in lg.items():
-                w_[k] = w_.get(k, 0.0) + v * a
+            w_ = lower_weights(p, lw)
         Wn.append(w_)
     # (under the arm the new trunk meets the old arm: the weights there eased across neighbours, so the skin of the
     # armpit is shared between the chest and the arm instead of tearing along the join)
