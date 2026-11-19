@@ -172,11 +172,13 @@ your job is that slow, split it (one view first, the mannequin, check quality, f
 again unchanged.
 
 
-**Size a final turn to fit** (nightly, 2026-11-19). A five-angle final turn at 720 px and 128 samples was killed at 30
-minutes (#187, 5 to 6 minutes an angle), and one at 800 px took 10 minutes (#178). With `--denoise`, 600 px and 48
-samples look the same at review size and take 8 to 10 minutes for the whole turn. Go past that only as two jobs
-(`--angles front,3/4,profile` and `--angles back3/4,back`). Check a navy or near-black dye on a swatch first: three
-rejections were a navy that read slate blue under the figure's light.
+**Size a final turn to fit** (nightly, 2026-11-19). A final job's time is its image count times about 1.5 to 2
+minutes at 600 px and 48 samples with `--denoise`, plus about 3.5 minutes of setup. A turn is five images and `--head`
+adds five more, so a turn with a head is ten images and runs about 18 minutes (#188, 1110 s). At 720 px and 128 samples
+an image takes 5 to 6 minutes, and that turn was killed at 30 minutes (#187). To stay under the 10-minute warning, send
+the turn and the head as separate jobs, or split the turn (`--angles front,3/4,profile` and `--angles back3/4,back`).
+Check a navy or near-black dye on a swatch first: three rejections were a navy that read slate blue under the figure's
+light.
 
 ## John's desktop (GPU worker)
 
