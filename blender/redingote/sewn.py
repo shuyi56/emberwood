@@ -72,7 +72,7 @@ class Draft(sleeve.Draft):
 
 
 HEAD = {
-    'puff': 0.28,                # the head's crown off the shoulder, in w (0.50 stood as a ledge, #196; 0.42 as a shoulder pad, #206)
+    'puff': 0.12,                # the head's crown off the shoulder, in w (0.50 stood as a ledge, #196; 0.42 as a shoulder pad, #206)
     'rise': 1.30,                # it reaches it this far from the seam, in w, rising from the seam as a smooth step
     'dir_floor': 0.12,           # the least of it, where the skin faces up or forward and back into the bodice
 }
