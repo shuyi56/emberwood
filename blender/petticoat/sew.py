@@ -662,12 +662,13 @@ def drape(A, cuts, pts, nrm, floor, log=print):
 
 DART_BEND = 2e-4             # and round the darts, within DART_EASE of their legs, where the sewn dart shapes a cone
 DART_EASE = 0.8
-TUCK_BEND = 5e-3             # the bend ties across a pressed tuck's folds: the press holds it, not the cloth
+TUCK_BEND = 0                # the tuck zone is simulated flat: a 5 mm tuck is thinner than the cloth's points (1.1 cm), so
+                             # folding it in the solver only throws spikes; its ridge and stitching are drawn as geometry
 
 
 FLOUNCE_FLAT = None           # the flounce is lighter than the skirt and gathered, not starched to stand: it falls in
 FLOUNCE_BEND = 2e-4           # many small folds from its gathers
-FLOUNCE_PLEAT = 1.6           # its gathers laid in folds this long in the cloth (several points across, so they show)
+FLOUNCE_PLEAT = 2.4           # its gathers laid in folds this long in the cloth (several points across, so they show)
 FLOUNCE_ITERATIONS = 12       # gathered 1.6 times, its threads need the passes to stay their length and fold
 
 
