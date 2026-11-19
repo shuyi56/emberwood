@@ -20,8 +20,8 @@ from mathutils.kdtree import KDTree
 import fit
 
 RATIOS = dict(
-    gap=0.07,                # the room between the plates and what is under them, in w
-    plate=0.045,             # the plate's thickness, in w
+    gap=0.10,                # the room between the plates and what is under them, in w
+    plate=0.055,             # the plate's thickness, in w
     cop=58.0,                # the cop reaches this far down from the top of the shoulder, in degrees
     lame=17.0,               # the height of one lame showing, in degrees
     lames=4,
@@ -30,7 +30,16 @@ RATIOS = dict(
     round_lame=94.0,         # and the lames (the inside of the arm is left bare)
     inner=0.80,              # toward the neck the cop stops at this share of the way out to the shoulder point
     corner=0.35,             # the radius of a plate's corners, in w
-    dome=0.5,                # how far a lame is raised along its middle, in plate thicknesses
+    dome=0.8,                # how far a lame is raised along its middle, in plate thicknesses
+    step=2.6,                # a lame's bottom edge stands this far proud of the next lame's top, in plate
+                             # thicknesses: the groove between two lames
+    flare_cop=0.42,          # the cop's lower edge is turned out by this much, in w: the top plate flares, a
+                             # brim over the lames
+    flare_lame=0.16,         # and each lame's lower edge, by this much
+    flare_last=0.30,         # the lowest lame's the most of the lames: the fall ends in a kick
+    box=3.2,                 # the outline's squareness seen from the front: 2 follows the shoulder's round,
+                             # more makes a corner of it (a superellipse's exponent)
+    box_out=0.10,            # and the whole set stands this much further out at the corner, in w
     rivet=0.075,             # a rivet head's radius, in w
 )
 D_TH, D_AL = 2.0, 3.0        # the measuring grid about the shoulder's centre, in degrees
@@ -69,6 +78,7 @@ class Shoulder:
         for _ in range(3):
             smooth = np.maximum(smooth, fit._blur(fit._blur(np.maximum(R, smooth), 2.0, 0, False), 3.0, 1, True))
         self.R = np.maximum(smooth, R) + ratios['gap'] * w
+        self.R_side = float(self.R[int(round(90.0 / D_TH)), int(round(180.0 / D_AL))])
 
     def radius(self, th, al):
         """The measured radius at angles th and al (between the grid's entries)."""
@@ -87,13 +97,31 @@ class Shoulder:
         return np.arccos(np.clip(q[:, 2] / np.maximum(r, 1e-9), -1.0, 1.0)), np.arctan2(q[:, 1], self.side * q[:, 0]), r
 
 
+def _lift(S, name, u, th):
+    """How far a plate stands off the measured shoulder at u across it (0 its top edge, 1 its bottom), at th down
+    from straight up. Tucked under the plate above at its top, proud at its bottom where it laps the next, raised
+    along its middle, its lower edge turned out; and the whole made squarer than the shoulder's round."""
+    r, w = S.r, S.M['w']
+    t_pl = r['plate'] * w
+    n = r['box']
+    square = (np.abs(np.sin(th)) ** n + np.abs(np.cos(th)) ** n) ** (-1.0 / n) - 1.0      # (0 at the top and the side)
+    box = (r['box_out'] * w + S.R_side * 1.0) * square * (th < 0.5 * math.pi)
+    if name == 'cop':
+        return box + t_pl * r['step'] + r['flare_cop'] * w * u ** 3
+    k = r['flare_last'] if name == 'lame %d' % r['lames'] else r['flare_lame']
+    return box + t_pl * (r['step'] * u + r['dome'] * np.sin(math.pi * u)) + k * w * u ** 2
+
+
 def plates(S):
     """The plates' places on the shoulder: (name, top, bottom, how far round), angles in radians, the cop first."""
     r = S.r
     out = [('cop', 0.0, math.radians(r['cop']), math.radians(r['round_cop']))]
     a = math.radians(r['cop'])
     for k in range(r['lames']):
-        out.append(('lame %d' % (k + 1), a - math.radians(r['lap']), a + math.radians(r['lame']), math.radians(r['round_lame'])))
+        # (the first lame runs twice as far up under the cop: the cop's edge is turned out, and the shirt showed
+        # in the gap under it)
+        lap = math.radians(r['lap']) * (2.0 if k == 0 else 1.0)
+        out.append(('lame %d' % (k + 1), a - lap, a + math.radians(r['lame']), math.radians(r['round_lame'])))
         a += math.radians(r['lame'])
     return out
 
@@ -169,10 +197,7 @@ def raise_plates(S, log=print):
         al = np.arange(-half - math.radians(6), half + math.radians(6), math.radians(1.5))
         TH, AL = np.meshgrid(th, al, indexing='ij')
         u = np.clip((TH - a) / (b - a), 0.0, 1.0)                 # (0 at the plate's top edge, 1 at its bottom)
-        # tucked under the plate above at its top, a thickness proud at its bottom where it laps the next, and
-        # raised a little along its middle
-        lift = t_pl * (1.3 * u + r['dome'] * np.sin(math.pi * u)) if name != 'cop' else t_pl * 1.3 * np.ones_like(u)
-        R = S.radius(TH.reshape(-1), AL.reshape(-1)).reshape(TH.shape) + lift
+        R = S.radius(TH.reshape(-1), AL.reshape(-1)).reshape(TH.shape) + _lift(S, name, u, TH)
         V = (S.C[None, None, :] + R[:, :, None] * _dirs(TH, AL, S.side)).reshape(-1, 3)
         n0, n1 = TH.shape
         idx = np.arange(n0 * n1).reshape(n0, n1)
@@ -198,7 +223,7 @@ def raise_plates(S, log=print):
             for sgn in (-1.0, 1.0):
                 al_r = sgn * (half - 0.16)
                 uu = (mid - a) / (b - a)
-                rad = float(S.radius(np.array([mid]), np.array([al_r]))[0]) + t_pl * (1.3 * uu + r['dome'] * math.sin(math.pi * uu)) + t_pl
+                rad = float(S.radius(np.array([mid]), np.array([al_r]))[0]) + float(_lift(S, name, np.array(uu), np.array(mid))) + t_pl
                 n = Vector(_dirs(np.array(mid), np.array(al_r), S.side))
                 rivets.append(_rivet(Vector(S.C) + n * rad, n, r['rivet'] * w))
     return pieces, rivets
