@@ -1,8 +1,8 @@
 ﻿{
-    "state":  "BUSY free memory N GB (under N GB)",
+    "state":  "BUSY free memory under 9 GB",
     "job":  null,
     "pending":  [
-                    "demo-mannequin-front"
+
                 ],
     "recent":  [
                    {
