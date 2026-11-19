@@ -29,6 +29,23 @@ Planning rules
     Overlapping ones get their own batch. Requests with no code changes are never combined. mode=isolated is
     accepted but ignored: every branch is combined whenever its code does not overlap.
   * Every job is cached by the hash of the script inputs plus its parameters: the same code is never rendered twice.
+
+Batching rules (John, 2026-11-19)
+  * Sets: pieces of one set (sets.json) waiting at the same time render together, always: one build of the body with
+    every piece on it (rq_outfit.py, run as views.py --figure outfit), in wearing order, delivered to each piece's
+    thread. Angles, views and looks are the union; size and samples the largest.
+  * One build per scene: views.py jobs of one figure on one commit, with the same body (--mannequin), pose (--frame),
+    env and quality, run as one views.py call when that renders no more images than the separate calls would.
+  * Drafts with drafts, finals with finals: a check render never shares a job with a final; checks run first.
+  * Identical requests are one job (same key), whatever batch they come from; the cache serves repeats.
+  * Coalescing: a new request for the same branch and the same views replaces one still waiting (pinned or not).
+  * Intent: a thread says what it is about to send (rq.py intent) before it does the work. A waiting job that an
+    open intent could join (same figure, or a piece of the same set) is held for it: the collation window, 5 minutes
+    (READY_CUTOFF_S) from the first piece ready (its request). When it ends the batch renders with whichever pieces
+    are ready; a slower piece goes in the next batch. When every announced piece has come, it starts at once.
+  * Without an intent a job still waits WINDOW_S (45 s) after its newest request for a related one, never longer.
+  * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
+    job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
 import argparse, glob, ast, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, time
 
@@ -46,6 +63,164 @@ NOT_INPUTS = ("blender/facecheck/",)
 RENDERED = ("blender/ranger/ranger-blender.png",)   # the pngs the queue itself renders
 REQUESTABLE = ("frames", "views", "glb")
 PRIORITY = {"frames": 0, "views": 0, "glb": 1, "sheet": 9}
+MAX_BATCH = int(os.environ.get("RQ_MAX_BATCH", "4"))      # branches merged into one commit
+MAX_MERGE = int(os.environ.get("RQ_MAX_MERGE", "6"))      # requests in one combined views.py job
+WINDOW_S = int(os.environ.get("RQ_WINDOW", "45"))         # a job waits this long after its newest request
+READY_CUTOFF_S = int(os.environ.get("RQ_READY_CUTOFF", "300"))   # John: a 5-minute collation window from the first piece ready
+INTENT_TTL_S = 1800                                       # an intent nobody followed lapses after its ETA + this
+VIEWS_PY = "blender/base/views.py"
+OUTFIT = os.path.join(HERE, "rq_outfit.py")
+ANGLES = ("front", "3/4", "profile", "back3/4", "back")
+# views.py options a combined job can take the union of (True: takes a value); any other option keeps a job apart
+MERGEABLE = {"--figure": True, "--angles": True, "--size": True, "--samples": True, "--frame": True,
+             "--mannequin": False, "--turn": False, "--head": False, "--clay": False, "--clay-only": False,
+             "--denoise": False}
+
+
+def sets():
+    for d in (DATA, HERE):
+        try:
+            return {k: v for k, v in json.load(open(os.path.join(d, "sets.json"))).items() if not k.startswith("_")}
+        except (OSError, ValueError):
+            continue
+    return {}
+
+
+def ts(t):
+    import calendar
+    return calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ"))
+
+
+def parse_view(param):
+    """A views.py job's parts, or None when it is not one a combined job can take."""
+    check = param.endswith(CHECK)
+    words = shlex.split(param[:-len(CHECK)] if check else param)
+    env = []
+    if words and words[0] == "env":
+        words = words[1:]
+        while words and "=" in words[0] and not words[0].startswith("-"):
+            env.append(words.pop(0))
+    if not words or words[0] != VIEWS_PY:
+        return None
+    a, i = {}, 1
+    while i < len(words):
+        w = words[i]
+        if w not in MERGEABLE or (MERGEABLE[w] and i + 1 >= len(words)):
+            return None
+        a[w] = words[i + 1] if MERGEABLE[w] else True
+        i += 2 if MERGEABLE[w] else 1
+    if "--figure" not in a or not ("--turn" in a or "--head" in a) or any(e.startswith("OUTFIT") for e in env):
+        return None
+    return {"env": env, "check": check, "a": a, "group": (tuple(sorted(env)), check, "--mannequin" in a,
+                                                          a.get("--frame"))}
+
+
+def view_images(a):
+    ang = len(a["--angles"].split(",")) if "--angles" in a else 5
+    return (("--turn" in a) + ("--head" in a)) * ang * (1 if "--clay-only" in a else 2 if "--clay" in a else 1)
+
+
+def union_args(parts, figure):
+    a = {"--figure": figure}
+    for f in ("--mannequin", "--turn", "--head", "--denoise"):
+        if any(f in p for p in parts):
+            a[f] = True
+    if all("--clay-only" in p for p in parts):
+        a["--clay-only"] = True
+    elif any("--clay" in p or "--clay-only" in p for p in parts):
+        a["--clay"] = True
+    if all("--angles" in p for p in parts):
+        want = {x for p in parts for x in p["--angles"].split(",")}
+        a["--angles"] = ",".join([x for x in ANGLES if x in want] + sorted(want - set(ANGLES)))
+    for k in ("--size", "--samples"):
+        vals = [int(p[k]) for p in parts if k in p]
+        if vals:
+            a[k] = str(max(vals))
+    if parts[0].get("--frame"):
+        a["--frame"] = parts[0]["--frame"]
+    return a
+
+
+def view_param(env, a, check):
+    words = [VIEWS_PY]
+    for k, v in a.items():
+        words += [k] if v is True else [k, v]
+    return ("env " + " ".join(env) + " " if env else "") + shlex.join(words) + (CHECK if check else "")
+
+
+def combine_views(bjobs, solo):
+    """John's batching rules on one batch's views.py jobs: pieces of one set in one build, and one build per
+    figure where that renders no more than the separate builds would."""
+    keep, pool = [], []
+    for j in bjobs:
+        pv = parse_view(j["param"]) if j["kind"] == "views" and not (set(j["requests"]) & solo) else None
+        (pool if pv else keep).append((j, pv))
+    out = [j for j, _ in keep]
+    groups = {}
+    for j, pv in pool:
+        groups.setdefault(pv["group"], []).append((j, pv))
+    for g, items in groups.items():
+        # one build per figure
+        by_fig = {}
+        for j, pv in items:
+            by_fig.setdefault(pv["a"]["--figure"], []).append([(j, pv)])
+        for fig, lots in by_fig.items():
+            merged = [lots[0]]
+            for lot in lots[1:]:
+                cur = merged[-1]
+                parts = [pv["a"] for _, pv in cur + lot]
+                same = all(p.get("--size") == parts[0].get("--size") and p.get("--samples") == parts[0].get("--samples")
+                           for p in parts)
+                n_req = len({i for j, _ in cur + lot for i in j["requests"]})
+                if same and n_req <= MAX_MERGE and view_images(union_args(parts, fig)) <= sum(map(view_images, parts)):
+                    merged[-1] = cur + lot
+                else:
+                    merged.append(lot)
+            by_fig[fig] = merged
+        # pieces of one set: always one build, the set with the most waiting pieces first
+        lots = [(fig, lot) for fig, ls in by_fig.items() for lot in ls]
+        done = set()
+        for name, members in sorted(sets().items(), key=lambda kv: -len(set(kv[1]) & set(by_fig))):
+            have = [i for i, (fig, _) in enumerate(lots) if fig in members and i not in done]
+            if len({lots[i][0] for i in have}) < 2:
+                continue
+            have.sort(key=lambda i: members.index(lots[i][0]))
+            while have:
+                take, n = [], 0
+                for i in have:
+                    k = len({x for j, _ in lots[i][1] for x in j["requests"]})
+                    if take and n + k > MAX_MERGE:
+                        break
+                    take.append(i); n += k
+                have = have[len(take):]
+                if len({lots[i][0] for i in take}) < 2:
+                    continue
+                figs = list(dict.fromkeys(lots[i][0] for i in take))
+                items2 = [x for i in take for x in lots[i][1]]
+                out.append(_combined(items2, "outfit", g, figs, name))
+                done.update(take)
+        for i, (fig, lot) in enumerate(lots):
+            if i not in done:
+                out.append(lot[0][0] if len(lot) == 1 else _combined(lot, fig, g, None, None))
+    return out
+
+
+def _combined(items, fig, group, pieces, set_name):
+    env, check = list(group[0]), group[1]
+    a = union_args([pv["a"] for _, pv in items], fig)
+    if pieces:
+        rev = hashlib.sha1(open(OUTFIT, "rb").read()).hexdigest()[:8]
+        # the --head close-up frames the pieces whose own requests asked for it (a skirt's waist-to-floor framing
+        # would lose the sleeves' close-up)
+        heads = [p for p in pieces if any(pv["a"]["--figure"] == p and "--head" in pv["a"] for _, pv in items)]
+        env = [f"OUTFIT={','.join(pieces)}"] + ([f"OUTFIT_FRAME={','.join(heads)}"] if heads else []) + \
+              [f"OUTFIT_REV={rev}"] + env
+    j0 = items[0][0]
+    param = view_param(env, a, check)
+    reqs = sorted({i for j, _ in items for i in j["requests"]})
+    return dict(j0, param=param, requests=reqs, key=job_key(j0["commit"], "views", param),
+                order=min(j["order"] for j, _ in items), merged_from=[j["param"] for j, _ in items],
+                **({"set": set_name, "pieces": pieces} if pieces else {}))
 
 
 def now():
@@ -305,12 +480,16 @@ def plan(fetch=True):
                 b["requests"].append(r)
             continue
         for b in batches:
+            if r.get("solo") or b.get("solo"):
+                continue     # (a request retried on its own after a combined job failed)
             if all(x["tip"] == r["tip"] for x in b["requests"]):
                 b["requests"].append(r); placed = True; break     # same commit asked twice: one render
             # (mode=isolated is no longer honoured: John wants branches combined whenever their code does not
             #  overlap; befores, the one case isolation served, now come only from the cache)
             # a batch that is already rendering is closed: adding to it would change its commit and waste the
             # jobs in flight
+            if len({x["branch"] for x in b["requests"]} | {r["branch"]}) > MAX_BATCH:
+                continue     # John: a cap on batch size, so one failure does not lose the lot
             if b["isolated"] or not fp or b["requests"][0]["base"] != r["base"] or r["state"] == "rendering" \
                     or any(x["state"] == "rendering" for x in b["requests"]):
                 continue
@@ -327,9 +506,11 @@ def plan(fetch=True):
             placed = True; break
         if not placed:
             batches.append({"commit": r["merged"], "requests": [r], "fp": fp,
-                            "isolated": not fp})
+                            "isolated": not fp, "solo": bool(r.get("solo"))})
     jobs = []
+    solo = {r["id"] for r in ready if r.get("solo")}
     for b in batches:
+        bjobs = []
         want = {}
         for r in b["requests"]:
             for o in r["outputs"]:
@@ -340,10 +521,20 @@ def plan(fetch=True):
         for (kind, param), rs in want.items():
             if kind == "frames":
                 param = cells_union([r["cells"] for r in rs])
-            jobs.append({"kind": kind, "param": param, "commit": b["commit"], "requests": [r["id"] for r in rs],
-                         "combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"]} for r in b["requests"]],
-                         "key": job_key(b["commit"], kind, param), "prio": PRIORITY[kind],
-                         "order": min(r["id"] for r in rs)})
+            bjobs.append({"kind": kind, "param": param, "commit": b["commit"], "requests": [r["id"] for r in rs],
+                          "combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"]} for r in b["requests"]],
+                          "key": job_key(b["commit"], kind, param), "prio": PRIORITY[kind],
+                          "order": min(r["id"] for r in rs)})
+        jobs += combine_views(bjobs, solo)
+    # identical jobs (the same key) from different batches are one job for all their requests
+    seen = {}
+    for j in jobs:
+        if j["key"] in seen:
+            seen[j["key"]]["requests"] = sorted(set(seen[j["key"]]["requests"]) | set(j["requests"]))
+            seen[j["key"]]["dups"] = seen[j["key"]].get("dups", 0) + 1
+        else:
+            seen[j["key"]] = j
+    jobs = list(seen.values())
     for r in ready:
         r["jobs"] = [j["key"] for j in jobs if r["id"] in j["requests"]]
     # full sheets: only once the scheduled task has marked them due; main first, then the branches marked ready
@@ -356,7 +547,8 @@ def plan(fetch=True):
                              "key": job_key(c, "sheet", None), "combines": [{"id": None, "branch": br, "sha": tip}]})
     for j in jobs:
         j["cached"] = cached(j["key"])
-    jobs.sort(key=lambda j: (j["prio"], j["order"]))
+    # cheap drafts before expensive finals
+    jobs.sort(key=lambda j: (j["prio"], 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
     save(s)
     return main, held, batches, jobs
 
@@ -407,6 +599,9 @@ def start(job):
     shutil.rmtree(tmp_out, ignore_errors=True); os.makedirs(tmp_out)
     git("worktree", "remove", "--force", wt, check=False)
     git("worktree", "add", "--detach", wt, job["commit"])
+    if job.get("pieces") or "--figure outfit" in (job["param"] or ""):
+        os.makedirs(os.path.join(wt, "blender", "outfit"), exist_ok=True)
+        shutil.copy(OUTFIT, os.path.join(wt, "blender", "outfit", "outfit.py"))
     log = open(os.path.join(tmp_out, "render.log"), "w")
     cmd = command(job, tmp_out)
     log.write(f"$ {cmd}\n"); log.flush()
@@ -425,7 +620,8 @@ def finish(run):
             files[os.path.relpath(p, run["out"])] = {"bytes": os.path.getsize(p),
                                                        "git_blob": git("hash-object", p).stdout.strip()}
     m = {"ok": rc == 0, "key": job["key"], "kind": job["kind"], "param": job["param"], "commit": job["commit"],
-         "combines": job["combines"], "seconds": round(time.time() - run["t0"]), "files": files, "finished": now()}
+         "combines": job["combines"], "seconds": round(time.time() - run["t0"]), "files": files, "finished": now(),
+         "requests": job["requests"], **{k: job[k] for k in ("merged_from", "set", "pieces") if k in job}}
     with open(os.path.join(run["out"], "manifest.json"), "w") as f:
         json.dump(m, f, indent=2)
     dst = os.path.join(RESULTS, job["key"] + ("" if m["ok"] else "-failed"))
@@ -448,11 +644,27 @@ def settle(s):
     for r in s["requests"]:
         if r["state"] in ("pending", "rendering") and r.get("jobs"):
             bad = [k for k in r["jobs"] if failed(k)]
+            if bad and not r.get("solo") and any(_retry_alone(k) for k in bad):
+                r["solo"] = True; r.pop("jobs", None); r.pop("batch_commit", None); r["state"] = "pending"
+                r["retried_alone"] = bad
+                event("retry_alone", bad[0], request=r["id"])
+                continue
             if bad or all(cached(k) for k in r["jobs"]):
                 r["state"] = "failed" if bad else "done"
                 r["results"] = {k: os.path.join(RESULTS, k + ("-failed" if k in bad else "")) for k in r["jobs"]}
                 r["finished"] = now(); done.append(r)
     return done
+
+
+def _retry_alone(key):
+    """A failed job that combined several requests (a set, merged views or merged branches), unless it was killed
+    at the time limit (alone it would be killed again)."""
+    try:
+        m = json.load(open(os.path.join(RESULTS, key + "-failed", "manifest.json")))
+    except (OSError, ValueError):
+        return False
+    many = len(m.get("requests") or []) > 1 or len(m.get("combines") or []) > 1 or bool(m.get("merged_from"))
+    return many and m.get("seconds", 0) < KILL_S
 
 
 PARALLEL = int(os.environ.get("RQ_PARALLEL", "3"))
@@ -489,6 +701,8 @@ def job_gb(job):
     """About how much memory a job's build peaks at: the warden (771 hair strands, cape, armour) peaks at 7.6 GB (one of two side
     by side was killed here); the other figures stay under 4."""
     p = job.get("param") or ""
+    if "OUTFIT=" in p:
+        return min(6.0, 2.0 + 0.6 * len(re.search(r"OUTFIT=(\S+)", p)[1].split(",")))
     if "--mannequin" in p:
         return 2.0                                     # (no head, face or hair: a light build)
     return 7.6 if "warden" in p else 4.0
@@ -507,6 +721,7 @@ def cmd_serve(a):
     running = {}     # key -> run: quick jobs run side by side (each build is single-threaded Python, so
     #                  PARALLEL of them overlap their builds on the 4 cores); a full sheet always runs alone
     finished = []
+    waits_seen = {}   # key -> what a job was held for (the batching stats)
     try:
         while True:
             main, held, batches, jobs = plan(fetch=not running)
@@ -514,11 +729,29 @@ def cmd_serve(a):
             fin = settle(s)
             finished += [{"id": r["id"], "thread": r["thread"], "state": r["state"]} for r in fin]
             todo = [j for j in jobs if not j["cached"] and not failed(j["key"]) and j["key"] not in running]
+            waits = {j["key"]: hold_until(j, s) for j in todo}
+            if any(waits.values()):
+                for j in todo:
+                    if waits[j["key"]] and j["key"] not in s.setdefault("holding", {}):
+                        s["holding"][j["key"]] = waits[j["key"]]
+                        print(f"{now()} hold {j['key']} for {waits[j['key']]['for']} until "
+                              f"{time.strftime('%H:%M:%SZ', time.gmtime(waits[j['key']]['until']))}", flush=True)
+            for k in list(s.get("holding", {})):
+                if not waits.get(k):
+                    s["holding"].pop(k)
+            for k, w in waits.items():
+                if w:
+                    waits_seen.setdefault(k, w["for"])
+            held_jobs = [j for j in todo if waits[j["key"]]]
+            todo = [j for j in todo if not waits[j["key"]]]
             if s["sheet_due"] and not running and not any(j["kind"] == "sheet" for j in todo):
                 s["sheet_due"] = False                     # every due sheet is rendered
             save(s)
             if finished and not running:
                 print(json.dumps({"finished": finished})); return
+            if not todo and not running and held_jobs:
+                time.sleep(max(1, min(10, min(waits[j["key"]]["until"] for j in held_jobs) - time.time())))
+                continue                                   # (a held job: wait for its partner, then plan again)
             if not todo and not running:
                 print(json.dumps({"idle": True, "held": [r["id"] for r in held]})); return
             # start more jobs while there is room, unless a request has just finished (then let the running ones
@@ -543,6 +776,8 @@ def cmd_serve(a):
                 running[job["key"]] = start(job)
                 event("start", job["key"], requests=job["requests"], param=job["param"],
                       parallel=len(running), waiting=len(todo))
+                if job["kind"] != "sheet":
+                    batch_event(job, s, waits_seen.pop(job["key"], None))
                 if job["kind"] == "sheet":
                     break
             mtime = os.path.getmtime(STATE)
@@ -581,6 +816,107 @@ def cmd_serve(a):
                     return
     finally:
         os.remove(lock)
+
+
+def batch_event(job, s, held_for):
+    """One line per job started, for the nightly batching numbers (rq_stats.py): what it combined, how long its
+    first request waited, what it was held for, and the announced pieces it left out (the stragglers)."""
+    rs = [r for r in s["requests"] if r["id"] in job["requests"]]
+    first = min((ts(r["created"]) for r in rs), default=time.time())
+    figs = job_figures(job)
+    strag = [i["id"] for i in open_intents(s) if any(related(f, i["piece"]) for f in figs)
+             and not (i["thread"] in {r["thread"] for r in rs} and i["branch"] in {r["branch"] for r in rs})]
+    event("batch", job["key"], requests=job["requests"], pieces=job.get("pieces") or figs, set=job.get("set"),
+          parts=len(job.get("merged_from") or [job["param"]]), branches=len({c["branch"] for c in job["combines"]}),
+          waited=round(time.time() - first), held_for=held_for, stragglers=strag, dups=job.get("dups", 0),
+          solo=any(r.get("solo") for r in rs), check=(job["param"] or "").endswith(CHECK))
+
+
+def related(fig_a, fig_b):
+    if fig_a == fig_b:
+        return True
+    return any(fig_a in m and fig_b in m for m in sets().values())
+
+
+def job_figures(job):
+    p = job.get("param") or ""
+    if job.get("pieces"):
+        return list(job["pieces"])
+    m = re.search(r"--figure\s+(\S+)", p)
+    return [m[1]] if m else []
+
+
+def hold_until(job, s):
+    """When a waiting job may start: None now, else {"until": t, "for": why}. John: a short window for related
+    requests, longer only for an announced intent, and never past the readiness cutoff (a slow piece goes in the
+    next batch)."""
+    if job["kind"] == "sheet" or not job["requests"]:
+        return None
+    rs = [r for r in s["requests"] if r["id"] in job["requests"]]
+    if not rs or any(r.get("solo") for r in rs):
+        return None
+    t0 = min(ts(r["created"]) for r in rs)
+    t1 = max(ts(r["created"]) for r in rs)
+    cutoff = t0 + READY_CUTOFF_S
+    figs = job_figures(job)
+    best = None
+    for i in open_intents(s):
+        if i["thread"] in {r["thread"] for r in rs} and i["branch"] in {r["branch"] for r in rs}:
+            continue       # (the job's own thread announcing its next step does not hold this one)
+        if any(related(f, i["piece"]) for f in figs) and (not i.get("quality") or i["quality"] == rs[0].get("quality")):
+            eta = cutoff       # John: a 5-minute collation window from the first piece ready; stragglers wait for the next
+            if eta > time.time() and (best is None or eta > best["until"]):
+                best = {"until": eta, "for": f"intent #{i['id']} ({i['piece']}, {i['thread'][-6:]})"}
+    win = t1 + WINDOW_S
+    if win > time.time() and win <= cutoff and (best is None or win > best["until"]):
+        best = {"until": win, "for": f"the {WINDOW_S} s window"}
+    return best
+
+
+def open_intents(s):
+    t = time.time()
+    return [i for i in s.get("intents", []) if i["state"] == "open" and ts(i["created"]) + 0 <= t
+            and i["eta"] + INTENT_TTL_S > t]
+
+
+def cmd_intent(a):
+    """A thread says what it is about to send, before it does the work, so the queue can hold a related job for it."""
+    s = load()
+    s.setdefault("intents", [])
+    s.setdefault("next_intent", 1)
+    piece = a.piece or (re.search(r"--figure\s+(\S+)", a.view or "") or [None, None])[1]
+    if not piece:
+        sys.exit("intent needs --piece FIGURE (blender/<figure>/<figure>.py) or a --view with --figure")
+    st = next((n for n, m in sets().items() if piece in m), None)
+    for o in s["intents"]:      # a thread's newer intent for the same piece replaces its older one
+        if o["state"] == "open" and o["thread"] == a.thread and o["piece"] == piece:
+            o["state"] = "replaced"
+    i = {"id": s["next_intent"], "thread": a.thread, "branch": a.branch, "piece": piece, "set": a.set or st,
+         "view": a.view, "quality": a.quality, "eta": time.time() + 60 * a.eta, "created": now(),
+         "note": a.note, "state": "open"}
+    s["next_intent"] += 1; s["intents"].append(i); save(s)
+    print(json.dumps(dict(i, eta=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(i["eta"]))), indent=2))
+    pend = [r for r in s["requests"] if r["state"] == "pending" and any(
+        related(piece, f) for v in r.get("views") or [] for f in re.findall(r"--figure\s+(\S+)", v))]
+    if pend:
+        print(f"waiting now that this could join: {[r['id'] for r in pend]} (held up to "
+              f"{READY_CUTOFF_S // 60} min after each one's request; later, {piece} goes in the next batch)")
+
+
+def cmd_intents(a):
+    s = load()
+    for i in s.get("intents", []):
+        if a.all or i["state"] == "open":
+            print(f"intent #{i['id']:<3} {i['state']:<10} {i['piece']:<18} {i.get('set') or '-':<14} "
+                  f"eta {time.strftime('%H:%M:%SZ', time.gmtime(i['eta']))}  {i['branch']}  {i.get('note') or ''}")
+
+
+def cmd_drop_intent(a):
+    s = load()
+    for i in s.get("intents", []):
+        if i["id"] == a.id:
+            i["state"] = "dropped"
+    save(s)
 
 
 # ------------------------------------------------------------------ small commands
@@ -628,11 +964,19 @@ def cmd_add(a):
     r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
          "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
          "quality": a.quality}
-    for o in s["requests"]:   # a newer request from the same thread for the same branch replaces its pending one
-        # (only a request that follows the branch tip is replaced; one pinned to a commit is its own request)
-        if o["state"] in ("pending", "conflict") and o["thread"] == a.thread and o["branch"] == a.branch \
-                and not a.sha and not o.get("sha") and o["outputs"] == outs:
+    for o in s["requests"]:   # coalescing: a newer request for the same piece replaces one still waiting
+        # (the same thread and branch following the branch tip, or the same branch asking for the same views and
+        #  cells at another commit, pinned or not: the stale one is dropped, never rendered)
+        if o["state"] in ("pending", "conflict") and o["branch"] == a.branch and o["outputs"] == outs and (
+                (o["thread"] == a.thread and not a.sha and not o.get("sha"))
+                or (sorted(o.get("views") or []) == sorted(r["views"]) and o.get("cells") == r["cells"]
+                    and o.get("quality") == r["quality"])):
             o["state"] = f"superseded by {r['id']}"
+            event("coalesced", None, dropped=o["id"], by=r["id"], branch=a.branch)
+    figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
+    for i in s.get("intents", []):    # the request an intent announced has come
+        if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
+            i["state"] = f"sent as #{r['id']}"
     s["next"] += 1; s["requests"].append(r); save(s)
     print(json.dumps(r, indent=2))
 
@@ -761,6 +1105,16 @@ def main():
     q.add_argument("--outputs", required=True); q.add_argument("--view", action="append"); q.add_argument("--cells")
     q.add_argument("--mode", choices=("combined", "isolated"), default="combined"); q.add_argument("--note")
     q.add_argument("--quality", choices=("final", "check"), default="final")
+    q = sub.add_parser("intent")
+    q.add_argument("--thread", required=True); q.add_argument("--branch", required=True)
+    q.add_argument("--piece", help="the figure module (blender/<piece>/<piece>.py) the render will be of")
+    q.add_argument("--set", help="the set it belongs to (default: from sets.json)")
+    q.add_argument("--view", help="the views.py command it expects to send, if known")
+    q.add_argument("--quality", choices=("final", "check"))
+    q.add_argument("--eta", type=float, default=5, help="minutes until the request will be sent")
+    q.add_argument("--note")
+    sub.add_parser("intents").add_argument("--all", action="store_true")
+    sub.add_parser("drop-intent").add_argument("id", type=int)
     sub.add_parser("ready").add_argument("--branch", required=True)
     for n in ("list", "plan", "serve", "sheet-due"):
         sub.add_parser(n)

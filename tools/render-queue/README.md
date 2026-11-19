@@ -63,8 +63,58 @@ cached renders of main to compare against. Don't fake a before on your branch ei
 hides your new layer. Ask only for your after views and compare them with a cached main render.
 
 Every request is combined with the other waiting branches whenever it merges cleanly with them and changes
-different functions of the scripts. One render then covers all of them, and the reply says what else was in it.
+different functions of the scripts (see "Batching" below for sets and the collation window). One render then covers all of them, and the reply says what else was in it.
 `mode: isolated` is still accepted but ignored. Up to three quick jobs render side by side.
+
+## Batching: sets, intents and the collation window
+
+John's rules (2026-11-19). The queue does all of this itself; a thread only has to announce its work.
+
+**Announce a render before you do the work.** When you start on a change you will want rendered, send the
+reviewer thread an intent along with your plan, and the reviewer passes it to the queue:
+
+```json
+{"intent": true, "branch": "claude/project-thread-xxxxxx", "piece": "sleeves", "quality": "check",
+ "eta_minutes": 10, "view": "blender/base/views.py --figure sleeves --mannequin --head --angles 3/4 --clay-only"}
+```
+
+The queue records it with `rq.py intent --thread T --branch B --piece FIGURE [--set NAME] [--view CMD]
+[--quality check|final] [--eta MINUTES] [--note TEXT]` (`rq.py intents` lists the open ones). `piece` is the
+figure module, `blender/<piece>/<piece>.py`, and its set comes from `sets.json`. The intent is closed when your
+request comes. A newer intent from you for the same piece replaces the old one.
+
+**Pieces of one set render together, always.** When pieces of one set are waiting together (in
+`sets.json`: the riding habit is chemise, corset, petticoat, skirt, redingote bodice and sleeves), the queue
+renders them in one build, with every piece on one body, in wearing order. The job is `views.py --figure outfit`,
+using the queue's own `rq_outfit.py` with `OUTFIT=skirt,sleeves`, and every piece's thread gets the same
+pictures. The views and angles are the union of what was asked, and the size and samples are the largest. The
+`--head` close-up is framed on the pieces that asked for it. Each piece is still fitted by its own module, so
+the combined render shows where the layers meet.
+
+**The collation window.** The clock starts when the first piece of a set is ready (its request). The queue holds
+that job for up to **5 minutes** (`READY_CUTOFF_S`) while another piece of the set or another view of the same
+figure is announced and not yet sent. When the window ends, the batch renders with whichever pieces are ready.
+A slower piece goes in the next batch, and its thread is not held up either. Once every announced piece has
+come, the job starts at once. A job nothing is announced for waits only 45 s (`WINDOW_S`) after its newest
+request, to catch requests sent together, and never longer.
+
+**Other batching rules:**
+- **One build per scene.** Views of one figure on one commit, with the same body, pose (`--frame`), env and
+  quality, run as one `views.py` call when that renders no more images than the separate calls would.
+- **Drafts with drafts.** A check render never shares a job with a final, and checks run before finals.
+- **Identical requests render once.** A job with the same key serves every request that asks for it, and the
+  cache serves repeats.
+- **Edits coalesce.** A new request for the same branch with the same views replaces one that is still waiting,
+  whether pinned to a commit or not, so a stale commit is never rendered.
+- **Caps.** A merged commit holds at most 4 branches (`MAX_BATCH`) and a combined job at most 6 requests
+  (`MAX_MERGE`). If a combined job fails (other than by being killed at 30 minutes), each of its requests is
+  retried alone, so one broken piece does not lose the lot.
+
+Every job start writes a `batch` line to `events.jsonl`: what it combined, how long its first request waited,
+what it was held for, and the announced pieces it left out. Coalesced requests and solo retries are logged
+there too. The nightly job's `rq_stats.py` reports these numbers (builds saved, duplicates, coalesced
+requests, holds that gained a partner, stragglers and how late they came) and proposes changes to the window,
+the cutoff and the caps from them.
 
 ## Review before the queue
 

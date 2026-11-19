@@ -202,7 +202,98 @@ def compute(hours=None, names=None):
                  "warned": max(evc("warn"), sum(1 for j in jl if j["seconds"] > 600)), "killed": evc("killed"), "sheet_preempted": evc("stopped")},
         "threads": by_thread,
         "blocked_now": blocked_now,
+        "batching": batching(lo, events, json.load(open(STATE)) if os.path.exists(STATE) else {}),
     }
+
+
+def build_seconds(key):
+    """How long a job's build took (views.py prints 'build N s'), from its render.log."""
+    import re
+    for d in (os.path.join(RESULTS, key), os.path.join(RESULTS, key + "-failed")):
+        try:
+            m = re.search(r"^build (\d+) s", open(os.path.join(d, "render.log")).read(), re.M)
+        except OSError:
+            continue
+        if m:
+            return int(m[1])
+    return None
+
+
+def batching(lo, events, state):
+    """John's batching numbers (2026-11-19): what was combined, what it saved, who was left out, and how long
+    the collation window held work; with tuning proposals for the window, the straggler cutoff and the caps."""
+    import re
+    src = open(os.path.join(HERE, "rq.py")).read()
+    knob = lambda n, d: int(re.search(rf'{n} = int\(os.environ.get\("[A-Z_]+", "(\d+)"\)\)', src)[1]) if re.search(  # noqa: E731
+        rf'{n} = int\(os.environ.get\("[A-Z_]+", "(\d+)"\)\)', src) else d
+    window, cutoff = knob("WINDOW_S", 45), knob("READY_CUTOFF_S", 300)
+    cap_batch, cap_merge = knob("MAX_BATCH", 4), knob("MAX_MERGE", 6)
+    ev = [e for e in events if ts(e["t"]) >= lo]
+    bt = [e for e in ev if e["ev"] == "batch"]
+    done = {e["key"]: e for e in ev if e["ev"] in ("done", "failed", "killed")}
+    combined = [e for e in bt if e.get("parts", 1) > 1 or e.get("set")]
+    sets_ = [e for e in bt if e.get("set")]
+    saved = 0
+    for e in combined:
+        b = build_seconds(e["key"])
+        if b:
+            saved += (e["parts"] - 1) * b      # one build instead of `parts`
+    held = [e for e in bt if e.get("held_for")]
+    held_window = [e["waited"] for e in held if "window" in (e["held_for"] or "")]
+    held_intent = [e["waited"] for e in held if "intent" in (e["held_for"] or "")]
+    gained = [e for e in held if e.get("parts", 1) > 1 or e.get("branches", 1) > 1 or len(e.get("requests") or []) > 1]
+    strag = [i for e in bt for i in (e.get("stragglers") or [])]
+    intents = {i["id"]: i for i in state.get("intents", [])}
+    reqs = {r["id"]: r for r in state.get("requests", [])}
+    late = []      # how long after the batch started a straggler's request came
+    for e in bt:
+        for i in e.get("stragglers") or []:
+            it = intents.get(i)
+            m = re.match(r"sent as #(\d+)", (it or {}).get("state", ""))
+            if m and int(m[1]) in reqs:
+                late.append(ts(reqs[int(m[1])]["created"]) - ts(e["t"]))
+    fails = [e for e in combined if done.get(e["key"], {}).get("ev") in ("failed", "killed")]
+    at_cap = [e for e in bt if e.get("branches", 1) >= cap_batch or len(e.get("requests") or []) >= cap_merge]
+    out = {"jobs": len(bt), "combined": len(combined), "set_renders": len(sets_),
+           "pieces_per_set": [len(e.get("pieces") or []) for e in sets_],
+           "requests_per_job": statistics.mean([len(e.get("requests") or []) for e in bt]) if bt else None,
+           "time_saved": saved, "duplicates_dropped": sum(e.get("dups", 0) for e in bt),
+           "coalesced": sum(1 for e in ev if e["ev"] == "coalesced"),
+           "retried_alone": sum(1 for e in ev if e["ev"] == "retry_alone"),
+           "held": len(held), "held_gained_partner": len(gained),
+           "wait_in_window": {"median": statistics.median(held_window) if held_window else None,
+                              "max": max(held_window, default=None)},
+           "wait_for_intent": {"median": statistics.median(held_intent) if held_intent else None,
+                               "max": max(held_intent, default=None)},
+           "stragglers": len(strag), "straggler_late": {"median": statistics.median(late) if late else None,
+                                                        "max": max(late, default=None)},
+           "combined_failed": len(fails), "at_cap": len(at_cap),
+           "knobs": {"WINDOW_S": window, "READY_CUTOFF_S": cutoff, "MAX_BATCH": cap_batch, "MAX_MERGE": cap_merge}}
+    tune = []
+    if len(held) >= 5:
+        rate = len(gained) / len(held)
+        if rate < 0.1 and window > 15:
+            tune.append(f"WINDOW_S {window} -> {max(15, window // 2)}: only {len(gained)} of {len(held)} held jobs "
+                        f"gained a partner in the window; the wait costs every lone job")
+        elif rate > 0.4 and window < 120:
+            tune.append(f"WINDOW_S {window} -> {min(120, window * 2)}: {len(gained)} of {len(held)} held jobs gained "
+                        f"a partner; a longer window may catch more")
+    if len(late) >= 3:
+        p75 = sorted(late)[int(0.75 * (len(late) - 1))]
+        if p75 < 600 and p75 > 0:
+            tune.append(f"READY_CUTOFF_S {cutoff} -> {min(900, cutoff + int(p75) // 60 * 60 + 60)}: three quarters of "
+                        f"the stragglers came within {fmt(p75)} of their batch starting, and each cost a second build")
+    if len(held_intent) >= 5 and not strag and max(held_intent) < cutoff * 0.6:
+        tune.append(f"READY_CUTOFF_S {cutoff} -> {max(120, int(max(held_intent)) // 60 * 60 + 60)}: every announced "
+                    f"piece came within {fmt(max(held_intent))}; a shorter cutoff loses nothing")
+    if combined and len(fails) / len(combined) > 0.2 and cap_merge > 2:
+        tune.append(f"MAX_MERGE {cap_merge} -> {cap_merge - 1}: {len(fails)} of {len(combined)} combined jobs failed "
+                    f"and were retried alone")
+    elif len(at_cap) >= 3 and not fails:
+        tune.append(f"MAX_MERGE {cap_merge} -> {cap_merge + 2}, MAX_BATCH {cap_batch} -> {cap_batch + 1}: {len(at_cap)} "
+                    f"jobs hit the cap and no combined job failed")
+    out["tuning"] = tune or ["no change: too few batches, or the numbers sit inside the bands"]
+    return out
 
 
 def report(st):
@@ -226,6 +317,21 @@ def report(st):
     out += ["", "Threads (requests, total wait, longest wait, total turnaround, render time):"]
     for t, b in sorted(st["threads"].items(), key=lambda kv: -kv[1]["wait"]):
         out.append(f"  {t}: {b['requests']}, {fmt(b['wait'])}, {fmt(b['max_wait'])}, {fmt(b['turnaround'])}, {fmt(b['render'])}")
+    b = st.get("batching")
+    if b:
+        out += ["", "Batching (sets, merged views, the collation window):",
+                f"  {b['combined']} of {b['jobs']} jobs combined work ({b['set_renders']} set renders, pieces "
+                f"{b['pieces_per_set'] or '-'}), {b['requests_per_job'] or 0:.2f} requests a job; about "
+                f"{fmt(b['time_saved'])} of builds saved",
+                f"  {b['duplicates_dropped']} duplicate jobs dropped, {b['coalesced']} stale requests coalesced, "
+                f"{b['retried_alone']} retried alone after a combined job failed ({b['combined_failed']} failed)",
+                f"  held: {b['held']} jobs, {b['held_gained_partner']} gained a partner; wait in the window median "
+                f"{fmt(b['wait_in_window']['median'])}, for an intent median {fmt(b['wait_for_intent']['median'])} "
+                f"(longest {fmt(b['wait_for_intent']['max'])})",
+                f"  stragglers left out: {b['stragglers']}, arriving a median {fmt(b['straggler_late']['median'])} "
+                f"after their batch started; {b['at_cap']} jobs at the size cap",
+                f"  knobs: {b['knobs']}"]
+        out += ["  tuning: " + t for t in b["tuning"]]
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]
     return "\n".join(out)

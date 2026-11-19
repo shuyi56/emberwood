@@ -1,0 +1,5 @@
+{
+  "_doc": "Sets whose pieces are rendered together (John, 2026-11-19): when pieces of one set are waiting at the same time, the queue renders them in one combined build (rq_outfit.py), in the order listed here, under to over. A name is a figure module, blender/<name>/<name>.py. A piece may be in more than one set; it joins the set that has the most of the waiting pieces. Edit the running copy to add a set; it is read on every plan.",
+  "riding-habit": ["chemise", "corset", "petticoat", "skirt", "redingote_bodice", "sleeves"],
+  "harness": ["chemise", "hose", "boot", "doublet", "vest"]
+}
