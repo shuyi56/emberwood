@@ -113,7 +113,7 @@ class Draft:
         # --- the body, round the neck's axis: the torso's skin, and at the arm's socket the armhole's own line
         phi = self.phi = 2 * math.pi * np.arange(NB) / NB
         sn, cs = np.sin(phi), np.cos(phi)
-        x_scye, z_b = fit.scye(P, aw, M, fit.RATIOS)
+        x_scye, z_b = fit.scye(P, aw, {k: v for k, v in M.items() if k != 'x_side'}, fit.RATIOS)     # (the shift's own line, not an outer garment's)
         band = P[(aw > 0.4) & (aw < 0.6)]
         low = band[band[:, 2] <= np.percentile(band[:, 2], 3)]
         self.x_pit = x_pit = float(np.abs(low[:, 0]).mean())

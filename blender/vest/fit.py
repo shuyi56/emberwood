@@ -197,6 +197,9 @@ def scye(P, aw, M, ratios=RATIOS):
     z_b = M['z_pit_arm'] - ratios['scye_drop'] * w
     side = P[(aw < 0.5) & (np.abs(P[:, 2] - z_b) < 0.1)]
     x_side = float(np.abs(side[:, 0]).max()) + (ratios['ease'] + 0.2) * w       # past the chest's side at the bottom
+    # (and past the garment's own side there, where it is known: over thick layers the shell stands further out
+    # than the chest, and a line that ended inside it left a torn step across the armhole's bottom)
+    x_side = max(x_side, M.get('x_side', 0.0))
     band = P[(aw > 0.4) & (aw < 0.6)]
     low = band[band[:, 2] <= np.percentile(band[:, 2], 3)]
     x_pit = float(np.abs(low[:, 0]).mean()) - ratios['scye_ease'] * w
@@ -285,6 +288,22 @@ def whole_piece(P, T, aw, M, head_bvh=None, ratios=RATIOS, log=print, over=None)
     cap = ~torso & (P[T][:, :, 2] > M['z_pit_arm']).all(1)
     bt = BVHTree.FromPolygons([Vector(p) for p in P], [tuple(int(i) for i in t) for t in T[torso]])
     bc = BVHTree.FromPolygons([Vector(p) for p in P], [tuple(int(i) for i in t) for t in T[cap]]) if cap.any() else None
+    # how far out the piece will stand at the armhole's bottom, measured before the armhole's line is drawn: the
+    # line has to end outside the piece there
+    z_b = M['z_pit_arm'] - ratios['scye_drop'] * w
+    reach = 0.0
+    for z in np.arange(z_b - 0.3 * w, z_b + 0.1 * w, STEP / 2):
+        o = Vector((0.0, yc, z))
+        for j in range(COLS):
+            d = Vector((-sn[j], -cs[j], 0.0))
+            hit = bt.ray_cast(o, d)[0]
+            if hit is not None:
+                reach = max(reach, abs(hit.x))
+            if over is not None:
+                hit = over.ray_cast(o + d * 60.0, -d, 60.0)[0]
+                if hit is not None:
+                    reach = max(reach, abs(hit.x))
+    M['x_side'] = reach + ease + 0.15 * w
     x_scye, _ = scye(P, aw, M, ratios)
     z_lo = M['z_waist'] - (ratios['hem_drop'] + ratios['hem_point'] + 0.5) * w
     z_hi = min(P[:, 2].max() - 0.15, M['z_chin'] + ratios['collar_rise'] * M['L'] + 0.6 * w)
@@ -419,6 +438,7 @@ def trim_lines(M, z_top, x_scye, ratios=RATIOS):
         return p[:, 2] - z
 
     y0, y1 = M['scye_y']
+    z_b = M['z_pit_arm'] - ratios['scye_drop'] * w
     ya, ay = 0.5 * (y0 + y1), 0.5 * (y1 - y0)
 
     def armholes(p):
@@ -427,7 +447,20 @@ def trim_lines(M, z_top, x_scye, ratios=RATIOS):
         u = (p[:, 1] - ya) / ay
         scoop = np.where(u < 0, ratios['scoop_front'], ratios['scoop_back']) * w * np.minimum(u * u, 1.0)
         scoop = scoop * _ss(M['z_pit_arm'], 0.5 * (M['z_pit_arm'] + M['z_sh']), p[:, 2])     # (none under the arm)
-        return x_scye(p[:, 2]) - scoop - np.abs(p[:, 0])
+        # (the cloth stays inside the line, or below the armhole's bottom: one field without a jump, the corner
+        # between the two rounded, so the cut is a clean curve wherever the piece crosses it)
+        if ratios.get('scye_round') is not None:
+            # A plate's armhole, as an armourer cuts it: round. Seen from the side it is a U with a half-round
+            # bottom, scye_round wider than the arm's own depth front and back; seen from the front it ends at the
+            # shoulder's line as before. (The line drawn from the front alone hooks in to the armpit and out again
+            # under it: right for a vest on the skin, a notch in a plate that stands off over a gambeson.)
+            hy = ay + ratios['scye_round'] * w
+            u_ = np.hypot(p[:, 1] - ya, np.minimum(p[:, 2] - (z_b + hy), 0.0)) - hy
+            z_ = np.maximum(p[:, 2], M['z_pit_arm'])
+            side = x_scye(z_) - scoop - 0.2 * w * (1.0 - _ss(M['z_pit_arm'], M['z_pit_arm'] + 0.4 * w, p[:, 2])) - np.abs(p[:, 0])
+            return -_smin(-side, -u_, 0.15 * w)
+        side = x_scye(np.maximum(p[:, 2], z_b + 1e-6)) - scoop - np.abs(p[:, 0])
+        return -_smin(-side, p[:, 2] - z_b, 0.15 * w)
 
     z_v = M['z_bust'] + ratios['v_point'] * (M['z_pit'] - M['z_bust'])
     z_f = float(z_top[0])
@@ -476,6 +509,29 @@ def trim(V, faces, f, snap=0.012):
     return V, out
 
 
+def keep_main(V, faces, share=0.02, log=print):
+    """A cut piece without its scraps: the bits a cut left joined to nothing, smaller than a share of the whole."""
+    par = {}
+
+    def find(a):
+        while par.setdefault(a, a) != a:
+            par[a] = par[par[a]]
+            a = par[a]
+        return a
+    for f in faces:
+        r = find(f[0])
+        for i in f[1:]:
+            par[find(i)] = r
+    roots = [find(f[0]) for f in faces]
+    n = {}
+    for r in roots:
+        n[r] = n.get(r, 0) + 1
+    keep = [f for f, r in zip(faces, roots) if n[r] >= share * len(faces)]
+    if len(keep) < len(faces):
+        log('cut: %d scraps dropped (%d faces)' % (sum(1 for c in n.values() if c < share * len(faces)), len(faces) - len(keep)))
+    return V, keep
+
+
 def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=RATIOS, log=print, steps=None,
                brass=None, over=None):
     """Measure the body, make the whole piece, cut it, and hand it to the body's bones. Returns (object, measures).
@@ -508,6 +564,7 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
         log('vest: trimmed %s, %d faces left' % (nm, len(faces)))
         if steps is not None:
             steps.append((nm, V.copy(), faces))
+    V, faces = keep_main(V, faces, log=log)
     kd = KDTree(len(P))
     for i, p in enumerate(P):
         kd.insert(Vector(p), i)

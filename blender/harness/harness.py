@@ -30,6 +30,8 @@ MEASURES = {}
 # The plates are bare bronze: the glazed trim is left off (HARNESS_GLAZE=1 lays it on again).
 GLAZE = os.environ.get('HARNESS_GLAZE') is not None
 LACE_ROOM = 0.07           # the room left under the plates for the doublet's lacing, in w
+SCYE_DROP = 0.45           # the plates' armhole: a little deeper than the gambeson's, and cut round (see
+SCYE_ROUND = 0.20          # fit.trim_lines): this much wider than the arm's own depth front and back, in w
 SHOULDERS = os.environ.get('HARNESS_NO_SHOULDERS') is None
 
 
@@ -49,7 +51,7 @@ def build():
     # (over the doublet's cloth alone, with room for its lacing in the ease: wrapped over the laces themselves the
     # plates took a dent at every cord and came out ragged at the hem)
     v, mv = fit.build_vest(body, heads, rig=rig, material=female.mat(vest.M_VEST), brass=female.mat(vest.M_BRASS),
-                           over=fit.rest_tree([coat])[0], ratios=dict(fit.RATIOS, ease=fit.RATIOS['ease'] + LACE_ROOM))
+                           over=fit.rest_tree([coat])[0], ratios=dict(fit.RATIOS, ease=fit.RATIOS['ease'] + LACE_ROOM, scye_drop=SCYE_DROP, scye_round=SCYE_ROUND))
     vest.warden_bronze()('vest bronze')
     if GLAZE:
         vest.glaze_coat('vest bronze')

@@ -315,6 +315,7 @@ def build_doublet(body, head_objs=(), rig=None, cloth=None, thread=None, lace=No
     for nm, f in lines:
         V, faces = fit.trim(V, faces, f)
         log('doublet: trimmed %s, %d faces left' % (nm, len(faces)))
+    V, faces = fit.keep_main(V, faces, log=log)
     # the channels: as many as the bust's girth holds at their width, an even number so one line of stitching runs
     # down the middle of the back and the front's edges meet on another
     girth = float(body_r[int(np.argmin(np.abs(zs - M['z_bust'])))].mean()) * 2 * math.pi
