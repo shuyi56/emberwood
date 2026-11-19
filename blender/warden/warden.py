@@ -1644,10 +1644,42 @@ def hair_tip_cut(objs):
         o.data.materials[0] = m
 
 
+HAIR_ASSET = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'warden.hair.glb')
+# (the pixel the head views are drawn at, for the creator's per-pixel ends and bump until a view sets its own:
+# views.py's --head, 17 units over 360 pixels)
+HAIR_VIEW_PIXEL = 17.0 / 360.0
+
+
 def creator_hair(head):
-    """Build the exported hairstyle on the head: 'Hair' (the cap, cut off where its strands thin out toward its
-    edge, so the locks make the outline) and 'Hair locks' (each strand a flat ribbon tapering to a point where the
-    creator fades it out, at its root and its tip)."""
+    """The face creator's hairstyle on the head, exactly as the creator draws it: the hair asset beside this file
+    (warden.hair.glb, from tools/hair-asset/export.cjs; FORMAT.md there), every piece of it with the creator's own
+    geometry and material (blender/shared/hair_asset.py). 'Hair' the cap, 'Hair locks' the strands of the top
+    layer, 'Hair locks under' the layer in its gaps, 'Hair veils' the sheer veils under the clumps. The sprite
+    sheet keeps the figure's own hair surface (female.sprite_mode), inside the creator's cut-out. Sets HAIR_PTS and
+    HAIR_RUNS for the clearance. Re-export the asset to change the hair; nothing here shapes it."""
+    global HAIR_PTS, HAIR_RUNS
+    sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
+    import hair_asset
+    A = hair_asset.load(HAIR_ASSET)
+    objs = hair_asset.build(A, parent=head, scale=HEAD_H / 8.6, name='Hair', split=True, base=mat(M_HAIR),
+                            tone=HAIR_ONSCREEN)
+    for o in objs:
+        # (the figure surface's patterns, for the sprite sheet: laid out down the hair, as on the figure's own)
+        me = o.data
+        rest = me.attributes.get('rest') or me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT')
+        rest.data.foreach_set('vector', [c for v in me.vertices for c in hair_flow(v.co)])
+    hair_asset.set_pixel(objs, HAIR_VIEW_PIXEL)
+    hair_asset.set_sprite_px(objs, hair_asset.tip_px_for(A, 1.0))      # (sprite-sized: the creator's far-off read)
+    HAIR_PTS, HAIR_RUNS = hair_asset.points(objs, A)
+    cap = bpy.data.objects['Hair']
+    return cap, [o for o in objs if o is not cap]
+
+
+def creator_hair_legacy(head):
+    """The older import, kept for the hair bench's before (hair_bench.py --legacy): the exported hairstyle
+    rebuilt on the head as 'Hair' (the cap, cut off where its strands thin out toward its edge, so the locks make
+    the outline) and 'Hair locks' (each strand a flat ribbon tapering to a point where the creator fades it out, at
+    its root and its tip)."""
     import gzip
     import json
     global HAIR_PTS, HAIR_RUNS
@@ -1787,7 +1819,7 @@ def creator_hair_clearance(cols=range(10), gap=0.2):
     from mathutils.kdtree import KDTree
     sc = bpy.context.scene
     cap = bpy.data.objects['Hair']
-    locks = [o for o in bpy.data.objects if o.name.startswith('Hair locks')]
+    locks = [o for o in bpy.data.objects if o.name.startswith(('Hair locks', 'Hair veils'))]
     P = HAIR_PTS
     need = {}
     clear_ = [1e9] * len(P)      # how close each point comes to the clothes in any pose

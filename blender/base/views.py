@@ -9,9 +9,12 @@
 --turn     the whole figure in its 3D look (sprite_mode off): front, front 3/4, profile, back 3/4 and back, in a
            row (DIR/turn.png), posed at sheet column --frame (default 0, the idle)
 --head     the head and shoulders from the same five angles (DIR/head.png)
---clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
-           the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
-           show (DIR/turn-clay.png, DIR/head-clay.png)
+--clay     with --turn or --head: the same views again with every surface one matte grey, the hair included (the
+           face creator's hair keeps its cut-out ends) and the painted layers (makeup, brows, painted strands, fuzz,
+           the hair's sheer veils) hidden, so only the forms and how they meet show (DIR/turn-clay.png,
+           DIR/head-clay.png)
+--hair-shadows  let the face creator's hair take shadows in the 3D look (by default it takes none, as in the
+           creator: hair_asset.unshadow)
 --angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
            comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
@@ -50,11 +53,13 @@ opt = lambda k, d=None: argv[argv.index(k) + 1] if k in argv else d  # noqa: E73
 FIGURE = opt('--figure', 'ranger')
 sys.path.insert(0, os.path.join(HERE, '..', FIGURE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 from mathutils import Vector  # noqa: E402
 from PIL import Image  # noqa: E402
 import female  # noqa: E402
+import hair_asset  # noqa: E402
 F = importlib.import_module(FIGURE)
 
 VIEWS = [('front', 0), ('3/4', 45), ('profile', 90), ('back 3/4', 135), ('back', 180)]
@@ -147,6 +152,9 @@ def look_3d(samples):
     # light off the floor: big, warm and from below, so the shaded undersides (legs, jaw, the far side of the body)
     # keep some colour instead of going grey. It is not seen by the camera.
     area('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), aim=(0, 0, 20)).visible_camera = False
+    # (the face creator's hair takes no shadow, as in the creator: hair_asset.unshadow; --hair-shadows keeps them)
+    if '--hair-shadows' not in argv:
+        hair_asset.unshadow(hair_asset.hair_objects())
     cam_d = bpy.data.cameras.new('View')
     cam_d.clip_start, cam_d.clip_end = 1, 1000
     cam = bpy.data.objects.new('View', cam_d)
@@ -163,6 +171,8 @@ def row(cam, out, tmp, size, centre, height, ortho=True, dist=200.0):
     if ortho:
         cam.data.ortho_scale = height
         cam.data.sensor_fit = 'VERTICAL'
+        # (the creator's hair reads its ends and its bump per pixel, as three.js does: hair_asset.set_pixel)
+        hair_asset.set_pixel(hair_asset.hair_objects(), height / size[1])
     else:
         cam.data.lens = 85
     tiles = []
@@ -194,6 +204,14 @@ def clay(on, saved):
             saved[o.name] = ([s.material for s in o.material_slots], o.hide_render)
             if o.name.startswith(('Wool fuzz', 'Eyeshadow', 'Lashes', 'Brow paint', 'Hair paint')):
                 o.hide_render = True
+            # (the face creator's hair keeps its cut-out ends, in the clay's colour; its sheer veils are colour only)
+            if o.get('hair_kind') == 'veil':
+                o.hide_render = True
+                continue
+            if o.get('hair_kind') == 'cut':
+                for s in o.material_slots:
+                    s.material = hair_asset.clay_material(s.material, (0.42, 0.40, 0.38), 0.55)
+                continue
             for s in o.material_slots:
                 s.material = m
     else:

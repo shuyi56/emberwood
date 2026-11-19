@@ -133,7 +133,7 @@ def open_face(push=float(os.environ.get('HAIR_PUSH', '1.3'))):
     and out from the face, most at the brows and temples and least at the parting and below the jaw, so the
     curtain frames the face instead of covering it."""
     H = HEAD_H
-    for nm in ('Hair', 'Hair locks'):
+    for nm in ('Hair', 'Hair locks', 'Hair locks under', 'Hair veils'):
         o = bpy.data.objects.get(nm)
         if o is None:
             continue
