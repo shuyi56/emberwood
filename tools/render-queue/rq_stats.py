@@ -219,6 +219,14 @@ def build_seconds(key):
     return None
 
 
+def _rejections(lo):
+    try:
+        rows = [json.loads(x) for x in open(os.path.join(DATA, "rejections.jsonl")) if x.strip()]
+    except OSError:
+        return []
+    return [r for r in rows if ts(r.get("at")) and ts(r["at"]) >= lo]
+
+
 def batching(lo, events, state):
     """John's batching numbers (2026-11-19): what was combined, what it saved, who was left out, and how long
     the collation window held work; with tuning proposals for the window, the straggler cutoff and the caps."""
@@ -292,6 +300,15 @@ def batching(lo, events, state):
     elif len(at_cap) >= 3 and not fails:
         tune.append(f"MAX_MERGE {cap_merge} -> {cap_merge + 2}, MAX_BATCH {cap_batch} -> {cap_batch + 1}: {len(at_cap)} "
                     f"jobs hit the cap and no combined job failed")
+    crop_jobs = [e for e in bt if e.get("crops")]
+    pose_jobs = [e for e in bt if e.get("poses")]
+    secs = {e["key"]: e.get("seconds") for e in ev if e["ev"] == "done"}
+    extra_secs = [secs[e["key"]] for e in bt if e.get("only_extras") and secs.get(e["key"])]
+    out["extras"] = {"crop_jobs": len(crop_jobs), "crops": sum(e["crops"] for e in crop_jobs),
+                     "pose_strips": len(pose_jobs),
+                     "extras_only_median": statistics.median(extra_secs) if extra_secs else None,
+                     "rejected_after_pose_strip": sum(
+                         1 for r in _rejections(lo) if set(r.get("jobs") or []) & {e["key"] for e in pose_jobs})}
     out["tuning"] = tune or ["no change: too few batches, or the numbers sit inside the bands"]
     return out
 
@@ -331,6 +348,10 @@ def report(st):
                 f"  stragglers left out: {b['stragglers']}, arriving a median {fmt(b['straggler_late']['median'])} "
                 f"after their batch started; {b['at_cap']} jobs at the size cap",
                 f"  knobs: {b['knobs']}"]
+        x = b.get("extras") or {}
+        out.append(f"  crops: {x.get('crops', 0)} in {x.get('crop_jobs', 0)} jobs; pose strips: {x.get('pose_strips', 0)}; "
+                   f"crop/pose-only jobs median {fmt(x.get('extras_only_median'))}; rejections that came from a pose "
+                   f"strip: {x.get('rejected_after_pose_strip', 0)}")
         out += ["  tuning: " + t for t in b["tuning"]]
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]

@@ -116,6 +116,44 @@ there too. The nightly job's `rq_stats.py` reports these numbers (builds saved, 
 requests, holds that gained a partner, stragglers and how late they came) and proposes changes to the window,
 the cutoff and the caps from them.
 
+## Crops and the pose test strip
+
+Two cheap views the queue adds to `views.py` (its own `rq_views.py`, put in the job's worktree). Both run at check
+quality unless the request says `"quality": "final"`. Both batch with the figure's other views and with the
+other pieces of its set: the crops and the poses come from the same build as the turn.
+
+**Crops: render only the problem area.** Use `"views": ["crop shoulder,armhole --figure sleeves --mannequin"]`, or
+add `--crop SPECS` to a `views.py` line. Each spec gives `crop-NAME.png`, a row over `--crop-angles` (default:
+`--angles`, else 3/4). Crops use the same fixed camera and lights as `--head`, so crops of two commits line up
+pixel for pixel. A spec is:
+- **A region by name:** `head`, `face`, `neck`, `shoulder`, `armhole`, `bust`, `elbow`, `waist`, `wrist`,
+  `hand`, `hips`, `knee`, `hem` or `ankle`. Each is measured from the base figure's sizes at that commit and
+  centred on the figure, so both sides show at every angle.
+- **A widened region:** add `+PAD`, as in `hem+0.3` for 30% more.
+- **A box from a turn you already have:** `box:X0:Y0:X1:Y1@S`, in pixels of one tile of a `turn.png` rendered at
+  `--size S`. A fault seen in a turn is cropped exactly where it is.
+
+`--crop-size N` sets the height in pixels (default 384). `--clay` and `--clay-only` apply to crops as well.
+
+**Pose test strip: joint extremes before a full turn.** Use `"views": ["pose-strip --figure sleeves"]`. It
+renders one clay tile per pose from one fixed 3/4 camera, laid out as `poses.png`. The poses:
+- `rest`
+- `arms-up` (arms raised out to the side)
+- `arms-fwd` (arms reached forward)
+- `elbows` (hard bend)
+- `step` (deep stride)
+- `crouch`
+- `twist` (chest against hips)
+
+`--poses arms-up,step` picks some poses, and `--pose-angle front` changes the camera. Shoulder, armhole and
+hem faults show here first. On the riding habit's skirt and sleeves (`views-57cafbc602ee`), the arms-up pose
+tore the sleeve caps off the shoulder, and the skirt folded into itself in the step and the crouch. Check a
+garment's pose strip before asking for a final turn. The rig itself is weighted for the walk, so a pose that
+tears the body as well as the cloth is a rig limit, not a fault of yours.
+
+The nightly report counts crops, pose strips, how long jobs with only crops or poses take, and the rejections
+that came out of a pose strip.
+
 ## Review before the queue
 
 The reviewer thread checks each request without rendering anything, in about two minutes:

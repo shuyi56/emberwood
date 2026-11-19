@@ -69,12 +69,15 @@ WINDOW_S = int(os.environ.get("RQ_WINDOW", "45"))         # a job waits this lon
 READY_CUTOFF_S = int(os.environ.get("RQ_READY_CUTOFF", "300"))   # John: a 5-minute collation window from the first piece ready
 INTENT_TTL_S = 1800                                       # an intent nobody followed lapses after its ETA + this
 VIEWS_PY = "blender/base/views.py"
+RQ_VIEWS = "blender/base/rq_views.py"        # views.py plus crops and the pose strip (the queue's rq_views.py)
+RQ_VIEWS_SRC = os.path.join(HERE, "rq_views.py")
 OUTFIT = os.path.join(HERE, "rq_outfit.py")
 ANGLES = ("front", "3/4", "profile", "back3/4", "back")
 # views.py options a combined job can take the union of (True: takes a value); any other option keeps a job apart
 MERGEABLE = {"--figure": True, "--angles": True, "--size": True, "--samples": True, "--frame": True,
              "--mannequin": False, "--turn": False, "--head": False, "--clay": False, "--clay-only": False,
-             "--denoise": False}
+             "--denoise": False, "--crop": True, "--crop-size": True, "--crop-angles": True, "--poses": True,
+             "--pose-angle": True, "--pose-size": True}
 
 
 def sets():
@@ -100,7 +103,7 @@ def parse_view(param):
         words = words[1:]
         while words and "=" in words[0] and not words[0].startswith("-"):
             env.append(words.pop(0))
-    if not words or words[0] != VIEWS_PY:
+    if not words or words[0] not in (VIEWS_PY, RQ_VIEWS):
         return None
     a, i = {}, 1
     while i < len(words):
@@ -109,7 +112,8 @@ def parse_view(param):
             return None
         a[w] = words[i + 1] if MERGEABLE[w] else True
         i += 2 if MERGEABLE[w] else 1
-    if "--figure" not in a or not ("--turn" in a or "--head" in a) or any(e.startswith("OUTFIT") for e in env):
+    if "--figure" not in a or not ("--turn" in a or "--head" in a or "--crop" in a or "--poses" in a) \
+            or any(e.startswith("OUTFIT") for e in env):
         return None
     return {"env": env, "check": check, "a": a, "group": (tuple(sorted(env)), check, "--mannequin" in a,
                                                           a.get("--frame"))}
@@ -117,7 +121,20 @@ def parse_view(param):
 
 def view_images(a):
     ang = len(a["--angles"].split(",")) if "--angles" in a else 5
-    return (("--turn" in a) + ("--head" in a)) * ang * (1 if "--clay-only" in a else 2 if "--clay" in a else 1)
+    looks = 1 if "--clay-only" in a else 2 if "--clay" in a else 1
+    n = (("--turn" in a) + ("--head" in a)) * ang * looks
+    if "--crop" in a:
+        cang = len((a.get("--crop-angles") or a.get("--angles") or "3/4").split(","))
+        n += len(a["--crop"].split(",")) * cang * looks
+    if "--poses" in a:
+        n += 7 if a["--poses"] == "all" else len(a["--poses"].split(","))
+    return n
+
+
+def _union_list(parts, key, order=None):
+    vals = [x for p in parts if key in p for x in p[key].split(",") if x]
+    vals = list(dict.fromkeys(vals))
+    return ",".join(sorted(vals, key=order.index) if order and all(v in order for v in vals) else vals)
 
 
 def union_args(parts, figure):
@@ -125,14 +142,24 @@ def union_args(parts, figure):
     for f in ("--mannequin", "--turn", "--head", "--denoise"):
         if any(f in p for p in parts):
             a[f] = True
-    if all("--clay-only" in p for p in parts):
+    looked = [p for p in parts if "--turn" in p or "--head" in p or "--crop" in p] or parts   # (a pose strip is clay)
+    if all("--clay-only" in p for p in looked):
         a["--clay-only"] = True
-    elif any("--clay" in p or "--clay-only" in p for p in parts):
+    elif any("--clay" in p or "--clay-only" in p for p in looked):
         a["--clay"] = True
     if all("--angles" in p for p in parts):
         want = {x for p in parts for x in p["--angles"].split(",")}
         a["--angles"] = ",".join([x for x in ANGLES if x in want] + sorted(want - set(ANGLES)))
-    for k in ("--size", "--samples"):
+    if any("--crop" in p for p in parts):
+        a["--crop"] = _union_list(parts, "--crop")
+        if any("--crop-angles" in p for p in parts):
+            a["--crop-angles"] = _union_list(parts, "--crop-angles", list(ANGLES))
+    if any("--poses" in p for p in parts):
+        a["--poses"] = "all" if any(p.get("--poses") == "all" for p in parts) else _union_list(parts, "--poses")
+        pa = next((p["--pose-angle"] for p in parts if "--pose-angle" in p), None)
+        if pa:
+            a["--pose-angle"] = pa
+    for k in ("--size", "--samples", "--crop-size", "--pose-size"):
         vals = [int(p[k]) for p in parts if k in p]
         if vals:
             a[k] = str(max(vals))
@@ -142,7 +169,7 @@ def union_args(parts, figure):
 
 
 def view_param(env, a, check):
-    words = [VIEWS_PY]
+    words = [RQ_VIEWS if ("--crop" in a or "--poses" in a) else VIEWS_PY]
     for k, v in a.items():
         words += [k] if v is True else [k, v]
     return ("env " + " ".join(env) + " " if env else "") + shlex.join(words) + (CHECK if check else "")
@@ -349,6 +376,8 @@ def job_key(commit, kind, param):
         if (not gen(p) or (p.endswith(".png") and p not in RENDERED)) and not p.startswith(NOT_INPUTS):
             h.update(line.encode())
     h.update(json.dumps([kind, param]).encode())
+    if param and RQ_VIEWS in param:          # (the queue's own script, put in the worktree: its code is an input)
+        h.update(open(RQ_VIEWS_SRC, "rb").read())
     return f"{kind}-{h.hexdigest()[:12]}"
 
 
@@ -602,6 +631,8 @@ def start(job):
     if job.get("pieces") or "--figure outfit" in (job["param"] or ""):
         os.makedirs(os.path.join(wt, "blender", "outfit"), exist_ok=True)
         shutil.copy(OUTFIT, os.path.join(wt, "blender", "outfit", "outfit.py"))
+    if RQ_VIEWS in (job["param"] or ""):
+        shutil.copy(RQ_VIEWS_SRC, os.path.join(wt, RQ_VIEWS))
     log = open(os.path.join(tmp_out, "render.log"), "w")
     cmd = command(job, tmp_out)
     log.write(f"$ {cmd}\n"); log.flush()
@@ -829,7 +860,10 @@ def batch_event(job, s, held_for):
     event("batch", job["key"], requests=job["requests"], pieces=job.get("pieces") or figs, set=job.get("set"),
           parts=len(job.get("merged_from") or [job["param"]]), branches=len({c["branch"] for c in job["combines"]}),
           waited=round(time.time() - first), held_for=held_for, stragglers=strag, dups=job.get("dups", 0),
-          solo=any(r.get("solo") for r in rs), check=(job["param"] or "").endswith(CHECK))
+          solo=any(r.get("solo") for r in rs), check=(job["param"] or "").endswith(CHECK),
+          crops=len((re.search(r"--crop\s+(\S+)", job["param"] or "") or [None, ""])[1].split(",")) if "--crop " in (job["param"] or "") else 0,
+          poses="--poses " in (job["param"] or ""),
+          only_extras=not re.search(r"--(turn|head|walk|run|cells)\b", job["param"] or ""))
 
 
 def related(fig_a, fig_b):
@@ -947,6 +981,36 @@ def before_only_from_cache(a, outs):
              "\ncompare against one of the cached renders of main instead:\n" + "\n".join(sorted(have)))
 
 
+def expand_view(v):
+    """The named views a thread may ask for: "pose-strip ARGS" and "crop SPECS ARGS", and views.py with --crop or
+    --poses, all run as the queue's rq_views.py."""
+    w = shlex.split(v)
+    if not w:
+        return v
+    if w[0] == "pose-strip":
+        rest = w[1:]
+        if "--poses" not in rest:
+            rest += ["--poses", "all"]
+        if "--mannequin" not in rest:
+            rest.append("--mannequin")
+        return shlex.join([RQ_VIEWS] + rest)
+    if w[0] == "crop":
+        if len(w) < 2:
+            sys.exit("crop needs the regions: crop shoulder,hem --figure F (see rq_views.py for the names)")
+        return shlex.join([RQ_VIEWS] + w[2:] + ["--crop", w[1]])
+    env = []
+    while w and (w[0] == "env" or ("=" in w[0] and not w[0].startswith("-"))):
+        env.append(w.pop(0))
+    if w and w[0] == VIEWS_PY and ("--crop" in w or "--poses" in w):
+        return shlex.join(env + [RQ_VIEWS] + w[1:])
+    return v
+
+
+def is_extra(v):
+    w = shlex.split(v)
+    return RQ_VIEWS in w and not any(f in w for f in ("--turn", "--head", "--walk", "--run", "--cells"))
+
+
 def cmd_add(a):
     s = load()
     outs = [o for o in a.outputs.split(",") if o]
@@ -960,6 +1024,9 @@ def cmd_add(a):
         sys.exit("views needs at least one --view 'path/in/repo.py args'")
     if "frames" in outs and not a.cells:
         sys.exit("frames needs --cells ROWS:COLS, e.g. 0-7:2,4,6")
+    a.view = [expand_view(v) for v in (a.view or [])] or None
+    if a.quality is None:     # crops and pose strips are cheap drafts unless the request says final
+        a.quality = "check" if a.view and all(is_extra(v) for v in a.view) else "final"
     before_only_from_cache(a, outs)
     r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
          "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
@@ -1104,7 +1171,7 @@ def main():
     q.add_argument("--thread", required=True); q.add_argument("--branch", required=True); q.add_argument("--sha")
     q.add_argument("--outputs", required=True); q.add_argument("--view", action="append"); q.add_argument("--cells")
     q.add_argument("--mode", choices=("combined", "isolated"), default="combined"); q.add_argument("--note")
-    q.add_argument("--quality", choices=("final", "check"), default="final")
+    q.add_argument("--quality", choices=("final", "check"), default=None, help="default: check for crops and pose strips alone, final otherwise")
     q = sub.add_parser("intent")
     q.add_argument("--thread", required=True); q.add_argument("--branch", required=True)
     q.add_argument("--piece", help="the figure module (blender/<piece>/<piece>.py) the render will be of")
