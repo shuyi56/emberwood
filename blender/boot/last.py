@@ -62,18 +62,19 @@ import fit  # noqa: E402     (the vest's cutter and hull)
 RATIOS = {
     'leather': 0.014,        # the leather's thickness (about 3.5 mm)
     'ease': 0.035,           # the shaft's room over the leg's taut section (a finger's width all round)
-    'slope': 0.20,           # the most the shaft closes in on the leg for each unit it goes down
-    'ankle_girth': 1.05,     # the shaft's least girth, as a multiple of the ankle's (laced: the heel goes in open)
+    'slope': 0.15,           # the most the shaft closes in on the leg for each unit it goes down
+    'ankle_girth': 1.22,     # the shaft's least girth, as a multiple of the ankle's (laced: the heel goes in open)
     'flare': 0.008,          # the top's flare
     'flare_span': 0.30,
     'calf_swell': 0.015,     # the shaft's own swell over the calf, past the ease (as a laced boot is cut)
     'calf_span': 0.25,       # over this far either way of the calf's fullest
     'room': 0.022,           # the foot's room over the hose
+    'instep_room': 0.040,    # the extra room over the instep and the front of the ankle, where a stride presses the foot up
     'gap': 0.024,            # the least room between the skin and the leather anywhere (the hose is 0.0105 of it)
     'toe_room': 0.045,       # the toe box's height over the toe
     'toe_long': 0.070,       # how much longer the toe region is than the foot's (a share of its length)
     'bridge': 0.16,          # the most the leather stands off a hollow of the foot it bridges
-    'top_below_knee': 0.12,  # the top edge below the knee's joint
+    'top_below_knee': 0.09,  # the top edge below the knee's joint
     'join': 0.16,            # the span over the ankle where the last's shaft meets its foot
     'lap': 0.040,            # how far one piece laps over the next at a seam (about 1 cm)
     'throat': 0.40,          # the vamp's throat (the lacing's foot) this share of the foot's length behind the toe
@@ -425,6 +426,11 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         mine = X0[:, 0] * sgn > 0
         w = _ss(M['ankle_z'] - r['join'], M['ankle_z'] + 0.4 * r['join'], z[mine])   # (full width under its edge)
         X[mine] = _on_shaft(X0[mine], shafts[sgn]) * w[:, None] + Xf[mine] * (1 - w)[:, None]
+    # room over the instep and the front of the ankle, to flex into: the last above is the leg's own, which would
+    # leave the leather no more than the gap off the instep, and a stride (the foot's toe-off) presses the foot up
+    # into it (the shaft's table, carried down over the foot, cuts in there)
+    X += Nr * (r['instep_room'] * _ss(1.2, 2.8, z) * (1.0 - _ss(M['ankle_z'] + r['join'], M['ankle_z'] + 3.0 * r['join'], z))
+               * np.clip(-Nr[:, 1], 0.0, 1.0))[:, None]
     # the foot's hollows bridged
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
     lift = np.zeros(n)
@@ -551,6 +557,30 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     return res
 
 
+def reweight(boot, hose, k=4):
+    """The boot's bone weights taken from the hose beneath it, at the hose's rest shape: each point of the leather
+    takes the weights of the nearest few points of the hose, the nearer the more. The leather then moves as the hose
+    does through a stride, wherever the body's own weights and the hose's part ways (the instep and the ankle)."""
+    names = [g.name for g in hose.vertex_groups]
+    kd = KDTree(len(hose.data.vertices))
+    for v in hose.data.vertices:
+        kd.insert(hose.matrix_world @ v.co, v.index)
+    kd.balance()
+    W = np.zeros((len(hose.data.vertices), len(names)), dtype=np.float32)
+    for v in hose.data.vertices:
+        for g in v.groups:
+            W[v.index, g.group] = g.weight
+    for g in list(boot.vertex_groups):
+        boot.vertex_groups.remove(g)
+    groups = [boot.vertex_groups.new(name=n) for n in names]
+    for v in boot.data.vertices:
+        hits = kd.find_n(boot.matrix_world @ v.co, k)
+        w = np.array([1.0 / max(h[2], 1e-4) for h in hits])
+        ws = (W[[h[1] for h in hits]] * (w / w.sum())[:, None]).sum(0)
+        for gi in np.nonzero(ws > 1e-4)[0]:
+            groups[gi].add([v.index], float(ws[gi]), 'REPLACE')
+
+
 def clearance(boot, hose, log=print):
     """The gap between the hose and the boot's inner face, at the current frame: from every point of the hose under
     the boot (judged by where it lies at rest: on the boot's own leg, between the sole and the top), a ray straight
@@ -582,15 +612,25 @@ def clearance(boot, hose, log=print):
     side = -1 if boot.name.endswith('.R') else 1
     z_top, z_low = float(br[:, 2].max()) - 0.3, float(br[:, 2].min()) + 0.3
     gaps = []
+    where = []
     for p, nv, q in zip(hp, hn, hr):
         if q[0] * side <= 0 or q[2] > z_top or q[2] < z_low:
             continue
-        loc, fn, _, d = tree.ray_cast(p - nv * 1e-4, nv, 3.0)
+        loc, fn, ti, d = tree.ray_cast(p - nv * 1e-4, nv, 3.0)
         if loc is None:
             continue
         gaps.append(d if fn.dot(nv) > 0 else -d)
+        if fn.dot(nv) <= 0:
+            where.append((p[2], q[2], q[1], bt[ti][0]))      # (where it is through: posed height, rest height, rest y, the vertex it met)
     g = np.array(gaps)
     out = {'min': float(g.min()), 'mean': float(g.mean()), 'through': int((g < 0).sum()), 'n': len(g)}
     log('boot clearance %s: hose to leather min %.3f mean %.3f, %d of %d hose points through the leather' % (
         boot.name, out['min'], out['mean'], out['through'], out['n']))
+    if where:
+        w = np.array(where)
+        sides = PIECES.get(boot.name.rsplit('.', 1)[-1], [])
+        names = [next((pc['name'] for pc in sides if pc['name'] != 'sole' and pc['start'] <= int(v) < pc['start'] + len(pc['V'])), '?') for v in w[:, 3]]
+        log('boot clearance %s: met on the pieces %s' % (boot.name, {k: names.count(k) for k in sorted(set(names))}))
+        log('boot clearance %s: through at rest heights %.2f to %.2f (the ankle is at 4.9), rest y %.2f to %.2f'
+            % (boot.name, w[:, 1].min(), w[:, 1].max(), w[:, 2].min(), w[:, 2].max()))
     return out

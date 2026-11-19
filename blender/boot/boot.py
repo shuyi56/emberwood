@@ -49,6 +49,8 @@ def build():
     ho = bpy.data.objects['Hose']
     leather = female.mat(M_LEATHER)
     boots = last.build_boots(body, hose.MEASURES, rig=rig, material=leather, shaft_name=SHAFT)
+    for side in 'RL':
+        last.reweight(boots[side], ho)
     if SEW:
         import sew
         for side in 'RL':
