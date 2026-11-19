@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { makeDummy, CYCLE } from './dummy.js';
 import { SpringBones, findChains } from '../world/springbones.js';
-import { FabricBones } from '../world/fabric.js';
+import { FabricBones, CapeGait } from '../world/fabric.js';
+import { CAPE_RUN_SETTINGS } from '../world/cape-rig.js';
 import { WARDEN_COLLIDERS, makeColliders } from '../world/cape-rig.js';
 import { attachHairSprings } from '../world/hair-rig.js';
 import { HeadMotion } from '../world/head-motion.js';
@@ -67,8 +68,11 @@ export class CapeSim {
     const root = this.dummy.root;
     root.updateMatrixWorld(true);
     const { chains, links } = findChains(root, 'cape', this.settings, 1);
-    // (opts.solver 'fabric': the cape as cloth, fabric.js, on the same bones and colliders)
-    const Solver = this.opts.solver === 'fabric' ? FabricBones : SpringBones;
+    // (opts.solver: 'gait', fabric walking and spring bones running (CapeGait, with opts.runSettings or
+    // CAPE_RUN_SETTINGS); 'fabric', the cape as cloth; 'springs', spring bones; all on the same bones and colliders)
+    const sv = this.opts.solver || 'springs';
+    const Solver = sv === 'gait' ? class extends CapeGait { constructor(o) { super(o, { run: run }); } } : sv === 'fabric' ? FabricBones : SpringBones;
+    const run = { ...CAPE_RUN_SETTINGS, ...(this.opts.runSettings || {}) };
     this.springs = new Solver({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()),
       fit: 'surface' });
     this.springs.reset();
@@ -117,6 +121,8 @@ export class CapeSim {
     this.dummy.pose(this.phase, w, this.t);
     if (this.head) this.head.update(dt);
     this.dummy.root.updateMatrixWorld(true);
+    // (the gait cape is told what she is doing, as the game will: running while the body plays a baked run)
+    if (this.springs.setGait) this.springs.setGait(this.dummy.gait && w > 0.02 ? 'run' : 'walk');
     if (this.opts.springs) { this.springs.update(dt); if (this.hair) this.hair.update(dt); }
     else for (const b of [...this.dummy.cape.bones, ...(this.dummy.hair ? this.dummy.hair.bones : [])]) b.quaternion.copy(b.userData.rest);
     // the loop check: on the straight walk, compare the cape one cycle apart (in her own space)

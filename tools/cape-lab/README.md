@@ -41,6 +41,30 @@ on the body. Fabric is the game's cape and the bench's default; open the page wi
 and `WARDEN_FABRIC_SETTINGS` in `src/world/cape-rig.js`; `attachCapeSprings(model)` gives the fabric cape, and
 `attachCapeSprings(model, null, WARDEN_COLLIDERS, 'springs')` the spring bones.
 
+## Walking on fabric, running on springs
+
+The game's cape is `CapeGait` (`src/world/fabric.js`, the default of `attachCapeSprings`): fabric while she walks or
+stands, spring bones while she runs, on the same bones, so it passes from one to the other without a jump. The game
+says which (`cape.setGait('run')` while her run plays, `'walk'` otherwise); left unsaid, it goes by her speed. The
+bench does the same (`?solver=gait`, the default; `fabric` or `springs` for one throughout).
+
+The running springs (`CAPE_RUN_SETTINGS`) are set from the physics she and the cape should have, worked out by
+`node tools/cape-lab/physics.mjs`:
+
+- her scale from her head (chin to crown 8.6 units, an adult woman's 21.8 cm): 39.4 units a metre, so she is 1.78 m;
+- her weight from her volume (the mannequin's skin, neck, hands and head in `anatomy/mannequin-v14.blend`, 3319 cubic
+  units, 54 L) at the body's density: about 55 kg;
+- the forces of her gaits, from the baked hips' rise and fall at the step's rhythm: walking at 1.7 m/s the ground
+  pushes up to about 2 times her weight, running at 3.9 m/s about 2.2 (a real run, about 2.5); her chest shakes the
+  cape with up to 12 m/s2 running;
+- the cape: 1.05 m2 of heavy wool with a lining (550 g/m2), about 0.6 kg;
+- the air, on the part of the cape out of her wake (a flat sheet's drag on 35% of it): at a run 0.7 of the cape's
+  weight, which holds its hem about 30 degrees back; at a walk 0.14 of it, 8 degrees.
+
+So running, gravity is real gravity at her scale (386), the air's drag grows with the square of the speed (`drag`),
+and nothing carries the cape along with her (`follow` 0). `check.mjs` reports the hem's lift back walking and running
+(`walkLiftDeg`, `runLiftDeg`): about 6 and 26 degrees.
+
 ## The cape rig
 
 Each column of the cape is a chain `cape_<column>_0 … cape_<column>_<rows>` under `Chest`, plus an empty

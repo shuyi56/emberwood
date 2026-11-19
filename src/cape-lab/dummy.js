@@ -126,6 +126,8 @@ export function makeDummy({ columns = 7, rows = 5 } = {}) {
       for (const n of Object.keys(J)) { bones[n].position.copy(bones.rest[n]); bones[n].quaternion.identity(); }
       root.updateMatrixWorld(true);
       body.walkPlayer = walk ? makeWalkPlayer(walk, root) : null;
+      // (a baked run sets its own pace and stride; the stand-in's legs are the figure's it was made on)
+      body.gait = walk && walk.seconds_per_cycle ? { stride: walk.stride, seconds: walk.seconds_per_cycle } : null;
     },
   };
   body.setCape = (o) => setCape(body, o);

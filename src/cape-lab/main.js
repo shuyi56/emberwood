@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { applySettings } from '../world/springbones.js';
-import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS, CAPE_FABRIC_SETTINGS, WARDEN_FABRIC_SETTINGS } from '../world/cape-rig.js';
+import { CAPE_SETTINGS, WARDEN_MODEL_SETTINGS, CAPE_FABRIC_SETTINGS, WARDEN_FABRIC_SETTINGS, CAPE_RUN_SETTINGS, WARDEN_RUN_SETTINGS } from '../world/cape-rig.js';
 import { WALKS, loadBakedWalk } from './baked-walk.js';
 import { CapeSim, SCENARIOS, FRAME, PACE } from './sim.js';
 import { loadModelBody, loadMannequinBody } from './model-body.js';
@@ -53,10 +53,12 @@ controls.enableDamping = false;
 controls.enabled = false;
 
 // ---- the character ----
-// the cape as cloth (src/world/fabric.js), as in the game; ?solver=springs for spring bones on the same bones and colliders
-const FABRIC = new URLSearchParams(location.search).get('solver') !== 'springs';
+// the cape as in the game: fabric walking and spring bones running (CapeGait, src/world/fabric.js); ?solver=fabric or
+// ?solver=springs for one solver throughout, on the same bones and colliders
+const SOLVER = new URLSearchParams(location.search).get('solver') || 'gait';
+const FABRIC = SOLVER !== 'springs';
 const settings = { ...(FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, slow: 1 };
-const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true, solver: FABRIC ? 'fabric' : 'springs' };
+const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true, solver: SOLVER };
 let sim, colliderGroup, boneHelper;
 // the body: the stand-in, or the Warden's own model (?body=model, from ?model=<url>, models/warden.glb by default)
 const params = new URLSearchParams(location.search);
@@ -87,6 +89,7 @@ async function setBody(kind) {
   // each body's own tuning (her cape hangs closer to her than the stand-in's)
   const own = kind === 'model' ? (FABRIC ? WARDEN_FABRIC_SETTINGS : WARDEN_MODEL_SETTINGS) : (FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS);
   Object.assign(settings, { contactSoftness: own.contactSoftness, linkCurve: own.linkCurve });
+  opts.runSettings = kind === 'model' ? WARDEN_RUN_SETTINGS : CAPE_RUN_SETTINGS;      // (the gait cape's running springs)
   for (const f of syncSliders) f();
   build();
 }

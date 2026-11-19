@@ -90,6 +90,7 @@ export class FabricBones extends SpringBones {
       ch.joints.forEach((j, r) => {
         // (through the air, and the swing: its speed relative to what the chain hangs from)
         const v = _p.subVectors(j.tail, j.prevTail).multiplyScalar(air);
+        if (s.drag) v.multiplyScalar(1 / (1 + s.drag / sc * v.length()));      // (the air's drag, as in springbones.js)
         v.addScaledVector(_d.subVectors(v, carry), -swingLoss);
         if (s.stiffness) {
           j.worldLength = j.length * sc;
@@ -162,4 +163,44 @@ export function attachFabric(model, { prefix = 'cape', settings = FABRIC_SETTING
   const cloth = new FabricBones({ chains, links, root: model, colliders, fit });
   cloth.reset();
   return cloth;
+}
+
+// The cape by her gait: fabric while she walks or stands, spring bones while she runs. Both solve the same bones and
+// keep their state on them (each joint's tail and where it was a step ago), so the cape passes from one to the
+// other without a jump. The game says which she is doing (`setGait('run')` while it plays her run, 'walk' otherwise):
+// her arms pump and her heels kick up from the run's first step, and fabric let a hand through then. Left unsaid
+// (setGait(null)), it goes by her speed: her root's, eased over GAIT_EASE seconds; she runs above runAbove (model
+// units a second) and walks again below walkBelow, the gap between them keeping it from flicking back and forth.
+// walk, run: the chains' settings in each (FABRIC_SETTINGS and the spring bones' own, cape-rig.js)
+const GAIT_EASE = 0.15;
+export class CapeGait extends FabricBones {
+  constructor(o, { walk, run, runAbove = 100, walkBelow = 85 } = {}) {
+    super(o);
+    for (const ch of this.chains) { ch.walkSettings = walk ? { ...ch.settings, ...walk } : ch.settings; ch.runSettings = { ...ch.settings, ...(run || {}) }; ch.settings = ch.walkSettings; }
+    Object.assign(this, { runAbove, walkBelow, running: false, speed: 0, _at: null, gait: null });
+  }
+  setGait(g) { this.gait = g; }
+  reset() { this.speed = 0; this._at = null; this._set(false); super.reset(); }
+  _set(running) {
+    this.running = running;
+    for (const ch of this.chains) ch.settings = running ? ch.runSettings : ch.walkSettings;
+  }
+  update(dt) {
+    if (this.root && dt > 0) {
+      const at = _p.setFromMatrixPosition(this.root.node.matrixWorld), sc = _sc.setFromMatrixScale(this.root.node.matrixWorld).x || 1;
+      if (this._at) {
+        const v = Math.hypot(at.x - this._at.x, at.z - this._at.z) / dt / sc;
+        this.speed += (v - this.speed) * Math.min(1, dt / GAIT_EASE);
+      }
+      this._at = (this._at || new THREE.Vector3()).copy(at);
+    }
+    if (this.gait) { if ((this.gait === 'run') !== this.running) this._set(this.gait === 'run'); }
+    else if (!this.running && this.speed > this.runAbove) this._set(true);
+    else if (this.running && this.speed < this.walkBelow) this._set(false);
+    super.update(dt);
+  }
+  _step(h) {
+    if (this.running) return SpringBones.prototype._step.call(this, h);
+    return super._step(h);
+  }
 }

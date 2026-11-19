@@ -1,7 +1,7 @@
 // Numbers for the cape springs, without a browser: runs the cape bench's stand-in (src/cape-lab/sim.js) in node
 // and reports what a capture can't show at a glance.
 //
-//   node tools/cape-lab/check.mjs [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--walk new] [--solver springs]
+//   node tools/cape-lab/check.mjs [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--walk new] [--solver fabric|springs]
 //
 //  - loop drift: on the straight walk, how far any tail lands from where it was one cycle earlier (0 means the
 //    cape repeats exactly with the walk, so a looping clip shows no seam)
@@ -11,6 +11,7 @@
 //  - clearance: the closest any tail comes to the body's capsules (negative is inside)
 //  - cloth in body: the deepest any vertex of the skinned cape (below the shoulders) goes into a body capsule
 //    through the sharp turns, where an arm or a leg would show through
+//  - run: the same swing, jitter and cloth in body over the base figure's baked run (public/cape-lab/walk-run.json)
 //  - jitter: how much the cape shakes from frame to frame (the mean size of each tail's third difference over
 //    frames, in her own space: a smooth swing, however fast, scores low; a flicker scores high)
 import fs from 'fs';
@@ -22,9 +23,10 @@ const arg = (name, def) => {
   const i = process.argv.indexOf('--' + name);
   return i > 0 ? process.argv[i + 1] : def;
 };
-// --solver springs: spring bones instead of the cape as cloth (src/world/fabric.js, the game's), each with its own settings
-const solver = arg('solver', 'fabric');
-const settings = { ...(solver === 'fabric' ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
+// --solver: gait (the game's: fabric walking, spring bones running, src/world/fabric.js CapeGait), fabric or springs,
+// each with its own settings (gait's are fabric's, and CAPE_RUN_SETTINGS running)
+const solver = arg('solver', 'gait');
+const settings = { ...(solver === 'springs' ? CAPE_SETTINGS : CAPE_FABRIC_SETTINGS), colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
 // --walk new|main: a baked walk (public/cape-lab/walk-<name>.json) in place of the stand-in's walk made in code
 const walkName = arg('walk', null);
 const walkData = walkName ? JSON.parse(fs.readFileSync(new URL(`../../public/cape-lab/walk-${walkName}.json`, import.meta.url))) : null;
@@ -38,6 +40,14 @@ const hem = (s) => {
 };
 const rest = sim('walk');
 const restHem = hem(rest);
+// how far the middle of the hem is lifted back from hanging, in degrees (the angle at the chain's top, in her space)
+const liftOf = (s) => {
+  const ch = s.springs.chains[Math.floor(s.springs.chains.length / 2)], inv = s.dummy.root.matrixWorld.clone().invert();
+  const top = ch.joints[0].head.clone().applyMatrix4(inv), tip = ch.joints[ch.joints.length - 1].tail.clone().applyMatrix4(inv);
+  const d = tip.sub(top);
+  return Math.atan2(-d.z, -d.y) * 180 / Math.PI;
+};
+const restLift = liftOf(rest);
 const swingOf = (s) => Math.max(...hem(s).map((p, i) => {
   const r = restHem[i];
   const top = s.springs.chains[i].joints[0];
@@ -60,10 +70,11 @@ function clearance(s) {
 
 // loop drift and walking swing
 const w = sim('walk');
-let walkSwing = 0, minClear = Infinity;
+let walkSwing = 0, minClear = Infinity, walkLift = 0, wl = 0;
 for (let i = 0; i < CYCLE_FRAMES * 12; i++) {
   w.step();
   if (i > CYCLE_FRAMES * 4) { walkSwing = Math.max(walkSwing, swingOf(w)); minClear = Math.min(minClear, clearance(w)); }
+  if (i > CYCLE_FRAMES * 4) { walkLift += liftOf(w) - restLift; wl++; }
 }
 // turns
 const tr = sim('turn');
@@ -138,6 +149,43 @@ function jitter(scenario, secs) {
   }
   return sum / n;
 }
+// the run (the base figure's, baked: public/cape-lab/walk-run.json), on the same body: the hem's swing, how much
+// the cape flaps (jitter), and the cloth in the body
+const runData = JSON.parse(fs.readFileSync(new URL('../../public/cape-lab/walk-run.json', import.meta.url)));
+// (at the new mannequin's pace: her legs are 1.27 times the figure's the run was made on, and so is her stride)
+const runSim = () => new CapeSim({ ...settings }, { ...base, walkData: { ...runData, stride: runData.stride * 35.2 / runData.leg }, scenario: 'run' });
+
+function runNumbers() {
+  const s = runSim(), hist = [], mesh = s.dummy.cape.mesh, pos = mesh.geometry.attributes.position, v = new THREE.Vector3();
+  let swing = 0, sum = 0, n = 0, deep = 0, lift = 0, nl = 0;
+  for (let f = 0; f < 6 * 60; f++) {
+    s.step();
+    const running = s.t > 1.2 && s.t < 4;
+    if (!running) continue;
+    swing = Math.max(swing, swingOf(s));
+    if (s.t > 2) { lift += liftOf(s) - restLift; nl++; }
+    hist.push(s.tails()); if (hist.length > 4) hist.shift();
+    if (hist.length === 4) {
+      const [a, b, c, d] = hist;
+      for (let i = 0; i < a.length; i++) { sum += d[i].clone().sub(c[i].clone().multiplyScalar(3)).add(b[i].clone().multiplyScalar(3)).sub(a[i]).length(); n++; }
+    }
+    if (f % 2) continue;
+    mesh.skeleton.update();
+    for (const c of s.springs.colliders) c.refresh();
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) > 45) continue;
+      v.fromBufferAttribute(pos, i); mesh.boneTransform(i, v); v.applyMatrix4(mesh.matrixWorld);
+      for (const c of s.springs.colliders) {
+        const ab = c.wb.clone().sub(c.wa);
+        const t = Math.min(1, Math.max(0, v.clone().sub(c.wa).dot(ab) / Math.max(1e-9, ab.lengthSq())));
+        deep = Math.max(deep, c.radius * c.scale - v.distanceTo(c.wa.clone().addScaledVector(ab, t)));
+      }
+    }
+  }
+  return { swing, jitter: sum / n, deep, lift: lift / nl };
+}
+const run = runNumbers();
+walkLift /= wl;
 const report = {
   loopDrift: +w.drift.toFixed(4),
   walkSwingDeg: +walkSwing.toFixed(1),
@@ -150,5 +198,10 @@ const report = {
   jitterWalk: +jitter('walk', 4).toFixed(3),
   jitterStartStop: +jitter('startstop', 6).toFixed(3),
   jitterTurn: +jitter('turn', 7).toFixed(3),
+  walkLiftDeg: +walkLift.toFixed(1),
+  runLiftDeg: +run.lift.toFixed(1),
+  runSwingDeg: +run.swing.toFixed(1),
+  jitterRun: +run.jitter.toFixed(3),
+  runClothInBody: +run.deep.toFixed(2),
 };
 console.log(JSON.stringify(report, null, 2));

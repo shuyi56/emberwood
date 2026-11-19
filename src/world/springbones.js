@@ -32,6 +32,9 @@ export const DEFAULTS = {
   stiffness: 250,       // pull toward the rest direction (model units / s^2)
   damping: 0.15,        // share of the swing (velocity relative to the body) lost per 1/60 s
   airDrag: 0.02,        // share of the speed through the air lost per 1/60 s
+  // the air's drag as it really is, growing with the square of the speed: a = drag * v^2 (1 / model units). From the
+  // cloth's weight per area and how much of it meets the air (tools/cape-lab/physics.mjs); 0 leaves only airDrag
+  drag: 0,
   gravity: 450,         // fall (model units / s^2; 450 is real gravity at 46 units a metre)
   gravityDir: [0, -1, 0],
   hitRadius: 1.0,       // the tail's radius against colliders, in model units
@@ -425,6 +428,8 @@ export class SpringBones {
         const swing = _v2.subVectors(v, _v3.subVectors(j.head, j.prevHead));
         const k = h * 60;
         v.multiplyScalar(Math.pow(1 - s.airDrag, k));
+        // (a = drag v^2 over the step, taken implicitly so a fast tail is slowed, never turned back)
+        if (s.drag) v.multiplyScalar(1 / (1 + s.drag / sc * v.length()));
         v.addScaledVector(swing, -(1 - Math.pow(1 - s.damping, k)));
         j.next.copy(j.tail).add(v);
         j.next.addScaledVector(j.restDir, s.stiffness * sc * h * h);

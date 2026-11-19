@@ -18,7 +18,7 @@
 // the legs and 8.5 to the sides, and the cape hangs from the shoulders (52.7) to just under the knees (19).
 import { PropertyBinding } from 'three';
 import { SpringBones, Collider, findChains, DEFAULTS } from './springbones.js';
-import { FabricBones, FABRIC_SETTINGS } from './fabric.js';
+import { FabricBones, CapeGait, FABRIC_SETTINGS } from './fabric.js';
 
 export const CAPE_SETTINGS = {
   ...DEFAULTS,
@@ -45,6 +45,15 @@ export const WARDEN_MODEL_SETTINGS = { ...CAPE_SETTINGS, contactSoftness: 0.5, l
 // sheet of cloth. It has no pull back to the modelled shape and no swing limit: its threads and the body shape it
 export const CAPE_FABRIC_SETTINGS = { ...FABRIC_SETTINGS, hitRadius: 0.6, contactSoftness: 2, follow: 0.5 };
 export const WARDEN_FABRIC_SETTINGS = { ...CAPE_FABRIC_SETTINGS, contactSoftness: 0.5, linkCurve: [0.12, 0.12] };
+
+// The cape running, on spring bones, set from the physics she and it should have (tools/cape-lab/physics.mjs: her head
+// gives 39.4 units a metre, so she is 1.78 m and about 55 kg; the cape, heavy wool with a lining, is about 0.6 kg).
+// Real gravity at that scale, and the air's drag on the part of the cape that is out of her wake, growing with the
+// square of the speed (0.47 / m, so at her 3.9 m/s run it is about 0.7 of the cape's weight and lifts its hem back
+// about 30 degrees). Nothing carries the cape along with her (`follow` 0): the air, not a shortcut, holds it out
+// behind her; only a little of the old linear air loss is kept, for the flutter
+export const CAPE_RUN_SETTINGS = { ...CAPE_SETTINGS, gravity: 386, drag: 0.47 / 39.4, airDrag: 0.005, follow: 0 };
+export const WARDEN_RUN_SETTINGS = { ...CAPE_RUN_SETTINGS, contactSoftness: 0.5, linkCurve: [0.12, 0.12] };
 
 // [from joint, offset], [to joint, offset, beyond], radius: offsets are in the model's axes (+z is her front);
 // `beyond` carries the far end on past its joint by that share of the capsule's length; options { turns: true }
@@ -97,14 +106,15 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)
-// solver: 'fabric' (cloth, fabric.js: the game's cape) or 'springs' (spring bones); settings default to that solver's
-export function attachCapeSprings(model, settings = null, colliders = WARDEN_COLLIDERS, solver = 'fabric') {
-  settings = settings || (solver === 'fabric' ? WARDEN_FABRIC_SETTINGS : WARDEN_MODEL_SETTINGS);
+// solver: 'gait' (the game's cape: fabric walking, spring bones running, see CapeGait), 'fabric' or 'springs';
+// settings default to that solver's (for 'gait', the walking settings; runSettings the running ones)
+export function attachCapeSprings(model, settings = null, colliders = WARDEN_COLLIDERS, solver = 'gait', runSettings = WARDEN_RUN_SETTINGS) {
+  settings = settings || (solver === 'springs' ? WARDEN_MODEL_SETTINGS : WARDEN_FABRIC_SETTINGS);
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;
-  const Solver = solver === 'fabric' ? FabricBones : SpringBones;
-  const springs = new Solver({ chains, links, root: model, colliders: makeColliders(model, colliders), fit: 'surface' });
+  const o = { chains, links, root: model, colliders: makeColliders(model, colliders), fit: 'surface' };
+  const springs = solver === 'gait' ? new CapeGait(o, { run: runSettings }) : solver === 'fabric' ? new FabricBones(o) : new SpringBones(o);
   springs.reset();
   return springs;
 }
