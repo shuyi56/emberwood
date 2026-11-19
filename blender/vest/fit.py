@@ -568,6 +568,9 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
         for gi, wt in acc.items():
             if wt / tot > 1e-3:
                 groups[gi].add([v.index], wt / tot, 'REPLACE')
+        if not acc and 'Pelvis' in o.vertex_groups:
+            # (a point below the trunk's own skin, on a skirt over the thighs: it hangs from the hips)
+            o.vertex_groups['Pelvis'].add([v.index], 1.0, 'REPLACE')
     if rig is not None:
         m = o.modifiers.new('rig', 'ARMATURE')
         m.object = rig

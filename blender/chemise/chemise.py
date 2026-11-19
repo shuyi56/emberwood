@@ -52,6 +52,7 @@ def linen_closeup(name, P=LINEN):
     if flat is not None:
         flat.name = 'sprite bsdf'
     weave_img, streak_img = linen_texture.make_images()
+    pitch = P.get('pitch', PITCH)              # (a coarser cloth of the same weave: a wider thread)
     uv = N('ShaderNodeUVMap')
 
     def image(img, span):
@@ -64,8 +65,8 @@ def linen_closeup(name, P=LINEN):
         sep = N('ShaderNodeSeparateColor')
         nt.links.new(tex.outputs['Color'], sep.inputs['Color'])
         return sep.outputs['Red'], sep.outputs['Green'], sep.outputs['Blue']
-    height, tone, rub = image(weave_img, linen_texture.WEAVE_THREADS * PITCH)
-    streak, body, _ = image(streak_img, linen_texture.STREAK_SPAN * PITCH)
+    height, tone, rub = image(weave_img, linen_texture.WEAVE_THREADS * pitch)
+    streak, body, _ = image(streak_img, linen_texture.STREAK_SPAN * pitch)
 
     def rng(sock, a, b, lo, hi):
         r = N('ShaderNodeMapRange')
@@ -102,7 +103,7 @@ def linen_closeup(name, P=LINEN):
     col = scaled(P['colour'], math_('MULTIPLY', shade, rng(ao.outputs['AO'], 0.0, 1.0, 0.45, 1.0)))
     # the relief: the weave, and the fuller yarns standing a little proud
     bump = N('ShaderNodeBump')
-    bump.inputs['Strength'].default_value, bump.inputs['Distance'].default_value = P['relief'], 0.5 * PITCH
+    bump.inputs['Strength'].default_value, bump.inputs['Distance'].default_value = P['relief'], 0.5 * pitch
     nt.links.new(math_('ADD', height, math_('MULTIPLY', body, 0.6)), bump.inputs['Height'])
     pb = N('ShaderNodeBsdfPrincipled')
     nt.links.new(col, pb.inputs['Base Color'])
