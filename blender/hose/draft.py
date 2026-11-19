@@ -51,7 +51,7 @@ RATIOS = {
     'stirrup': 0.12,         # the stirrup's half width along the foot
     'stirrup_at': 0.42,      # where it crosses the foot, as a share of the way from the heel to the toe
     'crease_depth': 0.7,     # how much of the extra ease a crease takes up
-    'crease_width': 0.022,   # a crease's half width
+    'crease_width': 0.04,    # a crease's half width (soft: a narrower one reads as a seam)
 }
 FOOT = 'footed'              # 'footed' (period joined hose, the whole foot), 'stirrup' or 'open'
 ARM_GROUPS = ('UpperArm', 'Forearm', 'Hand')
@@ -292,6 +292,8 @@ def build_hose(body, M, rig=None, material=None, name='Hose', ratios=RATIOS, foo
             loc, nrm, _, d = tree.find_nearest(Vector(X[i]), 2.0 * r['ease'])
             if loc is None:
                 continue
+            if (loc - Vector(X0[i])).length > 6.0 * r['ease']:
+                continue        # (the other thigh's skin: a point is only ever set off the skin it came from)
             sd = d if (Vector(X[i]) - loc).dot(nrm) >= 0 else -d
             if sd < 0.95 * r['ease']:
                 X[i] = np.array(loc + nrm * r['ease'])
