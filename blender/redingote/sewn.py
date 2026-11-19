@@ -142,28 +142,67 @@ def _project_star(D, X, keep=None, steps=28, rounds=16):
     d = Y - C
     n = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
     ts = np.linspace(0.3, 5.0, steps)
-    f = np.stack([D.field(C + t * n, gathers=False) for t in ts], 1)
+    e = D.r['ease_head'] * D.M['w']
+    z_lo = D.z_under - 0.5 * D.M['w']
+
+    def field(Q):
+        """The drafted surface, and where it would run inside the body's own folds under the armhole (the
+        armpit's front and back, between the seam and the arm), the skin let out by the head's ease instead: the
+        cloth comes off the seam lying on the body, and does not bridge across to the arm as a fin."""
+        f = D.field(Q, gathers=False)
+        near = np.nonzero((Q[:, 2] > z_lo) & (Q[:, 0] > D.seam_x(Q[:, 1], Q[:, 2])))[0]
+        for k in near:
+            p = Vector(Q[k])
+            loc, nrm, _, dist = D.b_all.find_nearest(p)
+            if loc is not None:
+                f[k] = min(f[k], (dist if (p - loc).dot(nrm) >= 0 else -dist) - e)
+        return f
+    f = np.stack([field(C + t * n) for t in ts], 1)
     cross = (f[:, :-1] <= 0) & (f[:, 1:] > 0)
     pick = np.where(cross.any(1), np.argmax(cross, axis=1), -1)
     a = np.where(pick >= 0, ts[np.maximum(pick, 0)], 0.0)
     b = np.where(pick >= 0, ts[np.maximum(pick, 0) + 1], 0.0)
     for _ in range(rounds):
         mid = 0.5 * (a + b)
-        fm = D.field(C + mid[:, None] * n, gathers=False)
+        fm = field(C + mid[:, None] * n)
         a, b = np.where(fm <= 0, mid, a), np.where(fm <= 0, b, mid)
     t = 0.5 * (a + b)
     # (never past the armhole's seam surface onto the bodice's side: where the sleeve runs from the seam round to the
     # arm under the front and back of the armhole, it lies along the seam's own surface, not out over the body)
     P_ = C + t[:, None] * n
-    e = D.r['ease_head'] * D.M['w']
-    over = (P_[:, 0] < D.seam_x(P_[:, 1], P_[:, 2]) + e) & (n[:, 0] < -1e-3)
+    over = (P_[:, 0] < D.seam_x(P_[:, 1], P_[:, 2]) + e) & (n[:, 0] < -1e-3) & (P_[:, 2] > z_lo)
     for _ in range(3):
         P_ = C + t[:, None] * n
         gap = D.seam_x(P_[:, 1], P_[:, 2]) + e - P_[:, 0]
         t = np.where(over, np.maximum(t - np.maximum(gap, 0.0) / -np.minimum(n[:, 0], -1e-3), 0.3), t)
     ok = pick >= 0
+    if os.environ.get('SEWN_DEBUG'):
+        print('project: %d of %d without a crossing, %d over the seam; z of the missed %s' % (
+            (~ok).sum(), len(ok), over.sum(), np.round(np.percentile(Y[~ok, 2], [5, 50, 95]), 2) if (~ok).any() else '-'))
     X[idx[ok]] = C[ok] + t[ok, None] * n[ok]
     return X
+
+
+def _carry(G, seam, Q, Hq, where, band=0.6 / CM, reach=3.0):
+    """Each column's cloth carried from its place on the surface back to the seam, the move fading with its flat
+    distance down from the stitching over max(band, reach times the move)."""
+    G = G.copy()
+    # (the move measured against the next row's place, which the projection sets off the seam, not the seam row's
+    # own, whose ray may run anywhere; at most a hand's breadth)
+    delta = seam - G[1]
+    nd = np.linalg.norm(delta, axis=1, keepdims=True)
+    delta *= np.minimum(1.0, 1.5 / np.maximum(nd, 1e-9)) * where[:, None]
+    L = np.maximum(band, reach * np.linalg.norm(delta, axis=1))
+    u = np.linalg.norm(Q - Hq[None], axis=-1)
+    g = 1.0 - _ss01(u / L[None])
+    G = G + g[..., None] * delta[None]
+    G[0] = seam
+    return G
+
+
+def _ss01(x):
+    x = np.clip(x, 0.0, 1.0)
+    return x * x * (3 - 2 * x)
 
 
 def _taubin(G, rounds=20, lam=0.5, mu=-0.53, hold_rows=1, hold_cols=True):
@@ -304,12 +343,17 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     Xu = sw.cart(Xu_c).reshape(-1, 3)
     Xt[:ncols] = H3
     Xu[:ncu] = Hu3
-    held_t = np.zeros(len(Xt), bool)
-    held_t[:ncols] = True
-    held_u = np.zeros(len(Xu), bool)
-    held_u[:ncu] = True
-    Xt = _project_star(D, Xt, keep=held_t)
-    Xu = _project_star(D, Xu, keep=held_u)
+    Xt = _project_star(D, Xt)
+    Xu = _project_star(D, Xu)
+    # (the stitching back on the seam: where the drafted surface lies off it, as under the front and back of the
+    # armhole where the seam runs on the body in front of and behind the arm, the cloth is carried from the seam
+    # onto the surface over a band three times as long as that gap, so it hangs across in a curve instead of folding
+    # down off the seam at once)
+    # (only where the seam runs round in front of, under and behind the arm; over the shoulder the head
+    # rises off its seam on its own)
+    toward = lambda C_: np.clip((0.6 - np.cos(C_[:, 0])) / 0.4, 0.0, 1.0)   # noqa: E731
+    Xt = _carry(Xt.reshape(ROWS, ncols, 3), H3, Xt_f.reshape(ROWS, ncols, 2), Hf, toward(Hc)).reshape(-1, 3)
+    Xu = _carry(Xu.reshape(ROWS, ncu, 3), Hu3, Xu_f.reshape(ROWS, ncu, 2), Huf, toward(Huc)).reshape(-1, 3)
     # (smoothed as pressed cloth: the drafted surface is found point by point, and shows its facets)
     Xt = _taubin(Xt.reshape(ROWS, ncols, 3), hold_cols=False).reshape(-1, 3)
     # (the seams' lines: the same in both pieces, row by row; the topsleeve's, as projected, is the seam's)
