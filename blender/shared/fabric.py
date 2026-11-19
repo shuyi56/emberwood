@@ -39,6 +39,27 @@ Additions to fabric-core.js's model, each documented where it is defined:
   - bodies: a callable on all points at once, body(P) -> (pushed P, touched mask). MeshBody (scipy, the nearest
     surface point and its normal, with a floor) and bvh_body (a mathutils BVHTree) are two.
 
+The API (kept stable: the boot, and the skirt, sleeves and petticoat scripts use it):
+
+    f = Fabric(points [n, 3], settings)    settings: FABRIC_DEFAULTS' names, the game's where it has them
+    f.pin(indices, weight=None)            hold points (weight 1, or partly: an inverse mass of 1 - weight)
+    f.tie(i, j, compliance, rest=None)     ties between point arrays, at their present lengths or rest (slack=)
+    f.mesh(faces)                          a mesh's threads, quad diagonals and bend ties; returns their counts
+                                           (rest_pos=, bend_at=, flat=: see mesh)
+    f.step(h, body, neutral=False)         one step; body(points) -> (points pushed out, touched mask)
+    f.settle(body, h, most, tol, damping)  run to rest; returns the steps taken
+    f.pos                                  the points as they are now
+    bvh_body(tree, gap)                    a body from a mathutils BVHTree (normals outward)
+  added with the petticoat:
+    f.tether(i, j, rest)                   ties that only stop i going further than rest from j
+    f.sew(i, j, loose, firm, seconds)      seam ties of no length, eased from loose to firm compliance
+    f.flatten(a, b, c, d, rest, comp)      fold-resisting stencils (an angle bend; mesh(flat=) makes them)
+    f.hold_chain(points)                   a chain kept at its exact segment lengths (fabric-core.js's hold)
+    MeshBody(points, normals, gap, floor)  a body from a surface's points and normals (needs scipy; nothing else does)
+
+It follows src/world/fabric-core.js: what is added there (per-point mass, angle bends, creases that set) is to be
+added here under the same names.
+
 Units are the caller's; positions are an array [n, 3], z up (fabric-core.js's y), so GRAVITY is along -z: 9.81 m/s^2
 in the figure's units (63 units to 1.65 m)."""
 import time
