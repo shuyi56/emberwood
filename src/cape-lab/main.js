@@ -75,7 +75,8 @@ async function setBody(kind) {
   }
   if (kind === 'mannequin') {
     flash('Loading the mannequin…', 60000);
-    mannequinBody = mannequinBody || await loadMannequinBody(import.meta.env.BASE_URL + 'models/mannequin.glb');
+    mannequinBody = mannequinBody || await loadMannequinBody(import.meta.env.BASE_URL + 'models/mannequin.glb',
+      params.get('head') === 'none' ? null : import.meta.env.BASE_URL + (params.get('head') || 'models/warden.glb'));      // (?head=<glb> or none)
     // (it has no walk of its own: the baked one)
     if (opts.walk === 'clip') opts.walk = 'new';
     flash('');

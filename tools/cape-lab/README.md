@@ -23,6 +23,8 @@ one chain, `hairT_0_<row>`, from the tie; the rest of her hair rides her head.
 The Body menu also has the new mannequin (`?body=mannequin`, `--body mannequin` for captures):
 `public/models/mannequin.glb`, the bare figure of the project's `anatomy/mannequin-v14.blend` on its own rig. It wears
 the stand-in's cape and plays the baked walk (`--walk new`), as it has neither of its own.
+It also wears the Face Creator head and hair of another model (the Warden's glb by default, `?head=<glb under public/>`, or
+`?head=none` for its own blank head), and the hair hangs on spring-bone chains as the Warden's does.
 
 ## Springs or fabric
 

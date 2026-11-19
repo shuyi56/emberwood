@@ -477,9 +477,12 @@ function reskinHair(body, { rows = 3 } = {}) {
 // The new mannequin as the bench's body (public/models/mannequin.glb: the bare figure of anatomy/mannequin-v14.blend,
 // its skin on its own rig, which has the Warden's joint names). It has no cape of its own, so it wears the
 // stand-in's (dummy.js), hung from its Chest, and no walk of its own, so it plays a baked one (?walk=new).
-export function loadMannequinBody(url) {
-  return new Promise((resolve, reject) => {
-    new GLTFLoader().load(url, (res) => {
+// headUrl: a model whose Head node carries a Face Creator head and hair (the Warden's glb), to wear in place of
+// the mannequin's blank head; its hair is then hung on spring-bone chains as the Warden's is (reskinHair).
+export function loadMannequinBody(url, headUrl = null) {
+  const load = (u) => new Promise((ok, no) => new GLTFLoader().load(u, ok, undefined, no));
+  return Promise.all([load(url), headUrl ? load(headUrl) : null]).then(([res, donor]) => new Promise((resolve) => {
+    (() => {
       const root = res.scene;
       root.name = 'Mannequin';
       const bones = {}, rest = [];
@@ -494,6 +497,19 @@ export function loadMannequinBody(url) {
         o.frustumCulled = false;
       });
       root.updateMatrixWorld(true);
+      const head = root.getObjectByName('Head'), theirs = donor && donor.scene.getObjectByName('Head');
+      if (head && theirs) {
+        donor.scene.updateMatrixWorld(true);
+        // (their head's frame in their model, set in ours: both are the creator's, chin at the Head node)
+        const wear = new THREE.Group();
+        wear.name = 'Creator head';
+        new THREE.Matrix4().copy(head.matrixWorld).invert().multiply(theirs.matrixWorld).decompose(wear.position, wear.quaternion, wear.scale);
+        for (const c of [...head.children]) c.traverse((o) => { o.visible = false; o.userData.replaced = true; });   // (the body toggle must not show it again)
+        for (const c of [...theirs.children]) wear.add(c);
+        wear.traverse((o) => { if (o.isMesh) { o.castShadow = !(o.material && o.material.alphaTest > 0); o.receiveShadow = true; o.frustumCulled = false; } });
+        head.add(wear);
+        root.updateMatrixWorld(true);
+      }
       const body = {
         root, bones, cape: null, hair: null, walkPlayer: null,
         // (her legs are longer than the Warden's and her soles lie below her rig's origin: lifted to stand on the ground)
@@ -510,8 +526,8 @@ export function loadMannequinBody(url) {
           root.updateMatrixWorld(true);
         },
       };
-      body.setCape = (o) => { body.restPose(); setCape(body, o); };
+      body.setCape = (o) => { body.restPose(); setCape(body, o); body.cape.meshes = [body.cape.mesh, body.cape.lining]; if (!body.hair && theirs) reskinHair(body); };
       resolve(body);
-    }, undefined, reject);
-  });
+    })();
+  }));
 }
