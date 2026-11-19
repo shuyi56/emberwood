@@ -725,8 +725,8 @@ def review(req, thread, do_smoke=True):
         one = "--angles" in tok and tok.index("--angles") + 1 < len(tok) \
             and "," not in tok[tok.index("--angles") + 1]
         multi = [f for f in ("--turn", "--head", "--pieces") if f in tok]
-        if not any(f in tok for f in ("--turn", "--head", "--pieces", "--cells", "--list", "--walk", "--run", "--save")):
-            rep.block("views", "views.py command with none of --turn, --head, --pieces, --cells, --list, --walk, --run or --save: it builds "
+        if not any(f in tok for f in ("--turn", "--head", "--pieces", "--cells", "--list", "--walk", "--run", "--save", "--preset")):
+            rep.block("views", "views.py command with none of --turn, --head, --pieces, --cells, --list, --walk, --run, --save or --preset: it builds "
                       "the figure and renders nothing (--angles only picks the angles of --turn, --head and --pieces).",
                       "Add --turn (one view: --turn --angles front) or --head, --pieces, --cells, --walk N or --run N.", "P027")
         if multi and not one and not str(req.get("confirmed") or "").strip():
