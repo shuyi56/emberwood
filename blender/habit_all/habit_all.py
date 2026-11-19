@@ -115,6 +115,7 @@ def _fit_over_layers(self):
     """The skirt module's make_skirt, handed what lies under it, so its draft clears it."""
     make, draft = self.mod.make_skirt, self.mod.draft
     pts = _points(SKIRT_OVER)
+    pts = pts[::max(1, len(pts) // 40000)]            # (its sections need an outline, not every point: 570 000 of them ran out of memory)
     print('habit_all: the skirt fitted over %d points of %s' % (len(pts), ', '.join(SKIRT_OVER)), flush=True)
     self.mod.make_skirt = lambda body, rig, M, **kw: make(body, rig, M, under=draft.under_body(pts), **kw)
 
