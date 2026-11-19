@@ -252,11 +252,11 @@ def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
     fkey = sew.settled_key(X, extra=key)
     hit = None if os.environ.get('PETTI_RESOLVE') else sew.settled_load('flounce', fkey, log)
     if hit is not None:
-        Y, FT, FUV = hit.pop('Y'), hit.pop('T'), hit.pop('UV')
-        FR = hit
+        Y, FT, FUV = hit.pop('pts'), hit.pop('tris'), hit.pop('flat')
+        FR = hit                                  # (the ring's own arrays: its UV, T, close, gather, ...)
     else:
         Y, FT, FUV, FR = sew.flounce(A, cuts, X, pieces, M, pts, nrm, M['floor'], log=log)
-        sew.settled_save('flounce', fkey, log, Y=Y, T=FT, UV=FUV, **FR)
+        sew.settled_save('flounce', fkey, log, pts=Y, tris=FT, flat=FUV, **{k: v for k, v in FR.items() if k not in ('pts', 'tris', 'flat')})
     # (the drape is found on the body as it stands at frame 1; carried back to the rest shape through the bones)
     o = make_object(X, T, A['UV'][T], sew.weights(X, M), rig, name='Petticoat sewing')
     B = cloth.bone_matrices(o, rig)
