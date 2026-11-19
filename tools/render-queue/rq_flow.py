@@ -28,7 +28,9 @@ as built in its rest pose (so only what the pose does to it shows):
     jag_p99                  how far a triangle's strain stands above its neighbours' mean, at the worst 1%
     roughness                rms of that excess over the field's own spread: near 0 smooth, near 1 noise
     grad_p99                 how fast strain changes between neighbouring triangles, per unit of length
-    peaks                    isolated strain peaks: local maxima standing well clear of their neighbourhood
+    peaks                    isolated strain peaks: local maxima standing well clear of their neighbourhood, one
+                             per place (peaks closer than PEAK_SPACING are one)
+    peak_max                 how far the sharpest peak stands above its neighbourhood, in strain
     seam_mismatch_pct        the worst seam: paired edges' lengths on the reference, |A - B| / max, in percent.
                              Seams are found three ways: UV seams inside one mesh (both sides of the cut), a
                              'seam_mate' point attribute (each point's partner index, -1 for none) that a garment
@@ -53,7 +55,7 @@ import time
 
 import numpy as np
 
-VERSION = 2
+VERSION = 3
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
@@ -65,7 +67,7 @@ DEFORM = {'ARMATURE', 'SHRINKWRAP', 'SURFACE_DEFORM', 'LATTICE', 'CORRECTIVE_SMO
 SKIP_NAMES = ('stitch', 'eyelet', 'button', 'buckle', 'plate', 'rivet', 'aglet', 'medallion', 'pendant', 'lace ')
 # Until flow_baseline.json is written: loose, so nothing is flagged on guesses.
 DEFAULT_LIMITS = {'stretch_p99': 1.35, 'squash_p1': 0.65, 'shear_p99': 25.0, 'strain_p99': 0.45, 'jag_p99': 0.12,
-                  'roughness': 0.9, 'peaks': 12, 'seam_mismatch_pct': 8.0, 'fold_radius_p1': 0.05}
+                  'roughness': 0.9, 'peaks': 12, 'peak_max': 0.5, 'seam_mismatch_pct': 8.0, 'fold_radius_p1': 0.05}
 LOWER_IS_WORSE = ('squash_p1', 'fold_radius_p1')
 SLIVER_DEG = 4.0          # triangles with a smaller angle than this on the reference are left out
 STRAIN_CAP = 2.0          # the jaggedness reads strain up to this (Green strain 2: the cloth twice its length)
@@ -273,6 +275,7 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
         'grad_p99': _r(float(np.percentile(grad, 99)) if len(grad) else None, 4),
         'smooth_pct': _r(100.0 * gw[np.abs(excess[good]) < 0.02].sum() / max(gw.sum(), 1e-12), 1),
         'peaks': int(peak.sum()), 'peak_tris': peak_tris,
+        'peak_max': _r(float((s - ring)[peak].max()) if peak.any() else 0.0, 4),
         'seam_mismatch_pct': _r(max([c['mismatch_pct'] for c in seams] or [0.0]), 2), 'seams': seams[:8],
     }
     F = {'X': X, 'tris': tris, 'strain': np.where(good, strain, 0.0), 'excess': excess, 'bend': bend_t,
@@ -464,6 +467,10 @@ def judge(S, lim):
     flags.sort(key=lambda f: (f['level'] != 'likely rejection',
                               -(f['limit'] / max(f['value'], 1e-9) if f['metric'] in LOWER_IS_WORSE
                                 else f['value'] / max(f['limit'], 1e-9))))
+    # (the worst first: rejections, then by how far past the limit)
+    flags.sort(key=lambda f: (f['level'] != 'likely rejection',
+                              -(f['limit'] / max(f['value'], 1e-9) if f['metric'] in LOWER_IS_WORSE
+                                else f['value'] / max(f['limit'], 1e-9))))
     # (a peak far past the band at a seam end or dart tip is a rejection on its own)
     hot = [p for p in S.get('spots', []) if p['peak'] and (p['excess'] or 0) > 2 * lim['jag_p99']]
     if hot:
@@ -476,30 +483,45 @@ def judge(S, lim):
 # ---------------------------------------------------------------------------------------------------- the band
 
 FLOORS = {'stretch_p99': 1.03, 'squash_p1': 0.97, 'shear_p99': 2.0, 'strain_p99': 0.02, 'jag_p99': 0.01,
-          'roughness': 0.3, 'peaks': 2, 'seam_mismatch_pct': 1.0, 'fold_radius_p1': None}
+          'roughness': 0.3, 'peaks': 2, 'peak_max': 0.05, 'seam_mismatch_pct': 1.0, 'fold_radius_p1': None}
 MARGIN = 1.25
 
 
-def calibrate(approved):
+def badness(k, v):
+    """How bad a value is, 0 for perfect, the same way up for every metric."""
+    return v - 1 if k == 'stretch_p99' else 1 - v if k == 'squash_p1' else 1 / max(v, 1e-9) \
+        if k == 'fold_radius_p1' else v
+
+
+def calibrate(approved, outliers=None):
     """The limits from approved garments' summaries ({name: summary}): each metric's worst approved value with a
-    margin (x 1.25, or / 1.25 where lower is worse; peaks: the most seen + 2), never tighter than FLOORS, so a
-    garment as good as the approved ones is never flagged."""
+    margin (x 1.25 on how far it is from perfect; peaks: the most seen + 2), never tighter than FLOORS, so a
+    garment as good as the approved ones is not flagged. A garment that carries no strain at all (a rigid sole) says
+    nothing and is left out. One approved garment far worse than all the others on a metric (over 3x the next worst)
+    is a fault John did not see (the vest's sides under the hanging arm): it is left out of that metric's band and
+    listed in outliers (a dict to fill: metric -> [garment, value])."""
+    live = {n: S for n, S in approved.items() if (S.get('strain_p99') or 0) > 1e-4}
     out = {}
     for k in DEFAULT_LIMITS:
-        vals = [S[k] for S in approved.values() if S.get(k) is not None]
+        vals = sorted(((badness(k, S[k]), n, S[k]) for n, S in live.items() if S.get(k) is not None), reverse=True)
         if not vals:
             out[k] = DEFAULT_LIMITS[k]
             continue
+        if len(vals) >= 3 and vals[0][0] > 3 * max(vals[1][0], 1e-6) and k != 'peaks':
+            if outliers is not None:
+                outliers.setdefault(k, []).append([vals[0][1], vals[0][2]])
+            vals = vals[1:]
+        worst = vals[0][0]
         if k == 'peaks':
-            v = max(vals) + 2
-        elif k == 'squash_p1':
-            v = 1 - (1 - min(vals)) * MARGIN
-        elif k in LOWER_IS_WORSE:
-            v = min(vals) / MARGIN
+            v = worst + 2
         elif k == 'stretch_p99':
-            v = 1 + (max(vals) - 1) * MARGIN
+            v = 1 + worst * MARGIN
+        elif k == 'squash_p1':
+            v = 1 - worst * MARGIN
+        elif k == 'fold_radius_p1':
+            v = 1 / (worst * MARGIN)
         else:
-            v = max(vals) * MARGIN
+            v = worst * MARGIN
         f = FLOORS.get(k)
         if f is not None:
             v = min(v, f) if k in LOWER_IS_WORSE else max(v, f)
@@ -955,19 +977,28 @@ def main():
                 for name, S in r['garments'].items():
                     by_pose.setdefault(pose, {})[name + ' / ' + os.path.basename(os.path.dirname(os.path.abspath(p)))] = S
                     per.setdefault(pose, {})[name] = {k: S.get(k) for k in DEFAULT_LIMITS}
-        poses = {pose: calibrate(g) for pose, g in sorted(by_pose.items())}
-        # (every approved garment judged again on the band it made: none may be flagged)
+        outl = {}
+        poses = {}
+        for pose, g in sorted(by_pose.items()):
+            o = {}
+            poses[pose] = calibrate(g, o)
+            if o:
+                outl[pose] = o
+        # (every approved garment judged again on the band it made: none may be flagged but on its outlier metrics)
         for pose, g in by_pose.items():
             for name, S in g.items():
+                bad = {k for k, v in outl.get(pose, {}).items() if any(x[0] == name for x in v)}
                 fl, verdict = judge(S, poses[pose])
-                assert verdict == 'ok', (pose, name, fl)
+                left = [f for f in fl if f['metric'] not in bad and not (f['metric'] == 'peak' and bad)]
+                assert not left, (pose, name, left)
         json.dump({'_doc': 'The approved band for rq_flow.py, per pose: each limit is the worst value among the '
                            'garments John approved (listed under approved) in that pose, with a margin '
                            '(rq_flow.calibrate). limits is the rest pose. Re-run rq_flow.py --calibrate on new '
                            'approved flow-poses.json files to widen or tighten it.',
                    'from': [os.path.basename(os.path.dirname(os.path.abspath(p))) + '/' + os.path.basename(p)
                             for p in srcs],
-                   'limits': poses.get('rest') or next(iter(poses.values())), 'poses': poses, 'approved': per},
+                   'limits': poses.get('rest') or next(iter(poses.values())), 'poses': poses,
+                   'outliers': outl, 'approved': per},
                   open(dst, 'w'), indent=1)
         print('wrote', dst, flush=True)
 
