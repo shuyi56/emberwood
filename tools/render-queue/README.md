@@ -66,6 +66,31 @@ Every request is combined with the other waiting branches whenever it merges cle
 different functions of the scripts (see "Batching" below for sets and the collation window). One render then covers all of them, and the reply says what else was in it.
 `mode: isolated` is still accepted but ignored. Up to three quick jobs render side by side.
 
+## Ping the queue before you ask for more
+
+Run this before every render request, and again before a second one (John, 2026-11-19). It is read-only, costs one
+tool call and wakes no other thread, so use it instead of asking the queue thread "is my render done?":
+
+```
+python3 /mnt/project-files/render-queue/rq.py ping --thread <your thread id>
+```
+
+It prints how busy the queue is (idle, light or busy), what is rendering and for how long, what is waiting and
+when each request should start, any announced intents, and about when a new request would start. With `--thread`
+it adds your own requests, your last result and where its files are, your hogging warnings, and advice. Add `--json`
+for a machine-readable answer.
+
+What to do with the answer:
+- If you already have a request rendering or waiting, wait for it, or send a newer one for the same views, which
+  replaces the waiting one. Do not stack a second request on the first.
+- If the queue is busy, send a check-quality crop first and keep full renders for when it has room.
+- If your last result is already back, read it before you send another request.
+- If you are flagged for hogging, change the request (a cheaper crop) or check that your edit changes the build.
+
+`rq.py add` reminds a thread that has not pinged in the last 15 minutes (it logs an `unpinged` event, which the
+nightly stats count). The reminder never blocks the request. The reviewer thread pings on a thread's behalf when it
+forwards a request, and tells the thread to ping when the queue is busy.
+
 ## Batching: sets, intents and the collation window
 
 John's rules (2026-11-19). The queue does all of this itself; a thread only has to announce its work.

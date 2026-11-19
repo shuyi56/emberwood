@@ -237,7 +237,13 @@ def hogging(lo, now, events):
         if e["ev"] == "hog" and ts(e["t"]) >= lo:
             n = rq.THREAD_NAMES.get(e.get("thread", ""), e.get("thread", "")[-6:])
             told[n] = told.get(n, 0) + 1
-    return {"rules": rq.HOG,
+    pings, unpinged = {}, {}
+    for e in events:
+        if e["ev"] in ("ping", "unpinged") and ts(e["t"]) >= lo:
+            n = rq.THREAD_NAMES.get(e.get("thread", ""), e.get("thread", "")[-6:])
+            d = pings if e["ev"] == "ping" else unpinged
+            d[n] = d.get(n, 0) + 1
+    return {"rules": rq.HOG, "pings": pings, "unpinged": unpinged,
             "share": {k: round(v / tot, 2) for k, v in sorted(secs.items(), key=lambda kv: -kv[1])},
             "seconds": {k: round(v) for k, v in secs.items()},
             "warnings": [dict(v, first=dt.datetime.fromtimestamp(v["first"], dt.timezone.utc).strftime("%H:%MZ"),
@@ -501,6 +507,7 @@ def report(st):
         out += [f"  {w['thread']}: {w['rule']} from {w['first']} to {w['last']}, peak {w['peak']}" for w in h["warnings"]] \
             or ["  no thread passed a warning"]
         out.append(f"  warnings told to threads at request time: {h['told'] or 'none'}; rules {h['rules']}")
+        out.append(f"  pings by thread: {h['pings'] or 'none'}; requests sent without a recent ping: {h['unpinged'] or 'none'}")
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]
     return "\n".join(out)
