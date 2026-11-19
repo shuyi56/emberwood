@@ -4369,13 +4369,21 @@ def sprite_mode(on):
         if 'sprite bsdf' not in nt.nodes or 'hair bsdf' not in nt.nodes:
             continue
         for n in nt.nodes:
-            if n.type == 'BUMP':
+            if n.type == 'BUMP' and n.name != 'creator bump':      # (the creator's bump is set per view: hair_asset)
                 n.inputs['Strength'].default_value = 0.1 if on else 0.6
         # (and the sheet is lit from the plain diffuse surface, its tones picked from the palette ramp; a hair cut-out
-        # wrapped round the close-up surface ('tip cut', a figure's own copy of the hair) is for the 3D view only)
+        # wrapped round the close-up surface ('tip cut', a figure's own copy of the hair) is for the 3D view only,
+        # except the face creator's (hair_asset): its cap runs on under the ends it cuts away, so the sheet keeps
+        # the cut-out, read as the creator reads hair that is small on screen)
         out = next(n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL')
         cut = nt.nodes.get('tip cut')
-        if on or cut is None:
+        tpx = nt.nodes.get('tip px')
+        if tpx is not None and 'view_px' in tpx:
+            tpx.outputs[0].default_value = tpx['sprite_px'] if on else tpx['view_px']
+        if on and cut is not None and m.get('emberwood') == 'cut':
+            nt.links.new(nt.nodes['sprite bsdf'].outputs['BSDF'], cut.inputs[2])
+            nt.links.new(cut.outputs['Shader'], out.inputs['Surface'])
+        elif on or cut is None:
             nt.links.new(nt.nodes['sprite bsdf' if on else 'hair bsdf'].outputs['BSDF'], out.inputs['Surface'])
         else:
             nt.links.new(nt.nodes['hair bsdf'].outputs['BSDF'], cut.inputs[2])
@@ -4389,6 +4397,8 @@ def sprite_mode(on):
     # the iris is life-size, a pixel and a bit across in the sheet, and in the 3/4 views it fell between pixel
     # centres and the eye showed as a blank white: for the sprites it is drawn larger, as a painter would
     for o in bpy.data.objects:
+        if o.get('hair_kind') == 'veil':
+            o.hide_render = on         # (the creator's sheer veils: unlit colour, no palette pass to band)
         if o.name.startswith('Wool fuzz'):
             o.hide_render = on
         if o.name.startswith(('Eyeshadow', 'Lashes', 'Brow paint', 'Lip paint', 'Hair paint')):
