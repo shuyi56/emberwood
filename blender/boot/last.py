@@ -74,7 +74,7 @@ RATIOS = {
     'toe_room': 0.045,       # the toe box's height over the toe
     'toe_long': 0.070,       # how much longer the toe region is than the foot's (a share of its length)
     'bridge': 0.16,          # the most the leather stands off a hollow of the foot it bridges
-    'top_below_knee': 0.09,  # the top edge below the knee's joint
+    'top_below_knee': 0.12,  # the top edge below the knee's joint
     'join': 0.16,            # the span over the ankle where the last's shaft meets its foot
     'lap': 0.040,            # how far one piece laps over the next at a seam (about 1 cm)
     'throat': 0.40,          # the vamp's throat (the lacing's foot) this share of the foot's length behind the toe
