@@ -144,7 +144,7 @@ def _hem_stitches(o, posed):
     return np.array(pairs, dtype=int).reshape(-1, 2)
 
 
-def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), log=print):
+def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, log=print):
     """The same job as settle(), by the local XPBD solver (fabric-core.js's method: small steps, constraints with a
     compliance, the body pushes the points out) on the sewn mesh's own edges, in numpy. The skirt o is put on the
     posed body and let go: the top (from pin[1] up) is held as the waistband holds it, easing off to pin[0]."""
@@ -177,6 +177,7 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), log=print):
     hold = hold * hold * (3 - 2 * hold)
     w = 1.0 - hold
     w[hold > 0.999] = 0.0
+    gaps = np.full(n, P['gap']) if gap is None else np.array([gap(p) for p in posed])      # (the cloth's stand-off from the skin, by height)
     x, prev = posed.copy(), posed.copy()
     pushed = np.zeros(n, dtype=int)
     h = P['h']
@@ -205,13 +206,13 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), log=print):
         # the body pushes the points out (every other step: the legs are still)
         if step % 2 == 0:
             for i in free:
-                loc, nrm, _, d = tree.find_nearest(tuple(x[i]), 2.0 * P['gap'] + 0.5)
+                loc, nrm, _, d = tree.find_nearest(tuple(x[i]), 2.0 * gaps[i] + 0.5)
                 if loc is None:
                     continue
                 p = np.array(x[i]) - np.array(loc)
                 side = float(np.dot(p, np.array(nrm)))
-                if side < P['gap']:
-                    x[i] = np.array(loc) + np.array(nrm) * P['gap']
+                if side < gaps[i]:
+                    x[i] = np.array(loc) + np.array(nrm) * gaps[i]
                     pushed[i] += 1
                     # (friction: the push takes away the slide along the body, and the speed it gave)
                     nn = np.array(nrm)

@@ -453,7 +453,11 @@ def build():
             P['pin_to'], P['pin_from'] = M['hips_z'], M['hips_z'] - 0.2 * H
             settle.settle(sk, rig, [proxy] + hands, M['floor_z'], P)
         else:
-            settle.settle_xpbd(sk, rig, [proxy] + hands, M['floor_z'], pin=(M['hips_z'] - 0.2 * H, M['hips_z']))
+            def stand_off(p):        # (as the push: wide below the crotch, where the skirt hangs free, close over the hips)
+                t = min(1.0, max(0.0, (p[2] - (M['crotch_z'] + 0.1 * H)) / (-0.3 * H)))
+                t = t * t * (3 - 2 * t)
+                return 0.012 * H + (0.06 * H - 0.012 * H) * t
+            settle.settle_xpbd(sk, rig, [body] + hands, M['floor_z'], pin=(M['hips_z'] - 0.2 * H, M['hips_z']), gap=stand_off)
         after = np.array([tuple(v.co) for v in sk.data.vertices])
         for o in aux:                    # (the stitches and the pressed allowances go with the cloth they lie on)
             carry_move(sk, o, before, after)
