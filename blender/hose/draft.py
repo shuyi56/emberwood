@@ -244,7 +244,7 @@ def build_hose(body, M, rig=None, material=None, name='Hose', ratios=RATIOS, foo
         fr_ = np.clip(-X[:, 1] / rr, -1.0, 1.0)
         return M['waist_z'] - r['top_drop'] * _ss(-0.2, 1.0, fr_) + r['top_back'] * _ss(0.0, -1.0, fr_) - X[:, 2]
     # the part of the skin the shell is made from: a margin past every cut, so each cut falls inside it
-    region = (P[:, 2] < top_z + 0.5) & (arm < 0.9)
+    region = (P[:, 2] < top_z + 0.5) & (arm < 0.02)     # (none of the arm: the hanging forearm lies against the hip)
     idx = np.nonzero(region)[0]
     remap = -np.ones(len(P), dtype=np.int64)
     remap[idx] = np.arange(len(idx))
@@ -418,6 +418,8 @@ def build_hose(body, M, rig=None, material=None, name='Hose', ratios=RATIOS, foo
     r_own = np.where(sd_v == 0, rr['R'], rr['L'])
     back_d = (math.pi - np.abs(th_own)) * r_own
     centre = np.where(Sk[:, 2] > M['crotch_z'] - 0.6, np.abs(Sk[:, 0]), 1e3)
+    # (the foot's sole was its own piece: the back seam stops at the heel, where it turned under)
+    back_d = np.where(Sk[:, 2] > M['ankle_z'] - 0.05 * H, back_d, 1e3)
     seam = np.minimum(back_d, centre)
     a = me.attributes.new('seam', 'FLOAT', 'POINT')
     a.data.foreach_set('value', seam.astype(np.float32))
@@ -475,7 +477,7 @@ def build_hose(body, M, rig=None, material=None, name='Hose', ratios=RATIOS, foo
     m = o.modifiers.new('relax', 'CORRECTIVE_SMOOTH')
     m.vertex_group = 'hose relax'
     m.rest_source = 'ORCO'
-    m.smooth_type = 'LENGTH_WEIGHTED'
+    m.smooth_type = 'SIMPLE'          # (length-weighted divides by the cut's sliver edges and throws spikes)
     m.factor = 0.5
     m.iterations = int(ratios.get('relax_rounds', RELAX_ROUNDS))
     m.use_pin_boundary = True
@@ -483,7 +485,8 @@ def build_hose(body, M, rig=None, material=None, name='Hose', ratios=RATIOS, foo
     m.thickness = r['thickness']
     m.offset = 1.0
     m.use_rim = True
-    m.use_even_offset = True
+    m.use_even_offset = False         # (even thickness throws spikes off the cut's sliver triangles)
+    m.use_quality_normals = True
     # the skin the hose covers, kept a little in from every edge, for a mask on the body (no skin can show through
     # a bent knee or a stretched seat where the hose is)
     cover = region.copy()
