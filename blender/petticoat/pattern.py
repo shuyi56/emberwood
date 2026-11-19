@@ -222,7 +222,8 @@ def _tuck_lines(piece, H, depth_flounce):
     lines = [('flounce line', depth_flounce)]
     for k in range(TUCKS):
         d = depth_flounce + TUCK_GAP * H * (1.2 + k) + 2 * TUCK * H * k
-        lines += [('tuck %d stitch' % (k + 1), d), ('tuck %d fold' % (k + 1), d + TUCK * H)]
+        lines += [('tuck %d stitch' % (k + 1), d), ('tuck %d fold' % (k + 1), d + TUCK * H),
+                  ('tuck %d upper' % (k + 1), d + 2 * TUCK * H)]
     for name, d in lines:
         pts = up(d)
         if pts is not None:
@@ -449,7 +450,7 @@ def layout(pieces, seams, m, path):
             style = ':' if 'fold' in name else '-.'
             col = '#b07a2a' if 'tuck' in name else ('#2a7a4a' if 'flounce' in name or 'gather' in name else '#666')
             ax.plot(ln[:, 0], ln[:, 1], style, color=col, lw=0.8)
-            if not name.startswith(('notch', 'tuck 2', 'tuck 3')) and 'fold' not in name:
+            if not name.startswith(('notch', 'tuck 2', 'tuck 3')) and 'fold' not in name and 'upper' not in name:
                 lab = 'tucks x%d (stitch and fold lines)' % TUCKS if name.startswith('tuck') else name
                 ax.text(ln[-1, 0] + 1, ln[-1, 1], lab, fontsize=5.5, color=col, va='center')
         o2 = p.outline()

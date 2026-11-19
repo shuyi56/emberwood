@@ -2,8 +2,9 @@
 
 Drafted flat first (the project's rule): the body is drawn in and corseted by the corset thread's habit.py, the
 petticoat is measured over the corset (draft.py), and its pieces are drafted flat from those measures with every seam
-edge paired (pattern.py). Sewing the pieces, the stitch lines and the drape (cloth.py, tuned on swatch.py's bench)
-wait for John's go.
+edge paired (pattern.py). Then the pieces are cut as cloth, laid round her, sewn along their paired edges by the
+solver's sewing threads with the band held on the corset, and draped (sew.py, cloth.py, the cotton tuned on
+swatch.py's bench); the sewn points are joined into one cloth.
 
     PETTI_OUT=DIR/pattern python3 blender/base/views.py --figure petticoat --mannequin --list
 
@@ -26,7 +27,10 @@ import sorceress_pendant as SP  # noqa: E402
 import draft  # noqa: E402
 import pattern  # noqa: E402
 import habit  # noqa: E402
+import sew  # noqa: E402
+import cloth  # noqa: E402
 
+SEW = True                   # cut, sew and drape the pieces (False: draft the flat pattern only)
 CORSET = True                # wear the corset under it (False: the skin drawn in, the corset's surface measured but not built)
 MEASURES = {}
 M_COTTON = female.mat_def(76, 'petticoat cotton', female.ramp(0xe6e2d8, 0.1), 0.0, closeup='cloth')
@@ -160,6 +164,88 @@ def cotton_closeup(name, P=COTTON):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
+def make_object(V, F, UV, wts, rig, name='Petticoat', mat=None):
+    """The cloth as a mesh skinned to rig: its flat pattern coordinates as the 'pattern' UVs (one pair per face corner,
+    so a seam keeps each side's own), and a 'rest' copy of its points."""
+    me = bpy.data.meshes.new(name)
+    me.from_pydata([tuple(p) for p in V], [], [tuple(int(i) for i in f) for f in F])
+    for p in me.polygons:
+        p.use_smooth = True
+    uv = me.uv_layers.new(name='pattern')
+    uv.data.foreach_set('uv', np.asarray(UV, float).reshape(-1))
+    rest = me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT')
+    rest.data.foreach_set('vector', np.asarray(V, float).reshape(-1))
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    me.materials.append(mat or female.mat(M_COTTON))
+    for bone, w in wts.items():
+        g = o.vertex_groups.new(name=bone)
+        for i in np.nonzero(w > 1e-4)[0]:
+            g.add([int(i)], float(w[i]), 'REPLACE')
+    m = o.modifiers.new('rig', 'ARMATURE')
+    m.object = rig
+    return o
+
+
+def finish(o, H):
+    m = o.modifiers.new('thickness', 'SOLIDIFY')
+    m.thickness = draft.RATIOS['thickness'] * H
+    m.offset = -1.0
+    m = o.modifiers.new('smooth', 'SUBSURF')
+    m.levels = m.render_levels = 1
+
+
+def body_surface(objs):
+    """The points and outward normals of what the petticoat lies on, posed as at this frame."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    pts, nrm = [], []
+    for o in objs:
+        e = o.evaluated_get(dg)
+        me = e.to_mesh()
+        n = len(me.vertices)
+        co = np.empty(n * 3)
+        me.vertices.foreach_get('co', co)
+        no = np.empty(n * 3)
+        me.vertices.foreach_get('normal', no)
+        mw = np.array(o.matrix_world)
+        pts.append(co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3])
+        nrm.append(no.reshape(-1, 3) @ np.linalg.inv(mw[:3, :3]))
+        e.to_mesh_clear()
+    return np.concatenate(pts), np.concatenate(nrm)
+
+
+def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
+    """Cut the flat pieces, lay them round her, sew them and let the skirt fall in the local solver (the band held
+    on the corset); the sewn points are then joined. Returns the petticoat object."""
+    cuts = sew.cut(pieces)
+    placed = sew.lay(cuts, pieces, m, M, pat, log=log)
+    bp, ba = sew.band_ring(cuts[('waistband', 'C')], m, M, pat)
+    A = sew.assemble(cuts, placed, bp, ba, m, M)
+    P, T, S = A['P'], A['T'], A['sew']
+    gap0 = np.linalg.norm(P[S[:, 0]] - P[S[:, 1]], axis=1)
+    log('petticoat sew: %d points, %d faces, %d sewn pairs (apart %.2f on average, %.2f at most before sewing)' % (
+        len(P), len(T), len(S), float(gap0.mean()), float(gap0.max())))
+    bpy.context.scene.frame_set(1)
+    hands = [bpy.data.objects[n] for n in ('Hand.L', 'Hand.R') if n in bpy.data.objects]
+    pts, nrm = body_surface([body] + hands + [u for u in under_objs if u.type == 'MESH'])
+    if os.environ.get('PETTI_COLLIDER'):
+        np.savez(os.environ['PETTI_COLLIDER'], pts=pts, nrm=nrm, floor=M['floor'])
+    X, weld = sew.drape(A, cuts, pts, nrm, M['floor'], log=log)
+    # (the drape is found on the body as it stands at frame 1; carried back to the rest shape through the bones)
+    o = make_object(X, T, A['UV'][T], sew.weights(X, M), rig, name='Petticoat sewing')
+    B = cloth.bone_matrices(o, rig)
+    Bi = np.linalg.inv(B)
+    X = np.einsum('nij,nj->ni', Bi[:, :3, :3], X) + Bi[:, :3, 3]
+    me_old = o.data
+    bpy.data.objects.remove(o)
+    bpy.data.meshes.remove(me_old)
+    Q, F, new = sew.weld(X, T, weld)
+    ok = (new[T][:, 0] != new[T][:, 1]) & (new[T][:, 1] != new[T][:, 2]) & (new[T][:, 0] != new[T][:, 2])
+    o = make_object(Q, F, A['UV'][T][ok], sew.weights(Q, M), rig)
+    log('petticoat sew: joined into one cloth of %d points, %d faces' % (len(Q), len(F)))
+    return o
+
+
 def draft_on(body, H, under_objs=(), extra=None, log=print):
     """The petticoat's flat pattern for a body that is already corseted (habit.compress_body) with the corset on it:
     under_objs are what it goes over (the corset's meshes). Returns (pieces, seams, measures). The pieces are not sewn
@@ -172,6 +258,7 @@ def draft_on(body, H, under_objs=(), extra=None, log=print):
     pat = draft.pattern(M, log=log)
     pieces, seams, m = pattern.draft_pieces(M, pat, log=log)
     pattern.report(pieces, seams, m, log)
+    m['_M'], m['_pat'] = M, pat
     return pieces, seams, m
 
 
@@ -197,10 +284,14 @@ def build():
         'worn' if CORSET else 'measured only', HM.natural_waist, HM.girth_waist_corseted))
     extra = None if CORSET else corset_surface(HM, H)
     pieces, seams, m = draft_on(body, H, worn, extra=extra)
+    M, pat = m.pop('_M'), m.pop('_pat')
     MEASURES.update({'band': m['band'], 'H': m['H']})
     out = os.environ.get('PETTI_OUT')
     if out:
         pattern.layout(pieces, seams, m, out + '.png')
         pattern.save(pieces, seams, m, out + '.json')
+    if SEW and not os.environ.get('PETTI_FLAT'):
+        o = sew_and_drape(body, rig, M, pat, pieces, m, worn)
+        finish(o, H)
     bpy.context.view_layer.update()
     return res

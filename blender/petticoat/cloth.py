@@ -28,6 +28,10 @@ COTTON = dict(
     quality=8,
     frames=120,
     self_collide=False,
+    sew_force=0.0,           # the sewing threads' pull (0: as hard as the solver allows)
+    sew_frames=8,            # frames the pieces are sewn in without their weight (the seams close in about 10; longer and
+                             # the pulled-in cloth flies up past the band)
+    sew_ramp=12,             # and the frames over which the weight comes in
 )
 
 
@@ -82,10 +86,14 @@ def bone_matrices(o, rig):
     return out / tot[:, None, None]
 
 
-def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
+def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print, sew=None, decimate=None):
     """Let the garment o (skinned to rig, in its drafted rest shape) fall on the posed colliders and the floor, held
     where pinned (a weight per point, 1 held), and set its rest shape to what it settles to. Returns the settled
-    points (posed)."""
+    points (posed).
+
+    sew: pairs of points (cut pieces laid apart) tied by the solver's sewing threads, which pull each pair together;
+    the cloth is sewn weightless for P['sew_frames'] frames, then its weight comes in. decimate: a ratio for the
+    colliders (a fine corset mesh makes every frame slow)."""
     sc = bpy.context.scene
     n = len(o.data.vertices)
     # (a settle is kept by its inputs: the drafted points, the cloth's numbers and the colliders' points, so a run
@@ -95,6 +103,8 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
     rest0 = np.empty(n * 3)
     o.data.vertices.foreach_get('co', rest0)
     h = hashlib.sha1(np.round(rest0, 4).tobytes() + repr(sorted(P.items())).encode() + np.round(pinned, 3).tobytes())
+    if sew is not None:
+        h.update(np.asarray(sew, dtype=np.int64).tobytes() + repr(decimate).encode())
     dg = bpy.context.evaluated_depsgraph_get()
     for c_ in colliders:
         e = c_.evaluated_get(dg)
@@ -121,13 +131,17 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
     rest = rest.reshape(-1, 3)
     posed = np.einsum('nij,nj->ni', B[:, :3, :3], rest) + B[:, :3, 3]
     me = bpy.data.meshes.new('petticoat sim')
-    me.from_pydata([tuple(p) for p in posed], [], [tuple(p.vertices) for p in o.data.polygons])
+    loose = [] if sew is None else [tuple(int(i) for i in e) for e in sew if e[0] != e[1]]
+    me.from_pydata([tuple(p) for p in posed], loose, [tuple(p.vertices) for p in o.data.polygons])
     cloth = bpy.data.objects.new('petticoat sim', me)
     sc.collection.objects.link(cloth)
     body = bpy.data.objects.new('petticoat collider', _posed(colliders))
     ground = bpy.data.objects.new('petticoat floor', _posed(None, floor))
     for ob, fr in ((body, P['friction']), (ground, P['floor_friction'])):
         sc.collection.objects.link(ob)
+        if decimate and ob is body:
+            dm = ob.modifiers.new('fewer', 'DECIMATE')
+            dm.ratio = decimate
         ob.modifiers.new('collision', 'COLLISION')
         ob.collision.thickness_outer = P['gap']
         ob.collision.thickness_inner = 0.3
@@ -144,6 +158,14 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
     c.use_self_collision = P['self_collide']
     c.self_distance_min, c.self_friction = P['self_gap'], 5.0
     m.point_cache.frame_start, m.point_cache.frame_end = 1, P['frames']
+    if sew is not None and len(loose):
+        s.use_sewing_springs = True
+        s.sewing_force_max = P.get('sew_force', 0.0)
+        ew = s.effector_weights
+        f0, f1 = P.get('sew_frames', 45), P.get('sew_frames', 45) + P.get('sew_ramp', 25)
+        for f, g_ in ((1, 0.0), (f0, 0.0), (f1, 1.0)):
+            ew.gravity = g_
+            ew.keyframe_insert('gravity', frame=f)
     end0 = sc.frame_end
     sc.frame_end = max(sc.frame_end, P['frames'])
     t0 = time.time()
@@ -158,6 +180,8 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
             log('petticoat cloth: frame %d (%.0f s), points moved %.3f on average in the last 10 frames' % (
                 f, time.time() - t0, float(np.linalg.norm(cur - prev, axis=1).mean())))
             prev = cur
+            if os.environ.get('PETTI_DUMP'):
+                np.save('%s_%03d.npy' % (os.environ['PETTI_DUMP'], f), cur.astype(np.float32))
     ev = cloth.evaluated_get(bpy.context.evaluated_depsgraph_get())
     out = np.empty(n * 3)
     ev.data.vertices.foreach_get('co', out)
@@ -165,6 +189,14 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
     e = np.empty(len(me.edges) * 2, dtype=np.int32)
     me.edges.foreach_get('vertices', e)
     e = e.reshape(-1, 2)
+    if sew is not None and len(loose):
+        lz = np.array(loose)
+        gap = np.linalg.norm(out[lz[:, 0]] - out[lz[:, 1]], axis=1)
+        log('petticoat cloth: %d sewn pairs, apart %.3f on average, %.3f at most, %d still over 0.1' % (
+            len(lz), float(gap.mean()), float(gap.max()), int((gap > 0.1).sum())))
+        ls = set(map(tuple, np.sort(lz, 1)))
+        isf = np.array([tuple(sorted(x)) not in ls for x in e])
+        e = e[isf]
     l0 = np.linalg.norm(posed[e[:, 0]] - posed[e[:, 1]], axis=1)
     l1 = np.linalg.norm(out[e[:, 0]] - out[e[:, 1]], axis=1)
     log('petticoat cloth: settled in %d frames (%.0f s): points moved %.2f on average, %.2f at most; edges %.1f%% '
