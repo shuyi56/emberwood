@@ -187,12 +187,13 @@ def make_object(V, F, UV, wts, rig, name='Petticoat', mat=None):
     return o
 
 
-def finish(o, H):
+def finish(o, H, smooth=1):
     m = o.modifiers.new('thickness', 'SOLIDIFY')
     m.thickness = draft.RATIOS['thickness'] * H
     m.offset = -1.0
-    m = o.modifiers.new('smooth', 'SUBSURF')
-    m.levels = m.render_levels = 1
+    if smooth:
+        m = o.modifiers.new('smooth', 'SUBSURF')
+        m.levels = m.render_levels = smooth
 
 
 def body_surface(objs):
@@ -314,7 +315,8 @@ def build():
         pattern.layout(pieces, seams, m, out + '.png')
         pattern.save(pieces, seams, m, out + '.json')
     if SEW and not os.environ.get('PETTI_FLAT'):
-        for o in sew_and_drape(body, rig, M, pat, pieces, m, worn):
-            finish(o, H)
+        skirt, fl = sew_and_drape(body, rig, M, pat, pieces, m, worn)
+        finish(skirt, H)
+        finish(fl, H, smooth=0)          # (its points already closer than the skirt's)
     bpy.context.view_layer.update()
     return res
