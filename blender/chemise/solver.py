@@ -66,11 +66,9 @@ def _bone_matrices(o, rig):
     return out / tot[:, None, None]
 
 
-def settle(o, rig, colliders, pinned=None, P=LINEN, log=print, cut=None, label='chemise'):
+def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
     """Let the garment o (skinned to rig, in its drafted rest shape) fall on the posed colliders, and set its rest
-    shape to what it settles to. pinned: a weight for each point, 1 held where it was drafted (or None). cut: the
-    piece as it was cut, a point for each point in the same rest space, when that differs from where it is put on
-    (a piece cut longer than the place it is held in has to take up the length: it buckles); None, as drafted."""
+    shape to what it settles to. pinned: a weight for each point, 1 held where it was drafted (or None)."""
     sc = bpy.context.scene
     n = len(o.data.vertices)
     arm = next(m for m in o.modifiers if m.type == 'ARMATURE')
@@ -85,10 +83,6 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print, cut=None, label='
     me.vertices.foreach_set('co', posed.reshape(-1))
     cloth = bpy.data.objects.new('cloth sim', me)
     sc.collection.objects.link(cloth)
-    if cut is not None:
-        cloth.shape_key_add(name='Basis')
-        k = cloth.shape_key_add(name='cut')
-        k.data.foreach_set('co', (np.einsum('nij,nj->ni', B[:, :3, :3], cut) + B[:, :3, 3]).reshape(-1))
     body = bpy.data.objects.new('cloth collider', _posed(colliders))
     sc.collection.objects.link(body)
     cm = body.modifiers.new('collision', 'COLLISION')
@@ -109,11 +103,9 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print, cut=None, label='
     s.shear_stiffness, s.bending_stiffness = P['shear'], P['bending']
     s.tension_damping, s.compression_damping, s.shear_damping, s.bending_damping = P['damping']
     s.air_damping = P['air']
-    if cut is not None:
-        s.rest_shape_key = cloth.data.shape_keys.key_blocks['cut']
     if pinned is not None and np.any(pinned > 0):
         s.vertex_group_mass = 'pin'
-        s.pin_stiffness = P.get('pin', 1.0)
+        s.pin_stiffness = 1.0
     c.use_collision, c.collision_quality, c.distance_min = True, 4, 0.02
     c.use_self_collision, c.self_distance_min, c.self_friction = True, P['self_gap'], 8.0
     m.point_cache.frame_start, m.point_cache.frame_end = 1, P['frames']
@@ -134,7 +126,7 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print, cut=None, label='
     e = e.reshape(-1, 2)
     l0 = np.linalg.norm(posed[e[:, 0]] - posed[e[:, 1]], axis=1)
     l1 = np.linalg.norm(out[e[:, 0]] - out[e[:, 1]], axis=1)
-    log(label + ': settled in %d frames (%.0f s): points moved %.2f on average, %.2f at most; the cloth is %.1f%% longer '
+    log('chemise: settled in %d frames (%.0f s): points moved %.2f on average, %.2f at most; the cloth is %.1f%% longer '
         'along its threads on average' % (P['frames'], time.time() - t0, float(np.linalg.norm(out - posed, axis=1).mean()),
                                          float(np.linalg.norm(out - posed, axis=1).max()), 100.0 * float((l1 / np.maximum(l0, 1e-9)).mean() - 1.0)))
     # carried back through the bones to the rest shape
