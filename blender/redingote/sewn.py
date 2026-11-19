@@ -39,6 +39,7 @@ import sleeve  # noqa: E402
 
 CM = pattern.CM
 RATIOS = {
+    'lie_slope': 0.35,                     # (over the top, the cloth's least rise off the skin per its distance from the seam)
     'clear': 0.03,                         # (the least the cloth stands off the skin as sewn, in w)
     'under_hang': 8.0 / CM,                  # (the undersleeve hung from its seam over this, flat, before it lies on the arm)
     'gather_pitch': 0.9 / CM,    # the gathers' spacing along the stitching, sewn (a running stitch drawn up: small,
@@ -63,10 +64,17 @@ class Draft(sleeve.Draft):
         a, b = HEAD['rise'] * w, r['puff_out'] * w
         return HEAD['puff'] * w * sleeve._ss(0.0, a, u) * (1.0 - sleeve._ss(a, b, u))
 
+    def puff_dir(self, N):
+        # (the puff stands out where the arm faces out to the side, and lies down where the skin faces up over the
+        # shoulder's top or forward and back into the bodice: standing there it squared the shoulder off like a pad,
+        # and met the bodice at the front of the armhole as a wall, render #206)
+        return HEAD['dir_floor'] + (1.0 - HEAD['dir_floor']) * sleeve._ss(0.15, 0.85, N[:, 0])
+
 
 HEAD = {
-    'puff': 0.42,                # the head's crown off the shoulder, in w (sleeve.RATIOS['puff'] 0.50 stood as a ledge)
-    'rise': 1.00,                # it reaches it this far from the seam, in w, rising from the seam as a smooth step
+    'puff': 0.28,                # the head's crown off the shoulder, in w (0.50 stood as a ledge, #196; 0.42 as a shoulder pad, #206)
+    'rise': 1.30,                # it reaches it this far from the seam, in w, rising from the seam as a smooth step
+    'dir_floor': 0.12,           # the least of it, where the skin faces up or forward and back into the bodice
 }
 ROWS = 150                       # rows from the head to the wrist
 COLS_UNDER = 64                  # columns across the undersleeve
@@ -170,6 +178,10 @@ def _project_star(D, X, keep=None, steps=40, rounds=16, nearest=True):
         return D.field(Q, gathers=False)
     f = np.stack([field(C + t * n) for t in ts], 1)
     cross = (f[:, :-1] <= 0) & (f[:, 1:] > 0)
+    # (over the head, none just off the axis: there the field meets the armpit's skin from inside, and a point sewn
+    # outside the drafted surface took that crossing and fell to the axis, #206's spike at the crown)
+    near_axis = (0.5 * (ts[:-1] + ts[1:]))[None] < 0.5 * D.M['w']
+    cross &= ~(near_axis & (Y[:, 2] > D.z_cap)[:, None])
     # (over the top of the shoulder, the crossing nearest the point's own place; elsewhere the first one out, onto the
     # arm: the nearest there can be out on the body behind or in front of the armpit, and would stand as a fin)
     al_, _ = D.polar(Y)
@@ -188,10 +200,14 @@ def _project_star(D, X, keep=None, steps=40, rounds=16, nearest=True):
     # arm under the front and back of the armhole, it lies along the seam's own surface, not out over the body)
     P_ = C + t[:, None] * n
     over = (P_[:, 0] < D.seam_x(P_[:, 1], P_[:, 2]) + e) & (n[:, 0] < -1e-3) & (P_[:, 2] > z_lo)
+    # (by at most a quarter of w along the ray: a ray running nearly along the seam's surface, as over the crown's
+    # front, was drawn back down it to the armpit, and the carry pulled its column up into a spike)
+    t_in = t.copy()
     for _ in range(3):
         P_ = C + t[:, None] * n
         gap = D.seam_x(P_[:, 1], P_[:, 2]) + e - P_[:, 0]
         t = np.where(over, np.maximum(t - np.maximum(gap, 0.0) / -np.minimum(n[:, 0], -1e-3), 0.3), t)
+        t = np.maximum(t, t_in - 0.25 * D.M['w'])
     ok = pick >= 0
     if os.environ.get('SEWN_DEBUG'):
         print('project: %d of %d without a crossing, %d over the seam; z of the missed %s' % (
@@ -243,16 +259,19 @@ def _loft(G, seam, Q, Hq, hang):
     return G
 
 
-def _clear(X, D, c):
-    """Points under the skin, or nearer it than c, set out from it to c along its normal."""
+def _clear(X, D, c, most=0.12):
+    """Points over the head under the skin, or nearer it than c, set out from it to c along its normal, by at most
+    `most` in w (deeper is a point spanning a hollow, nearest a skin it does not lie on: pushed, it stood as a spike)."""
     X = X.copy()
-    for i, p in enumerate(X):
+    w = D.M['w']
+    for i in np.nonzero(X[:, 2] > D.z_cap)[0]:
+        p = X[i]
         loc, nrm, _, dist = D.b_all.find_nearest(Vector(p))
         if loc is None:
             continue
         n = np.array(nrm)
         h = float(np.dot(p - np.array(loc), n))
-        if h < c:
+        if c - most * w < h < c:
             X[i] = p + (c - h) * n
     return X
 
@@ -274,6 +293,30 @@ def _clear_eased(G, D, c, rounds=12):
         d[0] = 0.0
     G = G + d
     G[1:] = _clear(G[1:].reshape(-1, 3), D, c).reshape(rows - 1, cols, 3)
+    return G
+
+
+def _lie_down(G, D, Q, Hq, c, slope):
+    """Where the skin faces up, each point near the seam held no higher off the skin than c plus slope times its
+    flat distance from the stitching, so the cloth leaves the seam lying on the shoulder."""
+    G = G.copy()
+    u = np.linalg.norm(Q - Hq[None], axis=-1)
+    reach = 1.5 * D.M['w']
+    for i, j in zip(*np.nonzero((u < reach) & (u > 0))):
+        p = G[i, j]
+        loc, nrm, _, _ = D.b_all.find_nearest(Vector(p))
+        if loc is None:
+            continue
+        n = np.array(nrm)
+        up = float(sleeve._ss(0.25, 0.65, n[2]))
+        if up <= 0:
+            continue
+        h = float(np.dot(p - np.array(loc), n))
+        top = c + slope * u[i, j]
+        if h > top:
+            # (eased out to nothing at the reach, so the rise above it is not cut off in a line)
+            k = up * (1.0 - _ss01(u[i, j] / reach))
+            G[i, j] = p - k * (h - top) * n
     return G
 
 
@@ -437,10 +480,13 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
         ker = np.exp(-0.5 * (np.arange(-2 * k_, 2 * k_ + 1) / k_) ** 2)
         pad = np.concatenate([np.full(2 * k_, t_[0]), t_, np.full(2 * k_, t_[-1])])
         return np.convolve(pad, ker / ker.sum(), 'valid')
-    Xt = _carry(Xt.reshape(ROWS, ncols, 3), H3, Xt_f.reshape(ROWS, ncols, 2), Hf, np.maximum(toward(Hc), 1.0)).reshape(-1, 3)
+    Xt = _carry(Xt.reshape(ROWS, ncols, 3), H3, Xt_f.reshape(ROWS, ncols, 2), Hf, toward(Hc)).reshape(-1, 3)
     Xu = _loft(Xu.reshape(ROWS, ncu, 3), Hu3, Xu_f.reshape(ROWS, ncu, 2), Huf, r['under_hang']).reshape(-1, 3)
     # (smoothed as pressed cloth: the drafted surface is found point by point, and shows its facets)
     Xt = _taubin(Xt.reshape(ROWS, ncols, 3), hold_cols=False).reshape(-1, 3)
+    # (over the shoulder's top the cloth leaves the stitching along the skin and only then rises: there it stood up
+    # off the seam as a small tent, which read as a shoulder pad, #206)
+    Xt = _lie_down(Xt.reshape(ROWS, ncols, 3), D, Xt_f.reshape(ROWS, ncols, 2), Hf, r['clear'] * w, r['lie_slope']).reshape(-1, 3)
     # (the seams' lines: the same in both pieces, row by row; the topsleeve's, as projected, is the seam's)
     Xu.reshape(ROWS, ncu, 3)[:, 0] = Xt.reshape(ROWS, ncols, 3)[:, 0]
     Xu.reshape(ROWS, ncu, 3)[:, -1] = Xt.reshape(ROWS, ncols, 3)[:, -1]
@@ -461,6 +507,9 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     # (laid down where the head faces up over the shoulder's top: there the bodice's shoulder presses the gathers
     # flat into the seam, and standing up they make a ragged ledge above the shoulder point, render #196)
     flat = (1.0 - np.clip(nt[:, 2], 0.0, 1.0)) ** 2
+    # (and where it turns forward or back into the bodice at the armhole: standing there they made a hard edge at the
+    # front of the armhole, #206; they stand out where the arm faces the side)
+    flat *= sleeve._ss(-0.25, 0.45, nt[:, 0])
     Xt = Xt + (0.5 * A * inside * fade * wave * flat)[:, None] * nt
     # -- the stitching: each seam draws the cloth in along its line (allowances pressed open behind it)
     thick = sleeve.RATIOS['thick'] * w

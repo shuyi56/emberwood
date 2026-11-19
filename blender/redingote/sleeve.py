@@ -239,6 +239,10 @@ class Draft:
         up = np.sin(0.5 * math.pi * np.clip(u / a, 0.0, 1.0))
         return r['puff'] * w * up * (1.0 - _ss(a, b, u))
 
+    def puff_dir(self, N):
+        """How much of the puff stands where the skin under it faces N (all of it, everywhere, here)."""
+        return np.ones(len(N))
+
     def field(self, X, puff=1.0, gathers=True):
         """The whole piece: negative inside the cloth's surface (left side). Below and under the arm it is the
         tailored tube; over the shoulder it is the shoulder's own skin let out by the head's ease and, by how far
@@ -253,10 +257,13 @@ class Draft:
         on = np.nonzero((hw > 1e-3) & (d < 3.0 * w) & (d > -2.0 * w))[0]
         if len(on):
             ds, u, sl = np.empty(len(on)), np.empty(len(on)), np.empty(len(on))
+            N = np.zeros((len(on), 3))
             for n_, i in enumerate(on):
                 p = Vector(X[i])
                 loc, nrm, _, dist = self.b_all.find_nearest(p)
                 ds[n_] = (dist if (p - loc).dot(nrm) >= 0 else -dist) if loc is not None else d[i]
+                if loc is not None:
+                    N[n_] = nrm
                         # (how far from the seam along the skin: from the skin's point under it, so that straight over the
                 # seam the head is still at the seam, and the puff rises as the cloth runs away from it; over the
                 # bodice's side of the seam there is no puff, or the head would stand there as a wall to be cut)
@@ -267,7 +274,7 @@ class Draft:
                 else:
                     _, j, u[n_] = self.kd_loop.find(q)
                     sl[n_] = self.loop_s[j]
-            dh = ds - self.r['ease_head'] * w - puff * self.puff_at(u) * hw[on]
+            dh = ds - self.r['ease_head'] * w - puff * self.puff_at(u) * self.puff_dir(N) * hw[on]
             if gathers:
                 # drawn: the head's fullness standing in soft gathers off the seam, a little uneven, running down
                 # from it and opening out (the solver's own gathers replace these when it is run)
