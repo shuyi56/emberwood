@@ -57,8 +57,8 @@ import fit  # noqa: E402     (the vest's cutter and hull)
 RATIOS = {
     'leather': 0.014,        # the leather's thickness (about 3.5 mm)
     'ease': 0.045,           # the shaft's room over the leg's taut section (a finger's width all round)
-    'slope': 0.06,           # the most the shaft closes in on the leg for each unit it goes down
-    'ankle_girth': 1.42,     # the shaft's least girth, as a multiple of the ankle's (the heel goes in through it)
+    'slope': 0.09,           # the most the shaft closes in on the leg for each unit it goes down
+    'ankle_girth': 1.30,     # the shaft's least girth, as a multiple of the ankle's (the heel goes in through it)
     'flare': 0.025,          # the top's flare
     'flare_span': 0.30,
     'room': 0.022,           # the foot's room over the hose
@@ -200,9 +200,9 @@ def _weights(Pskin, Wskin, X, k=4):
     return out
 
 
-def _object(name, V, faces, Wk, names, body, rig, material, seam_d, seam_u, thickness=None):
+def _object(name, V, faces, Wk, names, body, rig, material, seam_d, seam_u, thickness=None, skive=None):
     """A piece (or several, as islands) as an object on the body's bones, with the attributes the leather's shader
-    reads: 'rest', 'seam_d', 'seam_u'."""
+    reads: 'rest', 'seam_d', 'seam_u'. thickness: solidified outward by it, each lapped edge thinned over skive."""
     me = bpy.data.meshes.new(name)
     me.from_pydata(V.tolist(), [], faces)
     me.validate()
@@ -238,6 +238,14 @@ def _object(name, V, faces, Wk, names, body, rig, material, seam_d, seam_u, thic
         m.use_rim = True
         m.use_even_offset = False
         m.use_quality_normals = True
+        # each lapped edge skived down toward a feather, as a currier thins it, so a lap reads as a line, not a ledge
+        if skive:
+            sk = np.clip(seam_d / skive, 0.0, 1.0)
+            g = o.vertex_groups.new(name='skive')
+            for val in np.unique(np.round(sk, 2)):
+                g.add([int(i) for i in np.nonzero(np.abs(np.round(sk, 2) - val) < 1e-6)[0]], float(val), 'REPLACE')
+            m.vertex_group = 'skive'
+            m.thickness_vertex_group = 0.2
     return o
 
 
@@ -340,7 +348,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         leg = (P[:, 0] * sgn > 0) & (arm < 0.02)
         tables[sgn] = shaft(P, leg, M, z_top, r, log=log if sgn < 0 else (lambda *a: None))
         mine = X0[:, 0] * sgn > 0
-        w = _ss(M['ankle_z'] - 0.5 * r['join'], z_low, z[mine])
+        w = _ss(M['ankle_z'] - r['join'], M['ankle_z'] + 0.4 * r['join'], z[mine])   # (full width under its edge)
         X[mine] = _on_shaft(X0[mine], tables[sgn]) * w[:, None] + Xf[mine] * (1 - w)[:, None]
     # the foot's hollows bridged
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
@@ -487,7 +495,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             k0 += len(p['V'])
         Vall = np.concatenate(V)
         o = _object('%s.%s' % (name, side), Vall, F, np.concatenate(WW), names, body, rig, material,
-                    np.concatenate(SD), np.concatenate(SU), thickness=tl)
+                    np.concatenate(SD), np.concatenate(SU), thickness=tl, skive=1.5 * r['lap'])
         res[side] = o
         log('boot: %s, %d points: %s' % (o.name, len(Vall), ', '.join('%s %d' % (p['name'], len(p['V'])) for p in pieces)))
         # the sole, under the upper's cut edge
