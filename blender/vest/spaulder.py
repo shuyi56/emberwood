@@ -178,7 +178,9 @@ def blanks(S):
             out.append((name, [(rad * math.cos(t), rad * math.sin(t)) for t in np.linspace(0, 2 * math.pi, 49)]))
             continue
         rho, turn, wid = R * math.tan(mid) if abs(math.cos(mid)) > 0.05 else 1e3, 2 * half * math.cos(mid), R * (b - a)
-        if abs(turn) < 1e-3:                                     # (at the shoulder's widest the cone is a cylinder: a straight strip)
+        # (at the shoulder's widest the cone is a cylinder: a straight strip. Near it the arc's radius is not used: a
+        # stand-in radius with the cone's own turn drew a strip forty units long)
+        if abs(math.cos(mid)) <= 0.05 or abs(turn) < 1e-3:
             ln = R * 2 * half
             out.append((name, [(-0.5 * ln, 0.0), (0.5 * ln, 0.0), (0.5 * ln, wid), (-0.5 * ln, wid)]))
             continue
