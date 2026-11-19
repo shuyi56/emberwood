@@ -1,0 +1,10 @@
+queue.json
+queue.local.json
+events.jsonl
+results/
+resolutions/
+facechecks/
+previews/
+review/
+stats/
+__pycache__/

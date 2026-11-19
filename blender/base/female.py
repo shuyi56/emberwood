@@ -36,6 +36,7 @@ from mathutils import Vector, Euler  # noqa: F401  (Euler: for the characters)
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'shared'))
 from ear import ear_grids, ear_tones, side_x_finder  # noqa: E402  (the ears, sculpted as their own surface)
+from ear import EAR_BOTTOM, EAR_Y  # noqa: E402  (where the ear sits: the neck's upper joint is placed from it)
 
 FW, FH, RES, COLS, ROWS, WALK = 64, 80, 2, 10, 8, 8
 PW, PH = FW * RES, FH * RES
@@ -1330,6 +1331,41 @@ UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with
 LEG_X, SH_X = 3.3, 5.75
 # the trunk's two pivots for the walk: the pelvis turns about the hip joints, the chest about the waist above it
 CHEST_Z, NECK_Z = 41.0, 51.0
+# The neck below the head's sculpt: rings (z, rx, ry, cx, cy) from where it meets the head's throat down into the
+# collar. NECK_Z, its bottom, is the base of the neck at the front (the pit of the neck), 0.37 head heights under the
+# chin, as in a real body (ANSUR II women: suprasternale 0.36 head heights under the menton).
+NECK_RINGS = [(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (NECK_Z, 2.3, 2.15, 0, 0.2)]
+
+# ---- the neck's two joints (John, 2026-11-19: "why can't the head bend"). The head used to hang off the body's
+# frame on one pivot at the chin, so it never rode the spine (it stayed behind when the chest leaned, and the neck
+# tore open in the crouch) and it could only spin about a point no joint is at. A real neck bends in two places
+# that move differently, and both are placed here from the measured head, not by eye:
+#  - ATLAS: the upper cervical joints (the skull rocking on the atlas, the atlas turning on the axis) pivot at the
+#    occipital condyles, which sit straight under the ear's opening at the tip of the mastoid, level with the lobe
+#    of the ear;
+#  - CERVICAL: the lower cervical spine (C2 to T1) bends about the C7-T1 disc at the base of the neck, in the
+#    vertebral bodies, which lie behind the neck's middle. Its height is halfway between the base of the neck at the
+#    back (the C7 spine, 0.12 head heights under the chin: ANSUR II women, cervicale 2.4 cm under the menton) and at
+#    the front (NECK_Z, the pit of the neck), since the base of the neck slopes down to the front.
+# NECK_SHARE: the upper joints' share of each motion (nod, tilt, turn), from the ranges per level (White & Panjabi;
+# Panjabi's in vivo flexion and extension of the upper joints): bending forward the skull rocks little on the atlas
+# (occiput-C1 3.5, C1-C2 11.5 degrees: 15 of about 50), bending back far more (21 and 11: 32 of about 62), lateral
+# bend 10 of 61, axial rotation 45 of 77. So a turn of the head is mostly the atlas, a tilt almost all the lower
+# neck, and looking up tips the skull back on the atlas instead of bowing the whole neck.
+NECK_SHARE = (15 / 50, 10 / 61, 45 / 77)
+NECK_SHARE_EXT = 32 / 62
+# The rest of each motion is the lower cervical spine's, which bends along its length, not at one point: a third
+# joint at the C3-C4 disc takes the share of the C2-C3 and C3-C4 levels (White & Panjabi, of C2-T1's): flexion and
+# extension 25 of 91 degrees, lateral bend 21 of 51, rotation 10 of 32. The C7 joint takes the rest. So a nod or a
+# tilt curves down the neck instead of leaning it over as a straight column from its base.
+MID_SHARE = (25 / 91, 21 / 51, 10 / 32)
+C34_ALONG = 4 / 7       # the C3-C4 disc up the column from C7-T1 to the atlas: C7, C6, C5, C4 below it; C3, C2, C1 above
+LORDOSIS = 0.04         # how far forward of the line from C7 to the atlas the mid-neck's vertebrae lie, head heights
+NECK_ROM = {'flex': 50, 'ext': 60, 'tilt': 45, 'turn': 80}    # the neck's active range, degrees each way
+NECK_PIT = 0.36                      # the pit of the neck under the chin, head heights (ANSUR II women: suprasternale)
+C7_BACK = 0.12                       # the C7 spine under the chin, head heights (ANSUR II women: cervicale)
+VERTEBRA_BACK = 0.38                 # the vertebral bodies' centre, as a share of the neck's depth from the back
+NECK = {}                            # the joints as measured on the head the figure wears: see place_neck
 # the walk's range of motion: GAIT scales the swing of the hips (and so the stride), ARM_SWING the arms' swing
 # either way, in radians (the world model takes a longer stride: see export_glb.py)
 GAIT, ARM_SWING = 1.0, 0.2
@@ -1521,19 +1557,27 @@ def head_section(z, c, s):
     return _section(z, c, s)
 
 
+RAMUS_BACK = 0.11      # the back edge of the jaw's ramus, head heights from the head's middle (see jaw_relief)
+
+
+def jaw_edge(y):
+    """The jaw's lower edge in profile, head heights above the chin at y (head heights, face toward -y): one curve,
+    level under the chin and bending up smoothly to the angle under the ear (round 9)."""
+    return 0.17 * min(1.0, max(0.0, (y + 0.34) / 0.4)) ** 1.7
+
+
 def jaw_relief(y, z):
     """How far the jaw stands out of the neck (head heights, along the surface normal): 1 over the jaw, fading to
     0 across its lower edge (from the bottom of the chin back and up to the angle under the ear) and its back edge
     (the ramus), and fading out above into the cheek, which the sections already shape."""
-    # the lower edge in profile: one curve, level under the chin and bending up smoothly to the angle (round 9)
-    zl = 0.17 * min(1.0, max(0.0, (y + 0.34) / 0.4)) ** 1.7
+    zl = jaw_edge(y)
     def ss(t):
         t = min(1.0, max(0.0, t))
         return t * t * (3 - 2 * t)
     js = FACE['jawSharp']                      # (narrows the turn over the lower and back edges: a crisper jawline)
     tail = FACE['jawUnder']                    # (lets the jaw fall softly into the neck, with no crease)
     below = ss((z - zl + 0.03 / js + tail) / (0.1 / js + tail))        # above the lower edge of the jaw
-    behind = ss((0.11 + tail - y) / (0.11 / (1 + 0.3 * (js - 1)) + tail))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
+    behind = ss((RAMUS_BACK + tail - y) / (RAMUS_BACK / (1 + 0.3 * (js - 1)) + tail))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
     # the angle of the jaw under the ear, where the lower edge turns up into the ramus: a firm corner on a
     # defined jaw (the masseter over it), set inside both edges so they stay clean
@@ -1989,8 +2033,10 @@ def build_rig(body):
     vl.objects.active = arm
     bpy.ops.object.mode_set(mode='EDIT')
     eb = arm_data.edit_bones
+    nk = neck_joints()
+    at, md, cv = nk['atlas'], nk['mid'], nk['cervical']
     for name, h, t in (('Pelvis', (0, 0, HIP_Z), (0, 0, CHEST_Z - 1.0)), ('Chest', (0, 0, CHEST_Z), (0, 0, NECK_Z)),
-                       ('Neck', (0, 0, NECK_Z), (0, 0, HEAD_Z))):
+                       ('Cervical', cv, md), ('Midneck', md, at), ('Neck', at, (at[0], at[1], at[2] + 3.0))):
         b = eb.new(name)
         b.head, b.tail = h, t
     for side, s in (('R', 1), ('L', -1)):
@@ -2005,18 +2051,184 @@ def build_rig(body):
             b = eb.new(f'{name}.{side}')
             b.head, b.tail = h, t
     bpy.ops.object.mode_set(mode='OBJECT')
+    seat_neck()
+
+
+def seat_neck():
+    """The neck's joints as pivots on the spine: Chest -> Cervical (C7-T1) -> Midneck (C3-C4) -> Atlas (the skull's base) -> Head, so
+    the head rides the chest and bends at both joints. The Head empty keeps its own frame (the chin at its origin,
+    which the Face Creator's head and every head part are built in) and its rest place in the world: only its
+    parent changes. Call once, in the rest pose, after the head is built."""
+    ob = bpy.data.objects
+    if 'Head' not in ob or 'Chest' not in ob or 'Atlas' in ob:
+        return
+    head = ob['Head']
+    rest = head.matrix_world.translation.copy()
+    cerv = empty('Cervical', (0, 0, 0), ob['Chest'])
+    mid = empty('Midneck', (0, 0, 0), cerv)
+    atlas = empty('Atlas', (0, 0, 0), mid)
+    head.parent = atlas
+    head.matrix_parent_inverse.identity()
+    place_neck(rest)
+
+
+def _head_meshes():
+    """The head's own skin as it sits on the body: the sculpted head, or the Face Creator's head (its first part)."""
+    ob = bpy.data.objects
+    return [o for o in ob if o.type == 'MESH' and o.name.startswith(('Head shape', 'head part 0'))]
+
+
+def neck_joints():
+    """Measure the head the figure wears and place the neck's joints from it (all in the rest pose, world units):
+    chin (the lowest point at the front near the middle, as the figures' seat_head finds it), H (chin to crown),
+    the head's middle front to back at the ears, then:
+      atlas     the occipital condyles: under the ear's opening (EAR_Y), level with the lobe (EAR_BOTTOM)
+      pit       the base of the neck at the front, NECK_PIT under the chin
+      mid       the C3-C4 disc: C34_ALONG of the way up the column from C7-T1 to the atlas, LORDOSIS forward of it
+      cervical  the C7-T1 disc: halfway between the base of the neck at the back (C7_BACK) and the pit in height,
+                VERTEBRA_BACK of the neck's depth from its back, measured on the neck at that height
+      bottom    the lowest point of the head's rigid sculpt (it runs on down the neck, see HEAD_NECK_Z)
+    Falls back to the base figure's head (HEAD_Z, HEAD_H) where there is nothing to measure."""
+    bpy.context.view_layer.update()
+    pts = np.array([tuple(o.matrix_world @ v.co) for o in _head_meshes() for v in o.data.vertices]).reshape(-1, 3)
+    head = bpy.data.objects.get('Head')
+    sc = head.matrix_world.to_scale().x if head is not None else 1.0
+    hx = head.matrix_world.translation.x if head is not None else 0.0
+    front = pts[(np.abs(pts[:, 0] - hx) < 0.5 * sc) & (pts[:, 1] < -1.9 * sc)] if len(pts) else pts
+    if len(front):
+        chin, top = float(front[:, 2].min()), float(pts[:, 2].max())
+        H = top - chin
+        band = pts[np.abs(pts[:, 2] - (chin + 0.5 * H)) < 0.05 * H]
+        ymid = 0.5 * float(band[:, 1].min() + band[:, 1].max())
+        bottom = float(pts[:, 2].min())
+    else:
+        chin, H, ymid, bottom = HEAD_Z, HEAD_H, 0.0, HEAD_Z + HEAD_NECK_Z * HEAD_H
+    c7z = chin - 0.5 * (C7_BACK + NECK_PIT) * H
+    # the neck's depth at the C7 height, on its own surface (the neck, or the body's skin where it runs up the neck)
+    yf, yb = NECK_RINGS[-1][4] - NECK_RINGS[-1][2], NECK_RINGS[-1][4] + NECK_RINGS[-1][2]
+    for nm in ('Skin body', 'Neck'):
+        o = bpy.data.objects.get(nm)
+        if o is None:
+            continue
+        q = np.array([tuple(o.matrix_world @ v.co) for v in o.data.vertices]).reshape(-1, 3)
+        q = q[(np.abs(q[:, 0] - hx) < 0.5) & (np.abs(q[:, 2] - c7z) < 0.3)]
+        if len(q) >= 2:
+            yf, yb = float(q[:, 1].min()), float(q[:, 1].max())
+            break
+    at = (hx, ymid + EAR_Y * H, chin + EAR_BOTTOM * H)
+    cv = (hx, yb - VERTEBRA_BACK * (yb - yf), c7z)
+    md = tuple(c + C34_ALONG * (a - c) for c, a in zip(cv, at))
+    md = (md[0], md[1] - LORDOSIS * H, md[2])
+    return {'chin': chin, 'H': H, 'bottom': bottom, 'pit': chin - NECK_PIT * H, 'ymid': ymid,
+            'atlas': at, 'mid': md, 'cervical': cv}
+
+
+def place_neck(rest=None):
+    """Measure the head (neck_joints) and set the neck's pivots there, keeping the head where it is. Called by
+    seat_neck, and again by a figure that sizes or seats its head after the build (the sorceress), in the rest
+    pose: the pivots move, the trunk's neck weights are split again on the new joints (resplit_neck), the rig's
+    neck bones take their rest again and the nape hook is weighted again."""
+    ob = bpy.data.objects
+    if 'Atlas' not in ob:
+        return
+    head, cerv, mid, atlas = ob['Head'], ob['Cervical'], ob['Midneck'], ob['Atlas']
+    keyed = bool(head.animation_data and head.animation_data.action)
+    if 'head_rest' in NECK:
+        pose(0)          # (the rest of the neck and head: the idle stands the trunk straight)
+    bpy.context.view_layer.update()
+    rest = Vector(rest) if rest is not None else head.matrix_world.translation.copy()
+    NECK.clear()
+    NECK.update(neck_joints())
+    cv, md, at = Vector(NECK['cervical']), Vector(NECK['mid']), Vector(NECK['atlas'])
+    cerv.rotation_euler = mid.rotation_euler = atlas.rotation_euler = head.rotation_euler = (0, 0, 0)
+    cerv.location = ob['Chest'].matrix_world.inverted() @ cv
+    mid.location = md - cv
+    atlas.location = at - md
+    head.location = rest - at
+    NECK['head_rest'] = tuple(head.location)
+    bpy.context.view_layer.update()
+    arm = RIG.get('arm')
+    if arm is not None:
+        for name in ('Cervical', 'Midneck', 'Neck'):
+            pb = arm.pose.bones.get(name)
+            for c in (pb.constraints if pb else ()):
+                if c.type == 'CHILD_OF':
+                    c.inverse_matrix = c.target.matrix_world.inverted()
+        resplit_neck()
+        nape_hooks()
+    if keyed and FIG.get('root') is not None:
+        key_sheet(FIG['root'])      # (the sheet's keys hold the pivots' old places: keyed again on the new ones)
+
+
+def resplit_neck():
+    """Split each trunk point's share of the chest and neck (its Chest, Cervical, Midneck and Neck weights
+    together) again on the neck's joints as they are now placed (neck_shares)."""
+    names = ('Chest', 'Cervical', 'Midneck', 'Neck')
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or not any(m.type == 'ARMATURE' for m in o.modifiers):
+            continue
+        gi = {g.name: g.index for g in o.vertex_groups if g.name in names}
+        if 'Chest' not in gi:
+            continue
+        gs = {n: (o.vertex_groups[gi[n]] if n in gi else o.vertex_groups.new(name=n)) for n in names}
+        idx = {g.index: n for n, g in gs.items()}
+        mw = o.matrix_world
+        for v in o.data.vertices:
+            t = sum(g.weight for g in v.groups if g.group in idx)
+            if t <= 1e-6:
+                continue
+            for n, w in zip(names, [t * w for w in neck_split(mw @ v.co)]):
+                if w > 1e-4:
+                    gs[n].add([v.index], w, 'REPLACE')
+                else:
+                    gs[n].remove([v.index])
 
 
 PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
-            'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Neck': 'Head'}
+            'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Cervical': 'Cervical', 'Midneck': 'Midneck', 'Neck': 'Head'}
+
+
+def _ease(a, b, v):
+    """0 at a, 1 at b, eased between."""
+    t = min(1.0, max(0.0, (v - a) / (b - a)))
+    return t * t * (3 - 2 * t)
+
+
+def neck_shares(co):
+    """How a rest point of the neck splits between its joints: (lower, middle, upper). lower is the share carried
+    past the base of the neck by the lower cervical spine (0 on the chest, 1 on the neck), middle the share of that
+    carried on past the mid-neck (reaching 1 where the head's sculpt begins, as lower does), upper the share carried on by
+    the skull (1 on the head; the jaw and face always 1). The lower blend runs over the visible lower neck, from a little under its base at the
+    front (the skin over the top of the breastbone is drawn up as the head goes back) up to where the head's sculpt
+    begins; the upper one over the whole neck, from the pit up to just under the
+    jaw's lower edge (jaw_edge) in front of the ramus, and behind it up to the skull's base at the nape (the
+    atlas's height), so the nape bends with the neck instead of with the skull, and a turn of the head (mostly at the atlas)
+    is shared out along the neck's skin instead of wringing a thin ring of it under the jaw."""
+    nk = NECK or neck_joints()
+    H = nk['H']
+    lower = _ease(nk['pit'] - 0.12 * H, nk['bottom'] - 0.1, co.z)
+    middle = _ease(nk['pit'], nk['bottom'] - 0.1, co.z)
+    # the skull's own surface starts at the jaw's lower edge in front of the ramus (a little under it, so the edge
+    # stays crisp), and behind the ramus rises to the skull's base, level with the atlas, at the nape
+    hy = (co.y - nk['ymid']) / H
+    top = jaw_edge(hy) - 0.03 + (EAR_BOTTOM + 0.03 - jaw_edge(RAMUS_BACK)) * _ease(RAMUS_BACK, 0.3, hy)
+    upper = _ease(nk['pit'], nk['chin'] + top * H, co.z)
+    return lower, middle, upper
+
+
+def neck_split(co):
+    """(Chest, Cervical, Midneck, Neck) shares of a rest point's chest-and-neck weight (see neck_shares)."""
+    lower, middle, upper = neck_shares(co)
+    return (1 - lower, lower * (1 - middle), lower * middle * (1 - upper), lower * middle * upper)
 
 
 def trunk_weights(co):
     """The trunk's bones for a point of the torso: the pelvis below the waist, the chest above it (blended over
-    the waist, so the body twists there in one piece), and the neck following the head at the top."""
+    the waist, so the body twists there in one piece), then the neck: the lower cervical spine over the lower neck
+    and the head's bone (Neck, which follows the Head empty) at the top (see neck_shares)."""
     chest = 1.0 - _smooth(CHEST_Z + 2.5, CHEST_Z - 5.5, co.z)
-    neck = 1.0 - _smooth(NECK_Z + 4.5, NECK_Z + 0.5, co.z)
-    w = {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - neck), 'Neck': chest * neck}
+    c, cv, md, nk = neck_split(co)
+    w = {'Pelvis': 1.0 - chest, 'Chest': chest * c, 'Cervical': chest * cv, 'Midneck': chest * md, 'Neck': chest * nk}
     if LOCKED_WALK:
         # (the world model) the jerkin's short skirt is carried part of the way by the thigh under it, more toward
         # the hem, so the leg lifting forward lifts the skirt over it instead of pushing out past its front edge.
@@ -2086,14 +2298,71 @@ def finish_rig():
         # (taken in the rest pose: the bone then moves exactly as its pivot moves away from rest)
         c.inverse_matrix = target.matrix_world.inverted()
     arm.hide_render = True
+    nape_hooks()
 
 
-def hand_mesh(s):
+def nape_hooks():
+    """The head's sculpt runs on down the neck below the chin (to HEAD_NECK_Z), and the head is rigid: left so,
+    the whole upper neck and the nape swung with the skull, and a nod tore it away from the neck under it. Its
+    points below the skull take the lower neck's motion instead, by the same shares as the neck's own surface
+    (neck_shares), through a hook on the Midneck pivot (below the head's sculpt the neck is all past the mid-neck: see neck_shares): a hooked point follows that pivot from its rest place, and
+    the rest follows the head. Weighted in the rest pose; place_neck weights it again when the head is moved."""
+    ob = bpy.data.objects
+    if 'Midneck' not in ob or 'Head shape' not in ob:
+        return
+    o = ob['Head shape']
+    if 'nape' in o.modifiers:
+        o.modifiers.remove(o.modifiers['nape'])
+    if 'nape' in o.vertex_groups:
+        o.vertex_groups.remove(o.vertex_groups['nape'])
+    bpy.context.view_layer.update()
+    mw = o.matrix_world
+    lw = [1.0 - neck_shares(mw @ v.co)[2] for v in o.data.vertices]
+    idx = [i for i, w in enumerate(lw) if w > 1e-4]
+    if not idx:
+        return
+    g = o.vertex_groups.new(name='nape')
+    for i in idx:
+        g.add([i], lw[i], 'REPLACE')
+    m = o.modifiers.new('nape', 'HOOK')
+    m.object = ob['Midneck']
+    m.vertex_group = 'nape'
+    m.falloff_type = 'NONE'
+    o.modifiers.move(len(o.modifiers) - 1, 0)    # (before the head's smoothing)
+    rehook_nape()
+
+
+def rehook_nape():
+    """Take the nape hook's rest from the head and the Midneck pivot as they are now (the rest pose)."""
+    ob = bpy.data.objects
+    o = ob.get('Head shape')
+    m = o and o.modifiers.get('nape')
+    if not m:
+        return
+    bpy.context.view_layer.update()
+    m.matrix_inverse = m.object.matrix_world.inverted() @ o.matrix_world
+    m.center = (0, 0, 0)
+
+
+# The fingers, index to pinky: place across the palm, length as a share of the middle finger's, thickness, and the
+# height of the knuckle below the wrist. The shares and the knuckle arc are a real hand's (index 0.92, ring 0.95,
+# pinky 0.76 of the middle; the pinky's knuckle a tenth of the palm nearer the wrist).
+FINGER_L = 1.3
+FINGERS = ((-0.86, 0.92, 0.26, -2.52), (-0.29, 1.0, 0.27, -2.6), (0.27, 0.95, 0.25, -2.5), (0.8, 0.76, 0.22, -2.32))
+PHALANGES = (0.48, 0.30, 0.22)     # first, second and tip bone as shares of a finger's length
+
+
+def hand_mesh(s, fist=False):
     """A hand hanging relaxed from the wrist (at the origin, fingers down), made as one fused surface: metaball
     pieces for the palm, the four fingers (two segments each, curled loosely toward the palm, longest at the
     middle) and the thumb lying forward along the index finger melt into each other, so the fingers grow out of
     the palm with webbing between them, and the result is converted to a mesh. The palm faces the body (s = 1
-    for the right hand, whose inside faces +X); the front is -Y."""
+    for the right hand, whose inside faces +X); the front is -Y.
+
+    fist: the same wrist and palm with the hand closed. Each finger's first bone turns in at the knuckle, square to
+    the palm, its second folds back up along the palm and its tip tucks in against it, so the knuckles stand in a
+    row along the hand's lower edge (the top of the fist when the forearm is raised); the thumb lies across the
+    front of the first two fingers' second bones."""
     inward = s
     mb = bpy.data.metaballs.new('hand')
     mb.resolution = mb.render_resolution = 0.09
@@ -2127,12 +2396,28 @@ def hand_mesh(s):
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
-    # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
-    # size, slim fingers any longer read as spidery)
-    for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.8, 0.98, 0.22)):
+    # fingers, index at the front to pinky at the back. Lengths are shares of the middle finger's (itself shorter
+    # than the palm: on a figure this size, slim fingers any longer read as spidery), and the knuckles lie on an arc,
+    # the pinky's well back toward the wrist, so the four tips of the open hand fall on a curve and the four fingers
+    # of the fist fold to the same depth in the palm
+    for y0, share, r, zk in FINGERS:
+        L = FINGER_L * share
+        if fist:
+            # (the knuckle a little proud of the back of the hand; the first bone turns in square to the palm, the
+            # second folds back up along it, the tip tucks in against it, each its share of the finger's length)
+            b1, b2, b3 = (L * f for f in PHALANGES)
+            k0 = Vector((-0.06 * inward, y0 * 0.94, zk))
+            k1 = k0 + Vector((inward * 0.98 * b1, 0.0, -0.2 * b1))
+            k2 = k1 + Vector((inward * 0.1 * b2, 0.0, 0.995 * b2))
+            k3 = k2 + Vector((-inward * 0.9 * b3, 0.0, 0.43 * b3))
+            blob(k0, (0.9, 0.9, 0.9), r * 1.12)
+            capsule(k0, k1, r * 1.05)
+            capsule(k1, k2, r * 0.98)
+            capsule(k2, k3, r * 0.85)
+            continue
         # (the two pieces of each finger meet end to end at the middle joint with only a little overlap, and the
         # finger starts a touch lower in the palm: overlapping fully, their fields add up and swell into a knob)
-        p = Vector((0.05 * inward, y0, -2.6))
+        p = Vector((0.05 * inward, y0, zk - 0.05))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.85)):
             ang += extra
@@ -2147,15 +2432,21 @@ def hand_mesh(s):
     blob((0.1 * inward, 0.5, -1.1), (0.4, 0.4, 0.75), 0.75)
     # the little-finger edge of the palm: one straight ridge from the wrist to the pinky knuckle, so the
     # outline runs smoothly down that side with no dip between the heel of the hand and the pinky
-    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, -2.3), 0.44)
-    # (tapering on into the pinky's first segment, so the edge narrows down into the finger instead of
-    # stepping in at the knuckle)
-    capsule((0.05 * inward, 0.72, -2.2), (0.15 * inward, 0.8, -2.95), 0.3)
+    zp = FINGERS[3][3]
+    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, zp + 0.2), 0.44)
+    # (tapering on into the open pinky's first segment, so the edge narrows down into the finger instead of
+    # stepping in at the knuckle; the fist has no finger hanging there, so its edge ends at the knuckle)
+    if not fist:
+        capsule((0.05 * inward, 0.72, zp + 0.3), (0.15 * inward, 0.8, zp - 0.4), 0.3)
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
     t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
     t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
+    if fist:
+        # (round the front of the fist and across the first two fingers, outside their second bones)
+        t1 = Vector((0.62 * inward, -1.02, -1.75))
+        t2 = Vector((0.98 * inward, -0.28, -2.02))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.26)
     capsule(t0, t1, 0.34)
@@ -2179,6 +2470,23 @@ def hand_mesh(s):
     # toward the viewer, a life-size hand reads as far too big against the slim forearm and the sleeve)
     bmesh.ops.scale(bm, vec=(0.98, 0.98, 1.0), verts=bm.verts)
     return bm
+
+
+# ---- the fist
+def set_fists(amount):
+    """Close the hands into fists (amount over 0.5) or open them. A fist is a second mesh on the same wrist,
+    'Fist.R' and 'Fist.L' beside 'Hand.R' and 'Hand.L' (hand_mesh(s, fist=True): a closed hand rebuilt from the
+    hand's own pieces, since the open hand's skin has no finger joints to bend), and a pose shows one of the two.
+    A figure built without fist meshes keeps its open hands. The run closes them (pose_run); every other pose
+    opens them. (Posed frame by frame this is all it takes; an exporter keying a run clip has to carry the swap
+    itself.)"""
+    for side in 'RL':
+        hand, fist = bpy.data.objects.get(f'Hand.{side}'), bpy.data.objects.get(f'Fist.{side}')
+        if hand is None or fist is None:
+            continue
+        on = amount > 0.5
+        fist.hide_render = fist.hide_viewport = not on
+        hand.hide_render = hand.hide_viewport = on
 
 
 def dots(points, size=0.42):
@@ -3640,8 +3948,7 @@ def build_head(body):
     head's pivot and a BVH of the finished head (for laying hair on it)."""
     # (the neck above the collar is part of the head's sculpt, see head_section; this is only its lower part,
     # under the collar and the mantle, running on down into the shirt)
-    mesh_obj('Neck', loft([(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (51.0, 2.3, 2.15, 0, 0.2)]),
-             M_SKIN, body)
+    mesh_obj('Neck', loft(NECK_RINGS), M_SKIN, body)
     head = empty('Head', (0, 0, HEAD_Z), body)
     hb = sculpted_head()
     # the eyes, brows and mouth sit on the sculpted surface (found by casting rays at it)
@@ -3868,7 +4175,13 @@ def finish_figure(after_skin=None):
     sc.render.image_settings.color_depth = '32'
     sc.view_settings.view_transform = 'Standard'
 
-    # key the 10 sheet columns onto the timeline (frames 1-10), so the .blend plays the idle and walk
+    key_sheet(root)
+    return root
+
+
+def key_sheet(root):
+    """Key the 10 sheet columns onto the timeline (frames 1-10), so the .blend plays the idle and walk."""
+    sc = bpy.context.scene
     sc.frame_start, sc.frame_end = 1, COLS
     for col in range(COLS):
         pose(col)
@@ -3881,7 +4194,6 @@ def finish_figure(after_skin=None):
             for fc in _fcurves(o.animation_data.action):
                 for kp in fc.keyframe_points:
                     kp.interpolation = 'CONSTANT'
-    return root
 
 
 def run(build, stem, out_dir):
@@ -4143,15 +4455,69 @@ def locked_hips(tr):
     return float(h[i % len(h)] + (h[(i + 1) % len(h)] - h[i % len(h)]) * (x - i))
 
 
+# The head poses of the pose test strip (rq_views.py --poses): (nod, tilt, turn) in degrees from looking level
+# ahead, and the upper joints' share (None: NECK_SHARE). Each is near the neck's range (NECK_ROM): 'nod' is the
+# skull rocking on the atlas alone, the most that joint gives; the rest are the whole neck.
+HEAD_POSES = {
+    'nod': (20, 0, 0, (1.0, 1.0, 1.0)),
+    'look-down': (45, 0, 0, None),
+    'look-up': (-50, 0, 0, None),
+    'tilt': (0, 40, 0, None),
+    'turn': (0, 0, 70, None),
+}
+
+
+def carry_head(nod=0.0, tilt=0.0, turn=0.0, share=None):
+    """Carry the head on the neck, looking where (nod, tilt, turn) say (radians, in the world: nod chin down,
+    tilt toward her left, turn toward her left; all 0 is level and straight ahead), whatever the chest under it
+    is doing. The neck takes the turn from the chest to there, split between its joints: share is the upper
+    joints' (the atlas's) share of nod, tilt and turn (NECK_SHARE by default), and the rest is split between the
+    mid-neck and the base of the neck by MID_SHARE. So a leaning, twisting chest carries the head with it, and
+    the neck keeps the face level, as a real neck does in a walk."""
+    ob = bpy.data.objects
+    if 'Midneck' not in ob or 'head_rest' not in NECK:
+        return
+    chest = ob['Body'].rotation_euler.to_matrix() @ ob['Chest'].rotation_euler.to_matrix()
+    rel = chest.transposed() @ Euler((nod, tilt, turn), 'XYZ').to_matrix()
+    e = rel.to_euler('XYZ')
+    sn, st, sr = share or (NECK_SHARE[0] if e.x >= 0 else NECK_SHARE_EXT,) + NECK_SHARE[1:]
+    rest = [(1 - u) * a for u, a in zip((sn, st, sr), e)]
+    low = Euler([r * (1 - m) for r, m in zip(rest, MID_SHARE)], 'XYZ')
+    mid = Euler([r * m for r, m in zip(rest, MID_SHARE)], 'XYZ')
+    ob['Cervical'].rotation_euler = low
+    ob['Midneck'].rotation_euler = mid
+    ob['Atlas'].rotation_euler = ((low.to_matrix() @ mid.to_matrix()).transposed() @ rel).to_euler('XYZ')
+    ob['Head'].location, ob['Head'].rotation_euler = NECK['head_rest'], (0, 0, 0)
+
+
+def head_pose(name):
+    """One of HEAD_POSES, on whatever the body is doing."""
+    nod, tilt, turn, share = HEAD_POSES[name]
+    carry_head(math.radians(nod), math.radians(tilt), math.radians(turn), share)
+
+
+GAZE = [0.0]     # the head's nod for the pose being set (the run's; see pose_run)
+
+
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
-    # (the run carries the head forward on the leaning chest: every other pose has it at rest)
-    ob['Head'].location, ob['Head'].rotation_euler = (0, 0, HEAD_Z), (0, 0, 0)
+    GAZE[0] = 0.0
+    if 'Atlas' not in ob:      # (before the neck's joints are seated: the head on the body, at rest)
+        ob['Head'].location, ob['Head'].rotation_euler = (0, 0, HEAD_Z), (0, 0, 0)
+    set_fists(RUN_FIST if walking and RUN else 0.0)       # (and closes the hands)
     if walking and RUN:
-        return pose_run(col)
-    if walking and LOCKED_WALK:
-        return pose_locked(col)
+        pose_run(col)
+    elif walking and LOCKED_WALK:
+        pose_locked(col)
+    else:
+        pose_sheet(col, walking)
+    # (the head rides the chest and the neck keeps it looking ahead: level, or the run's slight nod)
+    carry_head(GAZE[0])
+
+
+def pose_sheet(col, walking):
+    ob = bpy.data.objects
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
     ph = (col - 2 + 0.5) / WALK * 2 * math.pi if walking else 0.0
     # (the right leg's point in its cycle: its heel strikes when its foot is furthest forward)
@@ -4326,12 +4692,19 @@ R_PELVIS_TURN, R_PELVIS_LIST, R_SWAY = 0.12, 0.05, 0.35
 # drawn well back past the ribs, the hand comes forward to about chest height); the elbow is held near a right angle,
 # closing a little as the arm comes forward and opening as it drives back
 R_ARM_SWING, R_ARM_BACK, R_ARM_LAG = 0.62, 0.12, 0.02
-R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.3, 0.07
+R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.5, 0.07
+# the wrist (John, 2026-11-19: the hand looked off, dead in line with the forearm like a paddle; then, of a wrist
+# that drooped: the hands should bend up, not down). A running fist is carried cocked: with the thumb on top it is
+# held a little up from the forearm's line (R_WRIST, toward the thumb, so negative about the wrist's X), gives a
+# touch with the arm's swing (R_WRIST_LAG), is curled in toward the body (R_WRIST_IN) and turned so the palm faces
+# partly down (R_WRIST_TURN). All well inside what a wrist bends: about 20 degrees toward the thumb, 60 folding in.
+R_WRIST, R_WRIST_LAG, R_WRIST_IN, R_WRIST_TURN = -0.2, 0.05, 0.14, 0.2
 # the ankle through the swing: (how far through the swing, the foot pointed away from the shin, degrees). In the air
 # the foot hangs from the shin, loose and pointed as the heel comes up behind, then drawn up to meet the ground. (It
 # is eased in from the push-off's pitch and out to the landing's over the first and last R_ANKLE_EASE of the swing.)
 R_SWING_ANKLE = [(0.0, 20), (0.2, 26), (0.5, 16), (0.75, 4), (0.9, -5), (1.0, -5)]
 R_ANKLE_EASE = 0.16
+RUN_FIST = 1.0          # how far the hands are closed into fists in the run (John, 2026-11-19: a closed fist)
 R_TOE_OUT, R_FOOT_X = 0.06, 0.8     # the feet point nearly straight ahead and land closer to the line of travel
 
 
@@ -4426,10 +4799,9 @@ def pose_run(col):
     # (the trunk folds a little further forward as each foot lands and comes up through the flight)
     lean = RUN_LEAN + 0.02 * math.cos(4 * math.pi * (tr - 0.06))
     ob['Chest'].rotation_euler = (lean, -CHEST_TILT * lst, -CHEST_TURN * turn)
-    # (the head is carried forward with the leaning chest, and stays nearly upright on it, looking where she runs)
-    up = HEAD_Z - CHEST_Z
-    ob['Head'].location = (0, -up * math.sin(lean), CHEST_Z + up * math.cos(lean))
-    ob['Head'].rotation_euler = (RUN_HEAD * lean, 0, 0)
+    # (the head is carried forward on the leaning chest, and stays nearly upright on it, looking where she runs:
+    # see carry_head, which pose() calls after this)
+    GAZE[0] = RUN_HEAD * lean
     for side, s in (('R', 1), ('L', -1)):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
@@ -4455,7 +4827,8 @@ def pose_run(col):
         a = R_ARM_SWING * c - R_ARM_BACK
         sh.rotation_euler = (-a, s * (ARM_OUT + R_ARM_CLEAR + 0.06 * max(0.0, -a)), 0)
         el.rotation_euler = (-(R_BEND + R_FOLD * (0.5 + 0.5 * c)), s * ARM_CARRY, 0)
-        wr.rotation_euler = (0.04, 0, 0)
+        droop = R_WRIST - R_WRIST_LAG * math.sin(2 * math.pi * (t - 0.5 - R_ARM_LAG - 0.04))
+        wr.rotation_euler = (droop, -s * R_WRIST_IN, s * R_WRIST_TURN)
 
 
 # ---------------------------------------------------------------- render and pixel-art conversion

@@ -911,8 +911,7 @@ def build():
 
     if DUMMY_MODE:
         # the dummy's neck and an egg for a head, on the head's pivot
-        mesh_obj('Neck', loft([(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (51.0, 2.3, 2.15, 0, 0.2)]),
-                 M_SKIN, body)
+        mesh_obj('Neck', loft(NECK_RINGS), M_SKIN, body)
         head = empty('Head', (0, 0, HEAD_Z), body)
         mesh_obj('Head shape', ellipsoid(2.9, 3.2, 4.0, 24, 16), M_SKIN, head, loc=(0, 0.6, 3.9))
     else:
