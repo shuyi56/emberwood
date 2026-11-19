@@ -31,6 +31,8 @@ import numpy as np  # noqa: E402
 import female  # noqa: E402
 import draft  # noqa: E402
 import settle  # noqa: E402
+import pattern  # noqa: E402
+import sew  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 
 FRAMES = ('skirt', 'waist', 'hem', 'train')
@@ -44,6 +46,7 @@ DRAFT = {}                   # the last draft and its measures (pattern.draft_pi
 # Navy broadcloth, near black in the shade, blue where the light is on it.
 WOOL = dict(colour=(0.012, 0.020, 0.055), pitch=0.030, relief=0.35, rough=0.88, sheen=0.55, mottle=0.08, nap=0.55,
             seam_ridge=0.09)
+M_THREAD = female.mat_def(88, 'skirt thread', female.ramp(0x2c3a66, 0.1), 0.0)
 M_WOOL = female.mat_def(87, 'skirt wool', female.ramp(0x1c2a52, 0.1), 0.0, surface='twill', closeup='skirt')
 
 
@@ -127,7 +130,7 @@ def wool_closeup(name, P=WOOL):
     turn = line(hem_d, band, 0.05)                       # (the hem's turned edge, stitched down)
     roll = line(hem_d, 0.45 * band, 0.5 * band)          # (the soft roll of the doubled cloth)
     stitch = math_('MULTIPLY', turn, math_('GREATER_THAN', math_('FRACT', math_('MULTIPLY', u, 3.2)), 0.35))
-    wb = line(top_d, 0.55 * float(MEASURES.get('H', 9.4)) * 0.075, 0.05)
+    wb = line(top_d, 0.0, 0.05)                         # (the waist join, where the gores meet the band)
     # the colour
     shade = math_('MULTIPLY', rng(dye.outputs['Fac'], 0.3, 0.7, 1.0 - P['mottle'], 1.0 + P['mottle']),
                   rng(weave, 0.0, 1.0, 0.9, 1.05))
@@ -305,57 +308,82 @@ def add_push(sk, body, M):
     m2.vertex_group = 'push'
 
 
-def smooth_weights(sk, fn, rows, cols, rounds=8):
-    """Give the skirt its rig weights from fn, evened out over the cloth: the weights that follow the nearest bit of
-    skin jump from one point of the skin to the next, and a jump in the weights is a step in the cloth when the legs
-    move. (The points run row by row down the cloth and wrap round it: the sheet's own grid.)"""
+def smooth_weights(sk, fn, rounds=8):
+    """Give the skirt its rig weights from fn, evened out over the cloth along its edges: the weights that follow the
+    nearest bit of skin jump from one point of the skin to the next, and a jump in the weights is a step in the cloth
+    when the legs move. (The sewn skirt's points are the pieces' own, joined at the seams: a point's neighbours are
+    those its edges reach, across a seam too.)"""
     me = sk.data
-    pts = [v.co for v in me.vertices]
-    ws = [fn(p) for p in pts]
+    n = len(me.vertices)
+    ws = [fn(v.co) for v in me.vertices]
     bones = sorted({b for w in ws for b in w})
-    W = np.zeros((len(pts), len(bones)))
+    W = np.zeros((n, len(bones)))
     for i, w in enumerate(ws):
         for b, v in w.items():
             W[i, bones.index(b)] = v
-    G = W.reshape(rows, cols, -1)
+    E = np.array([tuple(e.vertices) for e in me.edges])
+    deg = np.zeros(n)
+    np.add.at(deg, E[:, 0], 1.0)
+    np.add.at(deg, E[:, 1], 1.0)
+    deg = np.maximum(deg, 1.0)[:, None]
     for _ in range(rounds):
-        G = 0.5 * G + 0.125 * (np.roll(G, 1, 1) + np.roll(G, -1, 1)
-                               + np.concatenate([G[:1], G[:-1]]) + np.concatenate([G[1:], G[-1:]]))
-    W = G.reshape(len(pts), -1)
+        S = np.zeros_like(W)
+        np.add.at(S, E[:, 0], W[E[:, 1]])
+        np.add.at(S, E[:, 1], W[E[:, 0]])
+        W = 0.5 * W + 0.5 * S / deg
     groups = {b: sk.vertex_groups.new(name=b) for b in bones}
-    for i in range(len(pts)):
+    for i in range(n):
         for k, b in enumerate(bones):
             if W[i, k] > 1e-4:
                 groups[b].add([i], float(W[i, k]), 'REPLACE')
 
 
+def carry_weights(src, o):
+    """The rig weights of another object's points from the nearest point of src (the stitches and the pressed
+    allowances ride the cloth they lie on)."""
+    from mathutils.kdtree import KDTree
+    kd = KDTree(len(src.data.vertices))
+    for v in src.data.vertices:
+        kd.insert(v.co, v.index)
+    kd.balance()
+    names = {g.index: g.name for g in src.vertex_groups}
+    groups = {}
+    for v in o.data.vertices:
+        _, i, _ = kd.find(v.co)
+        for g in src.data.vertices[i].groups:
+            nm = names[g.group]
+            if nm not in groups:
+                groups[nm] = o.vertex_groups.new(name=nm)
+            groups[nm].add([v.index], g.weight, 'REPLACE')
+
+
 def make_skirt(body, rig, M, name='Riding skirt', under=None):
-    """Draft the skirt on the body from its measures M and hand it to the body's bones. Returns the object and the
-    draft (its sizes, for the thickness)."""
+    """Draft the skirt on the body from its measures M, cut the pattern's pieces as cloth, sew them (sew.py) and hand
+    the result to the body's bones. Returns the object, the draft and the sewing's extras (the stitches and the
+    pressed seam allowances as objects of their own, for build to give the same push)."""
     B = draft.body_data(body)
     D = draft.draft(B, M, under=under)
-    bm = draft.sheet_mesh(D)
+    pieces, pairs, extra = pattern.draft_pieces(D, M)
+    bm, sd = sew.sew(D, M, pieces)
     sk = female.mesh_obj(name, bm, M_WOOL, skin=lambda co: {}, subdiv=0, solid=0.0)
-    smooth_weights(sk, skirt_weights(M, body), D['rows'], D['cols'])
+    smooth_weights(sk, skirt_weights(M, body))
     MEASURES['band'] = D['r']['hem_band']
     MEASURES['H'] = M['H']
-    return sk, D
+    aux = []
+    for nm, mesh, mid in (('Riding skirt stitches', sew.stitch_mesh(sew.stitch_lines(D, sd, D['r'])), M_THREAD),
+                          ('Riding skirt seams', sew.allowance_mesh(D, sd, D['r']), M_WOOL)):
+        o = female.mesh_obj(nm, mesh, mid, skin=lambda co: {}, subdiv=0, solid=0.0)
+        carry_weights(sk, o)
+        aux.append(o)
+    return sk, D, aux
 
 
 def finish_skirt(sk, D):
-    """The wool's thickness (doubled in the turned hem: a vertex group weighs it down the cloth), then the surface's
-    smoothing: after the rig, the push and the settle."""
-    hem = sk.vertex_groups.new(name='hem')
-    band = D['r']['hem_band']
-    hd = np.empty(len(sk.data.vertices))
-    sk.data.attributes['hem_d'].data.foreach_get('value', hd)
-    for i, d in enumerate(hd):
-        hem.add([i], 0.5 + 0.5 * float(np.exp(-(d / (0.85 * band)) ** 4)), 'REPLACE')
+    """The wool's thickness (the turned hem is two layers of real cloth now), then the surface's smoothing: after the
+    rig and the push."""
     sol = sk.modifiers.new('thickness', 'SOLIDIFY')
-    sol.thickness = 2.0 * D['r']['wool']
+    sol.thickness = D['r']['wool']
     sol.offset = 1.0
-    sol.vertex_group = 'hem'
-    sol.thickness_vertex_group = 0.0
     sm = sk.modifiers.new('smooth', 'SUBSURF')
     sm.levels = sm.render_levels = 1
 
@@ -374,12 +402,13 @@ def build():
     M = draft.measure(B, rig, H)
     draft.report(M)
     MEASURES.update(M)
-    sk, D = make_skirt(body, rig, M)
+    sk, D, aux = make_skirt(body, rig, M)
     DRAFT.clear()
     DRAFT.update(D=D, M=M)
     proxy = leg_proxy(body, rig, M)
     if PUSH:
-        add_push(sk, body, M)
+        for o in [sk] + aux:
+            add_push(o, body, M)
     if SETTLE:
         hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o]
         P = dict(settle.WOOL)

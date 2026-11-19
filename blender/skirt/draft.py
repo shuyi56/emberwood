@@ -32,10 +32,10 @@ RATIOS = {
     'ease_waist': 0.02,     # the cloth's stand-off from the skin at the waist: close, the wool's thickness only
     'ease_hips': 0.05,      # over the hips: the petticoat's bulk under it (the petticoat thread's published value
     'ease_hem': 0.10,        # at the hem, and the petticoat's own flare below that, replace these when it lands)
-    'top_above': 0.045,      # the top edge above the waist, under the jacket's basque
-    'hem_front': 1.45,       # the hem's radius in front, at the sides and at the back, from the axis (the train's)
-    'hem_side': 1.5,
-    'hem_back': 1.85,
+    'top_above': 0.005,      # the gores' top edge above the waist; the waistband stands above it (its top is under the basque)
+    'hem_front': 1.6,       # the hem's radius in front, at the sides and at the back, from the axis (the train's)
+    'hem_side': 1.65,
+    'hem_back': 2.03,
     'hem_lift': 0.045,       # the hem's height above the floor in front, at the sides; it lies on the floor behind
     'hem_lift_side': 0.035,
     'flare_from': 0.0,       # the flare starts at the hips
@@ -196,7 +196,8 @@ def hem_height(phi, M, r):
     front = np.maximum(c, 0.0) ** 2
     back = np.maximum(-c, 0.0) ** 2
     side = np.sin(phi) ** 2
-    return M['floor_z'] + r['hem_lift'] * front + r['hem_lift_side'] * side + 0.0 * back
+    # (the fold of the turned hem hangs a fold radius below the cloth's end: raised by it, so the fold lies on the floor)
+    return M['floor_z'] + r.get('fold_r', 0.0) + r['hem_lift'] * front + r['hem_lift_side'] * side + 0.0 * back
 
 
 def under_body(points):
@@ -213,6 +214,7 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
     r = {k: v * H if k in ('ease_waist', 'ease_hips', 'ease_hem', 'top_above', 'hem_front', 'hem_side', 'hem_back',
                            'hem_lift', 'hem_lift_side', 'hem_band', 'wool', 'nap_roll', 'fold_depth', 'band', 'allowance') else v
          for k, v in ratios.items()}
+    r['fold_r'] = r['wool'] + 0.02          # (the radius of a fold: half the gap between a turned cloth's two layers)
     z_top = M['waist_z'] + r['top_above']
     z_hem = M['floor_z']
     zs = np.linspace(z_top + 0.3, z_hem, NZ)

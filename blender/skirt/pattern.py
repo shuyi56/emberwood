@@ -106,7 +106,7 @@ def _gore(name, a, b, column, rows, allow, hem_allow, notch_z):
     return dict(name=name, kind='gore', phi=(float(a), float(b)), stitch=stitch, cut=cut, grain=grain,
                 edges={'left': dict(poly=left, length=_length(left)), 'right': dict(poly=right, length=_length(right)),
                        'top': dict(poly=top, length=_length(top)), 'bottom': dict(poly=bottom, length=_length(bottom))},
-                notches=notches, stretch=(float(min(ratios)), float(max(ratios))), solid=G)
+                notches=notches, stretch=(float(min(ratios)), float(max(ratios))), solid=G, flat=F, phis=phis)
 
 
 def _waistband(top_lengths, height, allow):
