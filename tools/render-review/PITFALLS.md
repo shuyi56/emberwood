@@ -186,3 +186,9 @@ Note on view presets (PR 53, 2026-11-19): `--preset turn-clay|turn-matcap|turn-l
 - **Seen:** Redingote sleeves final turn, 2026-11-19: `--turn --denoise --size 720 --samples 128` (five angles) ran past the queue's 30-minute limit and was killed; the same turn at `--size 600 --samples 48 --denoise` finished. The reviewer had passed the 720/128 request because its build reached the first render in 95 s.
 - **Spot:** A five-angle --turn or --head with size squared times samples above about 40 million (720 x 720 x 128 is 66 million; 600 x 600 x 48 is 17 million; 480 x 480 x 96 is 22 million).
 - **Fix:** Send it back at 600 px, 48 samples and --denoise. A bigger frame goes one angle at a time (--angles NAME) with the larger size.
+
+## P029 A setting tuned across several renders that never bound
+
+- **Seen:** Boot ankle, 2026-11-19: renders 219, 235 and 239 changed the shaft's least-girth setting (1.05, 1.22, 1.12). The shaft at the ankle stayed 26 cm round in all three, because the taut leg plus ease set the width and the setting never limited it. Three renders changed only the fold softness.
+- **Spot:** A request whose note says "looser/tighter/higher" and whose diff only moves a number, with an earlier render from the same thread that moved little or went the wrong way.
+- **Fix:** Before asking, build headless and measure the posed width (or height) at the spot at two values of the knob. If the two numbers match, the knob does not bind: change the thing that sets the width. This is P017 for a setting that is clamped rather than overridden.
