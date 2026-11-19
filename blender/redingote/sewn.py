@@ -107,11 +107,18 @@ class Sewing:
         # the cloth at the stitching sits on the skin (the bodice's armhole edge), let out by a little of the head's
         # ease: the whole of it left a dark slot between the body and the cloth's edge (render #197)
         w = D.M['w']
-        off = []
+        # (on the skin itself: in front of and behind the arm the loop spans the armpit's hollow and stood off the
+        # chest, and the sleeve's edge hung there as a rim with a dark slot under it, #206 and #212)
+        c = 0.3 * D.r['ease_head'] * w
+        pts = []
         for p in fine:
             loc, nrm, _, _ = D.b_all.find_nearest(Vector(p))
-            off.append(np.array(nrm) if loc is not None else np.zeros(3))
-        self.seam_pts = fine + 0.3 * D.r['ease_head'] * w * np.array(off)
+            pts.append(np.array(loc) + c * np.array(nrm) if loc is not None else p)
+        pts = np.array(pts)
+        k = max(2, len(pts) // 120)                            # (eased along the loop: the snap is ragged)
+        for _ in range(3):
+            pts = sum(np.roll(pts, i, 0) for i in range(-k, k + 1)) / (2 * k + 1)
+        self.seam_pts = pts
 
     def at(self, sig):
         """The seam's point (on the cloth) at sig along the loop from its top, forward first (wrapped)."""
