@@ -267,6 +267,12 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
         hx, hy = float(hx[0]), float(hy[0])
         out = np.zeros((rows, 3))
         rmax = 0.0
+        # the A-line carried on below the seat: the line from the top edge to the hips' height goes on down at the same
+        # slope, so the cloth keeps going out where the body (the seat, then the thighs) turns back in and the
+        # flare has not begun; no shelf under the seat
+        r_top = float(body_r(z_top, phi)) + float(ease(z_top))
+        r_hip = float(body_r(zh, phi)) + float(ease(zh))
+        slope = max(0.0, (r_hip - r_top) / max(z_top - zh, 1e-6))
         for i in range(rows):
             z = z_top + (hz - z_top) * (i / (rows - 1))
             br = float(body_r(z, phi)) + float(ease(z))
@@ -279,6 +285,8 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
             # soft flutes where the flare is free of the legs: deepest toward the hem and at the back, none in front
             fl = r['fold_depth'] * t ** 1.6 * (0.35 + 0.65 * min(1.0, max(0.0, -math.cos(phi) + 0.35)))
             rr2 = rr + fl * math.cos(fold_n * phi + 0.4 * math.sin(3 * phi) + 6.0 * s)
+            if z < zh:
+                rr2 = max(rr2, r_hip + slope * (zh - z))
             x, y = x * rr2 / rr, y * rr2 / rr
             # (the cloth never turns back in on itself below the hips)
             if z < zh:
