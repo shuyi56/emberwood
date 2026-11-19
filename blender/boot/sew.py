@@ -99,6 +99,8 @@ def pairs(pieces, X, log=print):
         if top not in by:                                      # (a seam of another shaft than this boot's)
             continue
         pt = by[top]
+        if e_top not in _edges(pt):
+            continue
         st = np.arange(pt['start'], pt['start'] + len(pt['V']))
         for un in unders:
             if un not in by:
@@ -240,7 +242,7 @@ def _rows(o, pieces, sole):
     tl = o.modifiers['thickness'].thickness if 'thickness' in o.modifiers else 0.0
     rows = []
     for top, _, e_top, _ in SEAMS:
-        if e_top == 'top' or top not in by:
+        if e_top == 'top' or top not in by or e_top not in by[top]['edges']:
             continue
         p = by[top]
         sl = slice(p['start'], p['start'] + len(p['V']))
@@ -422,7 +424,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         for (A, NA), (B, NB) in (((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])), ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1]))):
             s = np.linspace(0.0, 1.0, 9)[:, None]
             up = 0.5 * (NA + NB)
-            mid = 0.5 * (A + B) + up * (r['lace'] * 2.0)
+            mid = 0.5 * (A + B) + up * (r['lace'] * 0.5)              # (drawn tight: flat over the tongue)
             path = (1 - s) ** 2 * (A + NA * r['lace']) + 2 * s * (1 - s) * mid + s ** 2 * (B + NB * r['lace'])
             v, f = _tube(path, r['lace'])
             LF += [[i + len(LV) for i in ff] for ff in f]
