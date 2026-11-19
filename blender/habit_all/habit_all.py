@@ -41,6 +41,10 @@ SETTINGS = {
 # and the body, not over it), so it bursts out through both. It is built, so the layers over it can be fitted to it, but
 # not shown until they are: HABIT_SHOW=chemise shows it.
 HIDDEN = [x for x in os.environ.get('HABIT_HIDE', 'chemise').split(',') if x and x not in os.environ.get('HABIT_SHOW', '').split(',')]
+# What the skirt must clear: the layers worn under it (by name prefix). Its draft stands its cloth off the larger of the
+# body's sections and theirs, so the corset's lower edge, which flares over the hips, is tucked under the skirt rather than
+# standing out through it.
+SKIRT_OVER = ('Corset', 'Petticoat')
 SHARED = ('sorceress_pendant', 'shared', 'base')
 PIECE_DIRS = tuple(os.path.join(ROOT, p) + os.sep for p in {d for _, _, ds in ORDER for d in ds} | {'corset', 'gown'})
 
@@ -76,6 +80,8 @@ class Piece:
         sys.modules.update(self.owned)
         sys.path[:0] = self.dirs
         try:
+            if self.name == 'skirt':
+                self._fit_over_layers()
             for k, v in SETTINGS.get(self.name, {}).items():
                 setattr(self.mod, k, v)
             return self.mod.build()
@@ -84,6 +90,36 @@ class Piece:
             for d in self.dirs:
                 if d in sys.path:
                     sys.path.remove(d)
+
+
+def _points(prefixes):
+    """The worn layers' points in world space, as they stand now (the rig, the modifiers)."""
+    import bpy
+    import numpy as np
+    dg = bpy.context.evaluated_depsgraph_get()
+    out = []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or o.hide_render or not o.name.startswith(tuple(prefixes)):
+            continue
+        e = o.evaluated_get(dg)
+        me = e.to_mesh()
+        co = np.empty(len(me.vertices) * 3)
+        me.vertices.foreach_get('co', co)
+        mw = np.array(o.matrix_world)
+        out.append(co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3])
+        e.to_mesh_clear()
+    return np.concatenate(out)
+
+
+def _fit_over_layers(self):
+    """The skirt module's make_skirt, handed what lies under it, so its draft clears it."""
+    make, draft = self.mod.make_skirt, self.mod.draft
+    pts = _points(SKIRT_OVER)
+    print('habit_all: the skirt fitted over %d points of %s' % (len(pts), ', '.join(SKIRT_OVER)), flush=True)
+    self.mod.make_skirt = lambda body, rig, M, **kw: make(body, rig, M, under=draft.under_body(pts), **kw)
+
+
+Piece._fit_over_layers = _fit_over_layers
 
 
 def build():
