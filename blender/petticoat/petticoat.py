@@ -237,13 +237,26 @@ def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
     pts, nrm = body_surface([body] + hands + [u for u in under_objs if u.type == 'MESH'])
     if os.environ.get('PETTI_COLLIDER'):
         np.savez(os.environ['PETTI_COLLIDER'], pts=pts, nrm=nrm, floor=M['floor'])
+    key = sew.settled_key(A['P'], A['T'], A['UV'], A['sew'], pts, nrm, np.float64(M['floor']))
     if os.environ.get('PETTI_SKIRT_IN'):      # (the layer below as it settled before: not run again)
         X, weld = _load_points(os.environ['PETTI_SKIRT_IN']), sew.gathers(A)[2]
         log('petticoat sew: the skirt as settled before, from %s' % os.environ['PETTI_SKIRT_IN'])
     else:
-        X, weld = sew.drape(A, cuts, pts, nrm, M['floor'], log=log)
-    # the flounce: the layer above, set on the settled skirt (which it does not move)
-    Y, FT, FUV, FR = sew.flounce(A, cuts, X, pieces, M, pts, nrm, M['floor'], log=log)
+        hit = None if os.environ.get('PETTI_RESOLVE') else sew.settled_load('skirt', key, log)
+        if hit is not None:
+            X, weld = hit['X'], sew.gathers(A)[2]
+        else:
+            X, weld = sew.drape(A, cuts, pts, nrm, M['floor'], log=log)
+            sew.settled_save('skirt', key, log, X=X)
+    # the flounce: the layer above, set on the settled skirt (which it does not move); its folds kept the same way
+    fkey = sew.settled_key(X, extra=key)
+    hit = None if os.environ.get('PETTI_RESOLVE') else sew.settled_load('flounce', fkey, log)
+    if hit is not None:
+        Y, FT, FUV = hit.pop('Y'), hit.pop('T'), hit.pop('UV')
+        FR = hit
+    else:
+        Y, FT, FUV, FR = sew.flounce(A, cuts, X, pieces, M, pts, nrm, M['floor'], log=log)
+        sew.settled_save('flounce', fkey, log, Y=Y, T=FT, UV=FUV, **FR)
     # (the drape is found on the body as it stands at frame 1; carried back to the rest shape through the bones)
     o = make_object(X, T, A['UV'][T], sew.weights(X, M), rig, name='Petticoat sewing')
     B = cloth.bone_matrices(o, rig)

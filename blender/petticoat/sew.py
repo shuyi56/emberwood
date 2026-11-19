@@ -723,6 +723,50 @@ def gathers(A):
     return np.array(out, np.int64), tg, np.array(weld, np.int64)
 
 
+# ---------------------------------------------------------------- the solved folds, kept
+
+CACHE = os.environ.get('PETTI_CACHE', '/mnt/project-files/petticoat/cache')
+
+
+def settled_key(*arrays, extra=''):
+    """What the solved folds depend on: the shape the solver was given (its arrays), every solver and lay setting
+    in this file, and the solver's own code (shared/fabric.py). A material or texture run changes none of these,
+    so it finds its folds already solved."""
+    import hashlib
+    h = hashlib.sha256()
+    for a in arrays:
+        a = np.ascontiguousarray(a)
+        h.update(str(a.shape).encode() + str(a.dtype).encode() + a.tobytes())
+    sets = {k: v for k, v in sorted(globals().items())
+            if k.isupper() and isinstance(v, (int, float, str, tuple, dict, type(None))) and k != 'CACHE'}
+    h.update(repr(sets).encode())
+    h.update(extra.encode())
+    for f in (xf.__file__, __file__):
+        with open(f, 'rb') as fh:
+            h.update(fh.read())
+    return h.hexdigest()[:20]
+
+
+def settled_load(kind, key, log=print):
+    path = os.path.join(CACHE, '%s-%s.npz' % (kind, key))
+    try:
+        d = np.load(path, allow_pickle=False)
+        out = {k: d[k] for k in d.files}
+        log('petticoat cache: %s folds loaded (%s), the solver not run' % (kind, key))
+        return out
+    except (OSError, ValueError):
+        return None
+
+
+def settled_save(kind, key, log=print, **arrays):
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        np.savez(os.path.join(CACHE, '%s-%s.npz' % (kind, key)), **arrays)
+        log('petticoat cache: %s folds saved (%s)' % (kind, key))
+    except OSError as e:
+        log('petticoat cache: not saved (%s)' % e)
+
+
 # ---------------------------------------------------------------- the flounce (the layer above, on the settled skirt)
 
 def flounce_ring(piece, spacing=FLOUNCE_SPACING):
