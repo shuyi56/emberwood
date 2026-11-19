@@ -342,6 +342,10 @@ class Fabric:
                     kk = np.where(ok, kk, 0.0)
                     p[t] -= kk[:, None] * sv
                 x[t] = p[t]
+                if neutral:          # (and what was running into the body stops: no speed kept along the push)
+                    u = push / np.maximum(nl, 1e-12)[:, None]
+                    vn = np.einsum('ij,ij->i', x[t] - pv[t], u)
+                    pv[t] += np.minimum(vn, 0.0)[:, None] * u
             if self.chains:
                 self.hold(body, neutral)
         self.t += h

@@ -214,9 +214,15 @@ def body_surface(objs):
     return np.concatenate(pts), np.concatenate(nrm)
 
 
+def _load_points(path):
+    d = np.load(path)
+    return d if isinstance(d, np.ndarray) else d['X']
+
+
 def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
     """Cut the flat pieces, lay them round her, sew them and let the skirt fall in the local solver (the band held
-    on the corset); the sewn points are then joined. Returns the petticoat object."""
+    on the corset); the sewn points are then joined; then the flounce set on it the same way. Returns the skirt's
+    object and the flounce's."""
     cuts = sew.cut(pieces)
     placed = sew.lay(cuts, pieces, m, M, pat, log=log)
     bp, ba = sew.band_ring(cuts[('waistband', 'C')], m, M, pat)
@@ -230,7 +236,13 @@ def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
     pts, nrm = body_surface([body] + hands + [u for u in under_objs if u.type == 'MESH'])
     if os.environ.get('PETTI_COLLIDER'):
         np.savez(os.environ['PETTI_COLLIDER'], pts=pts, nrm=nrm, floor=M['floor'])
-    X, weld = sew.drape(A, cuts, pts, nrm, M['floor'], log=log)
+    if os.environ.get('PETTI_SKIRT_IN'):      # (the layer below as it settled before: not run again)
+        X, weld = _load_points(os.environ['PETTI_SKIRT_IN']), sew.gathers(A)[2]
+        log('petticoat sew: the skirt as settled before, from %s' % os.environ['PETTI_SKIRT_IN'])
+    else:
+        X, weld = sew.drape(A, cuts, pts, nrm, M['floor'], log=log)
+    # the flounce: the layer above, set on the settled skirt (which it does not move)
+    Y, FT, FUV, FR = sew.flounce(A, cuts, X, pieces, M, pts, nrm, M['floor'], log=log)
     # (the drape is found on the body as it stands at frame 1; carried back to the rest shape through the bones)
     o = make_object(X, T, A['UV'][T], sew.weights(X, M), rig, name='Petticoat sewing')
     B = cloth.bone_matrices(o, rig)
@@ -243,7 +255,18 @@ def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
     ok = (new[T][:, 0] != new[T][:, 1]) & (new[T][:, 1] != new[T][:, 2]) & (new[T][:, 0] != new[T][:, 2])
     o = make_object(Q, F, A['UV'][T][ok], sew.weights(Q, M), rig)
     log('petticoat sew: joined into one cloth of %d points, %d faces' % (len(Q), len(F)))
-    return o
+    fo = make_object(Y, FT, FUV[FT], sew.weights(Y, M), rig, name='Petticoat flounce sewing')
+    B = cloth.bone_matrices(fo, rig)
+    Bi = np.linalg.inv(B)
+    Y = np.einsum('nij,nj->ni', Bi[:, :3, :3], Y) + Bi[:, :3, 3]
+    me_old = fo.data
+    bpy.data.objects.remove(fo)
+    bpy.data.meshes.remove(me_old)
+    Q, FF, new = sew.weld(Y, FT, FR['close'])
+    ok = (new[FT][:, 0] != new[FT][:, 1]) & (new[FT][:, 1] != new[FT][:, 2]) & (new[FT][:, 0] != new[FT][:, 2])
+    fo = make_object(Q, FF, FUV[FT][ok], sew.weights(Q, M), rig, name='Petticoat flounce')
+    log('petticoat sew: the flounce, %d points, %d faces' % (len(Q), len(FF)))
+    return o, fo
 
 
 def draft_on(body, H, under_objs=(), extra=None, log=print):
@@ -291,7 +314,7 @@ def build():
         pattern.layout(pieces, seams, m, out + '.png')
         pattern.save(pieces, seams, m, out + '.json')
     if SEW and not os.environ.get('PETTI_FLAT'):
-        o = sew_and_drape(body, rig, M, pat, pieces, m, worn)
-        finish(o, H)
+        for o in sew_and_drape(body, rig, M, pat, pieces, m, worn):
+            finish(o, H)
     bpy.context.view_layer.update()
     return res

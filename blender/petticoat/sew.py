@@ -218,10 +218,12 @@ def _cut_darts(pts, darts, spacing, named, base):
     i = 0
     for x, w, d in sorted(darts):
         a, b = x - 0.5 * w, x + 0.5 * w
-        while i < len(pts) and xs[i] < a - 1e-9:
+        # (the waist's own points kept off the dart's corners by a third of the spacing, so no sliver of cloth is
+        # left beside a corner)
+        while i < len(pts) and xs[i] < a - 0.35 * spacing:
             out.append(pts[i])
             i += 1
-        while i < len(pts) and xs[i] <= b + 1e-9:
+        while i < len(pts) and xs[i] <= b + 0.35 * spacing:
             i += 1
         top_a, top_b = np.array([a, pts[0][1]]), np.array([b, pts[0][1]])
         apex = np.array([x, pts[0][1] - d])
@@ -486,6 +488,15 @@ def assemble(cuts, placed, band_pts, band_ang, m, M):
     a1, a2 = pattern.SEAM_AT
     spans = {('front gore', 'C'): (-a1, a1), ('side gore', 'L'): (a1, a2), ('side gore', 'R'): (-a2, -a1),
              ('back breadth', 'L'): (a2, math.pi), ('back breadth', 'R'): (-math.pi, -a2)}
+    lp = P[low]
+    la_ = np.concatenate([low_ang - 2 * math.pi, low_ang, low_ang + 2 * math.pi])
+    lpp = np.vstack([lp, lp, lp])
+
+    def ring_at(t):
+        """the band's lower edge at angle t (the points between its own by angle)"""
+        t = (t + math.pi) % (2 * math.pi) - math.pi
+        return np.array([np.interp(t, la_, lpp[:, a]) for a in range(3)])
+    targets = []
     for k, (lo, hi) in spans.items():
         top = [i for i in cuts[k].edges['waist'] if i is not None]
         # (not the dart legs' points, and of each dart's two corners at the top only the first: the dart closed,
@@ -495,18 +506,28 @@ def assemble(cuts, placed, band_pts, band_ang, m, M):
         top = sorted(top, key=lambda i: math.atan2(P[i, 0], -P[i, 1]))
         if k[0] == 'back breadth' and k[1] == 'R':
             top = sorted(top, key=lambda i: math.atan2(P[i, 0], -P[i, 1]) % (2 * math.pi))
-        aw = np.arctan2(np.sin(low_ang), np.cos(low_ang))
-        if hi > math.pi - 1e-6:
-            sel = (aw >= lo - 1e-6) | (aw <= -math.pi + 1e-6)
-        else:
-            sel = (aw >= lo - 1e-6) & (aw <= hi + 1e-6)
-        band_part = list(low[sel][np.argsort(aw[sel] % (2 * math.pi) if k[1] == 'R' and k[0] == 'back breadth' else aw[sel])])
-        if len(band_part) < 2:
-            continue
-        sew += _pairs_gather(top, band_part) if len(top) >= len(band_part) else _pairs_equal(top, band_part)
+        # each top point to its own place along the band's edge over the piece's span, in proportion to its
+        # length along the top with the darts closed: flat over the front and sides, gathered evenly at the back
+        c = cuts[k]
+        corner = {la[0]: lb[0] for la, lb in getattr(c, 'darts', [])}
+        u = [0.0]
+        for p_, q_ in zip(top[:-1], top[1:]):
+            i_, j_ = p_ - off[k], q_ - off[k]
+            # (across a dart: from its corner on the far side, the dart shut, whichever way the top runs)
+            if i_ in corner and np.linalg.norm(c.V[j_] - c.V[corner[i_]]) < np.linalg.norm(c.V[j_] - c.V[i_]):
+                i_ = corner[i_]
+            elif j_ in corner and np.linalg.norm(c.V[i_] - c.V[corner[j_]]) < np.linalg.norm(c.V[i_] - c.V[j_]):
+                j_ = corner[j_]
+            u.append(u[-1] + float(np.linalg.norm(c.V[j_] - c.V[i_])))
+        u = np.array(u) / max(u[-1], 1e-9)
+        th_ = lo + u * (hi - lo)
+        for i_, t_ in zip(top, th_):
+            targets.append((i_, ring_at(t_)))
     pinned = np.zeros(len(P))
     pinned[off[kb]:] = 1.0
-    return dict(P=P, T=T, UV=UV, piece=piece_of, sew=np.array(sew, dtype=np.int64), pinned=pinned, off=off, H=M['H'])
+    return dict(P=P, T=T, UV=UV, piece=piece_of, sew=np.array(sew, dtype=np.int64), pinned=pinned, off=off, H=M['H'],
+                to_band=(np.array([t[0] for t in targets], np.int64), np.array([t[1] for t in targets]).reshape(-1, 3)),
+                band_low=low)
 
 
 def weld(P, T, sew):
@@ -559,16 +580,12 @@ GAP = 0.06                   # off the body, in units
 
 
 def tethers(A, cuts):
-    """Each skirt point held within its length of cloth from the band: tied to the band point its piece's top is
-    sewn to nearest above it on the pattern, at its flat distance from that top point (and 2% of give)."""
-    UV, S, off = A['UV'], A['sew'], A['off']
-    band = A['pinned'] > 0
-    partner = {}
-    for a, b in S:
-        if band[b] and not band[a]:
-            partner[int(a)] = int(b)
-        elif band[a] and not band[b]:
-            partner[int(b)] = int(a)
+    """Each skirt point held within its length of cloth from the band: tied to the place on the band that its
+    piece's top point nearest above it on the pattern is sewn to (numbered after the cloth's points, as gathers()
+    numbers them), at its flat distance from that top point (and 2% of give)."""
+    UV, off = A['UV'], A['off']
+    n0 = len(A['P'])
+    partner = {int(i): n0 + k for k, i in enumerate(A['to_band'][0])}
     I, J, R = [], [], []
     for k, c in cuts.items():
         if k[0] == 'waistband':
@@ -604,6 +621,13 @@ def drape(A, cuts, pts, nrm, floor, log=print):
         for d0, w in tuck_zones(A['H']):
             z |= (dh >= d0 - 0.15) & (dh <= d0 + w + 0.15)
         soft[A['off'][k]:A['off'][k] + len(c.V)][z] = TUCK_BEND
+        # (round a dart's legs the cloth is shaped into a cone when the dart is sewn: the starch gives there)
+        for la, lb in getattr(c, 'darts', []):
+            from shapely.geometry import LineString, Point
+            ln = LineString(np.vstack([c.V[la], c.V[lb][::-1]]))
+            near = np.array([ln.distance(Point(p)) < DART_EASE for p in c.V])
+            seg = soft[A['off'][k]:A['off'][k] + len(c.V)]
+            seg[near] = np.maximum(seg[near], DART_BEND)
     fab.mesh(T, rest_pos=A['UV'], bend_at=soft, flat=FLAT)
     fab.sew(S[:, 0], S[:, 1], loose=1e-3, firm=0.0, seconds=0.25)
     I, J, R = tethers(A, cuts)
@@ -636,7 +660,15 @@ def drape(A, cuts, pts, nrm, floor, log=print):
     return fab.pos[:n0].copy(), weld
 
 
+DART_BEND = 2e-4             # and round the darts, within DART_EASE of their legs, where the sewn dart shapes a cone
+DART_EASE = 0.8
 TUCK_BEND = 5e-3             # the bend ties across a pressed tuck's folds: the press holds it, not the cloth
+
+
+FLOUNCE_FLAT = None           # the flounce is lighter than the skirt and gathered, not starched to stand: it falls in
+FLOUNCE_BEND = 2e-4           # many small folds from its gathers
+FLOUNCE_PLEAT = 1.6           # its gathers laid in folds this long in the cloth (several points across, so they show)
+FLOUNCE_ITERATIONS = 12       # gathered 1.6 times, its threads need the passes to stay their length and fold
 
 
 def one_hold(S, fixed, n0):
@@ -668,42 +700,209 @@ def one_hold(S, fixed, n0):
 
 
 def gathers(A):
-    """The skirt's top sewn to the band: where several of its points go to one point of the band (the gathered
-    back), each is sewn instead to its own place along the band's edge from that point toward the next (a gathered
-    edge is drawn up evenly along the band, its cloth standing in small folds between), those places held where the
-    band is. Returns (pairs for the solver, the places, pairs to join after: the gathered points other than the
-    first stay where they are sewn, on the band's edge)."""
-    P, UV, S = A['P'], A['UV'], A['sew']
-    band = A['pinned'] > 0
+    """The skirt's top sewn to the band: each top point to its own place on the band's edge (assemble's to_band),
+    those places held where the band is. Returns (pairs for the solver: the seams and darts and tucks, then each top
+    point to its place, numbered after the cloth's points; the places; the pairs to join after: the seams, and each
+    band point with the top point whose place is nearest it, if near)."""
+    P = A['P']
     n0 = len(P)
-    groups = {}
-    for a, b in S:
-        if band[b] and not band[a]:
-            groups.setdefault(int(b), []).append(int(a))
-    low = np.nonzero(band & (UV[:, 1] < 1e-6))[0]
-    ang = np.arctan2(P[low, 0], -P[low, 1])
-    low = low[np.argsort(ang)]
-    ang = np.sort(ang)
-    nxt = {int(low[i]): int(low[(i + 1) % len(low)]) for i in range(len(low))}
-    out, extra, weld = [], [], []
-    for a, b in S:
-        if band[b] and not band[a] and len(groups[int(b)]) > 1:
+    idx, tg = A['to_band']
+    S = [tuple(p) for p in A['sew']]
+    out = S + [(int(i), n0 + k) for k, i in enumerate(idx)]
+    weld = list(S)
+    low = A['band_low']
+    if len(idx):
+        d = np.linalg.norm(tg[None, :, :] - P[low][:, None, :], axis=2)
+        j = np.argmin(d, axis=1)
+        sp = np.median(np.linalg.norm(np.diff(P[low], axis=0), axis=1))
+        used = set()
+        for b, jj in zip(low, j):
+            if d[list(low).index(b), jj] < 0.35 * sp and jj not in used:
+                weld.append((int(idx[jj]), int(b)))
+                used.add(jj)
+    return np.array(out, np.int64), tg, np.array(weld, np.int64)
+
+
+# ---------------------------------------------------------------- the flounce (the layer above, on the settled skirt)
+
+def flounce_ring(piece, spacing=FLOUNCE_SPACING):
+    """The flounce strips as cut, joined end to start into a ring: a grid of points on the flat strips laid end to end
+    (u along the ring, v down from the top edge), its triangles, and the gathering line's points. The grid is open at
+    the centre front: its last column lies on its first and the two are sewn point for point (the ring's closing seam;
+    the other joins between strips fall on grid columns and are meshed through)."""
+    top = piece.edge('top')
+    L = float(top[-1][0] - top[0][0])
+    depth = float(-piece.edge('end')[-1][1])
+    head = float(-dict(piece.lines)['gathering line'][0][1])
+    G = pattern.FLOUNCE_STRIPS * L
+    nu = int(math.ceil(G / spacing))
+    nu += (-nu) % pattern.FLOUNCE_STRIPS
+    us = np.arange(nu + 1) * (G / nu)
+    vs = np.unique(np.concatenate([np.linspace(0.0, depth, int(math.ceil(depth / spacing)) + 1), [head]]))
+    nc, nv = nu + 1, len(vs)
+    UV = np.array([(u, -v) for v in vs for u in us])
+    idx = lambda i, j: j * nc + i  # noqa: E731
+    T = []
+    for j in range(nv - 1):
+        for i in range(nu):
+            a, b, c, d = idx(i, j), idx(i + 1, j), idx(i, j + 1), idx(i + 1, j + 1)
+            T += [(a, c, b), (b, c, d)] if (i + j) % 2 else [(a, c, d), (a, d, b)]
+    jg = int(np.argmin(np.abs(vs - head)))
+    close = np.array([(idx(nu, j), idx(0, j)) for j in range(nv)])
+    return dict(UV=UV, T=np.array(T), gather=np.array([idx(i, jg) for i in range(nc)]), close=close,
+                nu=nu, nc=nc, nv=nv, G=G, us=us, vs=vs, head=head, depth=depth,
+                seams=[k * nu // pattern.FLOUNCE_STRIPS for k in range(pattern.FLOUNCE_STRIPS)])
+
+
+def _outward_normals(X, T, piece):
+    """A settled cloth's point normals by its faces' winding, each piece's turned outward as a whole."""
+    X, T = np.asarray(X, float), np.asarray(T)
+    nf = np.cross(X[T[:, 1]] - X[T[:, 0]], X[T[:, 2]] - X[T[:, 0]])
+    lab = np.asarray([hash(p) for p in piece])
+    mid = X[T].mean(1)
+    for p_ in np.unique(lab[T[:, 0]]):
+        on = lab[T[:, 0]] == p_
+        if np.einsum('ij,ij->i', nf[on, :2], mid[on, :2]).sum() < 0:
+            nf[on] *= -1
+    N = np.zeros_like(X)
+    for c_ in range(3):
+        np.add.at(N, T[:, c_], nf)
+    return N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+
+
+def cloth_surface(X, T, piece, n=3, smooth=1.2):
+    """A settled cloth as a body for the layer above: points sampled across its faces (n to an edge, so a point
+    slipping between its own points still meets it) with the faces' normals, each piece's turned outward as a whole
+    (a fold's sides keep their true sense, which a point-by-point radial test gets wrong where the cloth faces round
+    her)."""
+    X, T = np.asarray(X, float), np.asarray(T)
+    nf = np.cross(X[T[:, 1]] - X[T[:, 0]], X[T[:, 2]] - X[T[:, 0]])
+    nf /= np.maximum(np.linalg.norm(nf, axis=1, keepdims=True), 1e-12)
+    lab = np.asarray([hash(p) for p in piece])[T[:, 0]]
+    mid = X[T].mean(1)
+    for p_ in np.unique(lab):
+        on = lab == p_
+        if np.einsum('ij,ij->i', nf[on, :2], mid[on, :2]).sum() < 0:
+            nf[on] *= -1
+    # (pushed out along the cloth's lie, not its folds: a fold's side would shove the layer above round her, where
+    # it gathers into itself; the faces' normals averaged over a fold's width)
+    from scipy.spatial import cKDTree
+    tree = cKDTree(mid)
+    sm = np.zeros_like(nf)
+    for f_, nb in enumerate(tree.query_ball_point(mid, smooth)):
+        sm[f_] = nf[nb].sum(0)
+    nf = sm / np.maximum(np.linalg.norm(sm, axis=1, keepdims=True), 1e-12)
+    bc = np.array([(i, j, n - i - j) for i in range(n + 1) for j in range(n + 1 - i)], float) / n
+    pts = np.einsum('kc,fcd->fkd', bc, X[T]).reshape(-1, 3)
+    return pts, np.repeat(nf, len(bc), axis=0)
+
+
+def flounce(A, cuts, X, pieces, M, pts, nrm, floor, log=print):
+    """Set the flounce on the settled skirt X (the layer below, not moved again): its gathering line sewn evenly
+    round the skirt's flounce line, the strips laid down over the skirt in pleats, then let fall on the skirt, her and
+    the floor in the local solver. Returns (points, triangles, flat UVs, the ring)."""
+    F = flounce_ring(pieces['flounce strip'])
+    UV, T, nu, nc, nv = F['UV'], F['T'], F['nu'], F['nc'], F['nv']
+    # the skirt's flounce line, round her from the centre front: each piece's stretch of it in its cut order, turned
+    # to run round the same way, the pieces by angle; its length the cloth's (flat), so the gathers fall evenly in the
+    # cloth however the settled skirt folds
+    runs = []
+    for k, c in cuts.items():
+        if k[0] == 'waistband' or 'flounce line' not in c.lines:
             continue
-        out.append((a, b))
-        weld.append((a, b))
-    for b, part in groups.items():
-        if len(part) < 2:
-            continue
-        part = sorted(part, key=lambda i: math.atan2(P[i, 0], -P[i, 1]))
-        d = P[nxt[b]] - P[b]
-        if np.linalg.norm(d) > 1.5:          # (the band's end at the centre back: toward the point before instead)
-            d = -d
-        k = len(part)
-        weld.append((part[0], b))
-        for j, a in enumerate(part):
-            if j == 0:
-                out.append((a, b))
-                continue
-            extra.append(P[b] + d * (j / k))
-            out.append((a, n0 + len(extra) - 1))
-    return np.array(out, np.int64), np.array(extra).reshape(-1, 3), np.array(weld, np.int64)
+        li = np.asarray(c.lines['flounce line'])
+        g = A['off'][k] + li
+        th = np.unwrap(np.arctan2(X[g, 0], -X[g, 1]))
+        if th[-1] < th[0]:
+            li, g, th = li[::-1], g[::-1], th[::-1]
+        ds = np.linalg.norm(np.diff(c.V[li], axis=0), axis=1)
+        runs.append((float(np.mean(th)), g, ds, th, k, li))
+    runs.sort(key=lambda r: (r[0] + math.pi) % (2 * math.pi))
+    g = np.concatenate([r[1] for r in runs])
+    s = np.concatenate([[0.0], np.cumsum(np.concatenate([np.append(r[2], 0.0) for r in runs]))[:-1]])
+    Ls = float(np.sum([r[2].sum() for r in runs]))
+    # (the centre front: where the front gore's stretch crosses angle 0)
+    fr = min(runs, key=lambda r: abs(r[0]))
+    i0 = int(np.nonzero(np.isin(g, fr[1]))[0][0])
+    th0 = fr[3] - 2 * math.pi * round(fr[0] / (2 * math.pi))
+    s0 = s[i0] + float(np.interp(0.0, th0, np.concatenate([[0.0], np.cumsum(fr[2])])))
+    qq = np.vstack([X[g], X[g[:1]]])
+    ss = np.append(s, Ls)
+
+    def on_line(frac):
+        t = (np.asarray(frac) * Ls + s0) % Ls
+        return np.stack([np.interp(t, ss, qq[:, a_]) for a_ in range(3)], -1)
+    # the gathering line's points: evenly round the line (their share of the ring), from the centre front
+    frac = F['us'] / F['G']
+    tg = on_line(frac)
+    # (the seam lies on the skirt's face: the flounce's side of it a gap out, where the body lets it be)
+    rr = np.maximum(np.hypot(tg[:, 0], tg[:, 1]), 1e-9)
+    tg[:, :2] *= ((rr + GAP + 0.02) / rr)[:, None]
+    log('petticoat flounce: %d points round, %d down; the line round the skirt %.1f cm, the strips %.1f cm '
+        '(gathered %.2f times)' % (nu, nv, Ls * pattern.CM, F['G'] * pattern.CM, F['G'] / Ls))
+    # laid where it hangs: each column of the flounce down the skirt's own cloth from its place on the line (to the
+    # line's nearest hem point, on the flat piece, then on along the floor), a gap out from the skirt's face, with
+    # its spare round the ring laid in folds
+    from matplotlib.tri import Triangulation, LinearTriInterpolator
+    from shapely.geometry import LineString, Point
+    k_ = F['G'] / Ls
+    amp = 0.5 * FLOUNCE_PLEAT * math.sqrt(max(0.0, 1.0 - 1.0 / k_ ** 2))
+    nX = _outward_normals(X, A['T'], A['piece'])
+    t_ = (frac * Ls + s0) % Ls
+    run_at = np.searchsorted(np.cumsum([r[2].sum() for r in runs]), t_, side='right').clip(0, len(runs) - 1)
+    starts = np.concatenate([[0.0], np.cumsum([r[2].sum() for r in runs])[:-1]])
+    P = np.empty((nc * nv, 3))
+    u = F['us'] / FLOUNCE_PLEAT
+    fold = amp * (1.0 - np.abs(2.0 * (u - np.floor(u)) - 1.0))
+    dzs = F['vs'] - F['head']                       # (down from the gathering line; the heading stands above it)
+    for r_ in np.unique(run_at):
+        _, g_, ds_, _, k, li = runs[r_]
+        c = cuts[k]
+        cols = np.nonzero(run_at == r_)[0]
+        cs = np.concatenate([[0.0], np.cumsum(ds_)])
+        tt = np.clip(t_[cols] - starts[r_], 0.0, cs[-1])
+        p0 = np.stack([np.interp(tt, cs, c.V[li, a_]) for a_ in range(2)], -1)
+        hem = LineString(c.V[[i for i in c.edges['hem'] if i is not None]])
+        q0 = np.array([hem.interpolate(hem.project(Point(p))).coords[0] for p in p0])
+        dn = q0 - p0
+        Df_ = np.maximum(np.linalg.norm(dn, axis=1), 1e-9)
+        dn /= Df_[:, None]
+        tri_ = Triangulation(c.V[:, 0], c.V[:, 1], c.tris)
+        o = A['off'][k] + np.arange(len(c.V))
+        f3 = [LinearTriInterpolator(tri_, X[o, a_]) for a_ in range(3)]
+        fn = [LinearTriInterpolator(tri_, nX[o, a_]) for a_ in range(3)]
+        for j, dz in enumerate(dzs):
+            d_ = np.minimum(dz, Df_ - 1e-3)
+            fp = p0 + dn * d_[:, None]
+            at = np.stack([np.ma.filled(f(fp[:, 0], fp[:, 1]), np.nan) for f in f3], -1)
+            nn = np.stack([np.ma.filled(f(fp[:, 0], fp[:, 1]), np.nan) for f in fn], -1)
+            bad = ~np.isfinite(at).all(1)
+            if bad.any():                           # (off the piece's mesh: its nearest point)
+                jn = np.argmin(np.linalg.norm(c.V[None, :, :] - fp[bad][:, None, :], axis=2), axis=1)
+                at[bad], nn[bad] = X[o[jn]], nX[o[jn]]
+            nn /= np.maximum(np.linalg.norm(nn, axis=1, keepdims=True), 1e-9)
+            q = at + nn * (GAP + 0.08 + fold[cols] * min(1.0, 0.4 + abs(dz) / 3.0))[:, None]
+            past = np.maximum(dz - Df_, 0.0)        # (below the hem: on out along the floor)
+            rad = np.column_stack([q[:, 0], q[:, 1]])
+            rad /= np.maximum(np.linalg.norm(rad, axis=1, keepdims=True), 1e-9)
+            q[:, :2] += rad * past[:, None]
+            q[:, 2] = np.maximum(q[:, 2], floor + 0.08)
+            P[j * nc + cols] = q
+    # the solver: the flounce's points, then the places on the line (held)
+    n0 = len(P)
+    fab = xf.Fabric(np.vstack([P, tg]), dict(FABRIC, iterations=FLOUNCE_ITERATIONS))
+    fab.pin(np.arange(n0, n0 + nc))
+    fab.mesh(T, rest_pos=np.column_stack([UV, np.zeros(len(UV))]), bend=FLOUNCE_BEND, flat=FLOUNCE_FLAT)
+    fab.sew(F['gather'], np.arange(n0, n0 + nc), loose=1e-3, firm=0.0, seconds=0.2)
+    fab.sew(F['close'][:, 0], F['close'][:, 1], loose=1e-3, firm=0.0, seconds=0.2)
+    col = np.arange(n0) % nc
+    fab.tether(np.arange(n0), n0 + col, 1.02 * np.abs(UV[:, 1] + F['head']) + 0.05)
+    # the body: the settled skirt (outer side), her, the floor
+    sp_, sn_ = cloth_surface(X, A['T'], A['piece'])
+    body_ = xf.MeshBody(np.vstack([sp_, pts]), np.vstack([sn_, nrm]), gap=GAP, floor=floor, reach=1.0)
+    t0 = time.time()
+    for k in range(int(round(0.4 / STEP))):
+        fab.step(STEP, body_)
+    k = fab.settle(body_, h=STEP, most=480, tol=2e-4, log=log)
+    log('petticoat flounce: settled in %d more steps (%.0f s)' % (k, time.time() - t0))
+    return fab.pos[:n0].copy(), T, UV, F
