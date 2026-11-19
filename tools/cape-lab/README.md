@@ -20,6 +20,10 @@ Captures take `--body model` (add `?model=...` to `--url` for another glb). A he
 `FRONT_Z=-100`, so `export-head.js` keeps the tail's strands, and merged with `merge-head.mjs`) gets its tail on
 one chain, `hairT_0_<row>`, from the tie; the rest of her hair rides her head.
 
+The Walk menu has the base figure's run too (`run`: `blender/base/female.py` pose_run, baked to
+`public/cape-lab/walk-run.json` as `bake_walk.py` bakes the walk). It sets its own pace and stride, scaled to the
+body's legs; play it with the Run motion (`--walk run --scenarios run`).
+
 The Body menu also has the new mannequin (`?body=mannequin`, `--body mannequin` for captures):
 `public/models/mannequin.glb`, the bare figure of the project's `anatomy/mannequin-v14.blend` on its own rig. It wears
 the stand-in's cape and plays the baked walk (`--walk new`), as it has neither of its own.
@@ -32,9 +36,10 @@ The cape runs on either of two solvers over the same bones, colliders and fittin
 (`src/world/springbones.js`) swing each bone about its parent and pull it back to its modelled direction. Fabric
 (`src/world/fabric.js`, on the solver in `src/world/fabric-core.js`) solves every tail as a point of one sheet of
 cloth: threads that keep their length, diagonals, ties that make it roll into folds, and friction where it lies
-on the body. Open the page with `?solver=fabric`, and pass `--solver fabric` to `check.mjs` and `capture.mjs`.
-Its settings are `CAPE_FABRIC_SETTINGS` in `src/world/cape-rig.js`; in the game, `attachCapeFabric(model)` takes
-the place of `attachCapeSprings(model)`.
+on the body. Fabric is the game's cape and the bench's default; open the page with `?solver=springs`, and pass
+`--solver springs` to `check.mjs` and `capture.mjs`, for spring bones. Fabric's settings are `CAPE_FABRIC_SETTINGS`
+and `WARDEN_FABRIC_SETTINGS` in `src/world/cape-rig.js`; `attachCapeSprings(model)` gives the fabric cape, and
+`attachCapeSprings(model, null, WARDEN_COLLIDERS, 'springs')` the spring bones.
 
 ## The cape rig
 
@@ -91,7 +96,7 @@ cape at rest, or the cape puffs out where they overlap; the stand-in's cape is s
 1. In `blender/warden/warden.py`, add the bones above with the same layout (the stand-in's `makeCape` places them
    on the cloth's inner face), and weight the cape and its lining to them alike: two columns either side by angle,
    rigid in the middle of a bone and blended at its joints, as `makeCape` does.
-2. In `src/world/main.js`, after the model loads: `hero.cape = attachCapeSprings(m)` and
+2. In `src/world/main.js`, after the model loads: `hero.cape = attachCapeSprings(m)` (the cape as fabric) and
    `hero.hair = attachHairSprings(m)` (after the cape, so the hair finds the cape's bones and rests on them).
    Each frame, after `poseModel(h)`: `m.updateMatrixWorld(true); hero.cape.update(dt); hero.hair.update(dt)`,
    the cape first. Call `reset()` on both after a teleport. Before them, `hero.headMotion = HeadMotion.attach(m)`

@@ -8,7 +8,8 @@
 // this to the loaded model and calls `update(dt)` after posing the walk:
 //
 //     import { attachCapeSprings } from './cape-rig.js';
-//     const cape = attachCapeSprings(model);       // after GLTFLoader, model = res.scene
+//     const cape = attachCapeSprings(model);       // after GLTFLoader, model = res.scene (fabric; 'springs' as the
+//                                                  // fourth argument for spring bones)
 //     ...each frame, after mixer.setTime(...):
 //     model.updateMatrixWorld(true); cape.update(dt);
 //
@@ -96,8 +97,9 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)
-// solver: 'springs' (spring bones) or 'fabric' (cloth, fabric.js; give it WARDEN_FABRIC_SETTINGS)
-export function attachCapeSprings(model, settings = WARDEN_MODEL_SETTINGS, colliders = WARDEN_COLLIDERS, solver = 'springs') {
+// solver: 'fabric' (cloth, fabric.js: the game's cape) or 'springs' (spring bones); settings default to that solver's
+export function attachCapeSprings(model, settings = null, colliders = WARDEN_COLLIDERS, solver = 'fabric') {
+  settings = settings || (solver === 'fabric' ? WARDEN_FABRIC_SETTINGS : WARDEN_MODEL_SETTINGS);
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;

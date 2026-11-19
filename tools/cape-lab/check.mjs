@@ -1,7 +1,7 @@
 // Numbers for the cape springs, without a browser: runs the cape bench's stand-in (src/cape-lab/sim.js) in node
 // and reports what a capture can't show at a glance.
 //
-//   node tools/cape-lab/check.mjs [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--walk new] [--solver fabric]
+//   node tools/cape-lab/check.mjs [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--walk new] [--solver springs]
 //
 //  - loop drift: on the straight walk, how far any tail lands from where it was one cycle earlier (0 means the
 //    cape repeats exactly with the walk, so a looping clip shows no seam)
@@ -22,8 +22,8 @@ const arg = (name, def) => {
   const i = process.argv.indexOf('--' + name);
   return i > 0 ? process.argv[i + 1] : def;
 };
-// --solver fabric: the cape as cloth (src/world/fabric.js) instead of spring bones, with its own settings
-const solver = arg('solver', 'springs');
+// --solver springs: spring bones instead of the cape as cloth (src/world/fabric.js, the game's), each with its own settings
+const solver = arg('solver', 'fabric');
 const settings = { ...(solver === 'fabric' ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
 // --walk new|main: a baked walk (public/cape-lab/walk-<name>.json) in place of the stand-in's walk made in code
 const walkName = arg('walk', null);

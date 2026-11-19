@@ -97,7 +97,10 @@ export class CapeSim {
   // advance by dt (the bench always uses FRAME; the check also tries other frame rates)
   step(dt = FRAME) {
     const target = SCENARIOS[this.opts.scenario].at(this.scenarioTime());
-    const dv = target.pace * PACE - this.speed;
+    // (a baked run sets its own pace and stride: running, she covers its stride each cycle)
+    const gait = this.dummy.gait;
+    const want = gait && target.pace > 1 ? gait.stride / gait.seconds : target.pace * PACE;
+    const dv = want - this.speed;
     this.speed += Math.sign(dv) * Math.min(Math.abs(dv), ACCEL * dt);
     // turn as the game turns a hero (src/world/main.js): an ease that closes the angle at 12 a second, so a
     // reversal starts at over 30 radians a second
@@ -105,7 +108,7 @@ export class CapeSim {
     // heading 0 walks toward +z (her front)
     this.x += Math.sin(this.heading) * this.speed * dt;
     this.z += Math.cos(this.heading) * this.speed * dt;
-    this.phase = (this.phase + this.speed * dt / CYCLE * Math.PI * 2) % (Math.PI * 2);
+    this.phase = (this.phase + this.speed * dt / (gait ? gait.stride : CYCLE) * Math.PI * 2) % (Math.PI * 2);
     this.t += dt;
     this.frame++;
     this.place();

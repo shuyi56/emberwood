@@ -53,8 +53,8 @@ controls.enableDamping = false;
 controls.enabled = false;
 
 // ---- the character ----
-// ?solver=fabric: the cape as cloth (src/world/fabric.js) instead of spring bones, on the same bones and colliders
-const FABRIC = new URLSearchParams(location.search).get('solver') === 'fabric';
+// the cape as cloth (src/world/fabric.js), as in the game; ?solver=springs for spring bones on the same bones and colliders
+const FABRIC = new URLSearchParams(location.search).get('solver') !== 'springs';
 const settings = { ...(FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, slow: 1 };
 const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true, solver: FABRIC ? 'fabric' : 'springs' };
 let sim, colliderGroup, boneHelper;

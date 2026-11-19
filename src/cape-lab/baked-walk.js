@@ -6,6 +6,8 @@
 //
 //   public/cape-lab/walk-new.json   the planted-feet walk (PR #35): heel strike, a straighter stance leg
 //   public/cape-lab/walk-main.json  main's walk baked the same way (it reproduces warden.glb's clip)
+//   public/cape-lab/walk-run.json   the run (blender/base/female.py pose_run, PR #35's branch), baked the same way; it
+//                                   also gives its stride, its time a cycle and the leg (thigh + shin) it was made on
 import * as THREE from 'three';
 import { PropertyBinding } from 'three';
 
@@ -13,6 +15,7 @@ export const WALKS = {
   clip: 'Her own walk',
   new: 'New walk (planted feet)',
   main: 'Main walk (baked)',
+  run: 'Run (baked, from the walk thread)',
 };
 
 // each joint's parent in the walk's rig (a sided joint's parent is on its own side, unless it is the chest or

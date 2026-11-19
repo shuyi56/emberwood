@@ -520,6 +520,10 @@ export function loadMannequinBody(url, headUrl = null) {
         setWalk(walk) {
           body.restPose();
           body.walkPlayer = walk ? makeWalkPlayer(walk, root, [[root.getObjectByName('Head'), 'Neck']]) : null;
+          // (a run gives its own pace: its stride, scaled to her legs, which are longer than the figure it was made on)
+          const leg = bones.Thigh_L || bones.ThighL, foot = bones.FootL;
+          const mine = leg && foot ? leg.getWorldPosition(new THREE.Vector3()).distanceTo(foot.getWorldPosition(new THREE.Vector3())) / root.scale.y : 0;
+          body.gait = walk && walk.seconds_per_cycle ? { stride: walk.stride * (mine && walk.leg ? mine / walk.leg : 1), seconds: walk.seconds_per_cycle } : null;
         },
         restPose() {
           for (const [o, p, q, sc] of rest) if (o !== root) { o.position.copy(p); o.quaternion.copy(q); o.scale.copy(sc); }

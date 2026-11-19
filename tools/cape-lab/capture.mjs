@@ -3,7 +3,7 @@
 //
 //   npm run dev
 //   node tools/cape-lab/capture.mjs --out /tmp/cape [--scenarios turn,startstop,walk] [--views back3q,side]
-//        [--seconds 7] [--every 3] [--size 420x520] [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--solver fabric]
+//        [--seconds 7] [--every 3] [--size 420x520] [--settings '{"stiffness":300}'] [--columns 5] [--rows 5] [--solver springs]
 //        [--colliders] [--no-springs] [--body model] [--walk new] [--zoom 2.6 --look-y 50]
 //
 // --body model hangs the cape on the Warden's own glb instead of the stand-in (the page loads models/warden.glb,
