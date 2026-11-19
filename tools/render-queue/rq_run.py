@@ -14,6 +14,8 @@
 --gpu KIND   render Cycles on the graphics card (OPTIX or CUDA), on every device of that kind it finds.
 --quality    check: Cycles at 8 samples with the denoiser on, for a quick look (hair, cloth and light still
              read; fine noise and caustics do not). final (default): the script's own settings, untouched.
+--adaptive T final renders of 16 samples or more stop sampling a pixel once its noise is below T (Cycles' adaptive
+             sampling; the default threshold is 0.01). The sprite's one-sample cells are not touched.
 --keep-scene keep Cycles' copy of the scene between renders (use_persistent_data): pixel-identical, and each
              render after the first skips the scene sync (13 s or more on a figure).
 --hot DIR    hot swap in the build (rq_hot.py): a costly step (the warden's hair clearance and trim) whose code and
@@ -222,8 +224,26 @@ def install_keep_scene():
     print('rq keep-scene: the scene stays loaded between renders', flush=True)
 
 
+def install_adaptive(threshold):
+    """John, 2026-11-19: adaptive sampling for the 3D look's final renders. Cycles stops sampling each pixel once its
+    noise is under the threshold, so flat backdrop and smooth cloth finish early and the samples go where the
+    noise is."""
+    import bpy
+
+    @bpy.app.handlers.persistent
+    def adaptive(scene, *_):
+        if scene.render.engine == 'CYCLES' and scene.cycles.samples >= 16:
+            scene.cycles.use_adaptive_sampling = True
+            scene.cycles.adaptive_threshold = threshold
+            scene.cycles.adaptive_min_samples = 0
+    bpy.app.handlers.render_pre.append(adaptive)
+    print(f'rq adaptive: final renders stop at noise {threshold}', flush=True)
+
+
 if '--keep-scene' in own:
     install_keep_scene()
+if opt('--adaptive') and QUALITY != 'check' and blender:
+    install_adaptive(float(opt('--adaptive')))
 if opt('--hot'):                              # build hot swap: see rq_hot.py
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import rq_hot

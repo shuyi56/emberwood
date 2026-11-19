@@ -310,6 +310,16 @@ def main():
     timing = {'load': round(T_LOADED - T0, 1)}
     built = V['F'].build
     checked = {}
+    sp = sys.modules.get('sorceress_pendant')      # (the bare body every standalone garment starts from: timed apart)
+    if sp is not None and hasattr(sp, 'build'):
+        body_build = sp.build
+
+        def timed_body(*a, **k):
+            t = time.time()
+            r = body_build(*a, **k)
+            timing['body'] = round(timing.get('body', 0) + time.time() - t, 1)
+            return r
+        sp.build = timed_body
 
     def build_then_check(*a, **k):      # (the geometry checks between the build and the first render)
         r = built(*a, **k)

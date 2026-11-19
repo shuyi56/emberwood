@@ -616,6 +616,7 @@ def show(main, held, batches, jobs):
 # ------------------------------------------------------------------ running
 CHECK = "  [quality check]"
 MEMO = os.path.join(WORK, "memo")
+ADAPTIVE = os.environ.get("RQ_ADAPTIVE", "0.01") if os.environ.get("RQ_ADAPTIVE", "0.01") not in ("", "0") else None
 
 
 def command(job, out):
@@ -624,6 +625,8 @@ def command(job, out):
     q = shlex.quote
     # (--keep-scene: Cycles keeps the scene between a job's renders; pixel-identical, see rq_run.py)
     run = f"python3 {q(os.path.join(HERE, 'rq_run.py'))} --memo {q(MEMO)} --keep-scene"
+    if ADAPTIVE and job["kind"] == "views":       # (finals of the 3D look only: see rq_run.py --adaptive)
+        run += f" --adaptive {ADAPTIVE}"
     glb = f"{run} -- blender/ranger/export_glb.py --out {q(os.path.join(out, 'ranger.glb'))}"
     if job["kind"] == "sheet":
         return f"{run} -- blender/ranger/ranger.py --out {q(out)} && {glb}"
@@ -724,7 +727,7 @@ def telemetry(run, rc):
     geo_s = t.get("geometry") or 0
     phases = {"startup": round(max(0.0, total - sum(t.get(k) or 0 for k in ("load", "views", "crops", "poses"))), 1)
               if t else None, "load": t.get("load"), "build": round(int(b[1]) - geo_s, 1) if b else None,
-              "geometry": t.get("geometry"),
+              "geometry": t.get("geometry"), "body": t.get("body"),
               "render": round(t["views"] - int(b[1]), 1) if t.get("views") is not None and b else None,
               "crops": t.get("crops"), "poses": t.get("poses")}
     s = load()

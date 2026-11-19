@@ -291,6 +291,20 @@ and pasted onto main's image) is built and exact, but at the queue's sizes (480 
 about as much as the whole frame, because loading the scene, not the pixels, is most of a render. It is kept for
 big, high-sample renders and is not used by the queue's jobs.
 
+Since 2026-11-19, final renders of the 3D look use Cycles' adaptive sampling (`--adaptive 0.01`, set by
+`RQ_ADAPTIVE`, where 0 turns it off). Each pixel stops sampling once its noise is under the threshold. On a
+sleeves final (two angles, 600 px, 48 samples, denoised) the renders took 191 s instead of 213 s, and no pixel
+moved by more than 1 level in 255. Check renders are already 8 samples and denoised, so they are unchanged.
+
+**Where a check job's time goes** (the first telemetry, 2026-11-19). A mannequin check job of about 140 s spends
+about 85 s building the bare body (`sorceress_pendant.build`: the anatomy, the skin and the head), 30 to 40 s
+building the garment, and under 20 s rendering. Blender's start and loading the scripts take 2 to 10 s. So a warm
+Blender process saves only those few seconds. The large saving is the body: it is the same for every garment
+on one main, and caching it would cut a check job by about 60%. Forking a Blender process after the body is
+built deadlocks in the child (tested: the garment's build hangs in a thread wait). Caching the body needs the
+scene saved after the body build, plus the base modules' Python state restored. That is the next speed-up to
+build.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it
