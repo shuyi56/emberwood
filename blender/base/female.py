@@ -2198,96 +2198,20 @@ def hand_mesh(s, fist=False):
 
 
 # ---- the fist
-# The hand above is one fused skin with no finger joints, so a closed hand is a second shape of the same mesh (a
-# shape key, 'fist'): the four fingers bent at the knuckles and again at their middle joints until the tips tuck
-# against the palm, and the thumb laid over the top of the curled index finger. The run carries it (pose_run);
-# every other pose leaves the hand open. The measures below are hand_mesh's own, before any figure rescales the
-# hand: fist_shape works back to them from the mesh as it finds it (scaled about its top, as anatomy.py does).
-HAND_TOP, HAND_LEN = 1.72, 5.42         # hand_mesh's highest point and its length, as built
-FIST_KNUCKLE, FIST_MIDDLE = 78.0, 78.0  # how far the fingers bend at the knuckles and at their middle joints, degrees
-FINGERS = ((-0.86, 1.2), (-0.29, 1.3), (0.27, 1.23), (0.8, 0.98))     # each finger's y and length, as in hand_mesh
-
-
-def _seg_dist(p, a, b):
-    """(distance from points p to the segment a-b, how far along it 0..1)."""
-    ab = b - a
-    u = np.clip(((p - a) @ ab) / (ab @ ab), 0.0, 1.0)
-    return np.linalg.norm(p - (a + u[:, None] * ab), axis=1), u
-
-
-def fist_points(P, s):
-    """hand_mesh's points P (n x 3, in its own measures, for the hand on side s) closed into a fist."""
-    P = np.array(P, dtype=float)
-    P[:, 0] *= s                        # (work on the right hand: the palm faces +X)
-    sm = lambda a, b, x: np.clip((x - a) / (b - a), 0.0, 1.0) ** 2 * (3 - 2 * np.clip((x - a) / (b - a), 0.0, 1.0))  # noqa: E731
-    # the thumb: how much of each point belongs to it, and how far along it (0 at its root, 1 at the tip)
-    t0, t1, t2 = np.array((0.2, -0.7, -0.9)), np.array((0.48, -0.92, -1.85)), np.array((0.68, -0.87, -2.47))
-    d1, u1 = _seg_dist(P, t0, t1)
-    d2, u2 = _seg_dist(P, t1, t2)
-    near = np.minimum(d1 / 0.34, d2 / 0.27)                    # (in each segment's own radius)
-    along = np.where(d2 / 0.27 < d1 / 0.34, 0.6 + 0.4 * u2, 0.6 * u1)
-    # (only what lies in front of and inside the index finger: its own root shares that corner of the palm)
-    thumb = (1.0 - sm(1.25, 1.9, near)) * sm(0.15, 0.5, along) * sm(-0.45, -0.75, P[:, 1])
-    # the fingers: bent as one row, each at its own middle joint
-    p0 = np.array((0.05, 0.0, -2.6))
-    ax = np.array((math.sin(0.3), 0.0, -math.cos(0.3)))        # (the way the first segments point, as built)
-    a = (P - p0) @ ax                                           # how far down the finger from the knuckle
-    fy = np.array([f[0] for f in FINGERS])
-    L = np.array([f[1] for f in FINGERS])[np.argmin(np.abs(P[:, 1:2] - fy[None, :]), axis=1)]
-    finger = 1.0 - thumb
-
-    def bend(Q, pivot, ang):
-        """Q turned about the line through pivot along Y by ang (per point), the fingers swinging toward the palm."""
-        c, sn = np.cos(ang), np.sin(ang)
-        x, z = Q[:, 0] - pivot[:, 0], Q[:, 2] - pivot[:, 2]
-        out = Q.copy()
-        out[:, 0] = pivot[:, 0] + x * c - z * sn
-        out[:, 2] = pivot[:, 2] + x * sn + z * c
-        return out
-
-    mid = p0[None, :] + ax[None, :] * (0.55 * L)[:, None]
-    Q = bend(P, mid, math.radians(FIST_MIDDLE) * sm(-0.16, 0.2, a - 0.55 * L) * finger)
-    Q = bend(Q, np.repeat(p0[None, :] + np.array((0.0, 0.0, 0.12)), len(P), 0),
-             math.radians(FIST_KNUCKLE) * sm(-0.32, 0.22, a) * finger)
-    # (the curled fingers drawn a little together, as a closed hand's are)
-    Q[:, 1] -= 0.1 * Q[:, 1] * sm(-0.3, 0.3, a) * finger
-    # the thumb: out to the front and bent over, to lie along the top of the curled index finger
-    Q += thumb[:, None] * (sm(0.0, 0.6, along)[:, None] * np.array((0.1, -0.34, 0.12))
-                           + sm(0.6, 1.0, along)[:, None] * np.array((0.22, 0.1, 0.5)))
-    Q[:, 0] *= s
-    return Q
-
-
-def fist_shape(o, s):
-    """Give hand mesh o (side s) its 'fist' shape key, from the mesh as it stands (once: asked again, it is kept)."""
-    me = o.data
-    if me.shape_keys and 'fist' in me.shape_keys.key_blocks:
-        return me.shape_keys.key_blocks['fist']
-    co = np.array([v.co[:] for v in me.vertices])
-    top = co[:, 2].max()
-    k = (top - co[:, 2].min()) / HAND_LEN
-    P = np.stack([co[:, 0] / k, co[:, 1] / k, HAND_TOP + (co[:, 2] - top) / k], 1)
-    Q = fist_points(P, s)
-    # (only what the fist moves is moved: a figure's own reshaping of the wrist stays as it is)
-    out = co + np.stack([(Q[:, 0] - P[:, 0]) * k, (Q[:, 1] - P[:, 1]) * k, (Q[:, 2] - P[:, 2]) * k], 1)
-    if not me.shape_keys:
-        o.shape_key_add(name='Basis', from_mix=False)
-    key = o.shape_key_add(name='fist', from_mix=False)
-    for i, v in enumerate(out):
-        key.data[i].co = v
-    return key
-
-
 def set_fists(amount):
-    """Close the hands into fists (amount 1) or open them (0). The shape is made the first time it is wanted."""
-    for side, s in (('R', 1), ('L', -1)):
-        o = bpy.data.objects.get(f'Hand.{side}')
-        if o is None or o.type != 'MESH':
+    """Close the hands into fists (amount over 0.5) or open them. A fist is a second mesh on the same wrist,
+    'Fist.R' and 'Fist.L' beside 'Hand.R' and 'Hand.L' (hand_mesh(s, fist=True): a closed hand rebuilt from the
+    hand's own pieces, since the open hand's skin has no finger joints to bend), and a pose shows one of the two.
+    A figure built without fist meshes keeps its open hands. The run closes them (pose_run); every other pose
+    opens them. (Posed frame by frame this is all it takes; an exporter keying a run clip has to carry the swap
+    itself.)"""
+    for side in 'RL':
+        hand, fist = bpy.data.objects.get(f'Hand.{side}'), bpy.data.objects.get(f'Fist.{side}')
+        if hand is None or fist is None:
             continue
-        if amount > 0:
-            fist_shape(o, s).value = amount
-        elif o.data.shape_keys and 'fist' in o.data.shape_keys.key_blocks:
-            o.data.shape_keys.key_blocks['fist'].value = 0.0
+        on = amount > 0.5
+        fist.hide_render = fist.hide_viewport = not on
+        hand.hide_render = hand.hide_viewport = on
 
 
 def dots(points, size=0.42):
