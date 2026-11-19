@@ -13,29 +13,35 @@
 import { SpringBones, findChains, DEFAULTS } from './springbones.js';
 import { makeColliders } from './cape-rig.js';
 
+// Physical values for her scale (39.4 units to the metre; tools/cape-lab/physics.mjs): g = 9.8 m/s², and a quadratic air
+// drag of 0.58 /m from a hair's own size, weight and share of the air (0.58 / 39.4 per unit). With the pull to the
+// modelled shape nearly gone and none of the head's motion inherited, gravity and the air alone hold the hair
+// out behind her in a run (about +30°) and let it hang in a walk.
+const AIR_DRAG = 0.58 / 39.4;
 export const HAIR_GROUPS = ['hair', 'hairL', 'hairR', 'hairT'];
 // the front locks lie on her chest, which rocks under them with every step: stiffer, and riding the head more,
 // they sway a little on it instead of being levered off it into spikes
-const FRONT_LOCK = { stiffness: 800, inherit: 0.95, maxAngle: 0.1 };
+const FRONT_LOCK = { stiffness: 800, inherit: 0.95, maxAngle: 0.1, gravity: 386, drag: AIR_DRAG };
 // a ponytail (`hairT_0_<row>`, one chain from the tie): heavier and freer than loose hair, it swings as one rope,
 // carried less by the head so it lags each step and swings back across her nape
-const PONYTAIL = { stiffness: 40, damping: 0.08, airDrag: 0.03, gravity: 450, inherit: 0.2, maxAngle: 1.3, hitRadius: 0.8,
+const PONYTAIL = { stiffness: 10, damping: 0.08, airDrag: 0.005, gravity: 386, drag: AIR_DRAG, inherit: 0, maxAngle: 1.3, hitRadius: 0.8,
   contactSoftness: 0.5, sheetBend: 0 };
 export const HAIR_GROUP_SETTINGS = { hairL: FRONT_LOCK, hairR: FRONT_LOCK, hairT: PONYTAIL };
 
 export const HAIR_SETTINGS = {
   ...DEFAULTS,
-  stiffness: 400,
+  stiffness: 30,
   damping: 0.3,
-  airDrag: 0.05,
-  gravity: 350,
+  airDrag: 0.005,
+  gravity: 386,
+  drag: AIR_DRAG,
   hitRadius: 0.3,
   contactSoftness: 1,
   linkStiffness: 0.4,
   linkSlack: 0.2,
   sheetBend: 0.3,
   follow: 0,
-  inherit: 0.85,
+  inherit: 0,
   maxAngle: 0.9,
 };
 

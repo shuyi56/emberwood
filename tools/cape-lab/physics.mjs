@@ -23,6 +23,12 @@ const walk = gait(new URL('../../public/cape-lab/walk-new.json', import.meta.url
 const runD = JSON.parse(fs.readFileSync(new URL('../../public/cape-lab/walk-run.json', import.meta.url)));
 const run = gait(new URL('../../public/cape-lab/walk-run.json', import.meta.url), runD.seconds_per_cycle, runD.stride);
 for (const [k, r] of [['walk', walk], ['run', run]]) console.log(k, 'speed', r.speed.toFixed(2), 'm/s; hip bob', (r.bob * 100).toFixed(1), 'cm; ground force', r.grfMin.toFixed(2), 'to', r.grfMax.toFixed(2), 'bodyweights =', (r.grfMax * mass * g).toFixed(0), 'N peak; chest accel', r.chestDown.toFixed(1), 'to', r.chestUp.toFixed(1), 'm/s2; side', r.sway.toFixed(1));
+// How far weight and drag lift something hanging from a hinge, blown back, for drag/weight ratio r. A flat sheet meets
+// the air with only the part of the wind that is normal to it, so its drag falls with cos^2 of the lift:
+// sin(t) = r cos^2(t), which is r s^2 + s - r = 0 for s = sin(t). A hanging mass (a bunch of strands, a point on a
+// chain) meets the same wind at any angle: tan(t) = r.
+const lifts = (r) => { const sheet = Math.asin((-1 + Math.sqrt(1 + 4 * r * r)) / (2 * r || 1)), mass = Math.atan(r);
+  return (sheet * 180 / Math.PI).toFixed(0) + ' (as a sheet) to ' + (mass * 180 / Math.PI).toFixed(0) + ' (as a hanging mass) deg'; };
 // the cape: its area from the bench's cape (outer face)
 const body = makeDummy({ columns: 7, rows: 5 }); const geo = body.cape.mesh.geometry, p = geo.attributes.position, idx = geo.index;
 let area = 0; const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
@@ -34,8 +40,25 @@ console.log('cape area', A.toFixed(2), 'm2; mass', mc.toFixed(2), 'kg; weight', 
 const CdA = 1.2 * 0.35 * A;
 for (const [k, r] of [['walk', walk], ['run', run]]) {
   const D = 0.5 * rho * CdA * r.speed ** 2, ratio = D / (mc * g);
-  // a sheet hanging from a hinge, blown back: weight and drag balance at sin(t) = (D/W) cos^2(t)
-  let t = 0; for (let it = 0; it < 60; it++) t = Math.asin(Math.min(1, ratio * Math.cos(t) ** 2));
-  console.log(k, 'drag', D.toFixed(2), 'N =', ratio.toFixed(2), 'of its weight; hem lifts back', (t * 180 / Math.PI).toFixed(0), 'deg; the chest shakes it with up to', (mc * Math.max(run.chestUp, -run.chestDown)).toFixed(1), 'N');
+  console.log(k, 'drag', D.toFixed(2), 'N =', ratio.toFixed(2), 'of its weight; hem lifts back', lifts(ratio), '; the chest shakes it with up to', (mc * Math.max(run.chestUp, -run.chestDown)).toFixed(1), 'N');
 }
 console.log('quadratic drag a = c v^2: c =', (0.5 * rho * CdA / mc).toFixed(3), '1/m');
+
+// ---- her hair ----
+// A hair is a keratin cylinder: 75 micrometres across, 1300 kg/m3. A head carries about 90000 of them. Seen from the
+// air each one is a cylinder in cross flow (Cd 1.2), but in a mass they shield each other: a sheet of them as wide as
+// her back is some 30 layers deep, so only a share of them meets the air. 6% is taken here (the outer layer, and the
+// gaps in it).
+const nHair = 90000, d = 75e-6, rhoH = 1300, Cdh = 1.2, share = 0.06;
+const lenH = (62.8 - 44.6) / U + 0.12;               // down her back from the crown to where it ends (the Warden's hair), and over the head
+const mh = nHair * lenH * Math.PI * d * d / 4 * rhoH;
+const ch = 2 * rho * Cdh * share / (Math.PI * rhoH * d);     // a = ch v^2, per metre
+console.log('\nhair: mass', (mh * 1000).toFixed(0), 'g over', lenH.toFixed(2), 'm; drag c =', ch.toFixed(2), '1/m (the cape\'s is', (0.5 * rho * CdA / mc).toFixed(2), ')');
+for (const [k, r] of [['walk', walk], ['run', run]]) {
+  const ratio = ch * r.speed ** 2 / g;
+  console.log(k, 'drag is', ratio.toFixed(2), 'of its weight; hair lifts back', lifts(ratio));
+}
+// one hair on its own cannot hold itself up: its bending stiffness EI (E 3 GPa dry, I = pi d^4 / 64) against its weight w
+// gives the length a free strand holds out before it sags under its own weight, (8 EI / w)^(1/3)
+const EI = 3e9 * Math.PI * d ** 4 / 64, w = rhoH * Math.PI * d * d / 4 * g;
+console.log('one hair: EI', EI.toExponential(1), 'N m2; holds itself out only', (Math.cbrt(8 * EI / w) * 100).toFixed(1), 'cm: at her hair\'s length it is limp, so what keeps a style is the body it lies on and the strands pressing on each other');
