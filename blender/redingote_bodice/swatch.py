@@ -116,6 +116,8 @@ def main():
     sc.camera = cam
     sc.render.resolution_x = int(size * len(dyes))
     sc.render.resolution_y = int(size * len(dyes) * 12.6 / w) if w >= 12.6 else int(size * len(dyes))
+    if hasattr(sc.render.image_settings, 'media_type'):     # (P004: off multilayer EXR before the format is chosen)
+        sc.render.image_settings.media_type = 'IMAGE'
     sc.render.image_settings.file_format = 'PNG'
     print('swatches:', ', '.join('%06x' % d for d in dyes), flush=True)
     if '--dry' in argv:
