@@ -250,8 +250,8 @@ def _compact(D, fs):
 
 def _sole(edge, z_welt, r):
     """The sole: a slab under the upper's cut edge (its points, edge), its upper face at z_welt, wider than the upper
-    all round by the welt, its rims eased. Returns (points, faces, seam_d, seam_u): the welt's stitches run midway
-    between the upper and the rim."""
+    all round by the welt, its rims eased. Returns (points, faces, seam_d, seam_u, the welt's row of stitches: a
+    closed line midway between the upper and the rim)."""
     c = 0.5 * (edge[:, :2].min(0) + edge[:, :2].max(0))
     na = 144
     ang = np.arctan2(edge[:, 0] - c[0], -(edge[:, 1] - c[1]))
@@ -283,7 +283,9 @@ def _sole(edge, z_welt, r):
         j = (i + 1) % na
         F.append([5 * na, j, i])
         F.append([5 * na + 1, 4 * na + i, 4 * na + j])
-    return V, F, sd, su
+    path = np.stack([c[0] + np.sin(aa) * (rad + 0.5 * r['welt']), c[1] - np.cos(aa) * (rad + 0.5 * r['welt']),
+                     np.full(na, z_welt)], 1)
+    return V, F, sd, su, path
 
 
 def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot', ratios=RATIOS, log=print):
@@ -318,6 +320,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     legs = (arm < 0.02) & (P[:, 2] < z_top + 1.5)
     Pl, Wl = P[legs], W[legs]                          # (the skin the sheets take their bones from)
     M['boot_floor'] = z_welt - r['sole']
+    M['boot_welt'] = z_welt
 
     # ---- the last's foot: the room, the toe box, and down past the foot to the sole
     down = np.clip(-Nr[:, 2], 0.0, 1.0) ** 2 * _ss(1.4, 0.3, z)
@@ -411,13 +414,14 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         Dv, fv = _compact(*fit.trim(*fit.trim(D0, mine, lambda A: -side_seam(A)), lambda A: -toe_seam(A)))
         add(Dv[:, 3:6], fv, np.full(len(Dv), FAR), np.zeros(len(Dv)), Dv[:, 9:9 + nw])
         on = np.abs(side_seam(Dv)) < NEAR
-        pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), edges=foot_edges(
+        pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), lift=np.zeros(len(Dv)), lasted=True, edges=foot_edges(
             Dv, **{'A inner': on & (outer(Dv) < 0), 'A outer': on & (outer(Dv) > 0), 'G': np.abs(toe_seam(Dv)) < NEAR})))
         # the toe cap: ahead of its seam, its back edge lapped over the vamp
         Dc, fc = _compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap']))
         nc = Dc[:, 6:9] / np.maximum(np.linalg.norm(Dc[:, 6:9], axis=1, keepdims=True), 1e-9)
         add(Dc[:, 3:6] + nc * 1.1 * tl, fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
-        pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), edges=foot_edges(
+        pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), lift=np.full(len(Dc), 1.1 * tl), lasted=True,
+                           edges=foot_edges(
             Dc, G=np.abs(toe_seam(Dc) + r['lap']) < NEAR)))
         # the quarters: behind the side seams, their front edges lapped over the vamp; the outer one laps over the
         # inner at the heel's back seam
@@ -429,7 +433,8 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             up = 1.1 * tl * (1.0 + (_ss(4.0 * r['lap'], 0.0, d_back) if q == 'outer' else 0.0))
             add(Dq[:, 3:6] + nq * (up * np.ones(len(Dq)))[:, None], fq,
                 np.minimum(d_front, d_back), np.where(d_front < d_back, Dq[:, 5] / kc, Dq[:, 5]), Dq[:, 9:9 + nw])
-            pieces.append(dict(name=q + ' quarter', V=V[-1], F=fq, up=(0, 0, 1), edges=foot_edges(
+            pieces.append(dict(name=q + ' quarter', V=V[-1], F=fq, up=(0, 0, 1), lift=up * np.ones(len(Dq)), lasted=True,
+                               edges=foot_edges(
                 Dq, **{'A ' + q: np.abs(d_front) < NEAR, 'B': np.abs(cut(Dq)) < NEAR})))
         n_foot = sum(len(v) for v in V)
         # the shaft: one sheet from the ankle seam (lapped over the foot's pieces) to the top, its edges meeting down
@@ -445,14 +450,20 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         G, gf, zz, tt, rm = _sheet(T, z_low, z_top, a0, turn, sgn, lift_shaft)
         d_side, d_low = rm * (turn - tt), zz - z_low
         add(G, gf, np.minimum(d_side, d_low), np.where(d_side < d_low, zz, rm * tt), _weights(Pl, Wl, G))
-        pieces.append(dict(name='shaft', V=G, F=gf, up=(0, 0, 1), edges={
+        pieces.append(dict(name='shaft', V=G, F=gf, up=(0, 0, 1), lift=lift_shaft(zz, tt), t=tt / turn, edges={
             'C': zz < z_low + 1e-6, 'D': (tt < 1e-6) | (tt > turn - 1e-6), 'F': zz > z_top - 1e-6}))
         # the binding: a strip round the top edge, over the shaft, stitched along its lower edge
         zb = z_top - r['binding']
-        G, gf, zz, tt, rm = _sheet(T, zb, z_top + 0.3 * tl, a0 + sgn * 0.5 * over, turn, sgn,
-                                   lambda zz, tt: 1.15 * tl + 1.1 * tl * _ss(turn - 6.0 * over, turn - over, tt))
+        def lift_binding(zz, tt):
+            return 1.15 * tl + 1.1 * tl * _ss(turn - 6.0 * over, turn - over, tt)
+        G, gf, zz, tt, rm = _sheet(T, zb, z_top + 0.3 * tl, a0 + sgn * 0.5 * over, turn, sgn, lift_binding)
         add(G, gf, zz - zb, rm * tt, _weights(Pl, Wl, G))
-        pieces.append(dict(name='binding', V=G, F=gf, up=(0, 0, 1), edges={'F': zz < zb + 1e-6}))
+        pieces.append(dict(name='binding', V=G, F=gf, up=(0, 0, 1), lift=lift_binding(zz, tt), t=tt / turn,
+                           edges={'F': zz < zb + 1e-6, 'top': zz > z_top + 0.29 * tl}))
+        k0 = 0
+        for p in pieces:
+            p['start'] = k0
+            k0 += len(p['V'])
         Vall = np.concatenate(V)
         o = _object('%s.%s' % (name, side), Vall, F, np.concatenate(WW), names, body, rig, material,
                     np.concatenate(SD), np.concatenate(SU), thickness=tl)
@@ -460,7 +471,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         log('boot: %s, %d points: %s' % (o.name, len(Vall), ', '.join('%s %d' % (p['name'], len(p['V'])) for p in pieces)))
         # the sole, under the upper's cut edge
         edge = Vall[:n_foot]
-        Sv, Sf, sd, su = _sole(edge[np.abs(edge[:, 2] - z_welt) < 0.12], z_welt, r)
+        Sv, Sf, sd, su, path = _sole(edge[np.abs(edge[:, 2] - z_welt) < 0.12], z_welt, r)
         so = _object('%s sole.%s' % (name, side), Sv, Sf, _weights(Pl, Wl, Sv), names, body, rig,
                      sole_material or material, sd, su)
         bm = bmesh.new()
@@ -470,7 +481,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         bm.free()
         so.data.polygons.foreach_set('use_smooth', [False] * len(so.data.polygons))
         res['sole ' + side] = so
-        pieces.append(dict(name='sole', V=Sv, F=Sf, up=(0, -1, 0), flat=np.arange(144, 288), edges={}))
+        pieces.append(dict(name='sole', V=Sv, F=Sf, up=(0, -1, 0), flat=np.arange(144, 288), edges={}, stitch=path))
         PIECES[side] = pieces
     log('boot: the sole %.2f thick, its under face at z %.2f (%.2f under the foot)' % (r['sole'], M['boot_floor'],
                                                                                    z_foot - M['boot_floor']))
@@ -478,10 +489,13 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
 
 
 def clearance(boot, hose, log=print):
-    """The least gap between the boot's inner face and the hose's outer face, at the current frame, over every point
-    of the hose under the boot (judged by where it lies at rest: on the boot's own leg, between the sole and the
-    top): negative where the hose comes through the leather. Both are measured on their own surface, without
-    thickness."""
+    """The gap between the hose and the boot's inner face, at the current frame: from every point of the hose under
+    the boot (judged by where it lies at rest: on the boot's own leg, between the sole and the top), a ray straight
+    out from the hose finds the leather. Met from inside, the gap is how far; met from outside (the face turned
+    toward the hose's point, so the point is on the face's outer side), the hose is through the leather there, by
+    as much. Both are measured on their own surface, without thickness. (The nearest face alone misjudges where
+    the leather stands well off the leg, as the shaft does at the ankle: there the nearest thing is another piece's
+    cut edge, and which side of it the hose is on means nothing.)"""
     def surf(o):
         for m in o.modifiers:
             if m.type == 'SOLIDIFY':
@@ -490,6 +504,7 @@ def clearance(boot, hose, log=print):
         me = e.to_mesh()
         me.calc_loop_triangles()
         pts = [o.matrix_world @ v.co for v in me.vertices]
+        nrm = [(o.matrix_world.to_3x3() @ v.normal).normalized() for v in me.vertices]
         tris = [tuple(t.vertices) for t in me.loop_triangles]
         rest = np.zeros(len(me.vertices) * 3)
         me.attributes['rest'].data.foreach_get('vector', rest)
@@ -497,20 +512,20 @@ def clearance(boot, hose, log=print):
         for m in o.modifiers:
             if m.type == 'SOLIDIFY':
                 m.show_viewport = True
-        return pts, tris, rest.reshape(-1, 3)
-    bp, bt, br = surf(boot)
+        return pts, nrm, tris, rest.reshape(-1, 3)
+    bp, _, bt, br = surf(boot)
     tree = BVHTree.FromPolygons(bp, bt)
-    hp, _, hr = surf(hose)
+    hp, hn, _, hr = surf(hose)
     side = -1 if boot.name.endswith('.R') else 1
     z_top, z_low = float(br[:, 2].max()) - 0.3, float(br[:, 2].min()) + 0.3
     gaps = []
-    for p, q in zip(hp, hr):
+    for p, nv, q in zip(hp, hn, hr):
         if q[0] * side <= 0 or q[2] > z_top or q[2] < z_low:
             continue
-        loc, nrm, _, d = tree.find_nearest(p)
+        loc, fn, _, d = tree.ray_cast(p - nv * 1e-4, nv, 3.0)
         if loc is None:
             continue
-        gaps.append(-d if (p - loc).dot(nrm) > 0 else d)       # (outside the boot's surface: through the leather)
+        gaps.append(d if fn.dot(nv) > 0 else -d)
     g = np.array(gaps)
     out = {'min': float(g.min()), 'mean': float(g.mean()), 'through': int((g < 0).sum()), 'n': len(g)}
     log('boot clearance %s: hose to leather min %.3f mean %.3f, %d of %d hose points through the leather' % (

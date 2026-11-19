@@ -66,9 +66,10 @@ def _bone_matrices(o, rig):
     return out / tot[:, None, None]
 
 
-def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
+def settle(o, rig, colliders, pinned=None, P=LINEN, log=print, sew=None, label='chemise'):
     """Let the garment o (skinned to rig, in its drafted rest shape) fall on the posed colliders, and set its rest
-    shape to what it settles to. pinned: a weight for each point, 1 held where it was drafted (or None)."""
+    shape to what it settles to. pinned: a weight for each point, 1 held where it was drafted (or None). sew: pairs
+    of points (i, j) held together as it settles, as stitches hold two pieces at a seam (or None)."""
     sc = bpy.context.scene
     n = len(o.data.vertices)
     arm = next(m for m in o.modifiers if m.type == 'ARMATURE')
@@ -81,6 +82,19 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
     # the cloth, as it stands on the posed body, and the body to fall on
     me = o.data.copy()
     me.vertices.foreach_set('co', posed.reshape(-1))
+    if sew is not None and len(sew):
+        import bmesh
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        bm.verts.ensure_lookup_table()
+        have = {frozenset((e.verts[0].index, e.verts[1].index)) for e in bm.edges}
+        for i, j in sew:
+            key = frozenset((int(i), int(j)))
+            if i != j and key not in have:
+                bm.edges.new((bm.verts[int(i)], bm.verts[int(j)]))
+                have.add(key)
+        bm.to_mesh(me)
+        bm.free()
     cloth = bpy.data.objects.new('cloth sim', me)
     sc.collection.objects.link(cloth)
     body = bpy.data.objects.new('cloth collider', _posed(colliders))
@@ -103,11 +117,15 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
     s.shear_stiffness, s.bending_stiffness = P['shear'], P['bending']
     s.tension_damping, s.compression_damping, s.shear_damping, s.bending_damping = P['damping']
     s.air_damping = P['air']
+    s.effector_weights.gravity = P.get('gravity', 1.0)
+    if sew is not None and len(sew):
+        s.use_sewing_springs = True                # (the loose edges between the pairs draw them together)
+        s.sewing_force_max = P.get('sew_force', 0.0)
     if pinned is not None and np.any(pinned > 0):
         s.vertex_group_mass = 'pin'
-        s.pin_stiffness = 1.0
+        s.pin_stiffness = P.get('pin', 1.0)
     c.use_collision, c.collision_quality, c.distance_min = True, 4, 0.02
-    c.use_self_collision, c.self_distance_min, c.self_friction = True, P['self_gap'], 8.0
+    c.use_self_collision, c.self_distance_min, c.self_friction = P.get('self', True), P['self_gap'], 8.0
     m.point_cache.frame_start, m.point_cache.frame_end = 1, P['frames']
     end0 = sc.frame_end
     sc.frame_end = max(sc.frame_end, P['frames'])
@@ -121,12 +139,12 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
     ev.data.vertices.foreach_get('co', out)
     out = out.reshape(-1, 3)
     # how far it fell, and whether it stretched (linen should not)
-    e = np.empty(len(me.edges) * 2, dtype=np.int32)
-    me.edges.foreach_get('vertices', e)
+    e = np.empty(len(o.data.edges) * 2, dtype=np.int32)
+    o.data.edges.foreach_get('vertices', e)
     e = e.reshape(-1, 2)
     l0 = np.linalg.norm(posed[e[:, 0]] - posed[e[:, 1]], axis=1)
     l1 = np.linalg.norm(out[e[:, 0]] - out[e[:, 1]], axis=1)
-    log('chemise: settled in %d frames (%.0f s): points moved %.2f on average, %.2f at most; the cloth is %.1f%% longer '
+    log(label + ': settled in %d frames (%.0f s): points moved %.2f on average, %.2f at most; the cloth is %.1f%% longer '
         'along its threads on average' % (P['frames'], time.time() - t0, float(np.linalg.norm(out - posed, axis=1).mean()),
                                          float(np.linalg.norm(out - posed, axis=1).max()), 100.0 * float((l1 / np.maximum(l0, 1e-9)).mean() - 1.0)))
     # carried back through the bones to the rest shape
