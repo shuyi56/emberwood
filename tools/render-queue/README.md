@@ -252,16 +252,29 @@ right after the build, beside the geometry checks:
   and bending in four views and on the flat pattern, the worst spots ringed and numbered as in `flow.json`), and
   with poses `flow-poses.json` and `flow-heat-pose-NAME.png` for each flagged pose. Attach the heatmap beside the
   render it came with.
-- **What it measures:** against the flat pattern when the mesh has one (a UV layer `pattern`, `flat` or `cut`, or a
-  UV in model units), otherwise against the garment as built (then only what a pose does shows): principal
-  stretch and squash, shear of the threads (grain), Green strain, bending energy density (as a fold radius), how
-  far each triangle's strain stands above its neighbours (jaggedness, roughness, gradient, isolated peaks), and
-  each seam's paired edge lengths on the pattern. A garment script can declare its seams exactly with a `seam_mate`
+- **What it measures:** against the flat pattern when the mesh carries one (a UV layer `pattern`, `flat` or `cut`
+  that really is the cut: laid on the garment as built it must give a smooth, moderate strain), otherwise against
+  the garment as built, in the rig's rest position (then what the pose does to it shows): principal stretch and
+  squash, shear, Green strain, bending energy density (as a fold radius), how far each triangle's strain stands
+  above its neighbours (jaggedness, roughness, gradient, isolated peaks counted one per place, the sharpest
+  peak), and each seam's paired edge lengths. A garment script can declare its seams exactly with a `seam_mate`
   point attribute (each point's partner, -1 for none); otherwise they are found from the UV seams and from
-  separate pieces' edges that lie on each other.
-- **The band comes from John's approved garments.** `flow_baseline.json` holds the limits, calibrated by
+  separate pieces' edges that lie on each other. Slivers from trims and hardware (eyelets, studs, stitches,
+  plates) are left out. None of main's garments carries its flat pattern yet: the hose's and the chemise's UVs
+  are texture maps (banded in steps of 0.5 down the leg, folded at the shoulders), so they and the rest are
+  measured against their built shape. A garment built from flat pieces, as John's construction rule asks,
+  should keep its pieces' flat coordinates as a UV named `cut`; then the check reads the cut against the body.
+- **The band comes from John's approved garments, per pose.** `flow_baseline.json` holds the limits for the rest
+  pose and for every pose of the strip, calibrated by
   `python3 rq_flow.py --calibrate flow_baseline.json RESULT/flow-poses.json ...` on main's hose, boots, chemise
-  and vest (each the worst approved value with a 25% margin). Re-run it when John approves more garments.
+  and vest (no-render jobs `views-0a8c28aac239`, `views-05159b056b65`, `views-0e767d28ffaa`): each limit is the
+  worst approved value with a 25% margin, so a garment is flagged only when it does worse than what John already
+  passed, in that pose (the rig strains even approved cloth in arms-up). An approved garment more than 3x worse
+  than every other on a metric is left out of that metric's band and listed under `outliers`: so far that is the
+  vest, whose side panels under the arm stretch 2.7x in the rest pose (hidden by the arm in its renders) and tear
+  in arms-up and arms-fwd. The band is loose where the approved garments are rough (the chemise has one sharp
+  peak on the right forearm, the left boot shears at the ankle crease); fixing them and re-running the
+  calibration tightens it. Re-run it when John approves more garments.
 - **Cached.** Each garment's result is stored under a key made of its posed points, its reference, its triangles,
   the check's version and the band (`RQ_FLOW_CACHE`, else `RQ_HOME/flow-cache`). The fold cache gives a
   texture-only or material-only re-run the same settled points, so it gets the same key and costs nothing.

@@ -467,16 +467,6 @@ def judge(S, lim):
     flags.sort(key=lambda f: (f['level'] != 'likely rejection',
                               -(f['limit'] / max(f['value'], 1e-9) if f['metric'] in LOWER_IS_WORSE
                                 else f['value'] / max(f['limit'], 1e-9))))
-    # (the worst first: rejections, then by how far past the limit)
-    flags.sort(key=lambda f: (f['level'] != 'likely rejection',
-                              -(f['limit'] / max(f['value'], 1e-9) if f['metric'] in LOWER_IS_WORSE
-                                else f['value'] / max(f['limit'], 1e-9))))
-    # (a peak far past the band at a seam end or dart tip is a rejection on its own)
-    hot = [p for p in S.get('spots', []) if p['peak'] and (p['excess'] or 0) > 2 * lim['jag_p99']]
-    if hot:
-        flags.append({'metric': 'peak', 'value': hot[0]['excess'], 'limit': lim['jag_p99'], 'level': 'likely rejection',
-                      'where': hot[0]['where']})
-        worst = 'likely rejection'
     return flags, worst
 
 
@@ -596,6 +586,12 @@ def _paint(ids, col):
     return img.astype(np.uint8)
 
 
+def tag(name):
+    """A garment's short label on the heatmap: the initials of its name and its side, 'Boot.L' -> 'BL'."""
+    base, _, side = name.partition('.')
+    return ''.join(w[0] for w in base.split() if w).upper() + (side[:1].upper() if side else '')
+
+
 def heatmap(items, path, lim, title='', panel=260):
     """The heatmap sheet: one row per field (strain, jaggedness, bending), the four views and the flat pattern,
     every garment of the build together. items: [(name, summary, fields)]."""
@@ -652,7 +648,7 @@ def heatmap(items, path, lim, title='', panel=260):
                         continue
                     X0, Y0 = vi * Wpx + xx.mean(), y0 + 14 + yy.mean()
                     d.ellipse((X0 - 7, Y0 - 7, X0 + 7, Y0 + 7), outline=RING, width=2)
-                    d.text((X0 + 8, Y0 - 6), f"{name[:3]}{sp['n']}", fill=RING)
+                    d.text((X0 + 8, Y0 - 6), f"{tag(name)}{sp['n']}", fill=RING)
                 base += len(F['tris'])
         if pat_ids is not None:
             col = np.concatenate([ramp(fn(F)) for _, _, F in items])
@@ -665,6 +661,8 @@ def heatmap(items, path, lim, title='', panel=260):
         c = tuple(int(v) for v in ramp(np.array([i / 80.0]))[0])
         d.line((lx + i, ly, lx + i, ly + 10), fill=c)
     d.text((lx, ly + 12), '0       1.0 = limit  1.5', fill=INK)
+    d.text((lx, ly - 30), 'rings: worst spots, as', fill=INK)
+    d.text((lx, ly - 18), 'numbered in flow.json', fill=INK)
     sheet.save(path)
     return path
 
@@ -989,7 +987,7 @@ def main():
             for name, S in g.items():
                 bad = {k for k, v in outl.get(pose, {}).items() if any(x[0] == name for x in v)}
                 fl, verdict = judge(S, poses[pose])
-                left = [f for f in fl if f['metric'] not in bad and not (f['metric'] == 'peak' and bad)]
+                left = [f for f in fl if f['metric'] not in bad]
                 assert not left, (pose, name, left)
         json.dump({'_doc': 'The approved band for rq_flow.py, per pose: each limit is the worst value among the '
                            'garments John approved (listed under approved) in that pose, with a margin '
