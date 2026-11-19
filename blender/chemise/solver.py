@@ -27,6 +27,7 @@ LINEN = dict(
                              # and the whole garment swelled and drew its hems in)
     quality=9,
     frames=80,
+    let_out=30,              # the frames over which a fuller cloth is let out to its fullness
 )
 
 
@@ -66,9 +67,12 @@ def _bone_matrices(o, rig):
     return out / tot[:, None, None]
 
 
-def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
+def settle(o, rig, colliders, pinned=None, full=None, P=LINEN, log=print):
     """Let the garment o (skinned to rig, in its drafted rest shape) fall on the posed colliders, and set its rest
-    shape to what it settles to. pinned: a weight for each point, 1 held where it was drafted (or None)."""
+    shape to what it settles to. pinned: a weight for each point, 1 held where it was drafted (or None). full: how
+    much more cloth there is at each point than was drafted (0.3: three tenths more each way; negative: less, a
+    band drawn in), or None: the cloth let out or taken in there over the first frames, as a gathered piece is
+    fuller than the band it is sewn to."""
     sc = bpy.context.scene
     n = len(o.data.vertices)
     arm = next(m for m in o.modifiers if m.type == 'ARMATURE')
@@ -106,6 +110,21 @@ def settle(o, rig, colliders, pinned=None, P=LINEN, log=print):
     if pinned is not None and np.any(pinned > 0):
         s.vertex_group_mass = 'pin'
         s.pin_stiffness = 1.0
+    lo = hi = 0.0
+    if full is not None and np.ptp(full) > 0:
+        # (the solver's 'shrink': weight 0 the fullest cloth, weight 1 the most drawn in)
+        lo, hi = -float(full.max()), -float(full.min())
+        g = cloth.vertex_groups.new(name='full')
+        wt = (-full - lo) / (hi - lo)
+        for i in range(n):
+            g.add([i], float(wt[i]), 'REPLACE')
+        s.vertex_group_shrink = 'full'
+        # (let out little by little, so the cloth is not thrown: keyed, since a setting changed by hand between
+        # frames starts the solver over)
+        for f, k in ((1, 0.0), (P['let_out'], 1.0)):
+            s.shrink_min, s.shrink_max = k * lo, k * hi
+            s.keyframe_insert('shrink_min', frame=f)
+            s.keyframe_insert('shrink_max', frame=f)
     c.use_collision, c.collision_quality, c.distance_min = True, 4, 0.02
     c.use_self_collision, c.self_distance_min, c.self_friction = True, P['self_gap'], 8.0
     m.point_cache.frame_start, m.point_cache.frame_end = 1, P['frames']

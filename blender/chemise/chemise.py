@@ -134,7 +134,7 @@ def build():
                                 colliders=[o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o])
     linen_closeup('chemise linen')
     # the --head view on the garment: from under its hem to the chin
-    lo, hi = d.z_hem - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
+    lo, hi = d.z_hem_worn - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()

@@ -46,7 +46,11 @@ RATIOS = {
     'sleeve_bell': 0.35,     # and how much further by its open end, in w
     'sleeve_fold': 0.75,     # the depth of the sleeve's creases, in w
     'sleeve_folds': 7,       # how many round the sleeve
-    'cuff': 1.3,             # the sleeve ends this far above the wrist, in w
+    'cuff': 0.6,             # the sleeve ends this far above the wrist, in w
+    'full': 0.28,            # how much more cloth there is, each way, than the piece as drafted: let out by the
+                             # solver everywhere but at the neckline, so the cloth is gathered into the neckline
+    'cuff_in': 0.40,         # and how much the sleeve's end is drawn in (a gathered cuff)
+    'band': 0.45,            # the width of the neckline's and the cuff's bands, in w
     'blend': 0.85,           # the radius of the run from sleeve into body over the shoulder, in w
     'swell': 0.22,           # the slow in-and-out of the hanging cloth round the body and the sleeve, by the hem, in w
     'slit': 0.13,            # the gap left between the sleeve's cloth and the body's under the arm, in w
@@ -96,8 +100,10 @@ class Draft:
         w, yc = M['w'], M['yc']
         ease = ratios['ease'] * w
         z_elbow, z_wrist = arm_z
-        self.z_hem = M['z_waist'] - ratios['hem'] * w
-        self.z_cuff = z_wrist + ratios['cuff'] * w
+        # (the hem and the cuff as worn, and where they are cut: higher, by as much as the cloth will be let out)
+        self.z_hem_worn, self.z_cuff_worn = M['z_waist'] - ratios['hem'] * w, z_wrist + ratios['cuff'] * w
+        self.z_hem = M['z_sh'] - (M['z_sh'] - self.z_hem_worn) / (1.0 + ratios['full'])
+        self.z_cuff = M['z_sh'] - (M['z_sh'] - self.z_cuff_worn) / (1.0 + ratios['full'])
         self.zs = zs = np.arange(min(self.z_hem, self.z_cuff) - 1.0, M['z_side'] + 0.8 * w, VOXEL)
         nz = len(zs)
         torso = (aw[T] < 0.5).all(1)
@@ -354,8 +360,7 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
                   colliders=()):
     """Draft the chemise on the body (M: fit.measure's measurements) and hand it to the body's bones. settle: let
     the cloth solver hang it on the posed body (and the colliders with it); without it the folds are drawn."""
-    if settle:
-        ratios = dict(ratios, **PLAIN)
+    ratios = dict(ratios, **PLAIN) if settle else dict(ratios, full=0.0)
     P, T, aw = fit.body_arrays(body)
     w = M['w']
     gi = {g.name: g.index for g in body.vertex_groups}
@@ -430,6 +435,8 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
         for lp, i, a_ in zip(face.loops, f, an):
             lp[lay].uv = (float(a_) * (R_s if sl else R_b), float(V[i][2]))
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.verts.ensure_lookup_table()
+    edge = np.array([v.index for v in bm.verts if v.is_boundary and v.link_faces])
     bm.to_mesh(me)
     bm.free()
     for p in me.polygons:
@@ -479,7 +486,18 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
         m.object = rig
         m.use_deform_preserve_volume = True
         if settle:
-            solver.settle(o, rig, [body, *colliders], log=log)
+            # the fullness: all the cloth let out but a band at the neckline, which stays as drafted (the cloth is
+            # gathered into it), and a band at each sleeve's end, drawn in (a gathered cuff)
+            def near(pick, a_, b_):
+                E = V[edge[pick]]
+                d_ = np.concatenate([np.linalg.norm(V[i:i + 2000, None, :] - E[None, :, :], axis=2).min(1)
+                                     for i in range(0, len(V), 2000)])
+                return 1.0 - fit._ss(a_, b_, d_)
+            band = ratios['band'] * w
+            at_neck = near((share[edge] < 0.5) & (V[edge, 2] > M['z_bust']), 0.4 * band, 2.5 * band)
+            at_cuff = near((share[edge] >= 0.5) & (V[edge, 2] < D.z_cuff + 1.5 * VOXEL), 0.7 * band, 2.5 * band)
+            full = ratios['full'] * (1.0 - at_neck) * (1.0 - at_cuff) - ratios['cuff_in'] * at_cuff
+            solver.settle(o, rig, [body, *colliders], full=full, log=log)
     m = o.modifiers.new('smooth', 'SUBSURF')
     m.levels = m.render_levels = 1
     m = o.modifiers.new('thickness', 'SOLIDIFY')
