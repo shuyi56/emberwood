@@ -117,6 +117,31 @@ def _ang(p, yc):
     return np.arctan2(-p[:, 0], -(p[:, 1] - yc))
 
 
+def _along_loop(f_seam, loops):
+    """The shared armhole's cut, made to follow the loop itself. The seam surface's own field (armhole.armhole_cut)
+    is smooth where the loop is the hull of where the skin crosses that surface, and the two part at the front of the
+    underarm's U: the field left a pointed lobe of cloth running 0.3 past the loop. Here the cloth goes where the loop
+    says: it stays if it lies outside the loop seen from the side (y, z), or inside the seam surface."""
+    loop = np.asarray(loops['L']['loop'], dtype=float)[:, 1:3]
+    a, b = loop, np.roll(loop, -1, 0)
+    e = b - a
+    ee = np.maximum((e * e).sum(1), 1e-12)
+
+    def f(p):
+        p = np.asarray(p, dtype=float)
+        q = p[:, 1:3]
+        # signed distance to the loop in the side view: positive outside it
+        t = np.clip(((q[:, None, :] - a[None]) * e[None]).sum(2) / ee[None], 0.0, 1.0)
+        d = np.linalg.norm(q[:, None, :] - (a[None] + t[..., None] * e[None]), axis=2).min(1)
+        x1, x2 = a[None, :, 0], b[None, :, 0]
+        y1, y2 = a[None, :, 1], b[None, :, 1]
+        cross = ((y1 > q[:, None, 1]) != (y2 > q[:, None, 1])) & \
+            (q[:, None, 0] < (x2 - x1) * (q[:, None, 1] - y1) / np.where(y2 == y1, 1e-12, y2 - y1) + x1)
+        inside = (cross.sum(1) % 2) == 1
+        return np.maximum(np.where(inside, -d, d), f_seam(p))
+    return f
+
+
 def armhole_cut(P, T, aw, M, ratios=RATIOS):
     """The armhole's cutting line, positive on the cloth that stays. The sleeves' shared loop when it is there
     (redingote/armhole.py), else a stand-in: the vest's armhole at the same ratios."""
@@ -124,7 +149,7 @@ def armhole_cut(P, T, aw, M, ratios=RATIOS):
         import armhole  # noqa: F401  (the sleeves thread's module)
         if hasattr(armhole, 'armhole_cut'):   # (it has its own ratios: change them there, so the sleeve follows)
             loops = armhole.armhole(P, aw, M, T)
-            return armhole.armhole_cut(M, loops), 'shared loop'
+            return _along_loop(armhole.armhole_cut(M, loops), loops), 'shared loop'
     except ImportError:
         pass
     x_scye = fit.scye(P, aw, M, ratios)[0]
