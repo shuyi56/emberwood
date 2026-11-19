@@ -39,6 +39,8 @@ import sleeve  # noqa: E402
 
 CM = pattern.CM
 RATIOS = {
+    'clear': 0.03,                         # (the least the cloth stands off the skin as sewn, in w)
+    'under_hang': 8.0 / CM,                  # (the undersleeve hung from its seam over this, flat, before it lies on the arm)
     'gather_pitch': 0.9 / CM,    # the gathers' spacing along the stitching, sewn (a running stitch drawn up: small,
                                  # close gathers; the bench's puff stood its folds 3 mm deep)
     'gather_open': 1.2,          # how far the gathers run down into the head before they open out, in w
@@ -94,13 +96,14 @@ class Sewing:
         fine = armhole._resample(loop, 16 * len(loop))
         seg = np.linalg.norm(np.roll(fine, -1, 0) - fine, axis=1)
         self.fine, self.s, self.G = fine, np.concatenate([[0.0], np.cumsum(seg)]), float(seg.sum())
-        # the cloth at the stitching sits on the skin let out by the head's ease
+        # the cloth at the stitching sits on the skin (the bodice's armhole edge), let out by a little of the head's
+        # ease: the whole of it left a dark slot between the body and the cloth's edge (render #197)
         w = D.M['w']
         off = []
         for p in fine:
             loc, nrm, _, _ = D.b_all.find_nearest(Vector(p))
             off.append(np.array(nrm) if loc is not None else np.zeros(3))
-        self.seam_pts = fine + D.r['ease_head'] * w * np.array(off)
+        self.seam_pts = fine + 0.3 * D.r['ease_head'] * w * np.array(off)
 
     def at(self, sig):
         """The seam's point (on the cloth) at sig along the loop from its top, forward first (wrapped)."""
@@ -143,7 +146,7 @@ def _unwrap_from(a, ref):
     return a + 2 * math.pi * round((ref - a[0]) / (2 * math.pi))
 
 
-def _project_star(D, X, keep=None, steps=40, rounds=16):
+def _project_star(D, X, keep=None, steps=40, rounds=16, nearest=True):
     """Points brought onto the sleeve's drafted surface along rays from inside the arm: straight out from the axis
     round the tube, and fanned out from a point inside the shoulder over the head. Neighbours stay in order along
     their rays, so the cloth cannot fold over itself; keep: points held."""
@@ -164,20 +167,15 @@ def _project_star(D, X, keep=None, steps=40, rounds=16):
     z_lo = D.z_under - 0.5 * D.M['w']
 
     def field(Q):
-        """The drafted surface, and where it would run inside the body's own folds under the armhole (the
-        armpit's front and back, between the seam and the arm), the skin let out by the head's ease instead: the
-        cloth comes off the seam lying on the body, and does not bridge across to the arm as a fin."""
-        f = D.field(Q, gathers=False)
-        near = np.nonzero((Q[:, 2] > z_lo) & (Q[:, 0] > D.seam_x(Q[:, 1], Q[:, 2])))[0]
-        for k in near:
-            p = Vector(Q[k])
-            loc, nrm, _, dist = D.b_all.find_nearest(p)
-            if loc is not None:
-                f[k] = min(f[k], (dist if (p - loc).dot(nrm) >= 0 else -dist) - e)
-        return f
+        return D.field(Q, gathers=False)
     f = np.stack([field(C + t * n) for t in ts], 1)
     cross = (f[:, :-1] <= 0) & (f[:, 1:] > 0)
-    near = np.argmin(np.where(cross, np.abs(0.5 * (ts[:-1] + ts[1:])[None] - t0[:, None]), 1e9), axis=1)
+    # (over the top of the shoulder, the crossing nearest the point's own place; elsewhere the first one out, onto the
+    # arm: the nearest there can be out on the body behind or in front of the armpit, and would stand as a fin)
+    al_, _ = D.polar(Y)
+    top_ = (np.cos(al_) > 0.35) & (Y[:, 2] > D.z_under) if nearest else np.zeros(len(Y), bool)
+    near = np.where(top_, np.argmin(np.where(cross, np.abs(0.5 * (ts[:-1] + ts[1:])[None] - t0[:, None]), 1e9), axis=1),
+                    np.argmax(cross, axis=1))
     pick = np.where(cross.any(1), near, -1)
     a = np.where(pick >= 0, ts[np.maximum(pick, 0)], 0.0)
     b = np.where(pick >= 0, ts[np.maximum(pick, 0) + 1], 0.0)
@@ -202,20 +200,80 @@ def _project_star(D, X, keep=None, steps=40, rounds=16):
     return X
 
 
-def _carry(G, seam, Q, Hq, where, band=0.6 / CM, reach=3.0):
+def _carry(G, seam, Q, Hq, where, band=0.6 / CM, reach=3.0, most=1.5, spread=0):
     """Each column's cloth carried from its place on the surface back to the seam, the move fading with its flat
-    distance down from the stitching over max(band, reach times the move)."""
+    distance down from the stitching over max(band, reach times the move); spread: the fade's length evened out
+    over that many columns either side (where the surface's first rows jump from the arm to the body)."""
     G = G.copy()
     # (the move measured against the next row's place, which the projection sets off the seam, not the seam row's
-    # own, whose ray may run anywhere; at most a hand's breadth)
+    # own, whose ray may run anywhere; at most `most`)
     delta = seam - G[1]
     nd = np.linalg.norm(delta, axis=1, keepdims=True)
-    delta *= np.minimum(1.0, 1.5 / np.maximum(nd, 1e-9)) * where[:, None]
+    delta *= np.minimum(1.0, most / np.maximum(nd, 1e-9)) * where[:, None]
     L = np.maximum(band, reach * np.linalg.norm(delta, axis=1))
+    if spread:
+        # (the longest fade nearby, then eased, so a column on the body beside one on the arm fades as slowly)
+        pad = np.concatenate([np.full(spread, L[0]), L, np.full(spread, L[-1])])
+        L = np.array([pad[i:i + 2 * spread + 1].max() for i in range(len(L))])
+        ker = np.exp(-0.5 * (np.arange(-spread, spread + 1) / max(1.0, spread / 2.0)) ** 2)
+        pad = np.concatenate([np.full(spread, L[0]), L, np.full(spread, L[-1])])
+        L = np.convolve(pad, ker / ker.sum(), 'valid')
     u = np.linalg.norm(Q - Hq[None], axis=-1)
     g = 1.0 - _ss01(u / L[None])
     G = G + g[..., None] * delta[None]
     G[0] = seam
+    return G
+
+
+def _loft(G, seam, Q, Hq, hang):
+    """Under the arm, the cloth hung from the seam: each column's rows down to `hang` (flat, from the stitching)
+    replaced by one smooth curve from the seam to its place on the arm, leaving there along the arm. Where the
+    armhole runs on the body behind or in front of the arm, the projected rows jump from the arm to the body from one
+    column to the next; the curve spans that hollow as cloth does, every column alike."""
+    G = G.copy()
+    u = np.linalg.norm(Q - Hq[None], axis=-1).mean(1)           # (each row's mean distance down)
+    k = int(np.clip(np.searchsorted(u, hang), 2, len(G) - 2))
+    P0, P1 = seam, G[k]
+    m1 = (G[k + 1] - G[k - 1]) * 0.5 * k                       # (the arm's own run down, per the curve's length)
+    m0 = P1 - P0
+    t = (u[:k] / u[k])[:, None, None]
+    h00, h10, h01, h11 = 2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2
+    G[:k] = h00 * P0[None] + h10 * m0[None] + h01 * P1[None] + h11 * m1[None]
+    G[0] = seam
+    return G
+
+
+def _clear(X, D, c):
+    """Points under the skin, or nearer it than c, set out from it to c along its normal."""
+    X = X.copy()
+    for i, p in enumerate(X):
+        loc, nrm, _, dist = D.b_all.find_nearest(Vector(p))
+        if loc is None:
+            continue
+        n = np.array(nrm)
+        h = float(np.dot(p - np.array(loc), n))
+        if h < c:
+            X[i] = p + (c - h) * n
+    return X
+
+
+def _clear_eased(G, D, c, rounds=12):
+    """A grid's points set out from the skin (its first row, the stitching, held), the push spread over its
+    neighbours by blurring it before it is applied; what the blur leaves short is pushed again."""
+    rows, cols = G.shape[:2]
+    X = G.reshape(-1, 3)
+    d = (_clear(X, D, c) - X).reshape(rows, cols, 3)
+    d[0] = 0.0
+    m = np.linalg.norm(d, axis=-1)
+    for _ in range(rounds):
+        p = np.pad(d, ((1, 1), (1, 1), (0, 0)), mode='edge')
+        b = (p[:-2, 1:-1] + p[2:, 1:-1] + p[1:-1, :-2] + p[1:-1, 2:] + 4 * d) / 8.0
+        # (never less than the push itself where one was needed)
+        mb = np.linalg.norm(b, axis=-1)
+        d = np.where((mb < m)[..., None], b * (m / np.maximum(mb, 1e-12))[..., None], b)
+        d[0] = 0.0
+    G = G + d
+    G[1:] = _clear(G[1:].reshape(-1, 3), D, c).reshape(rows - 1, cols, 3)
     return G
 
 
@@ -363,7 +421,9 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     Xt[:ncols] = H3
     Xu[:ncu] = Hu3
     Xt = _project_star(D, Xt)
-    Xu = _project_star(D, Xu)
+    # (the undersleeve, under the arm: onto the arm itself, the first crossing out; the nearest one to its sewn place
+    # is out on the body behind the armpit, and it would stand there as a fin)
+    Xu = _project_star(D, Xu, nearest=False)
     # (the stitching back on the seam: where the drafted surface lies off it, as under the front and back of the
     # armhole where the seam runs on the body in front of and behind the arm, the cloth is carried from the seam
     # onto the surface over a band three times as long as that gap, so it hangs across in a curve instead of folding
@@ -377,8 +437,8 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
         ker = np.exp(-0.5 * (np.arange(-2 * k_, 2 * k_ + 1) / k_) ** 2)
         pad = np.concatenate([np.full(2 * k_, t_[0]), t_, np.full(2 * k_, t_[-1])])
         return np.convolve(pad, ker / ker.sum(), 'valid')
-    Xt = _carry(Xt.reshape(ROWS, ncols, 3), H3, Xt_f.reshape(ROWS, ncols, 2), Hf, toward(Hc)).reshape(-1, 3)
-    Xu = _carry(Xu.reshape(ROWS, ncu, 3), Hu3, Xu_f.reshape(ROWS, ncu, 2), Huf, toward(Huc)).reshape(-1, 3)
+    Xt = _carry(Xt.reshape(ROWS, ncols, 3), H3, Xt_f.reshape(ROWS, ncols, 2), Hf, np.maximum(toward(Hc), 1.0)).reshape(-1, 3)
+    Xu = _loft(Xu.reshape(ROWS, ncu, 3), Hu3, Xu_f.reshape(ROWS, ncu, 2), Huf, r['under_hang']).reshape(-1, 3)
     # (smoothed as pressed cloth: the drafted surface is found point by point, and shows its facets)
     Xt = _taubin(Xt.reshape(ROWS, ncols, 3), hold_cols=False).reshape(-1, 3)
     # (the seams' lines: the same in both pieces, row by row; the topsleeve's, as projected, is the seam's)
@@ -409,15 +469,16 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     vv_u = np.repeat(v[:, None], ncu, 1).ravel()
     sw_, sd = r['seam_w'], r['seam_depth']
     Qu = Xu_f.reshape(-1, 2)
-    d_fore_t, d_hind_t, d_head_t = _dist_to(Ff, Qt), _dist_to(Bf, Qt), u
-    d_fore_u, d_hind_u, d_head_u = _dist_to(Fuf, Qu), _dist_to(Buf, Qu), _dist_to(Huf, Qu)
+    d_fore_t, d_hind_t = _dist_to(Ff, Qt), _dist_to(Bf, Qt)
+    d_fore_u, d_hind_u = _dist_to(Fuf, Qu), _dist_to(Buf, Qu)
     open_t = vv_t > v_vent
     open_u = vv_u > v_vent
 
     def draw_in(d):
         return 1.0 - sleeve._ss(0.0, sw_, d)
-    seam_t = np.maximum.reduce([draw_in(d_fore_t), draw_in(d_hind_t) * ~open_t, draw_in(d_head_t)])
-    seam_u = np.maximum.reduce([draw_in(d_fore_u), draw_in(d_hind_u) * ~open_u, draw_in(d_head_u)])
+    # (not at the armhole: that seam lies on the body, under the bodice's edge, and drawn in it would sink into it)
+    seam_t = np.maximum(draw_in(d_fore_t), draw_in(d_hind_t) * ~open_t)
+    seam_u = np.maximum(draw_in(d_fore_u), draw_in(d_hind_u) * ~open_u)
     nu = _grid_normals(Xu.reshape(ROWS, ncu, 3), D)
     nt = _grid_normals(Xt.reshape(ROWS, ncols, 3), D)
     Xt -= (sd * seam_t)[:, None] * nt
@@ -425,6 +486,11 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     # -- the vent: the topsleeve's edge lapped over the undersleeve's below the seam
     lap_t = sleeve._ss(v_vent - 0.02, v_vent + 0.01, vv_t) * (1.0 - sleeve._ss(0.0, 0.6 * pr['underlap'], d_hind_t))
     Xt += (r['lap_proud'] * thick * lap_t)[:, None] * nt
+    # -- nowhere under the skin: where the head's projection runs below the shoulder's surface just off the seam
+    # (the crown's front, between its rays), the skin showed through the cloth as a hole
+    # (the push eased out over its neighbours, so the cloth rises over the hollow instead of lining it)
+    Xt = _clear_eased(Xt.reshape(ROWS, ncols, 3), D, r['clear'] * w).reshape(-1, 3)
+    Xu = _clear_eased(Xu.reshape(ROWS, ncu, 3), D, r['clear'] * w).reshape(-1, 3)
     # -- one cloth: the welded seams (the forearm's whole length, the hindarm's down to the vent)
     nT = len(Xt)
     V = np.vstack([Xt, Xu])
