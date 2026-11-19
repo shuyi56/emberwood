@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { capeSkin, CAPE, setCape } from './dummy.js';
+import { underClothes } from '../world/layering.js';
 import { makeColliders, WARDEN_COLLIDERS, WARDEN_MODEL_SETTINGS } from '../world/cape-rig.js';
 import { makeWalkPlayer } from './baked-walk.js';
 
@@ -47,6 +48,11 @@ export function loadModelBody(url) {
       }
       const capeMeshes = [];
       root.traverse((o) => { if (o.isSkinnedMesh && OWN_CAPE.test(o.name)) capeMeshes.push(o); });
+      // her arms and legs drawn a layer under her cape, so a limb swinging into it never shows through the cloth
+      // (src/world/layering.js; ?layer=0 draws them as they are)
+      if (new URLSearchParams(location.search).get('layer') !== '0') {
+        root.traverse((o) => { if (o.isSkinnedMesh && !OWN_CAPE.test(o.name)) underClothes(o); });
+      }
       const body = {
         root, bones, cape: null, hair: null, mixer, capeMeshes,
         // standing or walking, as the world does it: the walk at its phase, or the idle stance
