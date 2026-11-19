@@ -98,3 +98,39 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** John's rule since 2026-11-16: every figure face check goes through the face check API, not a render. Of the first 41 requests, 17 were face views of a face-only change (eyes, brows, lips, nose, jaw), each costing minutes of render time.
 - **Spot:** The change since the branch was last rendered touches only face sculpt or face paint (`face_relief`, `mouth_relief`, `jaw_relief`, lids, `eye_relief`, iris, sclera, eyeshadow, lashes, brows, lips) and the request asks only for face views (`face_views.py`, `sculpt_views.py`, or `views.py --head` without `--cells` or `--turn`).
 - **Fix:** Run `python blender/facecheck/facecheck.py <figure> --before origin/main` (no Blender, about 17 s, and a before is free there). Ask the queue only for what it cannot show: hair, cloth, final lighting, subsurface scattering and the sprite palette; say which in `"needs_render"`.
+
+# Proposed from logged rejections (nightly, 2026-11-19)
+
+These come from `render-queue/rejections.jsonl` (37 rejections on 2026-11-18, six garment branches). Each one
+repeated on more than one garment. The reviewer applies them once John merges this.
+
+## R001 The underarm and armhole edge left to chance
+
+- **Seen:** 5 rejections on 3 garments: a crumpled wedge at the front of the armhole (sleeves, m2odto), a ragged slit
+  and a knot of cloth at the bottom of each armhole and torn linen at both armholes (chemise, mjx1su), and a slit at the
+  armpit with skin showing in the final turn (bodice #178, ffan3z). In each case a shared armhole cut ended in a flat
+  edge or hard corner at the underarm.
+- **Spot:** The diff adds or changes an armhole, a sleeve seam or a side slit (`armhole`, `sleeve`, `slit`, `underarm`
+  in the garment script), and the request has no view of the underarm.
+- **Fix:** Close the armhole as one rounded loop with no corner under the arm, and check the build's clearance report
+  round that loop. Ask first for a 3/4 `--head` view of that side, with the arm at rest and raised, before any turn.
+
+## R002 A long hem in the walk with no look at the feet
+
+- **Seen:** 4 rejections on 2 skirts: toes through the hem at toe-off, the hem sinking into the floor when the body
+  dips (riding skirt, fva9xp), and the front hem catching on the toes and folding between the feet (petticoat,
+  ybma5q).
+- **Spot:** A skirt, petticoat, robe or gown whose hem reaches below the knee, asked for with `--walk` or `--run`
+  but without a profile view, or a hem change checked only standing.
+- **Fix:** Give the hem a foot clearance and a floor limit in the build. Check the walk in profile, because frames 6
+  and 7 (toe-off) and the body's lowest frame are where it fails.
+
+## R003 Cloth solver numbers guessed instead of measured
+
+- **Seen:** 4 rejections on 2 garments: cloth hung like tissue with a bending length of about 0 cm (petticoat,
+  ybma5q), fabric too heavy with thick rolled folds, and crumpled like paper (chemise, mjx1su). The numbers were at
+  the wrong scale until they were found on the swatch bench.
+- **Spot:** The diff changes cloth settings (`bending`, `compression`, `tension`, `mass`, weight per point) and
+  no swatch-bench result at that commit is cited.
+- **Fix:** Find the numbers on the swatch bench first (a strip of the cloth, rendered in seconds), cite the bending
+  length it shows, and only then render the garment.

@@ -171,6 +171,13 @@ crosses the line, and a job running past **30 minutes** is killed and comes back
 your job is that slow, split it (one view first, the mannequin, check quality, fewer frames) rather than asking
 again unchanged.
 
+
+**Size a final turn to fit** (nightly, 2026-11-19). A five-angle final turn at 720 px and 128 samples was killed at 30
+minutes (#187, 5 to 6 minutes an angle), and one at 800 px took 10 minutes (#178). With `--denoise`, 600 px and 48
+samples look the same at review size and take 8 to 10 minutes for the whole turn. Go past that only as two jobs
+(`--angles front,3/4,profile` and `--angles back3/4,back`). Check a navy or near-black dye on a swatch first: three
+rejections were a navy that read slate blue under the figure's light.
+
 ## John's desktop (GPU worker)
 
 John's PC (RTX 4070 Super, Ryzen 3800X, 16 GB) can take **light jobs only**: mannequin and head views, which peak
