@@ -47,7 +47,7 @@ Batching rules (John, 2026-11-19)
   * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
     job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
-import argparse, glob, ast, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, time
+import argparse, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("RQ_HOME", HERE)   # queue.json, results/, events.jsonl: next to the code unless RQ_HOME says
@@ -1176,6 +1176,9 @@ def cmd_add(a):
     a.view = [expand_view(v) for v in (a.view or [])] or None
     if a.quality is None:     # crops and pose strips are cheap drafts unless the request says final
         a.quality = "check" if a.view and all(is_extra(v) for v in a.view) else "final"
+    if a.quality == "final" and not a.reviewed:
+        sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'). "
+                 "A check-quality request you can add yourself: add --quality check")
     before_only_from_cache(a, outs)
     r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
          "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
@@ -1195,6 +1198,264 @@ def cmd_add(a):
             i["state"] = f"sent as #{r['id']}"
     s["next"] += 1; s["requests"].append(r); save(s)
     print(json.dumps(r, indent=2))
+    lp = last_ping(a.thread)
+    if lp is None or time.time() - lp > PING_FRESH_S:
+        print(f"rq note: no ping from this thread in the last {PING_FRESH_S // 60} minutes. Before the next request, run "
+              f"`python3 /mnt/project-files/render-queue/rq.py ping --thread {a.thread}` to see what is rendering, "
+              f"what is waiting and whether your last result is back", flush=True)
+        event("unpinged", None, thread=a.thread, request=r["id"])
+    for w in hog_warnings(s, thread=a.thread):     # (the requesting thread hears it in the add's answer)
+        print(f"rq warning: {w['text']}", flush=True)
+        event("hog", None, thread=a.thread, rule=w["rule"], value=w["value"], request=r["id"])
+
+
+# John, 2026-11-19: warn when one thread hogs the queue (the boots: seven near-identical 3/4 renders in an afternoon).
+# A warning only: nothing is blocked or reordered. Thresholds from the 2026-11-19 telemetry, when four threads
+# shared the queue and the busiest hour gave one thread 68% of 1,300 s of rendering.
+HOG = {"wait_s": 120, "hour_share": 0.5, "hour_min_s": 600,     # over half the last hour's render time, and at least 10 minutes
+       "day_share": 0.35, "day_min_s": 1800,     # over 35% of the last day's (fair share with three threads or
+       #                                           more is a third), and at least 30 minutes
+       "repeat": 4, "repeat_h": 3,               # the same views asked 4 times in 3 hours
+       "streak": 5}                              # 5 submissions in a row while another thread had one waiting
+
+
+def request_seconds(r):
+    """A request's share of render time: each of its jobs' seconds, split among the requests that job served."""
+    t = 0.0
+    for k in r.get("jobs") or []:
+        for d in (k, k + "-failed"):
+            mp = os.path.join(RESULTS, d, "manifest.json")
+            if os.path.exists(mp):
+                try:
+                    m = json.load(open(mp))
+                except ValueError:
+                    break
+                t += m.get("seconds", 0) / max(1, len(m.get("requests") or [1])); break
+    return t
+
+
+HOG_RULES = ("over {hour_share:.0%} of the last hour's render time (at least {hour_min_s} s) or {day_share:.0%} of the "
+             "day's (at least {day_min_s} s) while another thread waited {wait_s} s or more; the same views {repeat} times "
+             "in {repeat_h} h; {streak} requests in a row while another thread had one waiting. Warnings only: the "
+             "queue never blocks or reorders.")
+_STARTS = {}
+
+
+def _starts():
+    """Request id to the time its first render job started, from the event log (cached by file size)."""
+    try:
+        size = os.path.getsize(EVENTS)
+    except OSError:
+        return {}
+    if _STARTS.get("size") != size:
+        st = {}
+        with open(EVENTS) as f:
+            for line in f:
+                if '"start"' not in line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if e.get("ev") == "start":
+                    for i in e.get("requests") or []:
+                        st.setdefault(i, ts(e["t"]))
+        _STARTS.update(size=size, map=st)
+    return _STARTS["map"]
+
+
+def hog_warnings(s, at=None, thread=None):
+    """The warnings in force at time `at` (now), for one thread or all: share of the last hour's and the last day's
+    render time while another thread waited at least 2 minutes for a slot, the same views asked again and again, and long runs of requests in
+    a row while another thread waits."""
+    at = at or time.time()
+    rs = [r for r in s["requests"] if r.get("created") and ts(r["created"]) <= at]
+    name = lambda t: THREAD_NAMES.get(t, t[-6:])   # noqa: E731
+    starts = _starts()
+    out = []
+    for label, span, share, floor in (("hour", 3600, HOG["hour_share"], HOG["hour_min_s"]),
+                                      ("day", 86400, HOG["day_share"], HOG["day_min_s"])):
+        win = [r for r in rs if ts(r["created"]) > at - span]
+        secs = {}
+        for r in win:
+            secs[r["thread"]] = secs.get(r["thread"], 0) + request_seconds(r)
+        tot = sum(secs.values())
+        waited = {r["thread"] for r in win if r["id"] in starts and starts[r["id"]] - ts(r["created"]) >= HOG["wait_s"]}
+        if len(secs) < 2 or not tot:
+            continue          # (alone on the queue is no hogging)
+        for t, v in secs.items():
+            if v / tot > share and v >= floor and waited - {t}:   # (only while someone else waited for a slot)
+                out.append({"thread": t, "name": name(t), "rule": f"{label}_share", "value": round(v / tot, 2),
+                            "seconds": round(v), "of": round(tot),
+                            "text": f"{name(t)} used {v / tot:.0%} of the last {label}'s render time "
+                                    f"({fmt_s(v)} of {fmt_s(tot)}) while {", ".join(sorted(name(o) for o in waited - {t}))} waited for a slot"})
+    rep = {}
+    for r in rs:
+        if ts(r["created"]) > at - HOG["repeat_h"] * 3600 and r.get("views") and not r["state"].startswith("superseded"):
+            rep.setdefault((r["thread"], tuple(sorted(r["views"]))), []).append(r["id"])
+    for (t, _), ids in rep.items():
+        if len(ids) >= HOG["repeat"]:
+            out.append({"thread": t, "name": name(t), "rule": "repeat", "value": len(ids), "requests": ids,
+                        "text": f"{name(t)} asked for the same views {len(ids)} times in {HOG['repeat_h']} hours "
+                                f"(#{', #'.join(map(str, ids))}): check a cheaper crop, or what changed, before the next"})
+    srt = sorted(rs, key=lambda r: r["id"])
+    # (one submission: the requests a thread sent within 15 s, such as the three parts of one set fit test)
+    subs = []
+    for r in srt:
+        if subs and subs[-1]["thread"] == r["thread"] and ts(r["created"]) - ts(subs[-1]["created"]) <= 15:
+            continue
+        subs.append(r)
+    run, best = [], {}
+    for r in subs:
+        run = run + [r] if run and run[-1]["thread"] == r["thread"] else [r]
+        lo, hi = ts(run[0]["created"]), ts(r["created"])
+        others = any(o["thread"] != r["thread"] and ts(o["created"]) < hi and
+                     (not o.get("finished") or ts(o["finished"]) > lo) for o in srt)
+        if len(run) >= HOG["streak"] and others and hi > at - 3600 * HOG["repeat_h"]:
+            best[r["thread"]] = [x["id"] for x in run]
+    for t, ids in best.items():
+        out.append({"thread": t, "name": name(t), "rule": "streak", "value": len(ids), "requests": ids,
+                    "text": f"{name(t)} sent {len(ids)} requests in a row (#{ids[0]} to #{ids[-1]}) while another "
+                            f"thread had one waiting or rendering"})
+    return [w for w in out if thread is None or w["thread"] == thread]
+
+
+def fmt_s(v):
+    v = round(v)
+    return f"{v} s" if v < 90 else f"{v // 60} min {v % 60:02d} s" if v < 3600 else f"{v // 3600} h {v % 3600 // 60:02d} min"
+
+
+def cmd_hogs(a):
+    s = load()
+    ws = hog_warnings(s)
+    print(json.dumps(ws, indent=2) if ws else "no thread is hogging the queue")
+
+
+# John, 2026-11-19: a ping any thread can run, and threads are told to run it before they ask for more renders.
+PING_FRESH_S = 900    # a request sent without a ping from its thread in the last 15 minutes gets a reminder
+
+
+def _est_seconds(r, done):
+    """About how long a request will render: the median of the last finished requests like it (same quality and
+    the same kind of render), else of the same quality, else 3 minutes."""
+    kind = tuple(_view_kinds(r.get("views"), r.get("outputs") or []))
+    for pick in (lambda o: o.get("quality") == r.get("quality") and tuple(_view_kinds(o.get("views"), o.get("outputs") or [])) == kind,
+                 lambda o: o.get("quality") == r.get("quality")):
+        xs = [x for x in (request_seconds(o) for o in done[-60:] if pick(o)) if x > 0]
+        if len(xs) >= 3:
+            return statistics.median(xs)
+    return 180.0
+
+
+def queue_state(s, thread=None, at=None):
+    """What the queue is doing right now, and where a thread's own requests stand: the answer to a ping."""
+    at = at or time.time()
+    starts = _starts()
+    name = lambda t: THREAD_NAMES.get(t, t[-6:])   # noqa: E731
+    done = [r for r in s["requests"] if r["state"] == "done"]
+    rendering, waiting = [], []
+    for r in s["requests"]:
+        if r["state"] == "rendering":
+            st = starts.get(r["id"], ts(r["created"]))
+            est = _est_seconds(r, done)
+            rendering.append({"id": r["id"], "thread": name(r["thread"]), "mine": r["thread"] == thread,
+                              "running_s": round(at - st), "left_s": round(max(30, est - (at - st))), "note": r.get("note")})
+        elif r["state"] == "pending" or r["state"] == "conflict":
+            waiting.append({"id": r["id"], "thread": name(r["thread"]), "mine": r["thread"] == thread,
+                            "state": r["state"], "waited_s": round(at - ts(r["created"])), "est_s": round(_est_seconds(r, done)),
+                            "views": r.get("views"), "note": r.get("note")})
+    # (a rough clock: PARALLEL slots, each job taking its estimate; the queue starts jobs in id order)
+    slots = sorted([x["left_s"] for x in rendering] + [0] * max(0, PARALLEL - len(rendering)))[:PARALLEL] or [0]
+    for w in waiting:
+        if w["state"] != "pending":
+            continue
+        i = min(range(len(slots)), key=slots.__getitem__)
+        w["starts_in_s"] = slots[i]; slots[i] += w["est_s"]
+    new_wait = min(slots)
+    busy = "idle" if not rendering and not waiting else "light" if len(rendering) + len(waiting) <= PARALLEL else "busy"
+    out = {"at": now(), "busy": busy, "slots": PARALLEL, "rendering": rendering, "waiting": waiting,
+           "new_request_starts_in_s": round(new_wait), "sheet_due": s.get("sheet_due", False),
+           "open_intents": [{"id": i["id"], "thread": name(i["thread"]), "piece": i.get("piece")}
+                            for i in s.get("intents", []) if i.get("state") == "open"]}
+    if thread:
+        mine = [r for r in s["requests"] if r["thread"] == thread]
+        last = next((r for r in reversed(mine) if r["state"] in ("done", "failed")), None)
+        out["you"] = {
+            "name": name(thread),
+            "waiting": [w["id"] for w in waiting if w["mine"]],
+            "rendering": [x["id"] for x in rendering if x["mine"]],
+            "last_result": last and {"id": last["id"], "state": last["state"], "finished": last.get("finished"),
+                                     "results": [f"render-queue/results/{k}/" for k in last.get("jobs") or []],
+                                     "note": last.get("note")},
+            "warnings": [w["text"] for w in hog_warnings(s, at=at, thread=thread)],
+        }
+        adv = []
+        if out["you"]["rendering"] or out["you"]["waiting"]:
+            adv.append(f"you already have #{', #'.join(map(str, out['you']['rendering'] + out['you']['waiting']))} in the queue: "
+                       "wait for it, or send a newer request for the same views, which replaces a waiting one")
+        if out["you"]["warnings"]:
+            adv.append("you are flagged for hogging: send a cheaper crop or check that your edit changes the build before the next full render")
+        if busy == "busy":
+            adv.append(f"the queue is busy: a new request would start in about {fmt_s(new_wait)}; prefer a check-quality crop")
+        out["you"]["advice"] = adv or ["the queue has room: go ahead"]
+    return out
+
+
+def last_ping(thread):
+    """When this thread last pinged, from the event log (None if never)."""
+    t = None
+    try:
+        with open(EVENTS) as f:
+            for line in f:
+                if '"ping"' in line and thread in line:
+                    try:
+                        e = json.loads(line)
+                    except ValueError:
+                        continue
+                    if e.get("ev") == "ping" and e.get("thread") == thread:
+                        t = ts(e["t"])
+    except OSError:
+        pass
+    return t
+
+
+def cmd_ping(a):
+    for i in range(5):    # (another container may be mid-write on the shared mount: read again)
+        try:
+            s = load(); break
+        except ValueError:
+            time.sleep(1 + i)
+    else:
+        sys.exit("the queue file is being written: ping again in a few seconds")
+    st = queue_state(s, thread=a.thread)
+    if a.thread:
+        try:
+            event("ping", None, thread=a.thread)
+        except OSError:
+            pass      # (a ping is read-only for the queue; a thread that cannot append to the log still gets its answer)
+    if a.json:
+        print(json.dumps(st, indent=2)); return
+    print(f"render queue at {st['at']}: {st['busy']}, {len(st['rendering'])} rendering and "
+          f"{sum(w['state'] == 'pending' for w in st['waiting'])} waiting on {st['slots']} slots; "
+          f"a new request would start in about {fmt_s(st['new_request_starts_in_s'])}")
+    for x in st["rendering"]:
+        print(f"  rendering #{x['id']} {x['thread']}: {fmt_s(x['running_s'])} in, about {fmt_s(x['left_s'])} left  {x['note'] or ''}")
+    for w in st["waiting"]:
+        when = f"starts in about {fmt_s(w['starts_in_s'])}" if "starts_in_s" in w else w["state"]
+        print(f"  waiting   #{w['id']} {w['thread']}: {when}  {w['note'] or ''}")
+    if st["open_intents"]:
+        print("  announced: " + "; ".join(f"intent #{i['id']} {i['thread']} ({i['piece']})" for i in st["open_intents"]))
+    if st["sheet_due"]:
+        print("  the full sheet is due and runs when the queue goes idle")
+    y = st.get("you")
+    if y:
+        lr = y["last_result"]
+        print(f"you ({y['name']}): rendering {y['rendering'] or 'none'}, waiting {y['waiting'] or 'none'}; last result "
+              + (f"#{lr['id']} {lr['state']} {lr['finished'] or ''} {' '.join(lr['results'])}" if lr else "none"))
+        for w in y["warnings"]:
+            print(f"  warning: {w}")
+        for v in y["advice"]:
+            print(f"  advice: {v}")
 
 
 def cmd_ready(a):
@@ -1236,13 +1497,60 @@ THREAD_NAMES = {
     "cmsg_01CnnKqGvuWEUi2G9X9cb9nB58A32xihrD4suX2WgSKk5h": "World walk",
     "cmsg_01CnnKqGvuWEUi2G9X9cb9nBU9x4GTj8QLYGorRA6gLuHc": "Creator heads",
     "cmsg_01CnnKqGvuWEUi2G9X9cb9nBUhdiu12Gy6W5kaV1SvyEVc": "Face creator",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBA3b81CneeuYShgwNpSXbXe": "Sleeves",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBQkfRWVrSdTJkEPgPFsn9m6": "Hose and boots",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBBfxoRfhjYNDgEMgK2GDcKJ": "Riding skirt",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nB4hFTQqChHhnYciZn4Te2QE": "Vest, chemise and doublet",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBWHNmAC96iG7dkSuFhMvCv4": "Head and neck",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nB8K2NHFFcGop9VHSKeLiCHR": "Bodice",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBPFTNW92soZDZD4MFuoM2uf": "Petticoat",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nB4anKPy38sg1qeMmhbwzNnt": "Corset",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBYUips3shtbgvsGwsUspf95": "Cloak",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBQCTaqo5NACgyA2VUZDR8Rq": "Necklaces",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBPFdbEQxN22vaxHSoyHyetD": "Ranger hair",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBG3u7qgVcdd4PjmWwFqtjfQ": "Cape physics",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBDY4MDu8mY63XYh5NxKA37m": "Mannequin anatomy",
 }
+
+
+def _view_kinds(views, outputs):
+    """What a request renders, in plain words, for the tracking page's filter."""
+    out = [o for o in outputs if o != "views"]
+    for v in views or []:
+        w = v.split()
+        if w and w[0] == "pose-strip" or "--poses" in w:
+            out.append("pose strip")
+        if w and w[0] == "crop" or "--crop" in w:
+            out.append("crop")
+        if "--turn" in w:
+            out.append("turn")
+        if "--head" in w:
+            out.append("close-up")
+        if "--walk" in w or "--run" in w:
+            out.append("walk")
+    return list(dict.fromkeys(out)) or list(outputs)
+
+
+def _figures(views):
+    out = []
+    for v in views or []:
+        w = v.split()
+        if "--figure" in w and w.index("--figure") + 1 < len(w):
+            out.append(w[w.index("--figure") + 1])
+    return list(dict.fromkeys(out))
 
 
 def cmd_export(a):
     """Write the queue as JSON rows for the tracking page: one row per request, newest first."""
     s = load()
     rows = []
+    users = {}
+    for r in s["requests"]:
+        for k in r.get("jobs") or []:
+            users.setdefault(k, set()).add(r["id"])
+    shared = {k for k, ids in users.items() if len(ids) > 1}
+    sets_of = {k for k in users if "OUTFIT=" in k or os.path.exists(os.path.join(RESULTS, k, "manifest.json"))
+               and json.load(open(os.path.join(RESULTS, k, "manifest.json"))).get("set")}
     for r in s["requests"]:
         secs, fin, kinds = 0, r.get("finished"), []
         for k in r.get("jobs") or []:
@@ -1263,6 +1571,11 @@ def cmd_export(a):
             "results": ", ".join(os.path.join("render-queue/results", os.path.basename(p))
                                  for p in (r.get("results") or {}).values()),
             "warnings": (f"{len(r['warnings'])} undefined name(s) after the merge" if r.get("warnings") else ""),
+            "piece": ", ".join(_figures(r.get("views"))),
+            "quality": r.get("quality") or ("final" if "views" in r["outputs"] else ""),
+            "kind": ", ".join(_view_kinds(r.get("views"), r["outputs"])),
+            "combined": "set" if any(k in sets_of for k in r.get("jobs") or []) else
+                        ("shared" if any(k in shared for k in r.get("jobs") or []) else "alone"),
         })
     rows.sort(key=lambda x: -x["id"])
     sched = [{"item": "Full sheet, .blend and world model", "when": "Daily, 2:41 AM Toronto, only when the queue is idle",
@@ -1270,6 +1583,9 @@ def cmd_export(a):
     with open(a.out, "w") as f:
         json.dump({"rows": rows, "meta": [{"label": "Written by", "value": "rq.py export, from the render queue's queue.json"},
                                           {"label": "Exported", "value": now()}]}, f, indent=1)
+    hogs = [{k: w[k] for k in ("name", "rule", "value", "text")} for w in hog_warnings(s)]
+    with open(a.out.replace(".json", "-hogs.json"), "w") as f:
+        json.dump({"rows": hogs, "meta": [{"label": "Rules", "value": HOG_RULES.format(**HOG)}, {"label": "Exported", "value": now()}]}, f, indent=1)
     with open(a.out.replace(".json", "-schedule.json"), "w") as f:
         json.dump({"rows": sched, "meta": [{"label": "Exported", "value": now()}]}, f, indent=1)
     print(a.out, len(rows), "rows")
@@ -1321,6 +1637,7 @@ def main():
     q.add_argument("--outputs", required=True); q.add_argument("--view", action="append"); q.add_argument("--cells")
     q.add_argument("--mode", choices=("combined", "isolated"), default="combined"); q.add_argument("--note")
     q.add_argument("--quality", choices=("final", "check"), default=None, help="default: check for crops and pose strips alone, final otherwise")
+    q.add_argument("--reviewed", action="store_true", help="the reviewer thread passed this request (needed for final quality)")
     q = sub.add_parser("intent")
     q.add_argument("--thread", required=True); q.add_argument("--branch", required=True)
     q.add_argument("--piece", help="the figure module (blender/<piece>/<piece>.py) the render will be of")
@@ -1338,6 +1655,10 @@ def main():
         sub.add_parser(n).add_argument("branch")
     sub.add_parser("cancel").add_argument("id", type=int)
     sub.add_parser("export").add_argument("out")
+    sub.add_parser("hogs")
+    q = sub.add_parser("ping", help="what the queue is doing now, and where your own requests stand (read-only)")
+    q.add_argument("--thread", help="your thread id, for your own requests, last result and warnings")
+    q.add_argument("--json", action="store_true")
     a = p.parse_args()
     globals()["cmd_" + a.cmd.replace("-", "_")](a)
 

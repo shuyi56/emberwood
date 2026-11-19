@@ -22,6 +22,7 @@ import glob
 import json
 import os
 import statistics
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("RQ_HOME", HERE)   # queue.json, results/, events.jsonl: next to the code unless RQ_HOME says
@@ -204,7 +205,51 @@ def compute(hours=None, names=None):
         "blocked_now": blocked_now,
         "batching": batching(lo, events, json.load(open(STATE)) if os.path.exists(STATE) else {}),
         "telemetry": telemetry(lo, jl, json.load(open(STATE)) if os.path.exists(STATE) else {}),
+        "hogging": hogging(lo, now, events),
     }
+
+
+def hogging(lo, now, events):
+    """John, 2026-11-19: which threads hogged the queue. The warnings rq.py gives (hog_warnings), replayed every
+    15 minutes over the window, with each thread's share of the render time and the warnings the threads were told."""
+    try:
+        sys.path.insert(0, HERE)
+        import rq
+    except Exception as e:       # (the stats still run without it)
+        return {"error": repr(e)}
+    s = json.load(open(STATE))
+    seen = {}
+    t = lo
+    while t <= now:
+        for w in rq.hog_warnings(s, t):
+            k = (w["name"], w["rule"])
+            x = seen.setdefault(k, {"thread": w["name"], "rule": w["rule"], "first": t, "last": t, "peak": w["value"]})
+            x["last"] = t; x["peak"] = max(x["peak"], w["value"])
+        t += 900
+    secs = {}
+    for r in s["requests"]:
+        if r.get("created") and lo <= ts(r["created"]) <= now:
+            n = rq.THREAD_NAMES.get(r["thread"], r["thread"][-6:])
+            secs[n] = secs.get(n, 0) + rq.request_seconds(r)
+    tot = sum(secs.values()) or 1
+    told = {}
+    for e in events:
+        if e["ev"] == "hog" and ts(e["t"]) >= lo:
+            n = rq.THREAD_NAMES.get(e.get("thread", ""), e.get("thread", "")[-6:])
+            told[n] = told.get(n, 0) + 1
+    pings, unpinged = {}, {}
+    for e in events:
+        if e["ev"] in ("ping", "unpinged") and ts(e["t"]) >= lo:
+            n = rq.THREAD_NAMES.get(e.get("thread", ""), e.get("thread", "")[-6:])
+            d = pings if e["ev"] == "ping" else unpinged
+            d[n] = d.get(n, 0) + 1
+    return {"rules": rq.HOG, "pings": pings, "unpinged": unpinged,
+            "share": {k: round(v / tot, 2) for k, v in sorted(secs.items(), key=lambda kv: -kv[1])},
+            "seconds": {k: round(v) for k, v in secs.items()},
+            "warnings": [dict(v, first=dt.datetime.fromtimestamp(v["first"], dt.timezone.utc).strftime("%H:%MZ"),
+                              last=dt.datetime.fromtimestamp(v["last"], dt.timezone.utc).strftime("%H:%MZ"))
+                         for v in seen.values()],
+            "told": told}
 
 
 def build_seconds(key):
@@ -455,6 +500,14 @@ def report(st):
         r = t["rejections"]
         out.append(f"  rejections by tag {r['by_tag']}, by garment {r['by_garment']}, by who {r['by_who']}")
         out.append(f"  rounds (requests) per piece: {dict(list(r['rounds_per_piece'].items())[:8])}")
+    h = st.get("hogging")
+    if h and "error" not in h:
+        out += ["", "Hogging (one thread's share of the render time; warnings replayed every 15 min):",
+                "  share: " + "; ".join(f"{k} {v:.0%} ({fmt(h['seconds'][k])})" for k, v in list(h["share"].items())[:8])]
+        out += [f"  {w['thread']}: {w['rule']} from {w['first']} to {w['last']}, peak {w['peak']}" for w in h["warnings"]] \
+            or ["  no thread passed a warning"]
+        out.append(f"  warnings told to threads at request time: {h['told'] or 'none'}; rules {h['rules']}")
+        out.append(f"  pings by thread: {h['pings'] or 'none'}; requests sent without a recent ping: {h['unpinged'] or 'none'}")
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]
     return "\n".join(out)
