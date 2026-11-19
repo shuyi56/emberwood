@@ -39,6 +39,7 @@ RATIOS = {
     'elbow_bend': 1.2 / CM,  # the sleeve's forward curve at the elbow (a two-piece sleeve is cut bent)
     'support_chord': 0.80,   # the head support's width against the armhole length it spans (its edge a plain cap)
     'cuff': 4.5 / CM,        # the cuff's depth
+    'cuff_drop': 0.6 / CM,   # the cuff's lower edge this far below the wrist joint (over the wrist bone: sleeve's hem)
     'lap': 1.5 / CM,         # the cuff's ends lapped at the vent
     'vent': 7.0 / CM,        # the vent, up the hindarm seam from the hem
     'underlap': 2.0 / CM,    # the undersleeve's extension under the vent
@@ -136,6 +137,7 @@ def measure(P, T, aw, M, z_elbow, z_wrist, ratios=RATIOS):
              wrist=girth(P, aw, z_wrist + 0.3 * w),
              outside=float(L['top'][2] - z_wrist), inside=float(L['under'][2] - z_wrist),
              upper=float(L['top'][2] - z_elbow), z_elbow=z_elbow, z_wrist=z_wrist)
+    m['rise_back'] = float(np.interp(s_hind, s[:-1], loop[:, 2]) - np.interp(s_fore, s[:-1], loop[:, 2]))
     m['notch_front'] = s_fore - ratios['notch_in']
     m['notch_back'] = s_hind + ratios['notch_in']
     m['gathered'] = m['notch_front'] + (G - m['notch_back'])    # (the armhole between the notches, over the crown)
@@ -150,11 +152,13 @@ def draft(m, ratios=RATIOS):
     Wb, We, Ww = m['bicep'] + ease, m['elbow'] + ease, m['wrist'] + ease
     # the undersleeve's width at the cap's base: a little short of the armhole's underarm, so its head dips into the
     # underarm curve and matches it; the topsleeve takes the rest of the sleeve's width
-    ts = max(ratios['top_share'], 1.0 - ratios['under_dip'] * m['under_head'] / Wb)
+    rb = m['rise_back']
+    under_w = math.sqrt(max((ratios['under_dip'] * m['under_head']) ** 2 - rb ** 2, (0.3 * m['under_head']) ** 2))
+    ts = max(ratios['top_share'], 1.0 - under_w / Wb)
     # heights: the cap's base (the underarm) below the crown line, the elbow, the wrist
     cap = 0.75 * m['depth'] + ratios['crown_rise'] * w
     y_el = m['upper']
-    y_wr = m['outside']
+    y_wr = m['outside'] - (ratios['cuff'] - ratios['cuff_drop'])   # (the sleeve ends at the cuff's top)
     bend = ratios['elbow_bend']
 
     def sides(share, y):
@@ -165,30 +169,43 @@ def draft(m, ratios=RATIOS):
         return c - 0.5 * W, c + 0.5 * W
 
     ys = np.linspace(cap, y_wr, 60)
-    fx_t, bx_t = sides(ts, ys)
-    fx_u, bx_u = sides(1.0 - ts, ys)
+    # (the hindarm seam meets the armhole higher than the forearm seam, by the armhole's own rise between them, so
+    # the back edges start higher: each edge as long as the arm is from its seam's point to the cuff)
+    yb = np.linspace(cap - rb, y_wr, 60)
+    fx_t, _ = sides(ts, ys)
+    _, bx_t = sides(ts, yb)
+    fx_u, _ = sides(1.0 - ts, ys)
+    _, bx_u = sides(1.0 - ts, yb)
     # the topsleeve's hindarm edge let out over the elbow by the ease (eased into the undersleeve's when sewn)
-    bulge = np.exp(-0.5 * ((ys - y_el) / (0.18 * (y_wr - cap))) ** 2)
+    bulge = np.exp(-0.5 * ((yb - y_el) / (0.18 * (y_wr - cap))) ** 2)
     extra = ratios['elbow_ease']
-    k = _solve(lambda a: _len(np.stack([bx_t + a * bulge, ys], 1)), _len(np.stack([bx_u, ys], 1)) + extra, 0.0, 3.0)
+    k = _solve(lambda a: _len(np.stack([bx_t + a * bulge, yb], 1)), _len(np.stack([bx_u, yb], 1)) + extra, 0.0, 3.0)
     bx_t2 = bx_t + k * bulge
     fore_t = np.stack([fx_t, ys], 1)[::-1]                 # (wrist up to the cap's base: clockwise, y down)
     vent0 = y_wr - ratios['vent']
-    iv = int(np.searchsorted(ys, vent0))
-    hind_t = np.stack([bx_t2, ys], 1)[:iv + 1]               # (sewn: the cap's base down to the vent's top)
-    vent_t = np.stack([bx_t2, ys], 1)[iv:]                   # (the vent: faced, left open, buttoned)
+    iv = int(np.searchsorted(yb, vent0))
+    hind_t = np.stack([bx_t2, yb], 1)[:iv + 1]               # (sewn: the cap's base down to the vent's top)
+    vent_t = np.stack([bx_t2, yb], 1)[iv:]                   # (the vent: faced, lapped over the undersleeve's underlap)
     # the topsleeve's head: from its forearm edge's top over the crown to its hindarm edge's top. Its length: the
     # plain stretches beside the seams, and the gathered armhole between the notches let out by the fullness
     target = ratios['notch_in'] * 2 + m['gathered'] * (1.0 + ratios['full'])
-    p0, p3 = np.array([fx_t[0], cap]), np.array([bx_t2[0], cap])
+    p0, p3 = np.array([fx_t[0], cap]), np.array([bx_t2[0], cap - rb])
 
-    def head(h):
-        top = np.array([0.5 * (p0[0] + p3[0]) + 0.1 * (p3[0] - p0[0]), cap - h])
+    def head(h, off):
+        top = np.array([0.5 * (p0[0] + p3[0]) + off * (p3[0] - p0[0]), cap - h])
         a = _bezier(p0, p0 + [0.0, -0.55 * h], top + [-0.35 * (top[0] - p0[0]) - 0.6 * h, 0.0], top, 40)
         b = _bezier(top, top + [0.35 * (p3[0] - top[0]) + 0.6 * h, 0.0], p3 + [0.0, -0.55 * h], p3, 40)
-        return np.concatenate([a, b[1:]])
-    h = _solve(lambda h_: _len(head(h_)), target, 0.1, 6.0 * cap + 10.0)
-    head_t = head(h)
+        return np.concatenate([a, b[1:]]), len(a)
+    # (the crown, where the head meets the bodice's shoulder seam, as far along the head as it is along the armhole
+    # once the gathers are let out: the front's gathered stretch is the longer, so the crown stands behind the middle)
+    crown_at = (ratios['notch_in'] + (m['front_head'] - ratios['notch_in']) * (1.0 + ratios['full'])) / target
+
+    def shaped(off):
+        h_ = _solve(lambda hh: _len(head(hh, off)[0]), target, 0.1, 6.0 * cap + 10.0)
+        c, na = head(h_, off)
+        return h_, c, _len(c[:na]) / _len(c)
+    off = _solve(lambda o: shaped(o)[2], crown_at, -0.45, 0.45)
+    h, head_t, _ = shaped(off)
     wrist_t = np.stack([np.linspace(bx_t2[-1], fx_t[-1], 12), np.full(12, y_wr)], 1)
     top = Piece('topsleeve', {'head': head_t, 'hindarm': hind_t, 'vent': vent_t, 'wrist': wrist_t, 'forearm': fore_t},
                 {'head': ratios['seam_head'], 'hindarm': ratios['seam'], 'vent': ratios['seam'], 'wrist': ratios['hem'],
@@ -199,9 +216,9 @@ def draft(m, ratios=RATIOS):
     for d_ in (ratios['notch_in'], sh[-1] - ratios['notch_in']):
         top.notches.append(head_t[int(np.argmin(np.abs(sh - d_)))])
     top.notches.append(head_t[int(np.argmin(head_t[:, 1]))])          # (the crown: to the bodice's shoulder seam)
-    top.notches.append(np.array([bx_t2[int(np.argmin(np.abs(ys - y_el)))], y_el]))   # (the elbow: ease between)
+    top.notches.append(np.array([bx_t2[int(np.argmin(np.abs(yb - y_el)))], y_el]))   # (the elbow: ease between)
     # the undersleeve: its own plain head, a shallow curve dipping below the cap's base, to the armhole's underarm
-    q0, q3 = np.array([fx_u[0], cap]), np.array([bx_u[0], cap])
+    q0, q3 = np.array([fx_u[0], cap]), np.array([bx_u[0], cap - rb])
 
     def uhead(d):
         mid = 0.5 * (q0 + q3) + [0.0, d]
@@ -211,10 +228,10 @@ def draft(m, ratios=RATIOS):
     d = _solve(lambda d_: _len(uhead(d_)), m['under_head'], 0.0, 4.0) if _len(uhead(0.0)) < m['under_head'] else 0.0
     head_u = uhead(d)
     fore_u = np.stack([fx_u, ys], 1)
-    hind_u = np.stack([bx_u, ys], 1)[:iv + 1][::-1]          # (sewn: the vent's top up to the cap's base)
+    hind_u = np.stack([bx_u, yb], 1)[:iv + 1][::-1]          # (sewn: the vent's top up to the cap's base)
     # (the underlap under the vent: the hindarm edge stepped out by it, from the wrist up to the vent's top)
-    lap_u = np.concatenate([np.stack([bx_u[iv:] + ratios['underlap'], ys[iv:]], 1)[::-1],
-                            [[bx_u[iv], ys[iv]]]])
+    lap_u = np.concatenate([np.stack([bx_u[iv:] + ratios['underlap'], yb[iv:]], 1)[::-1],
+                            [[bx_u[iv], yb[iv]]]])
     wrist_u = np.stack([np.linspace(fx_u[-1], bx_u[-1] + ratios['underlap'], 10), np.full(10, y_wr)], 1)
     # (clockwise like the topsleeve: the head front to back, down the hindarm and underlap, the wrist back to front,
     # up the forearm)
@@ -224,8 +241,8 @@ def draft(m, ratios=RATIOS):
                   {'head': ratios['seam_head'], 'hindarm': ratios['seam'], 'underlap': ratios['seam'],
                    'wrist': ratios['hem'], 'forearm': ratios['seam']},
                   grain=np.array([[0.5 * (fx_u[0] + bx_u[0]), cap + d + 1.0], [0.5 * (fx_u[0] + bx_u[0]), y_el]]))
-    under.notches.append(np.array([bx_u[int(np.argmin(np.abs(ys - y_el)))], y_el]))
-    under.notches.append(np.array([bx_u[iv], ys[iv]]))
+    under.notches.append(np.array([bx_u[int(np.argmin(np.abs(yb - y_el)))], y_el]))
+    under.notches.append(np.array([bx_u[iv], yb[iv]]))
     # the cuff and its facing: straight-grain bands, the wrist's cloth girth and the lap
     Lc = Ww + ratios['lap']
 
@@ -264,10 +281,10 @@ def draft(m, ratios=RATIOS):
 SEAMS = [
     ('forearm seam', ('topsleeve', 'forearm'), ('undersleeve', 'forearm'), 'plain'),
     ('hindarm seam', ('topsleeve', 'hindarm'), ('undersleeve', 'hindarm'), 'eased over the elbow, down to the vent'),
-    ('vent', ('topsleeve', 'vent'), ('undersleeve', 'underlap'), 'faced, lapped over the underlap, buttoned'),
+    ('vent', ('topsleeve', 'vent'), ('undersleeve', 'underlap'), 'faced, lapped over the underlap'),
     ('sleeve head', ('topsleeve', 'head'), ('bodice', 'armhole: front notch over the crown to the back notch'), 'gathered between the notches'),
     ('underarm', ('undersleeve', 'head'), ('bodice', 'armhole: the underarm, forearm seam to hindarm seam'), 'plain'),
-    ('cuff', ('cuff', 'top'), ('sleeve', 'wrist (topsleeve + undersleeve)'), 'plain, ends lapped at the vent'),
+    ('cuff', ('cuff', 'top'), ('sleeve', 'wrist (topsleeve + undersleeve)'), 'plain, ends lapped at the vent and buttoned'),
     ('cuff facing', ('cuff facing', 'top'), ('cuff', 'bottom'), 'turned in'),
     ('support', ('head support (net)', 'head'), ('topsleeve', 'head'), 'tacked in the head seam, the head gathered over it'),
 ]
