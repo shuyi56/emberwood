@@ -3,10 +3,11 @@ over them. The hose are drafted in draft.py from the legs' own measurements; thi
 wool's look.
 
     python3 blender/base/views.py --figure hose --mannequin --turn --clay --out DIR
-    python3 blender/base/views.py --figure hose --mannequin --head --set "VIEW='knee'" --out DIR
+    python3 blender/base/views.py --figure hose --mannequin --head --set VIEW=2 --out DIR
 
-VIEW frames the --head close-up on one part of the hose: 'hips' (the waist to the crotch), 'knee', 'ankle', or 'legs'
-(the default: the waist to the floor). FOOT (draft.FOOT) is 'footed', 'stirrup' or 'open'.
+VIEW frames the --head close-up on one part of the hose, by its place in FRAMES: 0 'legs' (the default: the waist to
+the floor), 1 'hips' (the waist to the crotch), 2 'knee', 3 'ankle'. (A number, because views.py evaluates every --set
+value and the queue's commands carry no quotes.) FOOT (draft.FOOT) is 'footed', 'stirrup' or 'open'.
 
 Hose in the 14th and 15th centuries were cut from woven wool on the bias, so the cloth's give lies along the leg and
 round it, sewn up the back of the leg, footed or strapped under the foot, and tied to the doublet at the waist by
@@ -28,7 +29,8 @@ import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 import draft  # noqa: E402
 
-VIEW = 'legs'
+FRAMES = ('legs', 'hips', 'knee', 'ankle')
+VIEW = 0
 FOOT = draft.FOOT
 MASK = True                  # hide the skin the hose covers (it cannot show through a bent knee)
 MEASURES = {}
@@ -187,7 +189,7 @@ def build():
     floor = float(B['P'][:, 2].min())
     frames = {'legs': (floor - 0.5, M['waist_z'] + 1.5), 'hips': (M['crotch_z'] - 3.0, M['waist_z'] + 1.5),
               'knee': (M['knee_z'] - 3.5, M['knee_z'] + 3.5), 'ankle': (floor - 0.4, M['ankle_z'] + 4.5)}
-    lo, hi = frames.get(VIEW, frames['legs'])
+    lo, hi = frames[FRAMES[VIEW] if isinstance(VIEW, int) else VIEW]
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()
