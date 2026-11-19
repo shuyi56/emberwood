@@ -4361,12 +4361,12 @@ R_PELVIS_TURN, R_PELVIS_LIST, R_SWAY = 0.12, 0.05, 0.35
 # closing a little as the arm comes forward and opening as it drives back
 R_ARM_SWING, R_ARM_BACK, R_ARM_LAG = 0.62, 0.12, 0.02
 R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.5, 0.07
-# the wrist (John, 2026-11-19: the hand looked off, dead in line with the forearm like a paddle). A running hand is
-# carried loose: with the thumb on top it droops a little from the forearm's line (R_WRIST, toward the little finger),
-# trails the arm's swing (R_WRIST_LAG: dropped back as the arm drives forward, flicked through as it swings back),
-# is curled in a touch toward the body (R_WRIST_IN) and turned so the palm faces partly down (R_WRIST_TURN). All
-# well inside what a wrist bends: about 30 degrees toward the little finger, 60 folding in.
-R_WRIST, R_WRIST_LAG, R_WRIST_IN, R_WRIST_TURN = 0.24, 0.1, 0.14, 0.2
+# the wrist (John, 2026-11-19: the hand looked off, dead in line with the forearm like a paddle; then, of a wrist
+# that drooped: the hands should bend up, not down). A running fist is carried cocked: with the thumb on top it is
+# held a little up from the forearm's line (R_WRIST, toward the thumb, so negative about the wrist's X), gives a
+# touch with the arm's swing (R_WRIST_LAG), is curled in toward the body (R_WRIST_IN) and turned so the palm faces
+# partly down (R_WRIST_TURN). All well inside what a wrist bends: about 20 degrees toward the thumb, 60 folding in.
+R_WRIST, R_WRIST_LAG, R_WRIST_IN, R_WRIST_TURN = -0.2, 0.05, 0.14, 0.2
 # the ankle through the swing: (how far through the swing, the foot pointed away from the shin, degrees). In the air
 # the foot hangs from the shin, loose and pointed as the heel comes up behind, then drawn up to meet the ground. (It
 # is eased in from the push-off's pitch and out to the landing's over the first and last R_ANKLE_EASE of the swing.)
