@@ -171,7 +171,10 @@ def wool_closeup(name, P=WOOL):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
-def skirt_weights(M, body=None, near=(0.05, 1.3)):
+NEAR = tuple(float(v) for v in os.environ.get('SKIRT_NEAR', '0.05,1.3').split(','))     # how far from the skin the cloth follows a leg
+
+
+def skirt_weights(M, body=None, near=None):
     """The rig weights of a point of the skirt. The pelvis carries the top; below the hips each side's thigh takes a
     share rising to 0.45 at the knee and easing back at the hem, blended across the middle so the centre front and
     back are carried half by each leg (the back carries less: a thigh swinging forward would tip the back of the
@@ -180,6 +183,7 @@ def skirt_weights(M, body=None, near=(0.05, 1.3)):
     near[1] H): a thigh swung forward lifts the cloth it would have gone through with it, and the far flare, which
     the legs never reach, stays on the pelvis."""
     from mathutils.bvhtree import BVHTree
+    near = near or NEAR
     H = M['H']
 
     def ss(a, b, x):
