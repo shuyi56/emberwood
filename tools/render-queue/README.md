@@ -154,6 +154,46 @@ tears the body as well as the cloth is a rig limit, not a fault of yours.
 The nightly report counts crops, pose strips, how long jobs with only crops or poses take, and the rejections
 that came out of a pose strip.
 
+## Telemetry and the early geometry check
+
+John's telemetry (2026-11-19). Every `views.py` job now runs through the queue's `rq_views.py`, which runs
+`views.py`'s own code unchanged and adds measurements. The job's key is unchanged, so cached results stay valid.
+
+**Per job, in `manifest.json`:**
+- `queue_wait`, the time from the first request to the start
+- `phases`: Blender's startup, loading the scripts, the build, the geometry checks, the renders, the crops and
+  the poses
+- `settings`: quality, size, samples, the scene or set, and the mannequin
+- `solver`: the git blob of every solver, settle, sew, xpbd or drape script at that commit
+- `cause`, a short reason when the job failed
+- `geometry`, the geometry check's numbers
+
+The same phases and cause go on the job's `done` or `failed` line in `events.jsonl`.
+
+**The geometry checks run after the build, before the first render,** and are saved as `geometry.json`:
+- `inside_pct` and `max_depth`: the share of each garment's vertices inside the body, and the deepest. This is
+  penetration and clipping through the body.
+- `stretch_p99` and `squash_p1`: how far the garment's edges are stretched or squashed from the garment as
+  built.
+- The body's height, shoulder width and hip width and depth, so a drift in its ratios shows from commit to
+  commit.
+
+The checks never fail a render on their own. `RQ_PRECHECK` holds thresholds, for example
+`{"inside_pct": 5, "stretch_p99": 1.6}`. With it set, a garment past a threshold stops the job before it
+renders, and `precheck.json` says why. The thresholds stay unset until the nightly job has matched the
+numbers against the logged rejections. Seam-length mismatch needs each garment's seam pairs, so it is not
+checked yet.
+
+**The nightly report** (`rq_stats.py`, section "Telemetry") gives:
+- the phase medians and totals
+- failures by cause
+- the cache-hit rate (jobs already rendered when a request was first planned)
+- requests by quality (drafts against finals)
+- each thread's cost: requests, checks and finals, and render time, with a shared job split among its requests
+- garments past the geometry bands (over 2% inside, stretched past 1.3x, squashed below 0.7x)
+- body-ratio drift past 1% from the median
+- rejections by tag, garment and who, and the rounds of requests per piece
+
 ## Review before the queue
 
 The reviewer thread checks each request without rendering anything, in about two minutes:

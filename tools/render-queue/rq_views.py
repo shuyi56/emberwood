@@ -20,18 +20,26 @@ Regions (centred on the figure's axis, so one crop serves every angle; both side
   neck, shoulder, armhole, bust, elbow, waist, wrist (the cuff), hips (the seat), hand, knee, hem (floor length),
   ankle, face, head.
 """
+import json
 import math
 import os
+import sys
 import tempfile
+import time
 
+T0 = time.time()
 HERE = os.path.dirname(os.path.abspath(__file__))
 VIEWS_PY = os.path.join(HERE, 'views.py')
 src = open(VIEWS_PY).read()
 cut = src.rstrip().rfind('\nmain()')
-if cut < 0:
-    raise SystemExit('rq_views: views.py at this commit does not end in main()')
+if cut < 0:                 # (a views.py that does not end in main(): run it as it is, with no extras)
+    import runpy
+    print('rq_views: views.py does not end in main(): running it as it is', flush=True)
+    runpy.run_path(VIEWS_PY, run_name='__main__')
+    sys.exit(0)
 V = {'__file__': VIEWS_PY, '__name__': 'views_lib'}
 exec(compile(src[:cut], VIEWS_PY, 'exec'), V)
+T_LOADED = time.time()
 bpy, female, opt, argv = V['bpy'], V['female'], V['opt'], V['argv']
 
 POSES = ('rest', 'arms-up', 'arms-fwd', 'elbows', 'step', 'crouch', 'twist')
@@ -187,13 +195,149 @@ def poses(out):
     print('wrote', os.path.join(out, 'poses.png'), flush=True)
 
 
+def garments():
+    """The meshes showing that are not the base figure's (a material id from FIGURE_MATS up, not under the head)."""
+    ids = {d['name']: mid for mid, d in female.MATERIALS.items()}
+    first = V.get('FIGURE_MATS', 30)
+    out = []
+    for o in bpy.data.objects:
+        if o.type != 'MESH' or o.hide_render or o.active_material is None:
+            continue
+        if ids.get(o.active_material.name.split('.')[0], first) < first:
+            continue
+        q = o
+        while q.parent is not None and q.parent.name != 'Head':
+            q = q.parent
+        if q.parent is None:
+            out.append(o)
+    return out
+
+
+def geometry(out):
+    """Per-garment geometry checks on every build (John, 2026-11-19), in the pose the views were rendered in:
+    how much of each garment sits inside the body (penetration), how far its edges are stretched or squashed from
+    the garment as built (stretch), and the body's own size (so a drift in its ratios shows night to night).
+    Written to DIR/geometry.json for the queue's manifest and the nightly report."""
+    import numpy as np
+    from mathutils.bvhtree import BVHTree
+    t = time.time()
+    dg = bpy.context.evaluated_depsgraph_get()
+    body = bpy.data.objects.get('Skin body')
+    res = {'body': {}, 'garments': {}}
+    tree, inv = None, None
+    if body is not None:
+        tree = BVHTree.FromObject(body, dg)
+        inv = body.matrix_world.inverted()
+        be = body.evaluated_get(dg)
+        bm = be.to_mesh()
+        P = np.array([(be.matrix_world @ v.co)[:] for v in bm.vertices])
+        be.to_mesh_clear()
+        if len(P):
+            sh = P[np.abs(P[:, 2] - female.SH_Z) < 1.0]
+            hp = P[np.abs(P[:, 2] - female.HIP_Z) < 1.0]
+            res['body'] = {'height': round(float(P[:, 2].max() - P[:, 2].min()), 3),
+                           'shoulder_width': round(float(np.ptp(sh[:, 0])), 3) if len(sh) else None,
+                           'hip_width': round(float(np.ptp(hp[:, 0])), 3) if len(hp) else None,
+                           'hip_depth': round(float(np.ptp(hp[:, 1])), 3) if len(hp) else None}
+    for o in garments():
+        ev = o.evaluated_get(dg)
+        me = ev.to_mesh()
+        n = len(me.vertices)
+        g = {'verts': n}
+        if tree is not None and n:
+            M = inv @ ev.matrix_world
+            inside, deep = 0, 0.0
+            for v in me.vertices:
+                p = M @ v.co
+                loc, nrm, _, _ = tree.find_nearest(p, 3.0)
+                if loc is None:
+                    continue
+                d = (p - loc).dot(nrm)
+                if d < -0.05:
+                    inside += 1
+                    deep = max(deep, -d)
+            g.update(inside=inside, inside_pct=round(100.0 * inside / n, 2), max_depth=round(deep, 3))
+        rest = o.data
+        if n and len(rest.vertices) == n and len(me.edges) == len(rest.edges) and len(me.edges):
+            a = np.array([[e.vertices[0], e.vertices[1]] for e in me.edges])
+            pe = np.array([v.co[:] for v in me.vertices])
+            pr = np.array([v.co[:] for v in rest.vertices])
+            le, lr = np.linalg.norm(pe[a[:, 0]] - pe[a[:, 1]], axis=1), np.linalg.norm(pr[a[:, 0]] - pr[a[:, 1]], axis=1)
+            ok = lr > 1e-6
+            r = le[ok] / lr[ok]
+            if len(r):
+                g.update(stretch_p99=round(float(np.percentile(r, 99)), 3), squash_p1=round(float(np.percentile(r, 1)), 3),
+                         over_25pct=int((r > 1.25).sum()), under_25pct=int((r < 0.75).sum()))
+        ev.to_mesh_clear()
+        res['garments'][o.name] = g
+    res['seconds'] = round(time.time() - t, 2)
+    with open(os.path.join(out, 'geometry.json'), 'w') as f:
+        json.dump(res, f, indent=1)
+    worst = sorted(res['garments'].items(), key=lambda kv: -kv[1].get('inside_pct', 0))[:3]
+    print('rq geometry: ' + '; '.join(f"{k} {v.get('inside_pct', '-')}% inside, stretch p99 {v.get('stretch_p99', '-')}"
+                                       for k, v in worst), flush=True)
+
+
+def precheck(out):
+    """The early rejection check (John, 2026-11-19): the geometry checks run right after the build, before any
+    render. With RQ_PRECHECK set (JSON: {"inside_pct": 5, "stretch_p99": 1.6, "squash_p1": 0.5}, thresholds the
+    nightly job calibrates from the rejections), a garment past one of them stops the job before it renders, and
+    DIR/precheck.json says which garment and why. Without it the numbers are only recorded."""
+    geometry(out)
+    lim = json.loads(os.environ.get('RQ_PRECHECK') or '{}')
+    if not lim:
+        return
+    g = json.load(open(os.path.join(out, 'geometry.json')))
+    bad = []
+    for name, v in g['garments'].items():
+        if 'inside_pct' in lim and (v.get('inside_pct') or 0) > lim['inside_pct']:
+            bad.append(f"{name}: {v['inside_pct']}% inside the body (limit {lim['inside_pct']}%)")
+        if 'stretch_p99' in lim and (v.get('stretch_p99') or 0) > lim['stretch_p99']:
+            bad.append(f"{name}: stretched {v['stretch_p99']}x (limit {lim['stretch_p99']}x)")
+        if 'squash_p1' in lim and v.get('squash_p1') is not None and v['squash_p1'] < lim['squash_p1']:
+            bad.append(f"{name}: squashed {v['squash_p1']}x (limit {lim['squash_p1']}x)")
+    if bad:
+        with open(os.path.join(out, 'precheck.json'), 'w') as f:
+            json.dump({'failed': bad, 'limits': lim}, f, indent=1)
+        print('rq precheck: failed, not rendering: ' + '; '.join(bad), flush=True)
+        raise SystemExit('rq precheck: ' + '; '.join(bad))
+    print('rq precheck: passed', flush=True)
+
+
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), 'rq-views'))
+    os.makedirs(out, exist_ok=True)
+    timing = {'load': round(T_LOADED - T0, 1)}
+    built = V['F'].build
+    checked = {}
+
+    def build_then_check(*a, **k):      # (the geometry checks between the build and the first render)
+        r = built(*a, **k)
+        if os.environ.get('RQ_GEOMETRY', '1') != '0' and '--list' not in argv and not opt('--save'):
+            t = time.time()
+            try:
+                precheck(out)
+            except SystemExit:
+                raise
+            except Exception as e:      # (a check must never fail the render)
+                print(f'rq geometry: skipped ({type(e).__name__}: {e})', flush=True)
+            checked['s'] = round(time.time() - t, 1)
+        return r
+    V['F'].build = build_then_check
+    t = time.time()
     V['main']()             # views.py itself: the build and whatever it was asked for
-    if opt('--crop'):
-        crops(out)
-    if opt('--poses') or '--poses' in argv:
-        poses(out)
+    timing['views'] = round(time.time() - t, 1)
+    if '--list' in argv or opt('--save'):
+        return
+    if 's' in checked:
+        timing['geometry'] = checked['s']      # (inside views.py's own 'build N s', which includes it)
+    for name, fn, on in (('crops', crops, bool(opt('--crop'))), ('poses', poses, '--poses' in argv)):
+        if on:
+            t = time.time()
+            fn(out)
+            timing[name] = round(time.time() - t, 1)
+    with open(os.path.join(out, 'timing.json'), 'w') as f:
+        json.dump(timing, f)
 
 
 main()

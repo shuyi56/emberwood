@@ -105,9 +105,11 @@ def parse_view(param):
             env.append(words.pop(0))
     if not words or words[0] not in (VIEWS_PY, RQ_VIEWS):
         return None
-    a, i = {}, 1
+    a, i, sets_ = {}, 1, []
     while i < len(words):
         w = words[i]
+        if w == "--set" and i + 1 < len(words):     # (a figure setting: jobs share a build only with the same ones)
+            sets_.append(words[i + 1]); i += 2; continue
         if w not in MERGEABLE or (MERGEABLE[w] and i + 1 >= len(words)):
             return None
         a[w] = words[i + 1] if MERGEABLE[w] else True
@@ -115,8 +117,10 @@ def parse_view(param):
     if "--figure" not in a or not ("--turn" in a or "--head" in a or "--crop" in a or "--poses" in a) \
             or any(e.startswith("OUTFIT") for e in env):
         return None
+    if sets_:
+        a["--set"] = sorted(sets_)
     return {"env": env, "check": check, "a": a, "group": (tuple(sorted(env)), check, "--mannequin" in a,
-                                                          a.get("--frame"))}
+                                                          a.get("--frame"), tuple(sorted(sets_)))}
 
 
 def view_images(a):
@@ -137,7 +141,14 @@ def _union_list(parts, key, order=None):
     return ",".join(sorted(vals, key=order.index) if order and all(v in order for v in vals) else vals)
 
 
+def _views_part(p):
+    return "--turn" in p or "--head" in p
+
+
 def union_args(parts, figure):
+    # a crop's or a pose strip's own angles are made explicit first, so a turn beside it keeps its own
+    parts = [dict(p, **({"--crop-angles": p.get("--angles") or "3/4"} if "--crop" in p and "--crop-angles" not in p
+                        else {})) for p in parts]
     a = {"--figure": figure}
     for f in ("--mannequin", "--turn", "--head", "--denoise"):
         if any(f in p for p in parts):
@@ -147,8 +158,9 @@ def union_args(parts, figure):
         a["--clay-only"] = True
     elif any("--clay" in p or "--clay-only" in p for p in looked):
         a["--clay"] = True
-    if all("--angles" in p for p in parts):
-        want = {x for p in parts for x in p["--angles"].split(",")}
+    vparts = [p for p in parts if _views_part(p)]
+    if vparts and all("--angles" in p for p in vparts):
+        want = {x for p in vparts for x in p["--angles"].split(",")}
         a["--angles"] = ",".join([x for x in ANGLES if x in want] + sorted(want - set(ANGLES)))
     if any("--crop" in p for p in parts):
         a["--crop"] = _union_list(parts, "--crop")
@@ -160,18 +172,24 @@ def union_args(parts, figure):
         if pa:
             a["--pose-angle"] = pa
     for k in ("--size", "--samples", "--crop-size", "--pose-size"):
-        vals = [int(p[k]) for p in parts if k in p]
+        vals = [int(p[k]) for p in (vparts if k in ("--size", "--samples") else parts) if k in p]
         if vals:
             a[k] = str(max(vals))
     if parts[0].get("--frame"):
         a["--frame"] = parts[0]["--frame"]
+    if parts[0].get("--set"):
+        a["--set"] = parts[0]["--set"]          # (the same in every part: they are in one group)
     return a
 
 
 def view_param(env, a, check):
     words = [RQ_VIEWS if ("--crop" in a or "--poses" in a) else VIEWS_PY]
     for k, v in a.items():
-        words += [k] if v is True else [k, v]
+        if k == "--set":
+            for x in v:
+                words += ["--set", x]
+        else:
+            words += [k] if v is True else [k, v]
     return ("env " + " ".join(env) + " " if env else "") + shlex.join(words) + (CHECK if check else "")
 
 
@@ -196,8 +214,9 @@ def combine_views(bjobs, solo):
             for lot in lots[1:]:
                 cur = merged[-1]
                 parts = [pv["a"] for _, pv in cur + lot]
-                same = all(p.get("--size") == parts[0].get("--size") and p.get("--samples") == parts[0].get("--samples")
-                           for p in parts)
+                vp = [p for p in parts if _views_part(p)]
+                same = all(p.get("--size") == vp[0].get("--size") and p.get("--samples") == vp[0].get("--samples")
+                           for p in vp)
                 n_req = len({i for j, _ in cur + lot for i in j["requests"]})
                 if same and n_req <= MAX_MERGE and view_images(union_args(parts, fig)) <= sum(map(view_images, parts)):
                     merged[-1] = cur + lot
@@ -566,6 +585,8 @@ def plan(fetch=True):
     jobs = list(seen.values())
     for r in ready:
         r["jobs"] = [j["key"] for j in jobs if r["id"] in j["requests"]]
+        if "cache_hits" not in r and r["jobs"]:       # (the cache-hit rate: what it found ready when first planned)
+            r["cache_hits"] = sum(1 for k in r["jobs"] if cached(k))
     # full sheets: only once the scheduled task has marked them due; main first, then the branches marked ready
     if s["sheet_due"]:
         for br in ["main"] + s["ready"]:
@@ -619,6 +640,9 @@ def command(job, out):
         sets = [w for w in words[:next((i for i, w in enumerate(words) if "=" not in w), len(words))]]
         view = shlex.join(words[len(sets):])
         env = "env " + " ".join(q(w) for w in sets) + " "
+    w = shlex.split(view)
+    if w and w[0] == VIEWS_PY:          # (every views.py job runs through rq_views.py: geometry checks, timing)
+        view = shlex.join([RQ_VIEWS] + w[1:])
     return f"{env}{run} -- {view} --out {q(out)}"
 
 
@@ -631,7 +655,7 @@ def start(job):
     if job.get("pieces") or "--figure outfit" in (job["param"] or ""):
         os.makedirs(os.path.join(wt, "blender", "outfit"), exist_ok=True)
         shutil.copy(OUTFIT, os.path.join(wt, "blender", "outfit", "outfit.py"))
-    if RQ_VIEWS in (job["param"] or ""):
+    if job["kind"] == "views" and (RQ_VIEWS in (job["param"] or "") or VIEWS_PY in (job["param"] or "")):
         shutil.copy(RQ_VIEWS_SRC, os.path.join(wt, RQ_VIEWS))
     log = open(os.path.join(tmp_out, "render.log"), "w")
     cmd = command(job, tmp_out)
@@ -650,7 +674,9 @@ def finish(run):
             p = os.path.join(root, f)
             files[os.path.relpath(p, run["out"])] = {"bytes": os.path.getsize(p),
                                                        "git_blob": git("hash-object", p).stdout.strip()}
+    tele = telemetry(run, rc)
     m = {"ok": rc == 0, "key": job["key"], "kind": job["kind"], "param": job["param"], "commit": job["commit"],
+         **tele,
          "combines": job["combines"], "seconds": round(time.time() - run["t0"]), "files": files, "finished": now(),
          "requests": job["requests"], **{k: job[k] for k in ("merged_from", "set", "pieces") if k in job}}
     with open(os.path.join(run["out"], "manifest.json"), "w") as f:
@@ -659,6 +685,73 @@ def finish(run):
     shutil.rmtree(dst, ignore_errors=True); shutil.copytree(run["out"], dst)   # only complete results land here
     shutil.rmtree(run["out"], ignore_errors=True)
     return m
+
+
+def failure_cause(log, rc):
+    """Why a job failed, in a word or two, from the end of its log (for the nightly failure log)."""
+    tail = log[-6000:]
+    if "[killed: over the" in tail:
+        return "killed at the time limit"
+    if rc in (-9, 137) or "MemoryError" in tail or "Killed" in tail.splitlines()[-1:]:
+        return "out of memory"
+    if "Segmentation fault" in tail or rc in (-11, 139):
+        return "Blender crashed"
+    m = re.findall(r"^(\w*(?:Error|Exception)): (.*)$", tail, re.M)
+    if m:
+        return f"{m[-1][0]}: {m[-1][1][:120]}"
+    m = re.findall(r"^SystemExit: (.*)$|^(?:views\.py|rq_views|outfit|pose_strip): (.*)$", tail, re.M)
+    if m:
+        return (m[-1][0] or m[-1][1])[:140]
+    return f"exit {rc}"
+
+
+def telemetry(run, rc):
+    """John's per-job telemetry (2026-11-19): the queue wait, the phases (Blender's start, loading the scripts, the
+    build, the renders, crops, poses, the geometry checks), the settings and solver code it ran with, the cause
+    of a failure, and the geometry checks' numbers."""
+    job, out = run["job"], run["out"]
+    total = time.time() - run["t0"]
+    try:
+        log = open(os.path.join(out, "render.log"), errors="replace").read()
+    except OSError:
+        log = ""
+    t = {}
+    try:
+        t = json.load(open(os.path.join(out, "timing.json")))
+    except (OSError, ValueError):
+        pass
+    b = re.search(r"^build (\d+) s", log, re.M)
+    geo_s = t.get("geometry") or 0
+    phases = {"startup": round(max(0.0, total - sum(t.get(k) or 0 for k in ("load", "views", "crops", "poses"))), 1)
+              if t else None, "load": t.get("load"), "build": round(int(b[1]) - geo_s, 1) if b else None,
+              "geometry": t.get("geometry"),
+              "render": round(t["views"] - int(b[1]), 1) if t.get("views") is not None and b else None,
+              "crops": t.get("crops"), "poses": t.get("poses")}
+    s = load()
+    created = [ts(r["created"]) for r in s["requests"] if r["id"] in job["requests"] and r.get("created")]
+    p = job["param"] or ""
+    settings = {"quality": "check" if p.endswith(CHECK) else "final",
+                "size": (re.search(r"--size (\d+)", p) or [None, None])[1],
+                "samples": "8 (check)" if p.endswith(CHECK) else (re.search(r"--samples (\d+)", p) or [None, "default"])[1],
+                "scene": (re.search(r"--figure (\S+)", p) or [None, job["kind"]])[1],
+                "pieces": job.get("pieces"),
+                "mannequin": "--mannequin" in p}
+    solver = {}
+    for path in git("ls-tree", "-r", "--name-only", job["commit"], "--", "blender/").stdout.split():
+        if re.search(r"(solver|settle|sew|xpbd|drape)\w*\.py$", path):
+            solver[path] = git("rev-parse", f"{job['commit']}:{path}").stdout.strip()[:10]
+    geo = None
+    try:
+        g = json.load(open(os.path.join(out, "geometry.json")))
+        geo = {"body": g.get("body"), "seconds": g.get("seconds"),
+               "garments": {k: {x: v.get(x) for x in ("verts", "inside_pct", "max_depth", "stretch_p99", "squash_p1")}
+                            for k, v in (g.get("garments") or {}).items()}}
+    except (OSError, ValueError):
+        pass
+    return {"queue_wait": round(run["t0"] - min(created)) if created else None, "phases": phases,
+            "settings": settings, "solver": solver, "geometry": geo,
+            "cause": None if rc == 0 else failure_cause(log, rc),
+            "warnings": len(re.findall(r"^(?:WARNING|Warning|warning)\b|rq geometry: skipped", log, re.M))}
 
 
 def stop(run):
@@ -839,7 +932,9 @@ def cmd_serve(a):
             for key in [k for k, r in running.items() if r["proc"].poll() is not None]:
                 run = running.pop(key); job = run["job"]
                 m = finish(run)
-                event("done" if m["ok"] else "failed", job["key"], seconds=m["seconds"])
+                event("done" if m["ok"] else "failed", job["key"], seconds=m["seconds"], cause=m.get("cause"),
+                      phases=m.get("phases"), quality=(m.get("settings") or {}).get("quality"),
+                      threads=sorted({r["thread"] for r in load()["requests"] if r["id"] in job["requests"]}))
                 print(f"{now()} {'done' if m['ok'] else 'FAILED'} {job['key']} in {m['seconds']}s", flush=True)
                 if job["kind"] == "sheet":
                     s = load(); s["sheets_done"][job["combines"][0]["branch"]] = job["key"]; save(s)

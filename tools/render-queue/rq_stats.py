@@ -80,7 +80,7 @@ def load_jobs():
             continue
         jobs[m["key"]] = {"key": m["key"], "kind": m.get("kind"), "param": m.get("param") or "", "ok": m.get("ok"),
                           "start": end - m.get("seconds", 0), "end": end, "seconds": m.get("seconds", 0),
-                          "requests": [c["id"] for c in m.get("combines", [])]}
+                          "requests": [c["id"] for c in m.get("combines", [])], "dir": os.path.dirname(mp)}
     return jobs
 
 
@@ -203,6 +203,7 @@ def compute(hours=None, names=None):
         "threads": by_thread,
         "blocked_now": blocked_now,
         "batching": batching(lo, events, json.load(open(STATE)) if os.path.exists(STATE) else {}),
+        "telemetry": telemetry(lo, jl, json.load(open(STATE)) if os.path.exists(STATE) else {}),
     }
 
 
@@ -313,6 +314,89 @@ def batching(lo, events, state):
     return out
 
 
+def telemetry(lo, jl, state):
+    """John's telemetry (2026-11-19), from the manifests the queue writes: phase times, failures by cause, the
+    cache-hit rate, drafts against finals, what each thread costs, the garments' geometry checks and the body's
+    ratios commit to commit, and the rejections by tag, garment, who and rounds."""
+    import re
+    ms = []
+    for j in jl:
+        try:
+            ms.append(json.load(open(os.path.join(j["dir"], "manifest.json"))))
+        except (OSError, ValueError, KeyError):
+            continue
+    ms = [m for m in ms if m.get("phases") is not None or m.get("cause")]
+    ph = {}
+    for m in ms:
+        for k, v in (m.get("phases") or {}).items():
+            if isinstance(v, (int, float)):
+                ph.setdefault(k, []).append(v)
+        if m.get("queue_wait") is not None:
+            ph.setdefault("queue_wait", []).append(m["queue_wait"])
+    phases = {k: {"median": statistics.median(v), "p90": pct(v, 0.9), "total": sum(v), "n": len(v)} for k, v in ph.items()}
+    causes = {}
+    for m in ms:
+        if m.get("cause"):
+            causes.setdefault(m["cause"], []).append(m["key"])
+    reqs = [r for r in state.get("requests", []) if ts(r.get("created")) and ts(r["created"]) >= lo]
+    planned = [r for r in reqs if r.get("jobs")]
+    hits = sum(r.get("cache_hits", 0) for r in planned)
+    total_jobs = sum(len(r["jobs"]) for r in planned)
+    quality = {}
+    for r in reqs:
+        quality[r.get("quality") or "final"] = quality.get(r.get("quality") or "final", 0) + 1
+    # what each thread costs: requests, rounds on one piece, render time, check and final
+    cost = {}
+    secs = {j["key"]: j["seconds"] for j in jl}
+    for r in reqs:
+        c = cost.setdefault(r["thread"], {"requests": 0, "render": 0, "check": 0, "final": 0, "pieces": {}})
+        c["requests"] += 1
+        c[r.get("quality") or "final"] = c.get(r.get("quality") or "final", 0) + 1
+        for k in r.get("jobs") or []:
+            n = sum(1 for x in reqs if k in (x.get("jobs") or []))
+            c["render"] += secs.get(k, 0) / max(1, n)      # (a shared job's time is split among its requests)
+        for v in r.get("views") or []:
+            for f in re.findall(r"--figure (\S+)", v):
+                c["pieces"][f] = c["pieces"].get(f, 0) + 1
+    # geometry: the latest numbers per garment, flagged past the bands; the body's size per commit
+    geo, body = {}, []
+    for m in sorted(ms, key=lambda m: m.get("finished", "")):
+        g = m.get("geometry") or {}
+        for name, v in (g.get("garments") or {}).items():
+            geo[name] = dict(v, key=m["key"])
+        if g.get("body"):
+            body.append((m["key"], m.get("commit", "")[:9], g["body"]))
+    flags = [f"{n}: {v['inside_pct']}% of its vertices inside the body (deepest {v.get('max_depth')})"
+             for n, v in geo.items() if (v.get("inside_pct") or 0) > 2.0] + \
+            [f"{n}: edges stretched to {v['stretch_p99']}x (99th percentile)" for n, v in geo.items()
+             if (v.get("stretch_p99") or 0) > 1.3] + \
+            [f"{n}: edges squashed to {v['squash_p1']}x (1st percentile)" for n, v in geo.items()
+             if v.get("squash_p1") is not None and v["squash_p1"] < 0.7]
+    drift = []
+    for k in ("height", "shoulder_width", "hip_width", "hip_depth"):
+        vals = [b[k] for _, _, b in body if b.get(k)]
+        if len(vals) >= 3:
+            med = statistics.median(vals)
+            for key, c, b in body:
+                if b.get(k) and abs(b[k] - med) / med > 0.01:
+                    drift.append(f"{k} {b[k]} at {c} ({key}): {100 * (b[k] - med) / med:+.1f}% from the median {med}")
+    rej = _rejections(lo)
+    by = lambda f: dict(sorted(((k, sum(1 for r in rej if f(r) == k)) for k in {f(r) for r in rej}), key=lambda kv: -kv[1]))  # noqa: E731
+    piece = lambda r: (re.findall(r"--figure (\S+)", " ".join(r.get("views") or []) if isinstance(r.get("views"), list) else str(r.get("views") or "")) or [r.get("branch") or "-"])[0]  # noqa: E731
+    rounds = {}
+    for r in reqs:
+        for v in r.get("views") or []:
+            for f in re.findall(r"--figure (\S+)", v):
+                rounds.setdefault(f, set()).add(r["id"])
+    return {"phases": phases, "failures": {k: len(v) for k, v in causes.items()},
+            "cache_hit_rate": (hits / total_jobs) if total_jobs else None, "cache_hits": hits, "jobs_planned": total_jobs,
+            "quality": quality, "thread_cost": cost, "geometry": geo, "geometry_flags": flags, "body_drift": drift,
+            "rejections": {"by_tag": by(lambda r: (r.get("tags") or ["-"])[0]), "by_garment": by(piece),
+                           "by_who": by(lambda r: r.get("by") or "-"),
+                           "rounds_per_piece": {f: len(v) for f, v in sorted(rounds.items(), key=lambda kv: -len(kv[1]))},
+                           "rejected_per_piece": by(piece)}}
+
+
 def report(st):
     w, m, j = st["wait"], st["machine"], st["jobs"]
     out = [f"Render queue, last {st['window']['hours']} h (since {st['window']['from']})", "",
@@ -353,6 +437,24 @@ def report(st):
                    f"crop/pose-only jobs median {fmt(x.get('extras_only_median'))}; rejections that came from a pose "
                    f"strip: {x.get('rejected_after_pose_strip', 0)}")
         out += ["  tuning: " + t for t in b["tuning"]]
+    t = st.get("telemetry")
+    if t:
+        out += ["", "Telemetry (per job, from the manifests):"]
+        out.append("  phases (median / 90% / total): " + "; ".join(
+            f"{k} {fmt(v['median'])} / {fmt(v['p90'])} / {fmt(v['total'])}" for k, v in t["phases"].items()) if t["phases"]
+            else "  phases: none yet (recorded from 2026-11-19)")
+        out.append(f"  cache hits: {t['cache_hits']} of {t['jobs_planned']} jobs planned"
+                   + (f" ({t['cache_hit_rate']:.0%})" if t["cache_hit_rate"] is not None else "")
+                   + f"; requests by quality: {t['quality']}")
+        out.append(f"  failures by cause: {t['failures'] or 'none'}")
+        out.append("  thread cost (requests, check/final, render time): " + "; ".join(
+            f"{k[-6:]} {v['requests']}, {v.get('check', 0)}/{v.get('final', 0)}, {fmt(v['render'])}"
+            for k, v in sorted(t["thread_cost"].items(), key=lambda kv: -kv[1]["render"])[:8]))
+        out += ["  geometry: " + f for f in t["geometry_flags"]] or ["  geometry: every garment inside the bands"]
+        out += ["  body drift: " + d for d in t["body_drift"][:6]] or ["  body drift: none past 1%"]
+        r = t["rejections"]
+        out.append(f"  rejections by tag {r['by_tag']}, by garment {r['by_garment']}, by who {r['by_who']}")
+        out.append(f"  rounds (requests) per piece: {dict(list(r['rounds_per_piece'].items())[:8])}")
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]
     return "\n".join(out)
