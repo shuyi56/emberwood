@@ -414,18 +414,42 @@ def start(job):
     return {"proc": p, "log": log, "wt": wt, "out": tmp_out, "t0": time.time(), "job": job}
 
 
+def flag(out, m):
+    """Post-render artifact flags (rq_flags.py): cheap image, .glb and log checks of the job's files, written into the
+    manifest and appended to render.log. A fail flag on a job that exited 0 makes it a failed result (when flags.json
+    says so). The checks never stop a job from being delivered: if they crash, that is reported as a warn flag."""
+    try:
+        import rq_flags
+        rep = rq_flags.run(out, m, RESULTS, REPO)
+        lines = rq_flags.log_lines(rep["flags"])
+        fail_job = rq_flags.load_cfg().get("fail_marks_job_failed", True)
+    except Exception as e:                                         # noqa: BLE001
+        rep = {"flags": [{"id": "flags_crashed", "level": "warn", "file": None, "value": 1, "limit": 0,
+                          "msg": f"the post-render checks crashed: {type(e).__name__}: {e}"[:300]}]}
+        rep["flags_summary"] = {"level": "warn", "fail": 0, "warn": 1, "ids": ["flags_crashed"]}
+        lines, fail_job = [f"[flags] WARN flags_crashed: {rep['flags'][0]['msg']}"], False
+    with open(os.path.join(out, "render.log"), "a") as f:
+        f.write("\n" + "\n".join(lines) + "\n")
+    m.update(rep)
+    if fail_job and m["ok"] and rep["flags_summary"]["fail"]:
+        m["ok"] = False
+        m["failed_by_flags"] = sorted({x["id"] for x in rep["flags"] if x["level"] == "fail"})
+
+
 def finish(run):
     job, rc = run["job"], run["proc"].returncode
     run["log"].write(f"\n[exit {rc} after {time.time() - run['t0']:.0f}s]\n"); run["log"].close()
     git("worktree", "remove", "--force", run["wt"], check=False)
+    m = {"ok": rc == 0, "key": job["key"], "kind": job["kind"], "param": job["param"], "commit": job["commit"],
+         "combines": job["combines"], "seconds": round(time.time() - run["t0"]), "finished": now()}
+    flag(run["out"], m)
     files = {}
     for root, _, fs in os.walk(run["out"]):
         for f in fs:
             p = os.path.join(root, f)
             files[os.path.relpath(p, run["out"])] = {"bytes": os.path.getsize(p),
                                                        "git_blob": git("hash-object", p).stdout.strip()}
-    m = {"ok": rc == 0, "key": job["key"], "kind": job["kind"], "param": job["param"], "commit": job["commit"],
-         "combines": job["combines"], "seconds": round(time.time() - run["t0"]), "files": files, "finished": now()}
+    m["files"] = files
     with open(os.path.join(run["out"], "manifest.json"), "w") as f:
         json.dump(m, f, indent=2)
     dst = os.path.join(RESULTS, job["key"] + ("" if m["ok"] else "-failed"))
@@ -442,6 +466,22 @@ def stop(run):
     shutil.rmtree(run["out"], ignore_errors=True)
 
 
+def job_flags(results):
+    """{key: {"level", "flags": ["LEVEL id file: msg", ...]}} for the jobs of a request that raised any flag."""
+    out = {}
+    for k, d in results.items():
+        try:
+            m = json.load(open(os.path.join(d, "manifest.json")))
+        except (OSError, ValueError):
+            continue
+        fl = m.get("flags") or []
+        if fl:
+            out[k] = {"level": m.get("flags_summary", {}).get("level"), "failed_by_flags": m.get("failed_by_flags"),
+                      "flags": [f"{f['level']} {f['id']}{' ' + f['file'] if f.get('file') else ''}: {f['msg']}"
+                                for f in fl[:12]]}
+    return out
+
+
 def settle(s):
     """Mark requests whose jobs are all finished. Returns the requests that just finished."""
     done = []
@@ -451,6 +491,7 @@ def settle(s):
             if bad or all(cached(k) for k in r["jobs"]):
                 r["state"] = "failed" if bad else "done"
                 r["results"] = {k: os.path.join(RESULTS, k + ("-failed" if k in bad else "")) for k in r["jobs"]}
+                r["flags"] = job_flags(r["results"])
                 r["finished"] = now(); done.append(r)
     return done
 
@@ -512,7 +553,8 @@ def cmd_serve(a):
             main, held, batches, jobs = plan(fetch=not running)
             s = load()
             fin = settle(s)
-            finished += [{"id": r["id"], "thread": r["thread"], "state": r["state"]} for r in fin]
+            finished += [{"id": r["id"], "thread": r["thread"], "state": r["state"], "flags": r.get("flags") or {}}
+                         for r in fin]
             todo = [j for j in jobs if not j["cached"] and not failed(j["key"]) and j["key"] not in running]
             if s["sheet_due"] and not running and not any(j["kind"] == "sheet" for j in todo):
                 s["sheet_due"] = False                     # every due sheet is rendered
@@ -573,8 +615,11 @@ def cmd_serve(a):
             for key in [k for k, r in running.items() if r["proc"].poll() is not None]:
                 run = running.pop(key); job = run["job"]
                 m = finish(run)
-                event("done" if m["ok"] else "failed", job["key"], seconds=m["seconds"])
-                print(f"{now()} {'done' if m['ok'] else 'FAILED'} {job['key']} in {m['seconds']}s", flush=True)
+                fs = m.get("flags_summary") or {}
+                event("done" if m["ok"] else "failed", job["key"], seconds=m["seconds"],
+                      flags=fs.get("ids", []), flag_level=fs.get("level"))
+                print(f"{now()} {'done' if m['ok'] else 'FAILED'} {job['key']} in {m['seconds']}s"
+                      + (f" flags {fs['level']}: {', '.join(fs['ids'])}" if fs.get("ids") else ""), flush=True)
                 if job["kind"] == "sheet":
                     s = load(); s["sheets_done"][job["combines"][0]["branch"]] = job["key"]; save(s)
                     print(json.dumps({"sheet_finished": job["combines"][0]["branch"], "ok": m["ok"], "key": job["key"]}))
@@ -703,6 +748,7 @@ def cmd_export(a):
             "results": ", ".join(os.path.join("render-queue/results", os.path.basename(p))
                                  for p in (r.get("results") or {}).values()),
             "warnings": (f"{len(r['warnings'])} undefined name(s) after the merge" if r.get("warnings") else ""),
+            "flags": "; ".join(f"{k}: {', '.join(v['flags'])}" for k, v in (r.get("flags") or {}).items()),
         })
     rows.sort(key=lambda x: -x["id"])
     sched = [{"item": "Full sheet, .blend and world model", "when": "Daily, 2:41 AM Toronto, only when the queue is idle",
