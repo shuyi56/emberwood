@@ -430,6 +430,93 @@ def clear_of(o, garment, gap, log=print):
     log('chemise: %d free points put out to %.3f off the %s (the most %.3f)' % (moved, gap, garment.name, float(np.linalg.norm(D, axis=1).max()) if moved else 0.0))
 
 
+def lie_outside(o, garments, M, gap, log=print, z_top=None):
+    """The shirt's sleeve kept outside the garments worn over the trunk (the vest and its plates, whole thickness):
+    a sleeve hangs beside the body, and nothing of it may lie under the side of the breastplate or its belt. A free
+    sleeve point (the arm's own cloth, not held) is under a garment when, seen from the body's axis, the garment's
+    outermost surface along that line lies beyond it. It is put out past that surface by gap, the move feathered
+    over the cloth round it so it leaves no step, and carried back to the rest shape through the point's skinning.
+    The sleeve root, the cloth that passes out through the armhole above the armpit, is left (z_top)."""
+    me = o.data
+    bpy.context.scene.frame_set(1)
+    trees = []
+    for g in garments:
+        G, gp = _posed(g, without=('SUBSURF', 'BEVEL'))
+        trees.append(BVHTree.FromPolygons([Vector(q) for q in G], gp))
+    R = np.array([v.co[:] for v in me.vertices])
+    P, _ = _posed(o)
+    held = np.zeros(len(R), dtype=np.float32)
+    if 'held' in me.attributes:
+        me.attributes['held'].data.foreach_get('value', held)
+    names = {g.index: g.name.split('.')[0] for g in o.vertex_groups}
+    arm = np.zeros(len(R))
+    for v in me.vertices:
+        for g in v.groups:
+            if names.get(g.group) in ('UpperArm', 'Forearm', 'Hand'):
+                arm[v.index] += g.weight
+    z_top = M['z_pit_arm'] + 0.3 * M['w'] if z_top is None else z_top
+    yc = M['yc']
+    mask = (arm > 0.5) & (held < 0.5) & (P[:, 2] < z_top)
+    E = np.array([e.vertices[:] for e in me.edges])
+    need = np.zeros(len(P))
+    for i in np.nonzero(mask)[0]:
+        sx = 1.0 if P[i, 0] > 0 else -1.0
+        out = abs(P[i, 0])
+        for t in trees:
+            hit = t.ray_cast(Vector((P[i, 0] + sx * 40.0, P[i, 1], P[i, 2])), Vector((-sx, 0.0, 0.0)), 40.0)[0]
+            if hit is not None:
+                out = max(out, abs(hit.x))
+        if out > abs(P[i, 0]):
+            need[i] = out - abs(P[i, 0]) + gap
+    moved = int((need > 0).sum())
+    D = np.zeros_like(P)
+    if moved:
+        # The sleeve is moved as a whole, level by level: how far it must stand out at a height is the most any
+        # point of it there needs (and the levels near it), smoothed along its length, and every point of the
+        # sleeve at that height slides out by that much. Pushing only the points that are under the garment
+        # crumples the cloth between them; a slide keeps its folds.
+        zs = np.arange(float(P[mask, 2].min()) - 0.5, float(z_top) + 0.5, 0.25)
+        taper = 1.0 - fit._ss(M['z_pit_arm'] - 0.4 * M['w'], z_top, zs)
+        shift = {}
+        for side in (1.0, -1.0):
+            pick = mask & (np.sign(P[:, 0]) == side)
+            lvl = np.zeros(len(zs))
+            for k in np.nonzero(pick & (need > 0))[0]:
+                b = int(round((P[k, 2] - zs[0]) / 0.25))
+                lvl[b] = max(lvl[b], need[k])
+            lvl = np.array([lvl[max(0, b - 3):b + 4].max() for b in range(len(zs))])
+            w_ = np.exp(-0.5 * (np.arange(-9, 10) / 3.0) ** 2)
+            lvl = np.convolve(np.pad(lvl, 9, mode='edge'), w_ / w_.sum(), mode='valid')
+            shift[side] = np.maximum(lvl, 0.0) * taper
+        for i in np.nonzero(mask)[0]:
+            side = 1.0 if P[i, 0] > 0 else -1.0
+            D[i, 0] = side * float(np.interp(P[i, 2], zs, shift[side]))
+        for _ in range(10):                              # (feathered out over the free cloth round it, never less)
+            S, n = np.zeros_like(D), np.zeros(len(D))
+            np.add.at(S, E[:, 0], D[E[:, 1]]); np.add.at(S, E[:, 1], D[E[:, 0]])
+            np.add.at(n, E[:, 0], 1); np.add.at(n, E[:, 1], 1)
+            avg = 0.8 * S / np.maximum(n, 1)[:, None]
+            take = (np.linalg.norm(avg, axis=1) > np.linalg.norm(D, axis=1)) & (held < 0.5)
+            D[take] = avg[take]
+        h = 0.05
+        J = np.empty((len(R), 3, 3))
+        for k in range(3):
+            Rk = R.copy()
+            Rk[:, k] += h
+            me.vertices.foreach_set('co', Rk.reshape(-1))
+            me.update()
+            J[:, :, k] = (_posed(o)[0] - P) / h
+        rest_move = np.linalg.solve(J + 1e-6 * np.eye(3)[None], D[:, :, None])[:, :, 0]
+        Q = R + rest_move
+        me.vertices.foreach_set('co', Q.reshape(-1))
+        if 'rest' in me.attributes:
+            me.attributes['rest'].data.foreach_set('vector', Q.reshape(-1))
+        me.update()
+    log('chemise: %d sleeve points were under the %s and are put out past it (the most %.2f)' % (
+        moved, ' / '.join(g.name for g in garments), float(np.linalg.norm(D, axis=1).max()) if moved else 0.0))
+    return moved
+
+
 def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIOS, log=print, settle=True,
                   colliders=(), under=None):
     """Draft the chemise on the body (M: fit.measure's measurements) and hand it to the body's bones. settle: let

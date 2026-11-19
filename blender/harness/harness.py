@@ -21,6 +21,7 @@ import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 import fit  # noqa: E402
 import chemise  # noqa: E402
+import drape  # noqa: E402
 import doublet  # noqa: E402
 import vest  # noqa: E402
 import spaulder  # noqa: E402
@@ -33,6 +34,7 @@ LACE_ROOM = 0.07           # the room left under the plates for the doublet's la
 SCYE_DROP = 0.45           # the plates' armhole: a little deeper than the gambeson's, and cut round (see
 SCYE_ROUND = 0.20          # fit.trim_lines): this much wider than the arm's own depth front and back, in w
 SHOULDERS = os.environ.get('HARNESS_NO_SHOULDERS') is None
+LAYER_GAP = drape.LAYER_GAP
 
 
 def build():
@@ -55,6 +57,15 @@ def build():
     vest.warden_bronze()('vest bronze')
     if GLAZE:
         vest.glaze_coat('vest bronze')
+    # the shirt's sleeve is kept outside the breastplate and its belt: hanging beside the body, it was pulled in
+    # under the side of the plates (and the plates, raised over it, then fitted to that)
+    # (HARNESS_SLEEVE_OUT=1: off by default. The arm hangs inside the breastplate's side wall below the armpit, so
+    # sliding the sleeve out of it moves the whole sleeve about 2.5 units and widens the shoulder plates with it:
+    # see the cross-sections at z 36, 41 and 44. The fix wants the arm or the plates' sides to give.)
+    if os.environ.get('HARNESS_SLEEVE_OUT') is not None:
+        chem = bpy.data.objects['Chemise']
+        layers = [o for o in (bpy.data.objects.get(n) for n in ('Vest', 'Vest plates', 'Vest studs')) if o]
+        drape.lie_outside(chem, layers, mv, gap=2.0 * LAYER_GAP * mv['w'])
     if SHOULDERS:
         worn = [o for o in bpy.data.objects if o.name.startswith(('Doublet', 'Vest', 'Chemise'))]
         spaulder.build_spaulders(body, mv, worn, rig=rig, plate=female.mat(vest.M_BRASS),
