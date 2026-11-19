@@ -32,6 +32,7 @@ import draft  # noqa: E402
 FRAMES = ('legs', 'hips', 'knee', 'ankle')
 VIEW = 0
 FOOT = draft.FOOT
+BOOTS = False                # wear the Warden's tall boots over the hose (warden.boot_rings: the boots as they are today)
 MASK = True                  # hide the skin the hose covers (it cannot show through a bent knee)
 MEASURES = {}
 # A madder red, the commonest dye for good hose: dulled and a little brown, as a wool dyed in the piece is.
@@ -164,6 +165,17 @@ def wool_closeup(name, P=WOOL):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
+def add_boots():
+    """The Warden's boots as they are today (warden.boot_rings, hand-placed rings made for her own legs), lofted on each
+    shin at the knee's pivot and skinned to the leg bones, to see how they sit over the hose."""
+    sys.path.insert(0, os.path.join(HERE, '..', 'warden'))
+    import warden
+    kz = female.HIP_Z - female.THIGH
+    for side, s in (('R', 1), ('L', -1)):
+        female.mesh_obj('Boot.%s' % side, female.loft(warden.boot_rings(), n=40, cap_top=False), warden.M_BOOTS,
+                        loc=(-s * female.LEG_X, 0, kz), skin=female.leg_weights(side), solid=0.12)
+
+
 def build():
     res = SP.build()
     body = bpy.data.objects['Skin body']
@@ -185,6 +197,8 @@ def build():
     if MASK:
         draft.mask_body(body)
     wool_closeup('hose wool')
+    if BOOTS:
+        add_boots()
     # the --head view on a part of the hose
     floor = float(B['P'][:, 2].min())
     frames = {'legs': (floor - 0.5, M['waist_z'] + 1.5), 'hips': (M['crotch_z'] - 3.0, M['waist_z'] + 1.5),
