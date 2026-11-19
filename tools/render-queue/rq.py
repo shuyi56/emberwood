@@ -294,21 +294,23 @@ def save(s):
     """Compact JSON, written and then read back: the shared folder is a network mount, and a replace on it once
     left the file cut short. A local copy is kept too."""
     s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]]}
-    try:     # (keep requests another process added since s was loaded: plan() holds s through slow git merges)
-        with open(STATE) as f:
-            disk = json.load(f)
-        have = {r["id"] for r in s["requests"]}
-        extra = [r for r in disk.get("requests", []) if r["id"] not in have and r["id"] >= min(have | {10 ** 9})]
-        if extra:
-            s["requests"] = sorted(s["requests"] + extra, key=lambda r: r["id"])
-            s["next"] = max(s["next"], disk.get("next", 1))
-    except (OSError, ValueError, KeyError):
-        pass
-    data = json.dumps(s, separators=(",", ":"))
     os.makedirs(WORK, exist_ok=True)
-    with open(os.path.join(WORK, "queue.local.json"), "w") as f:
-        f.write(data)
     for _ in range(5):
+        # (keep requests another process added since s was loaded: plan() holds s through slow git merges; read
+        # again on every try, since an add that lands between the write and the check is what made it fail)
+        try:
+            with open(STATE) as f:
+                disk = json.load(f)
+            have = {r["id"] for r in s["requests"]}
+            extra = [r for r in disk.get("requests", []) if r["id"] not in have and r["id"] >= min(have | {10 ** 9})]
+            if extra:
+                s["requests"] = sorted(s["requests"] + extra, key=lambda r: r["id"])
+                s["next"] = max(s["next"], disk.get("next", 1))
+        except (OSError, ValueError, KeyError):
+            pass
+        data = json.dumps(s, separators=(",", ":"))
+        with open(os.path.join(WORK, "queue.local.json"), "w") as f:
+            f.write(data)
         with open(STATE, "w") as f:
             f.write(data); f.flush(); os.fsync(f.fileno())
         time.sleep(0.5)
