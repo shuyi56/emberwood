@@ -312,12 +312,12 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
         crease = _math(nt, 'MULTIPLY', ridge, band)
         # scuffs: pale, rough patches at the toe, heel and the ankle bones, broken up by scratches
         sc_ = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=3.2, Detail=6.0, Roughness=0.75)
-        scuff = _node(nt, 'ShaderNodeMapRange', Value=sc_.outputs['Fac'], **{'From Min': 0.56, 'From Max': 0.7}).outputs['Result']
+        scuff = _node(nt, 'ShaderNodeMapRange', Value=sc_.outputs['Fac'], **{'From Min': 0.64, 'From Max': 0.76}).outputs['Result']
         low = _node(nt, 'ShaderNodeMapRange', Value=zc, **{'From Min': 2.6, 'From Max': 0.8}).outputs['Result']
         scuff = _math(nt, 'MULTIPLY', scuff, _math(nt, 'MULTIPLY_ADD', low, 0.75, 0.25))
         wear = _math(nt, 'MAXIMUM', _math(nt, 'MULTIPLY', crease, 0.8), scuff)
         # (worn leather goes a duller, warmer tan, a little lighter than the hide: never the pale grey of dust or paint)
-        c1 = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', wear, 0.4), A=base.outputs['Result'])
+        c1 = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', wear, 0.3), A=base.outputs['Result'])
         c1.inputs['B'].default_value = (*[lerp(a, b, 0.3) for a, b in zip(mid, light)], 1)
         # mud and wet: the foot darkened, fading up the shaft along a wavering tide line
         tide = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=1.1, Detail=2.0)
@@ -330,14 +330,16 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
                       _node(nt, 'ShaderNodeMapRange', Value=tz, **{'From Min': 1.55, 'From Max': 1.25}).outputs['Result'])
         cw_ = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', mud, 0.45), A=c1.outputs['Result'])
         cw_.inputs['B'].default_value = (*[c * 0.6 for c in deep], 1)
-        col = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', caked, 0.8), A=cw_.outputs['Result'])
-        col.inputs['B'].default_value = (0.11, 0.09, 0.07, 1)
+        # (caked mud is the leather's own colour gone darker, not a fixed grey-brown that reads pale on dark hide)
+        dk = _node(nt, 'ShaderNodeVectorMath', 'SCALE', Vector=cw_.outputs['Result'], Scale=0.55)
+        col = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', caked, 0.7), A=cw_.outputs['Result'])
+        nt.links.new(dk.outputs['Vector'], col.inputs['B'])
         mud = _math(nt, 'MAXIMUM', mud, caked)
         # (the grain is a fine, shallow pebble: smooth calf at this distance, not hammered)
         h = _math(nt, 'MULTIPLY_ADD', peb.outputs['Distance'], 0.35, _math(nt, 'MULTIPLY', fine.outputs['Fac'], 0.25))
         h = _math(nt, 'MULTIPLY_ADD', pore, -0.45, h)
         h = _math(nt, 'MULTIPLY_ADD', ridge, _math(nt, 'MULTIPLY', band, 2.2), h)
-        h = _math(nt, 'MULTIPLY_ADD', caked, 0.8, h)
+        h = _math(nt, 'MULTIPLY_ADD', caked, 0.25, h)
     # shut-in places go darker (between the cuff and the shaft, under the stitching, where the foot meets the sole)
     ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.8)
     ao.samples = 8
