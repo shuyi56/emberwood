@@ -223,7 +223,7 @@ function skinLayersShader(sh) {
   sh.vertexShader = 'attribute vec2 skinWrap;\nattribute vec2 skinZones;\nvarying vec2 vSkinWrap;\nvarying vec2 vSkinZones;\n' +
     sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSkinWrap = skinWrap; vSkinZones = skinZones;');
   var pre = skinGlslConsts() + 'uniform sampler2D skinT0, skinT1, skinT2, skinMask;\nuniform float skinBaked, skinLayers, skinVeins, skinSpots, skinMoles, skinPores;\n' +
-    'uniform vec3 skinWrapRGB, skinBounceDir, skinBounceCol;\nvarying vec2 vSkinWrap;\nvarying vec2 vSkinZones;\nfloat skHeld = 0.0, skPit = 0.0, skRough = 0.0, skLay = 0.0;\n' +
+    'uniform vec3 skinWrapRGB, skinBounceDir, skinBounceCol;\nvarying vec2 vSkinWrap;\nvarying vec2 vSkinZones;\nfloat skHeld = 0.0, skPit = 0.0, skRough = 0.0, skLay = 0.0, skSh = 1.0;\n' +
     'float sk_ms(float v, float a, float b) { float t = clamp((v - a) / (b - a), 0.0, 1.0); return (3.0 - 2.0 * t) * t * t; }\n';
   var body = [
     '#include <color_fragment>',
@@ -259,10 +259,22 @@ function skinLayersShader(sh) {
   // the waterline's wet) as their difference from its plain skin (0.56)
   fs = fs.replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(roughnessFactor, clamp(skRough + roughnessFactor - 0.56, 0.05, 1.0), skLay);');
   // the scatter's stand-in: wrapped diffuse light, red furthest; none where the skin holds pigment or a pit
-  fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment.replace(
-    'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
+  // (the shadow map's self-shadow starts at the terminator: a convex cheek shadows itself where it turns from the light.
+  // The plain light is zero there, but the scatter's is not, and the shadow cut it into a hard edge across the cheek. So
+  // the key's shadow is kept apart (skSh): the specular takes it whole, the diffuse lets it go as the surface turns away,
+  // where only self-shadow can sit. A cast shadow (the nose's) falls on skin that faces the light and stays.)
+  fs = fs.replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment
+    .replace('irradiance = dotNL * directLight.color;', 'irradiance = dotNL * directLight.color * skSh;')
+    .replace('ccIrradiance = dotNLcc * directLight.color;', 'ccIrradiance = dotNLcc * directLight.color * skSh;')
+    .replace('reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
     'float skNL = dot( geometryNormal, directLight.direction ); vec3 skW = skinWrapRGB * ( 1.0 - skHeld );\n' +
-    '\treflectedLight.directDiffuse += clamp( ( vec3( skNL ) + skW ) / ( 1.0 + skW ), 0.0, 1.0 ) / ( 1.0 + skW ) * directLight.color * BRDF_Lambert( material.diffuseColor );'));      // (normalised: the red that reaches past the terminator is taken from the lit side, as the scatter moves it, not added)
+    '\tfloat skVis = mix( skSh, mix( 1.0, skSh, smoothstep( 0.0, 0.3, skNL ) ), skLay );\n' +
+    '\treflectedLight.directDiffuse += clamp( ( vec3( skNL ) + skW ) / ( 1.0 + skW ), 0.0, 1.0 ) / ( 1.0 + skW ) * skVis * directLight.color * BRDF_Lambert( material.diffuseColor );'));
+  var LFB = THREE.ShaderChunk.lights_fragment_begin, SHL = 'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ]';
+  if (LFB.indexOf(SHL) < 0) throw new Error('skin layers: three.js shadow chunk changed');
+  fs = fs.replace('#include <lights_fragment_begin>', LFB
+    .replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight ); skSh = 1.0;')
+    .replace(SHL, 'skSh = ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ]'));      // (normalised: the red that reaches past the terminator is taken from the lit side, as the scatter moves it, not added)
   // the bounce from below (the skin alone)
   fs = fs.replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  reflectedLight.indirectDiffuse += skinBounceCol * clamp((dot(normal, skinBounceDir) + 0.5) / 1.5, 0.0, 1.0) * BRDF_Lambert(material.diffuseColor);');
   sh.fragmentShader = pre + fs;

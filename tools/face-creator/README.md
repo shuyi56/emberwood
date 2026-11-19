@@ -33,6 +33,10 @@ What the creator cannot do, and what it does instead:
   them out of the scatter. It softens the terminator and reddens it, but it does not blur fine detail and does not
   deepen the colour as Cycles' random walk does (on the bench Blender stays about 4/255 darker in red and 9/255 in green
   and blue).
+- **The key light's shadow** is kept off the diffuse where the skin turns away from the light. The shadow map shadows a
+  convex cheek from itself at the terminator, and the wrapped light reaching past it was cut into a hard edge across the
+  face. The specular still takes the shadow whole, and a cast shadow (the nose's) falls on skin that faces the light, so
+  it stays.
 - **The bounce light** is added to the skin alone, so the hair's look and the lights a hair asset exports do not change.
 - **Pores and freckles** stay the creator's own (its pore relief, its ranked freckle patches that the Freckles slider
   drives). The creator takes from Blender only the roughness in the pits and the hold out of the scatter.
