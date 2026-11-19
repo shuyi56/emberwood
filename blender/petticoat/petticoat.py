@@ -36,7 +36,7 @@ MEASURES = {}
 M_COTTON = female.mat_def(76, 'petticoat cotton', female.ramp(0xe6e2d8, 0.1), 0.0, closeup='cloth')
 # A bleached cotton longcloth, starched: white just off toward cream, a fine plain weave too small to see from a step
 # back, a soft dull face. Opaque (a petticoat is two layers at the flounce and the light does not come through).
-COTTON = dict(colour=(0.80, 0.785, 0.74), pitch=0.012, relief=0.25, rough=0.62, sheen=0.25)
+COTTON = dict(colour=(0.80, 0.785, 0.74), pitch=0.012, relief=0.25, rough=0.62, sheen=0.25, tuck_w=0.11, tucks=())
 # White cloth shows its folds by their shadows: the floor's warm bounce fills every flute, so it is turned down here.
 LIGHT_SCALE = {'Bounce': 0.3, 'Fill': 0.7}
 
@@ -105,6 +105,9 @@ def make_object(V, F, info, wts, rig, name='Petticoat'):
     rest.data.foreach_set('vector', V.reshape(-1))
     t = me.attributes.new('down', 'FLOAT', 'POINT')
     t.data.foreach_set('value', info['t'])
+    # (how far up the cloth from the hem, for the tucks above the flounce)
+    up = me.attributes.new('to_hem', 'FLOAT', 'POINT')
+    up.data.foreach_set('value', info['v'] / np.maximum(info['t'], 1e-6) * (1.0 - info['t']))
     o = bpy.data.objects.new(name, me)
     bpy.context.scene.collection.objects.link(o)
     me.materials.append(female.mat(M_COTTON))
@@ -173,6 +176,25 @@ def cotton_closeup(name, P=COTTON):
     bump = N('ShaderNodeBump')
     bump.inputs['Strength'].default_value, bump.inputs['Distance'].default_value = P['relief'], 0.3 * P['pitch']
     nt.links.new(weave, bump.inputs['Height'])
+    # the tucks above the flounce: TUCKS folded ridges round the skirt, each casting a thin shade below it
+    th = N('ShaderNodeAttribute')
+    th.attribute_name = 'to_hem'
+    ridge = None
+    shadow = None
+    for c in P['tucks']:
+        d = math_('SUBTRACT', th.outputs['Fac'], c)
+        r = math_('EXPONENT', math_('MULTIPLY', math_('POWER', math_('DIVIDE', d, P['tuck_w']), 2.0), -1.0))
+        sh = math_('EXPONENT', math_('MULTIPLY', math_('POWER', math_('DIVIDE', math_('ADD', d, 1.6 * P['tuck_w']),
+                                                                                  0.7 * P['tuck_w']), 2.0), -1.0))
+        ridge = r if ridge is None else math_('ADD', ridge, r)
+        shadow = sh if shadow is None else math_('ADD', shadow, sh)
+    if ridge is not None:
+        shade = math_('MULTIPLY', shade, math_('SUBTRACT', 1.0, math_('MULTIPLY', shadow, 0.28)))
+        nt.links.new(shade, col.inputs['Scale'])
+        bump2 = N('ShaderNodeBump')
+        bump2.inputs['Strength'].default_value, bump2.inputs['Distance'].default_value = 0.8, 0.08
+        nt.links.new(ridge, bump2.inputs['Height'])
+        nt.links.new(bump2.outputs['Normal'], bump.inputs['Normal'])
     pb = N('ShaderNodeBsdfPrincipled')
     nt.links.new(col.outputs['Vector'], pb.inputs['Base Color'])
     nt.links.new(bump.outputs['Normal'], pb.inputs['Normal'])
@@ -205,14 +227,18 @@ def wear(body, rig, H, under_objs=(), log=print, extra=None):
         bpy.context.scene.frame_set(1)
         pinned = (V[:, 2] > pat['band_bot'] - 0.02).astype(float)
         hands = [bpy.data.objects[n] for n in ('Hand.L', 'Hand.R') if n in bpy.data.objects]
-        cloth.settle(o, rig, [body] + hands, pinned, M['floor'], log=log)
+        # (it falls on what it is worn over: the body, the hands, and the corset)
+        cloth.settle(o, rig, [body] + hands + [u for u in under_objs if u.type == 'MESH'], pinned, M['floor'], log=log)
     objs = [o]
     if FLOUNCE:
         import flounce
         objs.append(flounce.build(o, M, pat, info, rig, female.mat(M_COTTON), log=log))
     for ob in objs:
         finish(ob, M)
-    cotton_closeup('petticoat cotton')
+    # three tucks a hand's width above the flounce, about 1.2 cm apart (they shorten the cloth and stiffen the hem)
+    D = draft.RATIOS['flounce'] * M['H']
+    gap = 0.05 * M['H']
+    cotton_closeup('petticoat cotton', dict(COTTON, tucks=tuple(D + gap * (1.2 + k) for k in range(3))))
     bpy.context.view_layer.update()
     return objs, M, pat
 

@@ -45,7 +45,7 @@ RATIOS = {
     'ease': 0.018,           # the yoke over the corset and hips (about 4 mm)
     'thickness': 0.004,      # the cotton's thickness (about 1 mm)
     'flare_from': 0.10,      # the gores start to flare this far above the fullest hip
-    'clear': 0.09,           # the hem clears the floor at the front by this much (about 2 cm: under the habit's hem)
+    'clear': 0.22,           # the hem clears the floor at the front by this much (about 5 cm: shorter than the habit)
     'train': 0.7,            # the back is this much longer than it needs to reach the floor (about 17 cm)
     'flounce': 1.05,         # the flounce's depth (about 26 cm), set on this far above the hem
     'flute': 0.42,           # a flute's width at the hem, as the cloth hangs (about 10 cm)

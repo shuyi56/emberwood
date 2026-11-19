@@ -88,6 +88,31 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
     points (posed)."""
     sc = bpy.context.scene
     n = len(o.data.vertices)
+    # (a settle is kept by its inputs: the drafted points, the cloth's numbers and the colliders' points, so a run
+    # that only changes the flounce or the look reuses it)
+    import hashlib
+    import os
+    rest0 = np.empty(n * 3)
+    o.data.vertices.foreach_get('co', rest0)
+    h = hashlib.sha1(np.round(rest0, 4).tobytes() + repr(sorted(P.items())).encode() + np.round(pinned, 3).tobytes())
+    dg = bpy.context.evaluated_depsgraph_get()
+    for c_ in colliders:
+        e = c_.evaluated_get(dg)
+        me_ = e.to_mesh()
+        co_ = np.empty(len(me_.vertices) * 3)
+        me_.vertices.foreach_get('co', co_)
+        h.update(np.round(co_, 3).tobytes())
+        e.to_mesh_clear()
+    cache = os.path.join(os.environ.get('PETTI_CACHE', os.path.join(os.path.expanduser('~'), '.cache', 'petticoat')),
+                         h.hexdigest()[:16] + '.npy')
+    if os.path.exists(cache) and not os.environ.get('PETTI_NOCACHE'):
+        back = np.load(cache)
+        o.data.vertices.foreach_set('co', back.reshape(-1))
+        if 'rest' in o.data.attributes:
+            o.data.attributes['rest'].data.foreach_set('vector', back.reshape(-1))
+        o.data.update()
+        log('petticoat cloth: settled shape from the cache (%s)' % cache)
+        return None
     arm = next(m for m in o.modifiers if m.type == 'ARMATURE')
     arm.use_deform_preserve_volume = False
     B = bone_matrices(o, rig)
@@ -153,6 +178,11 @@ def settle(o, rig, colliders, pinned, floor, P=COTTON, log=print):
     if 'rest' in o.data.attributes:
         o.data.attributes['rest'].data.foreach_set('vector', back.reshape(-1))
     o.data.update()
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        np.save(cache, back)
+    except OSError:
+        pass
     for ob in (cloth, body, ground):
         d = ob.data
         bpy.data.objects.remove(ob)
