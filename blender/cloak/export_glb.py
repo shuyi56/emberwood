@@ -46,11 +46,15 @@ def main():
     female.MANNEQUIN = True
     cloak.build()
     sc = bpy.context.scene
-    keep = {'Skin body', 'Neck', 'Hand.L', 'Hand.R', 'Head shape', 'Cloak', 'Cloak clasp', 'Rig'}
+    # (the fists ride beside the open hands: the bench shows them when she runs, as female.set_fists does)
+    keep = {'Skin body', 'Neck', 'Hand.L', 'Hand.R', 'Fist.L', 'Fist.R', 'Head shape', 'Cloak', 'Cloak clasp', 'Rig'}
     for o in list(sc.objects):
         if o.type == 'MESH' and o.name not in keep:
             bpy.data.objects.remove(o)
     for o in sc.objects:
+        if o.name.startswith(('Fist.', 'Hand.')):
+            o.hide_set(False)
+            o.hide_render = o.hide_viewport = False
         if o.animation_data:
             o.animation_data_clear()
     # (the cloak is the cape the bench re-skins; its stitches ride the chest and would part from a swinging hem,

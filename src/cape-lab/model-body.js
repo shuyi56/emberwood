@@ -66,6 +66,13 @@ export function loadModelBody(url) {
         setWalk(walk) {
           body.restPose();
           body.walkPlayer = walk ? makeWalkPlayer(walk, root, [[root.getObjectByName('Head'), 'Neck']]) : null;
+          // a gait that closes the hands (the run: `fists` in its bake) shows the glb's Fist meshes in place of
+          // the open hands, as blender/base/female.py set_fists does; a glb without fists keeps its hands
+          const fists = [], hands = [];
+          root.traverse((o) => { if (o.isMesh) { if (/^Fist/.test(o.name)) fists.push(o); else if (/^Hand[._]?[LR]$/.test(o.name)) hands.push(o); } });
+          const closed = !!(walk && walk.fists) && fists.length > 0;
+          for (const o of fists) o.visible = closed;
+          for (const o of hands) o.visible = !closed;
         },
         // back to the pose the glb was exported in, which the cape is laid out and bound against
         restPose() {

@@ -1,13 +1,15 @@
-// A walk baked from the base figure's Blender script (blender/base/female.py, through bake_walk.py) to JSON, played
+// A walk baked from the base figure's Blender script (blender/base/female.py, through blender/base/bake_walk.py) to JSON, played
 // on either bench body by phase. Each frame gives, per rig joint, `q`: its rotation in her space away from the
 // pose the rig was bound in (xyzw), and `p`: where its pivot is (model units). So the walk can be tried on the
 // cape and hair before a new warden.glb is exported. Only the root joint's pivot is taken from `p`; the others
 // hang from it at this body's own proportions.
 //
-//   public/cape-lab/walk-new.json   the planted-feet walk (PR #35): heel strike, a straighter stance leg
+//   public/cape-lab/walk-new.json   the planted-feet walk as female.py walks now (PR #35: heel strike, a straighter
+//                                   stance leg, the arms swinging back)
 //   public/cape-lab/walk-main.json  main's walk baked the same way (it reproduces warden.glb's clip)
-//   public/cape-lab/walk-run.json   the run (blender/base/female.py pose_run, PR #35's branch), baked the same way; it
-//                                   also gives its stride, its time a cycle and the leg (thigh + shin) it was made on
+//   public/cape-lab/walk-run.json   the run (blender/base/female.py pose_run), baked the same way; it also gives its
+//                                   stride, its time a cycle, the leg (thigh + shin) it was made on, and that it closes
+//                                   the hands (`fists`: the body shows its Fist meshes)
 import * as THREE from 'three';
 import { PropertyBinding } from 'three';
 
@@ -19,8 +21,8 @@ export const WALKS = {
 };
 
 // each joint's parent in the walk's rig (a sided joint's parent is on its own side, unless it is the chest or
-// pelvis)
-const UP = { Chest: 'Pelvis', Neck: 'Chest', Thigh: 'Pelvis', Shin: 'Thigh', Foot: 'Shin', UpperArm: 'Chest', Forearm: 'UpperArm', Hand: 'Forearm' };
+// pelvis; the neck hangs from its own joints, Cervical and Midneck, where the walk has them, or else from the chest)
+const UP = { Chest: 'Pelvis', Cervical: 'Chest', Midneck: 'Cervical', Neck: ['Midneck', 'Chest'], Thigh: 'Pelvis', Shin: 'Thigh', Foot: 'Shin', UpperArm: 'Chest', Forearm: 'UpperArm', Hand: 'Forearm' };
 const UP_SIDED = new Set(['Shin', 'Foot', 'Forearm', 'Hand']);
 
 const cache = {};
@@ -60,7 +62,8 @@ export function makeWalkPlayer(walk, root, followers = []) {
   // off her collar
   // (her rig is flat, every joint a child of `Rig`, so the chain is by name)
   for (const j of joints) {
-    j.up = byName[UP[j.name.replace(/\.[LR]$/, '')] + (/\.[LR]$/.exec(j.name) && UP_SIDED.has(j.name.slice(0, -2)) ? j.name.slice(-2) : '')] || null;
+    const side = /\.[LR]$/.exec(j.name) && UP_SIDED.has(j.name.slice(0, -2)) ? j.name.slice(-2) : '';
+    j.up = [].concat(UP[j.name.replace(/\.[LR]$/, '')] || []).map((u) => byName[u + side]).find(Boolean) || null;
     if (j.up) j.off = j.p.clone().sub(j.up.p);
   }
   const follow = followers.map(([node, of]) => node && byName[of] && { node, of: byName[of], bind: inRoot(node) })
