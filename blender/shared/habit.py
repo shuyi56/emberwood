@@ -39,6 +39,7 @@ CORSET_BOTTOM_FRONT = 0.60
 CORSET_BOTTOM_BACK = 0.34
 CORSET_TOP_SIDE = 0.585
 CORSET_TOP_FRONT_SWING = -0.045        # (the top edge rises toward the back by this much per cos(theta))
+CORSET_TOP_CARRY = 1.0                 # (how much of the bust's lift the top edge follows)
 CORSET_TOP_DIP = 0.10                  # the dip between the breasts
 # The back opening, laced: its width at the waist, in H (parallel edges; a hand's breadth is tight, and the laces
 # bridge it).
@@ -55,6 +56,14 @@ BULGE_DOWN = (-0.38, 0.28)
 # Flesh is compressible (fat, the lower ribs flexing, organs shifting): only this share of the displaced volume has
 # to reappear as swelling; the rest is the trunk's own compression.
 VOLUME_KEPT = 0.40
+
+# The corset lifts the bust: the breast tissue is carried up and forward by the cups and the busk, so the apex stands
+# higher over a firmer shelf (a share of H, up) and a little fuller (the radius, a share), the lift easing in above
+# the waist's reach and out again before the collarbones.
+BUST_LIFT = 0.10
+BUST_PUSH = 0.03
+LIFT_FROM, LIFT_FULL = 0.20, 0.45       # (H above the waist: where the lift begins and is whole)
+LIFT_OUT, LIFT_GONE = 0.48, 0.80        # (and where it begins to fade and is gone)
 
 # the grid the body is measured on
 Z_STEP = 0.25
@@ -142,6 +151,14 @@ class Measure:
             bulge = 0.5 * (lo + hi)
         self.bulge = bulge
         rows = rows * (1.0 + bulge * shape)[:, None]
+        # the bust lift: the surface at height z' is carried up to z' + L(z', theta) and swells; the table is read
+        # back at each height, so it is the inverse of that carry
+        Lz, push = lift_field(self, self.zs[:, None], self.th[None, :])
+        lifted = np.empty_like(rows)
+        for j in range(rows.shape[1]):
+            zp = np.interp(self.zs, self.zs + Lz[:, j], self.zs)
+            lifted[:, j] = np.interp(zp, self.zs, rows[:, j] * push[:, j])
+        rows = lifted
         self._cr = rows
         self._key = self._params()
         self.shape_k = k
@@ -159,7 +176,9 @@ class Measure:
         """Height of the corset's upper edge at angle theta."""
         c = np.cos(theta)
         dip = CORSET_TOP_DIP * np.exp(-(_wrap(theta) / 0.28) ** 2)
-        return self.z_waist + self.H * (CORSET_TOP_SIDE + CORSET_TOP_FRONT_SWING * c - dip)
+        # (the cups rise with the bust they carry)
+        carry = BUST_LIFT * CORSET_TOP_CARRY * np.maximum(c, 0.0) ** 1.5
+        return self.z_waist + self.H * (CORSET_TOP_SIDE + CORSET_TOP_FRONT_SWING * c - dip + carry)
 
     def bottom(self, theta):
         """Height of the corset's lower edge at angle theta."""
@@ -232,6 +251,16 @@ def _squeeze_row(M, row, kx, ky):
     order = np.argsort(th2)
     t, r = th2[order], r2[order]
     return np.interp(M.th, np.concatenate([t - 2 * math.pi, t, t + 2 * math.pi]), np.concatenate([r, r, r]))
+
+
+def lift_field(M, z, theta):
+    """(how far a point of the natural trunk at height z and (squeezed) angle theta is carried up, how much its radius
+    swells) for the corset's bust lift: strongest on the front, nothing on the back or at the sides."""
+    H, zw = M.H, M.z_waist
+    z = np.asarray(z, dtype=float)
+    w = np.maximum(np.cos(theta), 0.0) ** 1.5
+    g = _ss(zw + LIFT_FROM * H, zw + LIFT_FULL * H, z) * (1.0 - _ss(zw + LIFT_OUT * H, zw + LIFT_GONE * H, z))
+    return BUST_LIFT * H * g * w, 1.0 + BUST_PUSH * g * w
 
 
 def compress_profile(M, z):
@@ -355,6 +384,12 @@ def compress_body(body, M, blend_by_arm=True):
     # range, are left exactly where they are)
     inside = (z > M.zs[0]) & (z < M.zs[-1])
     f = (1.0 - w_arm) * inside
+    # the bust lift, by each point's own angle after the squeeze
+    th = np.arctan2(-new[:, 0], -(new[:, 1] - M.cy)) % (2 * math.pi)
+    Lz, push = lift_field(M, z, th)
+    new[:, 2] = z + Lz
+    new[:, 0] *= push
+    new[:, 1] = M.cy + (new[:, 1] - M.cy) * push
     new = co + (new - co) * f[:, None]
     mv = np.abs(new - co).max()
     me.vertices.foreach_set('co', new.ravel())
