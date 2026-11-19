@@ -326,7 +326,7 @@ def main():
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
                     row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), centre, h)
                 if '--head' in argv:
-                    centre, h = fit(shown, 1.0) if framed else ((0, 0, float(os.environ.get('HEAD_CZ', 55.5))), float(os.environ.get('HEAD_H', 17.0)))
+                    centre, h = fit(shown, 1.0) if framed else ((float(os.environ.get('HEAD_CX', 0)), float(os.environ.get('HEAD_CY', 0)), float(os.environ.get('HEAD_CZ', 55.5))), float(os.environ.get('HEAD_H', 17.0)))
                     row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), centre, h)
             clay(False, saved)
     if opt('--pieces'):
