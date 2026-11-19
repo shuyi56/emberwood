@@ -4,12 +4,22 @@ can be laid onto whatever main.js is current. Then fill its parameters from skin
     python3 tools/face-creator/apply-skin-layers.py main.js tools/face-creator/skin-layers.js
     node tools/face-creator/skin-params.mjs main.js
 
-It stops, changing nothing, if an anchor is missing or the port is already in."""
+It stops, changing nothing, if an anchor is missing. If the port is already in, it replaces the module alone (the
+parameters then need skin-params.mjs again)."""
 import sys
 path, mod = sys.argv[1], sys.argv[2]
 s = open(path).read(); M = open(mod).read()
 if '@@SKIN_LAYERS@@' in s:
-    sys.exit('already applied')
+    # already in: lay the module itself in again (from its first line to the face texture), leaving the rest
+    i = s.find(M[:M.index('\n', 120)])
+    j = s.find('\nvar faceTex = new THREE.CanvasTexture(faceCanvas);', i)
+    if i < 0 or j < 0:
+        sys.exit('already applied, and the module is not where it was put')
+    s = s[:i] + M + s[j:]
+    # (and the hooks an older port put in, brought up to this module)
+    s = s.replace('head.onBeforeRender = function (r, s, cam) { skinU.skinBounceDir.value.copy(SKIN_BOUNCE_W).transformDirection(cam.matrixWorldInverse); };', 'head.onBeforeRender = function (r, s, cam) { skinU.skinBounceDir.value.copy(SKIN_BOUNCE_W).transformDirection(cam.matrixWorldInverse); skinBakeTick(head.geometry); };')
+    open(path, 'w').write(s)
+    sys.exit(print('module replaced') or 0)
 def rep(old, new, count=1):
     global s
     n = s.count(old)
@@ -27,7 +37,7 @@ rep("var eyeCanvases = [document.createElement('canvas'), document.createElement
     "(function () { var obc = skinMat.onBeforeCompile; skinMat.onBeforeCompile = function (sh) { obc(sh); skinLayersShader(sh); }; })();      // (the layered skin over this creator's own skin shader)\nvar eyeCanvases = [document.createElement('canvas'), document.createElement('canvas')];")
 rep("var head = new THREE.Mesh(new THREE.BufferGeometry(), skinMat); head.castShadow = true; head.receiveShadow = true; scene.add(head);",
     "var head = new THREE.Mesh(new THREE.BufferGeometry(), skinMat); head.castShadow = true; head.receiveShadow = true; scene.add(head);\n"
-    "head.onBeforeRender = function (r, s, cam) { skinU.skinBounceDir.value.copy(SKIN_BOUNCE_W).transformDirection(cam.matrixWorldInverse); };      // (the bounce's direction in view space)")
+    "head.onBeforeRender = function (r, s, cam) { skinU.skinBounceDir.value.copy(SKIN_BOUNCE_W).transformDirection(cam.matrixWorldInverse); skinBakeTick(head.geometry); };      // (the bounce's direction in view space)")
 # the head's lookups
 rep("  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));\n  geo.setAttribute('sssMask', new THREE.BufferAttribute(sss, 1));",
     """  // the layered skin's lookups (bakeSkinLayers): each point's place in the figure's rest space (model axes, the chin at

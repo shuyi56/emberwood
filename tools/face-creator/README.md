@@ -23,8 +23,15 @@ How it is the same skin as Blender's:
 - **Where they show.** `skin_tones`' thin-skin and freckle zones on the head (the same gaussians), with `paint_face`'s
   hold of the face's thin skin to 0.3.
 
-The patterns are baked once per head shape into three maps over the head's wrap-around coordinates, so the face costs
-three texture reads; the paint sliders only change uniforms.
+The patterns are baked once into three 1024x512 maps over the head's wrap-around coordinates (uv1), so the face costs
+three texture reads. Every head shape shares uv1, so the maps hold across shape sliders and presets: the patterns ride on
+the skin as the face is reshaped, and no slider bakes again. The bake is kept in the creator's startup cache between
+visits, with the rest position it was read at (`window.__skin.B.ref`, which the bench dump uses). A first visit bakes
+after the creator has loaded, with the shader compiled in the background, and the layers come in when it is done. With
+Layered skin at 0 nothing is baked and the shader skips the layers.
+
+To lay a changed `skin-layers.js` onto a `main.js` that already has the port, run the same two commands: the apply
+script then replaces the module alone.
 
 What the creator cannot do, and what it does instead:
 
@@ -44,7 +51,7 @@ What the creator cannot do, and what it does instead:
 - **The game export** (`tools/creator-head/export-head.js`) exports the plain material and painted maps, as before.
   The layers are shader work and do not export.
 
-To lay the port onto the current `main.js` (for example after another change to the creator):
+To lay the port onto a `main.js` without it:
 
     python3 tools/face-creator/apply-skin-layers.py main.js tools/face-creator/skin-layers.js
     node tools/face-creator/skin-params.mjs main.js

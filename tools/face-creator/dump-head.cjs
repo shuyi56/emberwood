@@ -17,7 +17,8 @@ const fs = require('fs'), path = require('path');
   p.on('console', m => { if (m.type() === 'error') console.log(m.text()); });
   await p.goto('file://' + path.resolve(page));
   await p.waitForFunction(() => document.getElementById('busy').hidden && window.__skin, null, { timeout: 600000 });
-  if (face) { await p.locator(`[data-face="${face}"]`).first().click(); await p.waitForTimeout(400); await p.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 600000 }); }
+  if (face) { await p.evaluate(f => document.querySelector(`[data-face="${f}"]`).click(), face); await p.waitForTimeout(400); await p.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 600000 }); }
+  await p.waitForFunction(() => !window.__skin || !__skin.B || __skin.B.done !== false || !(__fc.P.skinLayers > 0), null, { timeout: 900000 }); await p.waitForTimeout(300);      // (the layered skin's first bake runs after the load)
   await p.evaluate(extra => { if (extra) Object.assign(__fc.P, JSON.parse(extra)); __fc.P.hair = false; __fc.update(); }, extra || null);
   // (PLAIN=1: the head in a plain material, its painted face on a matte standard surface, to check the bench's light
   // against the creator's with nothing of either skin in the way; the bench's --plain is the same surface)
@@ -48,7 +49,7 @@ const fs = require('fs'), path = require('path');
     const L = S.lights, lin = c => [c.r, c.g, c.b];
     const dir = l => { const d = l.position.clone().sub(l.target.position).normalize(); return [d.x, -d.z, d.y]; };
     return {
-      head: mesh(S.head, ['skinRest', 'skinZones']),
+      head: Object.assign(mesh(S.head, ['skinRest', 'skinZones']), S.B && S.B.ref ? { skinRest: Array.from(S.B.ref) } : {}),      // (the rest the patterns were baked at: the default head's, which every shape keeps)
       eyes: S.eyes.map(m => Object.assign(mesh(m), { map: m.material.map.image.toDataURL('image/png') })),
       ears: S.ears.map(m => mesh(m)),
       face: S.face.toDataURL('image/png'), mask: S.mask.toDataURL('image/png'),
