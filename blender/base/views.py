@@ -12,6 +12,7 @@
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
+--clay-only  the clay views alone, without the full look (a first look at new forms: no materials rendered)
 --angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
            comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
@@ -154,6 +155,9 @@ def look_3d(samples):
     # light off the floor: big, warm and from below, so the shaded undersides (legs, jaw, the far side of the body)
     # keep some colour instead of going grey. It is not seen by the camera.
     area('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), aim=(0, 0, 20)).visible_camera = False
+    # (a figure may dim or raise a light for its own views, by name: LIGHT_SCALE = {'Bounce': 0.25}. None does by default.)
+    for name, k in getattr(F, 'LIGHT_SCALE', {}).items():
+        bpy.data.objects[name].data.energy *= k
     cam_d = bpy.data.cameras.new('View')
     cam_d.clip_start, cam_d.clip_end = 1, 1000
     cam = bpy.data.objects.new('View', cam_d)
@@ -376,7 +380,8 @@ def main():
             return
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
-            for look in ('', '-clay') if '--clay' in argv else ('',):
+            looks = ('-clay',) if '--clay-only' in argv else ('', '-clay') if '--clay' in argv else ('',)
+            for look in looks:
                 clay(look == '-clay', saved)
                 if '--turn' in argv:
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
