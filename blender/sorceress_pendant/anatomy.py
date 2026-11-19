@@ -731,15 +731,32 @@ def fuse_lower():
     k = float(os.environ.get('JOINT_SMOOTH', '1.0'))
     rest = relax(rest, np.clip(k * (0.9 * w_sh + 0.6 * w_nk), 0, 1), 14)
     rest = relax(rest, np.clip(k * 0.9 * w_pit, 0, 1), 18)
-    for nm in ('Hand.L', 'Hand.R'):       # (the hand as long as the face)
-        o = bpy.data.objects.get(nm)
+    # a second hand on each wrist, closed (for the run: use_fist() shows one or the other), with the open hand's
+    # weights and its colour layers
+    for side, s_ in (('R', 1), ('L', -1)):
+        h = bpy.data.objects.get(f'Hand.{side}')
+        if h is None or bpy.data.objects.get(f'Fist.{side}') is not None:
+            continue
+        fo = female.mesh_obj(f'Fist.{side}', female.hand_mesh(s_, fist=True), female.M_SKIN, loc=tuple(h.location),
+                             subdiv=0, skin=female.arm_weights(side))
+        for a_ in h.data.color_attributes:
+            arr_ = np.zeros(len(h.data.vertices) * 4)
+            a_.data.foreach_get('color', arr_)
+            b_ = fo.data.color_attributes.new(a_.name, a_.data_type, a_.domain)
+            b_.data.foreach_set('color', np.tile(arr_.reshape(-1, 4).mean(0), len(fo.data.vertices)))
+        fo.hide_render = fo.hide_viewport = True
+    for side in ('L', 'R'):       # (the hand as long as the face; the fist on the open hand's scale)
+        o = bpy.data.objects.get(f'Hand.{side}')
         if o is not None:
             zs_ = [v.co.z for v in o.data.vertices]
             k = CANON['hand'] / (max(zs_) - min(zs_))
-            top = max(zs_)
-            for v in o.data.vertices:
-                v.co = Vector((v.co.x * k, v.co.y * k, top + (v.co.z - top) * k))
-            o.data.update()
+            for q in (o, bpy.data.objects.get(f'Fist.{side}')):
+                if q is None:
+                    continue
+                top = max(v.co.z for v in q.data.vertices)
+                for v in q.data.vertices:
+                    v.co = Vector((v.co.x * k, v.co.y * k, top + (v.co.z - top) * k))
+                q.data.update()
     # the wrist: the forearm ends in the wrist's oval (ARM_SEC), and the root of the hand is drawn out to the same
     # oval. The hand's own root was a narrow dome that flared to the palm inside one unit; now its section runs
     # from the wrist's oval at the joint to the palm's own a fifth of the hand lower, centred on the arm at the
@@ -747,11 +764,11 @@ def fuse_lower():
     bpy.context.view_layer.update()
     zw = female.SH_Z - U - F
     fore = np.array([sum(v for b_, v in w_.items() if b_.split('.')[0] in ('Forearm', 'Hand')) for w_ in Wn]) > 0.5
-    for nm, sgn in (('Hand.R', -1.0), ('Hand.L', 1.0)):
+    for nm, sgn in (('Hand.R', -1.0), ('Hand.L', 1.0), ('Fist.R', -1.0), ('Fist.L', 1.0)):
         o = bpy.data.objects.get(nm)
         if o is None:
             continue
-        mw_ = o.matrix_world.copy()
+        mw_ = Matrix.Translation(o.location)      # (a skinned mesh, unparented: and a hidden one's matrix_world is stale)
         H_ = np.array([(mw_ @ v.co)[:] for v in o.data.vertices])
         axx, axy = sgn * female.SH_X, 0.2
         hx, hy, dz_ = H_[:, 0] - axx, H_[:, 1] - axy, H_[:, 2] - zw
@@ -783,6 +800,8 @@ def fuse_lower():
         for q, v in enumerate(o.data.vertices):
             v.co = inv_ @ Vector((axx + nx_[q], axy + ny_[q], H_[q, 2]))
         o.data.update()
+        if nm.startswith('Fist'):
+            continue
         # (the forearm's end, drawn in under the joint so its edge lies inside the heel of the hand)
         px, py = rest[:, 0] - axx, rest[:, 1] - axy
         ii = np.nonzero(fore & (np.hypot(px, py) < 2.4) & (rest[:, 2] < zw + 0.2) & (rest[:, 2] > zw - 1.0))[0]
@@ -845,6 +864,16 @@ def fuse_lower():
 SH_SLOPE = math.radians(float(os.environ.get('SH_SLOPE', '21')))
 SH_TAN = (float(os.environ.get('SH_TAN_X', '6.0')), float(os.environ.get('SH_TAN_Z', '49.54')))
 SH_OUT = float(os.environ.get('SH_OUT', str(CANON['shoulders'] / 2 + 0.1)))
+
+
+def use_fist(on=True, side=None):
+    """Show the closed fists in place of the open hands (or the open hands again), on one side ('L' or 'R') or
+    both. The two are separate meshes on the same wrist; a pose picks one."""
+    for sd in (side,) if side else ('L', 'R'):
+        for nm, show in ((f'Hand.{sd}', not on), (f'Fist.{sd}', on)):
+            o = bpy.data.objects.get(nm)
+            if o is not None:
+                o.hide_render = o.hide_viewport = not show
 
 
 def round_shoulders(co, b=0.35):

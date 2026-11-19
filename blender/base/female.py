@@ -2084,12 +2084,17 @@ def finish_rig():
     arm.hide_render = True
 
 
-def hand_mesh(s):
+def hand_mesh(s, fist=False):
     """A hand hanging relaxed from the wrist (at the origin, fingers down), made as one fused surface: metaball
     pieces for the palm, the four fingers (two segments each, curled loosely toward the palm, longest at the
     middle) and the thumb lying forward along the index finger melt into each other, so the fingers grow out of
     the palm with webbing between them, and the result is converted to a mesh. The palm faces the body (s = 1
-    for the right hand, whose inside faces +X); the front is -Y."""
+    for the right hand, whose inside faces +X); the front is -Y.
+
+    fist: the same wrist and palm with the hand closed. Each finger's first bone turns in at the knuckle, square to
+    the palm, its second folds back up along the palm and its tip tucks in against it, so the knuckles stand in a
+    row along the hand's lower edge (the top of the fist when the forearm is raised); the thumb lies across the
+    front of the first two fingers' second bones."""
     inward = s
     mb = bpy.data.metaballs.new('hand')
     mb.resolution = mb.render_resolution = 0.09
@@ -2126,6 +2131,17 @@ def hand_mesh(s):
     # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
     # size, slim fingers any longer read as spidery)
     for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.8, 0.98, 0.22)):
+        if fist:
+            # (the knuckle a little proud of the back of the hand, the three bones in the ratio a finger's have)
+            k0 = Vector((-0.06 * inward, y0 * 0.94, -2.55))
+            k1 = k0 + Vector((inward * 0.52 * L, 0.0, -0.12 * L))
+            k2 = k1 + Vector((inward * 0.04 * L, 0.0, 0.36 * L))
+            k3 = k2 + Vector((-inward * 0.22 * L, 0.0, 0.12 * L))
+            blob(k0, (0.9, 0.9, 0.9), r * 1.12)
+            capsule(k0, k1, r * 1.05)
+            capsule(k1, k2, r * 0.98)
+            capsule(k2, k3, r * 0.85)
+            continue
         # (the two pieces of each finger meet end to end at the middle joint with only a little overlap, and the
         # finger starts a touch lower in the palm: overlapping fully, their fields add up and swell into a knob)
         p = Vector((0.05 * inward, y0, -2.6))
@@ -2152,6 +2168,10 @@ def hand_mesh(s):
     t0 = Vector((0.2 * inward, -0.7, -0.9))
     t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
     t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
+    if fist:
+        # (round the front of the fist and across the first two fingers, outside their second bones)
+        t1 = Vector((0.62 * inward, -1.02, -1.75))
+        t2 = Vector((0.98 * inward, -0.28, -2.02))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.26)
     capsule(t0, t1, 0.34)
