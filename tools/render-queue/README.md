@@ -17,11 +17,58 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_compare.py` | before and after on a fixed camera, from cached results only (see "Standard views") |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
 `--out DIR`. The standard figure views are `blender/base/views.py` (`--figure`, `--mannequin`, `--turn`/`--head`,
-`--angles`, `--clay`, `--walk N`/`--run N`, `--size`, `--samples`, `--denoise`).
+`--angles`, `--clay`, `--walk N`/`--run N`, `--size`, `--samples`, `--denoise`, and the presets below).
+
+## Standard views: ask for a preset, not a camera
+
+Don't build cameras in your branch for routine checks. Ask for a named preset of `blender/base/views.py`; it expands
+into the flags above, so the request is still one `views` command line and the cache and `"quality"` work as before.
+
+| Preset | What it renders |
+| --- | --- |
+| `view-clay` | one 3/4 clay view of the whole figure: the first look at a change |
+| `turn-clay`, `turn-matcap`, `turn-lit` | orthographic turnaround, front, 3/4, profile, back, in clay, matcap or the lit look |
+| `head-clay`, `head-lit` | head and shoulders, four angles in clay, or one lit 3/4 |
+| `closeup` with `--area NAME` | a square close-up of a named part: face, head, shoulders, torso, waist, hips, hands, legs, knees, feet, full, or `piece:PREFIX` |
+| `walk`, `run` | the world walk or the run on the mannequin, 6 frames |
+
+Add `--mannequin` for clothes. Every preset renders at the **draft** tier unless `--tier` says otherwise:
+
+| Tier | Settings | For |
+| --- | --- | --- |
+| `draft` | 8 samples, no denoiser, 320 px | every iteration (the default) |
+| `check` | 32 samples, denoised, 480 px; add `"quality": "check"` and the queue drops it to 8 | a review look |
+| `final` | the script's own samples and size, denoised | John's sign-off only |
+
+A tier fills in only the flags you leave out. Every image comes back with a coloured strip under it naming the tier it
+really rendered at (amber draft, blue check, green final), the samples, the look, the angles, the figure and the
+commit, and `views.json` beside it records each image's exact camera. The named areas are framed from the figure's
+measurements (head height, chin, shoulder, hip and ankle heights, limb lengths), not from the meshes, so a close-up's
+camera does not move when a garment changes; `piece:PREFIX` frames on the piece and does.
+
+```json
+{"branch": "claude/project-thread-xxxxxx", "outputs": ["views"],
+ "views": ["blender/base/views.py --figure rogue --mannequin --preset closeup --area shoulders"],
+ "note": "shoulder seam of the new bodice, draft"}
+```
+
+John's one-view-first rule still applies: start with `view-clay` or a one-angle `closeup`, and ask for a `turn-*`
+preset with `"confirmed"` once that view is right.
+
+**Before and after** never renders a before. Render the after with the same preset command as an earlier result,
+then run
+
+    python3 tools/render-queue/rq_compare.py results/<after key> [--before results/<key>] --out DIR
+
+It takes the newest earlier result of the identical command (preferring one on main) as the before, refuses any
+image whose camera differs from the after's, and writes the before above the after with both tier labels and a row
+marking every changed pixel in red, with the changed share of each angle in `compare.json`. The first render of a
+preset is the before for the next change of the same view.
 
 ## How to ask for a render
 
