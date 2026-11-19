@@ -18,6 +18,9 @@ const OWN_CAPE = /^Cape(_|$)/;
 // the centre of the ring her cape hangs round (z), and how far either side of straight behind its chains reach:
 // her cape's back reaches 102° round each side, and its front panels on to about 146°
 const CZ = -0.5, SPAN = 2.55;
+// a cape that runs further round (the tailored cloak, blender/cloak/, closes at the centre front): ?capespan=<radians>
+// sets how far either side of the centre back its outer chains run
+const spanOf = () => Number(new URLSearchParams(globalThis.location ? globalThis.location.search : '').get('capespan')) || SPAN;
 const angleOf = (x, z) => Math.atan2(x, -(z - CZ));
 
 export function loadModelBody(url) {
@@ -100,7 +103,8 @@ function reskinCape(body, { columns = 7, rows = 5 } = {}) {
     for (let i = 0; i < p.count; i++) pts.push([p.getX(i), p.getY(i), p.getZ(i)]);
   }
   const top = Math.max(...pts.map((p) => p[1])), hemY = Math.min(...pts.map((p) => p[1]));
-  const colA = (c) => -SPAN + 2 * SPAN * (c / (columns - 1));
+  const span = spanOf();
+  const colA = (c) => -span + 2 * span * (c / (columns - 1));
   const rowY = [top - 0.3];
   for (let r = 0; r <= rows; r++) rowY.push(CAPE.shoulderY - (CAPE.shoulderY - hemY) * (r / rows));
   const layout = { colA, rowY, hemY, columns, rows };
