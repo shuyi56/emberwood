@@ -1343,10 +1343,13 @@ NECK_RINGS = [(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (NECK_Z, 2.
 #    vertebral bodies, which lie behind the neck's middle. Its height is halfway between the base of the neck at the
 #    back (the C7 spine, 0.12 head heights under the chin: ANSUR II women, cervicale 2.4 cm under the menton) and at
 #    the front (NECK_Z, the pit of the neck), since the base of the neck slopes down to the front.
-# NECK_SHARE: the upper joints' share of each motion (nod, tilt, turn), from the ranges per level (White & Panjabi):
-# flexion and extension 45 of the neck's 136 degrees, lateral bend 10 of 61, axial rotation 45 of 77. So a turn of
-# the head is mostly the atlas, and a tilt almost all the lower neck.
-NECK_SHARE = (45 / 136, 10 / 61, 45 / 77)
+# NECK_SHARE: the upper joints' share of each motion (nod, tilt, turn), from the ranges per level (White & Panjabi;
+# Panjabi's in vivo flexion and extension of the upper joints): bending forward the skull rocks little on the atlas
+# (occiput-C1 3.5, C1-C2 11.5 degrees: 15 of about 50), bending back far more (21 and 11: 32 of about 62), lateral
+# bend 10 of 61, axial rotation 45 of 77. So a turn of the head is mostly the atlas, a tilt almost all the lower
+# neck, and looking up tips the skull back on the atlas instead of bowing the whole neck.
+NECK_SHARE = (15 / 50, 10 / 61, 45 / 77)
+NECK_SHARE_EXT = 32 / 62
 NECK_ROM = {'flex': 50, 'ext': 60, 'tilt': 45, 'turn': 80}    # the neck's active range, degrees each way
 NECK_PIT = 0.36                      # the pit of the neck under the chin, head heights (ANSUR II women: suprasternale)
 C7_BACK = 0.12                       # the C7 spine under the chin, head heights (ANSUR II women: cervicale)
@@ -1543,19 +1546,27 @@ def head_section(z, c, s):
     return _section(z, c, s)
 
 
+RAMUS_BACK = 0.11      # the back edge of the jaw's ramus, head heights from the head's middle (see jaw_relief)
+
+
+def jaw_edge(y):
+    """The jaw's lower edge in profile, head heights above the chin at y (head heights, face toward -y): one curve,
+    level under the chin and bending up smoothly to the angle under the ear (round 9)."""
+    return 0.17 * min(1.0, max(0.0, (y + 0.34) / 0.4)) ** 1.7
+
+
 def jaw_relief(y, z):
     """How far the jaw stands out of the neck (head heights, along the surface normal): 1 over the jaw, fading to
     0 across its lower edge (from the bottom of the chin back and up to the angle under the ear) and its back edge
     (the ramus), and fading out above into the cheek, which the sections already shape."""
-    # the lower edge in profile: one curve, level under the chin and bending up smoothly to the angle (round 9)
-    zl = 0.17 * min(1.0, max(0.0, (y + 0.34) / 0.4)) ** 1.7
+    zl = jaw_edge(y)
     def ss(t):
         t = min(1.0, max(0.0, t))
         return t * t * (3 - 2 * t)
     js = FACE['jawSharp']                      # (narrows the turn over the lower and back edges: a crisper jawline)
     tail = FACE['jawUnder']                    # (lets the jaw fall softly into the neck, with no crease)
     below = ss((z - zl + 0.03 / js + tail) / (0.1 / js + tail))        # above the lower edge of the jaw
-    behind = ss((0.11 + tail - y) / (0.11 / (1 + 0.3 * (js - 1)) + tail))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
+    behind = ss((RAMUS_BACK + tail - y) / (RAMUS_BACK / (1 + 0.3 * (js - 1)) + tail))   # in front of the back edge of the ramus (kept soft: crisp, it read as a step)
     up = ss((zl + 0.26 - z) / 0.26)                 # under the cheek
     # the angle of the jaw under the ear, where the lower edge turns up into the ramus: a firm corner on a
     # defined jaw (the masseter over it), set inside both edges so they stay clean
@@ -2091,7 +2102,7 @@ def neck_joints():
         if len(q) >= 2:
             yf, yb = float(q[:, 1].min()), float(q[:, 1].max())
             break
-    return {'chin': chin, 'H': H, 'bottom': bottom, 'pit': chin - NECK_PIT * H,
+    return {'chin': chin, 'H': H, 'bottom': bottom, 'pit': chin - NECK_PIT * H, 'ymid': ymid,
             'atlas': (hx, ymid + EAR_Y * H, chin + EAR_BOTTOM * H),
             'cervical': (hx, yb - VERTEBRA_BACK * (yb - yf), c7z)}
 
@@ -2170,17 +2181,20 @@ def _ease(a, b, v):
 def neck_shares(co):
     """How a rest point of the neck splits between its joints: (lower, upper). lower is the share carried past
     the base of the neck by the lower cervical spine (0 on the chest, 1 on the neck), upper the share carried on by
-    the skull (1 on the head). The lower blend runs over the visible lower neck, from a little under its base at the
+    the skull (1 on the head; the jaw and face always 1). The lower blend runs over the visible lower neck, from a little under its base at the
     front (the skin over the top of the breastbone is drawn up as the head goes back) up to where the head's sculpt
-    begins; the upper one over the whole neck, from the pit up to the chin at
-    the throat (the floor under the jaw moves with the jaw) and up to the skull's base at the nape (the atlas's
-    height), so the nape bends with the neck instead of with the skull, and a turn of the head (mostly at the atlas)
+    begins; the upper one over the whole neck, from the pit up to just under the
+    jaw's lower edge (jaw_edge) in front of the ramus, and behind it up to the skull's base at the nape (the
+    atlas's height), so the nape bends with the neck instead of with the skull, and a turn of the head (mostly at the atlas)
     is shared out along the neck's skin instead of wringing a thin ring of it under the jaw."""
     nk = NECK or neck_joints()
-    chin, at = nk['chin'], nk['atlas']
-    lower = _ease(nk['pit'] - 0.12 * nk['H'], nk['bottom'] - 0.1, co.z)
-    back = _ease(at[1] - 0.25 * nk['H'], at[1] + 0.25 * nk['H'], co.y)        # 0 at the throat, 1 at the nape
-    upper = _ease(nk['pit'], chin + back * (at[2] - chin), co.z)
+    H = nk['H']
+    lower = _ease(nk['pit'] - 0.12 * H, nk['bottom'] - 0.1, co.z)
+    # the skull's own surface starts at the jaw's lower edge in front of the ramus (a little under it, so the edge
+    # stays crisp), and behind the ramus rises to the skull's base, level with the atlas, at the nape
+    hy = (co.y - nk['ymid']) / H
+    top = jaw_edge(hy) - 0.03 + (EAR_BOTTOM + 0.03 - jaw_edge(RAMUS_BACK)) * _ease(RAMUS_BACK, 0.3, hy)
+    upper = _ease(nk['pit'], nk['chin'] + top * H, co.z)
     return lower, upper
 
 
@@ -4442,7 +4456,7 @@ def carry_head(nod=0.0, tilt=0.0, turn=0.0, share=None):
     chest = ob['Body'].rotation_euler.to_matrix() @ ob['Chest'].rotation_euler.to_matrix()
     rel = chest.transposed() @ Euler((nod, tilt, turn), 'XYZ').to_matrix()
     e = rel.to_euler('XYZ')
-    sn, st, sr = share or NECK_SHARE
+    sn, st, sr = share or (NECK_SHARE[0] if e.x >= 0 else NECK_SHARE_EXT,) + NECK_SHARE[1:]
     low = Euler(((1 - sn) * e.x, (1 - st) * e.y, (1 - sr) * e.z), 'XYZ')
     ob['Cervical'].rotation_euler = low
     ob['Atlas'].rotation_euler = (low.to_matrix().transposed() @ rel).to_euler('XYZ')
