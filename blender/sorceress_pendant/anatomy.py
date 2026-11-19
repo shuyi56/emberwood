@@ -114,7 +114,13 @@ U, F = female.UPPER, female.FORE
 #                 then flat into its tendon over the lower third, so the back of the arm runs in to the elbow
 #   the biceps    in front, fullest lower, three fifths of the way down
 #   the elbow     the narrowest depth, wide across (the two knobs of the humerus), the point of the elbow behind
-#   the forearm   fullest a fifth of the way down, wide across, tapering to the wrist
+#   the forearm   its muscle in the upper half: fullest a fifth of the way down (0.86 of the shoulder across, 0.8
+#                 deep), still 0.73 at the middle, then running into tendon and the wrist's oval over the lower
+#                 half, so the depth seen from the side falls in one line (0.8, 0.73, 0.7, the wrist's 0.67) and
+#                 the width seen from the front tapers faster. With the wider wrist the old forearm (0.62 deep at
+#                 its middle, less than the wrist) read as bone (John, 2026-11-18). Over that, two masses
+#                 (forearm()): the brachioradialis and the extensors, from above the elbow down the outside and
+#                 front, and the flexors on the inside, a little lower.
 #   the wrist     an oval lying the other way: thin across and deep front to back, as the palm faces the thigh
 S_ARM = 1.82
 # The wrist comes from the hand, and the hand from the head (John, 2026-11-18: the hand looked too big for the wrist
@@ -130,8 +136,8 @@ ARM_SEC = [(1.5, 0.3, 0.276, 0.276), (1.25, 1.2, 1.104, 1.104), (0.8, 1.72, 1.58
            (-0.23 * U, 0.90 * S_ARM, 0.86 * S_ARM, 0.96 * S_ARM), (-0.41 * U, 0.80 * S_ARM, 0.85 * S_ARM, 1.0 * S_ARM),
            (-0.61 * U, 0.74 * S_ARM, 0.84 * S_ARM, 0.86 * S_ARM), (-0.82 * U, 0.70 * S_ARM, 0.74 * S_ARM, 0.73 * S_ARM),
            (-U, 0.74 * S_ARM, 0.64 * S_ARM, 0.71 * S_ARM),
-           (-U - 0.22 * F, 0.80 * S_ARM, 0.72 * S_ARM, 0.72 * S_ARM), (-U - 0.5 * F, 0.66 * S_ARM, 0.62 * S_ARM, 0.61 * S_ARM),
-           (-U - 0.8 * F, 0.5 * (0.66 * S_ARM + WRIST_T), 0.5 * (0.62 * S_ARM + WRIST_W), 0.5 * (0.61 * S_ARM + WRIST_W)),
+           (-U - 0.22 * F, 0.86 * S_ARM, 0.80 * S_ARM, 0.78 * S_ARM), (-U - 0.5 * F, 0.74 * S_ARM, 0.73 * S_ARM, 0.71 * S_ARM),
+           (-U - 0.8 * F, 0.52 * S_ARM, 0.5 * (0.73 * S_ARM + WRIST_W), 0.5 * (0.71 * S_ARM + WRIST_W)),
            (-U - F, WRIST_T, WRIST_W, WRIST_W), (-U - F - 0.4, WRIST_T, WRIST_W, WRIST_W)]
 # (the one radius other code asks for, the hole a sleeve needs and the ribs' clearance: the section's widest)
 ARM_R = [(r[0], max(r[1:])) for r in ARM_SEC]
@@ -156,11 +162,22 @@ def deltoid(z, phi, s):
     return r
 
 
+def forearm(z, phi, s):
+    """The forearm's two muscle masses over its section, as shares of the shoulder's radius: the brachioradialis
+    and extensors on the outside and front, rising above the elbow's outer side and fullest just below it; the
+    flexors on the inside, fullest a quarter of the way down. Both run out before the wrist."""
+    o_, fr = s * math.sin(phi), math.cos(phi)
+    k = float(os.environ.get('FOREARM_K', '1.0'))
+    r = 0.09 * S_ARM * math.exp(-((z + U + 0.16 * F) / (0.2 * F)) ** 2) * max(0.0, 0.75 * o_ + 0.55 * fr) ** 1.5
+    r += 0.08 * S_ARM * math.exp(-((z + U + 0.27 * F) / (0.2 * F)) ** 2) * max(0.0, -0.85 * o_ + 0.3 * fr) ** 1.5
+    return k * r
+
+
 def arm_xy(z, phi, s, out=0.0):
     """The bare arm's surface at local height z and phi (0 the front), pushed out by `out`."""
     a, bf, bb = _table(ARM_SEC, z)
     sn, c = math.sin(phi), math.cos(phi)
-    d = deltoid(z, phi, s) + out
+    d = deltoid(z, phi, s) + forearm(z, phi, s) + out
     return -(a + d) * sn, -((bf if c >= 0 else bb) + 0.92 * d) * c
 
 
