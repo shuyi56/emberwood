@@ -43,19 +43,18 @@ RATIOS = {
     'ease': 0.10,            # the gap between arm and sleeve below the head, in w (a close tailored sleeve: 5 mm)
     'ease_head': 0.06,       # and under the head, where it lies on the shoulder before the puff, in w
     'cap_base': 0.80,        # the head's gathers end this far below the underarm, in w (on the deltoid's lower edge)
-    'puff': 0.55,            # how far the head stands off the shoulder at its crown, in w (ca. 1889-1891: a modest
+    'puff': 0.50,            # how far the head stands off the shoulder at its crown, in w (ca. 1889-1891: a modest
                              # puff, about 2.5 cm, not yet the leg-of-mutton of 1895)
-    'puff_in': 0.25,         # the head rises to its full height this far from the seam, in w (the gathers stand up
-                             # off the seam at once: the 'kick-up' of ca. 1890)
-    'puff_hold': 0.75,       # stays there to this far from the seam, in w
-    'puff_out': 2.30,        # and has run down into the tailored sleeve by this far, in w (about 6 cm: the head
+    'puff_in': 0.80,         # the head's crown: this far from the seam, in w (it rises from the gathers in a dome, not
+                             # a wall: a quick rise and a flat top read as a shoulder pad, render #183)
+    'puff_out': 2.00,        # and has run down into the tailored sleeve by this far, in w (about 5 cm: the head
                              # covers the deltoid's top, the reference's upper quarter of the upper arm)
     'puff_round': 0.55,      # how far round the arm the puff runs from its crown: cos of the angle it fades out by
                              # (0: to the front and back of the arm, 1: only on top). The underarm stays plain.
     'full': 0.55,            # how much more cloth the head has than the seam it is gathered into, each way
-    'gather': 0.12,          # the drawn gathers' depth at the seam, in w (deeper than the bench's 3 mm: the grid and the
+    'gather': 0.16,          # the drawn gathers' depth at the seam, in w (deeper than the bench's 3 mm: the grid and the
                              # smoothing take about half of it)
-    'gather_step': 0.90,     # and their spacing along the seam, in w (the bench's puff: 4.6 cm)
+    'gather_step': 1.10,     # and their spacing along the seam, in w (the bench's puff: 4.6 cm)
     'gather_len': 1.10,      # how far down from the seam they run before they open out, in w
     'band': 0.30,            # the width of the band along the seam that is held to the seam's length, in w
     'elbow_ease': 0.26,      # the ease let into the hindarm seam behind the elbow, in w (room for the elbow's point
@@ -235,7 +234,10 @@ class Draft:
         """The head's height off the skin by the distance u from the seam: up at once off the gathers, held over the
         shoulder's top, and run down into the sleeve."""
         r, w = self.r, self.M['w']
-        return r['puff'] * w * _ss(0.0, r['puff_in'] * w, u) * (1.0 - _ss(r['puff_hold'] * w, r['puff_out'] * w, u))
+        a, b = r['puff_in'] * w, r['puff_out'] * w
+        # (a dome: up as a quarter of a sine to the crown, down as a smooth step to the sleeve)
+        up = np.sin(0.5 * math.pi * np.clip(u / a, 0.0, 1.0))
+        return r['puff'] * w * up * (1.0 - _ss(a, b, u))
 
     def field(self, X, puff=1.0, gathers=True):
         """The whole piece: negative inside the cloth's surface (left side). Below and under the arm it is the
