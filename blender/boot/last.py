@@ -62,9 +62,9 @@ import fit  # noqa: E402     (the vest's cutter and hull)
 RATIOS = {
     'leather': 0.014,        # the leather's thickness (about 3.5 mm)
     'ease': 0.035,           # the shaft's room over the leg's taut section (a finger's width all round)
-    'slope': 0.18,           # the most the shaft closes in on the leg for each unit it goes down
+    'slope': 0.20,           # the most the shaft closes in on the leg for each unit it goes down
     'ankle_girth': 1.12,     # the shaft's least girth, as a multiple of the ankle's (laced: the heel goes in open)
-    'flare': 0.004,          # the top's flare
+    'flare': 0.008,          # the top's flare
     'flare_span': 0.30,
     'calf_swell': 0.015,     # the shaft's own swell over the calf, past the ease (as a laced boot is cut)
     'calf_span': 0.25,       # over this far either way of the calf's fullest

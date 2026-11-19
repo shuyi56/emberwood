@@ -50,7 +50,8 @@ def build():
     leather = female.mat(M_LEATHER)
     boots = last.build_boots(body, hose.MEASURES, rig=rig, material=leather, shaft_name=SHAFT)
     for side in 'RL':
-        last.reweight(boots[side], ho)
+        if not os.environ.get('BOOT_BODY_WEIGHTS'):
+            last.reweight(boots[side], ho)           # (the hose's weights, so the leather moves as it does)
     if SEW:
         import sew
         for side in 'RL':
