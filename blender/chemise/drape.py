@@ -36,7 +36,7 @@ RATIOS = {
     'neck_side': 1.60,       # the neckline: half its width, in w
     'neck_front': 1.55,      # how far forward of the neck's axis it scoops, in w
     'neck_back': 1.20,       # and how far back
-    'hem': 2.6,              # the hem below the waist, in w
+    'hem': 3.4,              # the hem below the waist, in w
     'fold': 0.80,            # the depth of the body's creases at the hem, in w
     'folds': 9,              # how many round the body
     'gather': 0.075,         # the depth of the gathers at the neckline, in w
@@ -433,7 +433,8 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
         if np.ptp(an) > math.pi:                    # (a face across the cloth's seam: carried round)
             an = np.where(an < 0, an + 2 * math.pi, an)
         for lp, i, a_ in zip(face.loops, f, an):
-            lp[lay].uv = (float(a_) * (R_s if sl else R_b), float(V[i][2]))
+            # (the flat cloth is larger than the draft by the fullness: its threads are counted on the cloth)
+            lp[lay].uv = (float(a_) * (R_s if sl else R_b) * (1.0 + ratios['full']), float(V[i][2]) * (1.0 + ratios['full']))
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     bm.verts.ensure_lookup_table()
     edge = np.array([v.index for v in bm.verts if v.is_boundary and v.link_faces])
