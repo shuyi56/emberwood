@@ -57,6 +57,11 @@ VERSION = 1
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
+# the modifiers that only move points: kept when the garment is read; the rest (solidify, subdivision, bevel...)
+# are switched off for the read, so the cloth is read as the sheet it was cut and sewn as, point for point
+DEFORM = {'ARMATURE', 'SHRINKWRAP', 'SURFACE_DEFORM', 'LATTICE', 'CORRECTIVE_SMOOTH', 'SMOOTH', 'LAPLACIANSMOOTH',
+          'DISPLACE', 'MESH_DEFORM', 'HOOK', 'CAST', 'WARP', 'WAVE', 'SIMPLE_DEFORM', 'CLOTH', 'MESH_CACHE',
+          'MESH_SEQUENCE_CACHE', 'SOFT_BODY'}
 SKIP_NAMES = ('stitch', 'eyelet', 'button', 'buckle', 'plate', 'rivet', 'aglet', 'medallion', 'pendant', 'lace ')
 # Until flow_baseline.json is written: loose, so nothing is flagged on guesses.
 DEFAULT_LIMITS = {'stretch_p99': 1.35, 'squash_p1': 0.65, 'shear_p99': 25.0, 'strain_p99': 0.45, 'jag_p99': 0.12,
@@ -700,7 +705,8 @@ def collect(o, dg):
             UV = np.empty(len(me.loops) * 2)
             uvl.data.foreach_get('uv', UV)
             ref = UV.reshape(-1, 2)[Lp]
-            a_uv = 0.5 * np.abs(np.cross(ref[:, 1] - ref[:, 0], ref[:, 2] - ref[:, 0])).sum()
+            d1, d2 = ref[:, 1] - ref[:, 0], ref[:, 2] - ref[:, 0]
+            a_uv = 0.5 * np.abs(d1[:, 0] * d2[:, 1] - d1[:, 1] * d2[:, 0]).sum()
             S3 = (R3 if R3 is not None else X)[T]
             a_3d = 0.5 * np.linalg.norm(np.cross(S3[:, 1] - S3[:, 0], S3[:, 2] - S3[:, 0]), axis=1).sum()
             ratio = math.sqrt(a_uv / max(a_3d, 1e-12))
@@ -787,6 +793,13 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     t = time.time()
     lim, src = limits()
     place = body_places(female) if female is not None else None
+    off = []
+    for o in objects:
+        for md in getattr(o, 'modifiers', ()):
+            if md.type not in DEFORM and md.show_viewport:
+                md.show_viewport = False
+                off.append(md)
+    bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     rep = {'version': VERSION, 'limits': lim, 'limits_from': os.path.basename(src) if src else 'defaults',
            'garments': {}, 'skipped': {}}
@@ -803,6 +816,10 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
             items.append((o.name, S, F))
         except Exception as e:          # (a check must never fail the render)
             rep['skipped'][o.name] = f'{type(e).__name__}: {e}'
+    for md in off:
+        md.show_viewport = True
+    if off:
+        bpy.context.view_layer.update()
     order = {'ok': 0, 'watch': 1, 'likely rejection': 2}
     rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] or ['ok'], key=order.get)
     if items and (heat == 'always' or rep['verdict'] != 'ok'):
