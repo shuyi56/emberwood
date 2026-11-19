@@ -457,12 +457,13 @@ def _deform(o, rig):
     return out
 
 
-def crease(o, pieces, rig, colliders, ankle_bend=None, P=LEATHER, C=CREASE, log=print):
+def crease(o, pieces, rig, colliders, ankle_bend=None, zone=None, P=LEATHER, C=CREASE, log=print):
     """Crease the sewn boot o where a foot bends it, and set the creases in, as a worn boot has them: the ankle is
     bent (dorsiflexed by C['bend'] degrees), the leather carried along by the bones is drawn back to the lengths it
     was cut at by the fabric solver against the hose (so the leather the bend gathers over the front of the ankle
     folds out, with the sole and the collar held), and the folded leather is taken back to the rest pose through
-    the bones and kept as the boot's shape there."""
+    the bones and kept as the boot's shape there, over the front of the ankle only (zone: its lowest and highest
+    height, and the leg's middle front to back)."""
     import time
     from mathutils.bvhtree import BVHTree
     uppers = [p for p in pieces if p['name'] != 'sole']
@@ -470,6 +471,21 @@ def crease(o, pieces, rig, colliders, ankle_bend=None, P=LEATHER, C=CREASE, log=
     n = len(X)
     rest_ij = pairs(uppers, X, log=lambda *a: None)
     side = o.name.rsplit('.', 1)[-1]
+    # the folds are cached: the boot's points as sewn, the bend, the zone and the leather's numbers make the key, so
+    # a run that changes only the look (the texture, the lights) takes the folds it had and skips the solver
+    import hashlib
+    key = hashlib.sha1(np.round(X, 4).tobytes() + repr((C, ankle_bend, zone, sorted((k, P[k]) for k in P))).encode()
+                       ).hexdigest()[:16]
+    cache = os.path.join(os.environ.get('BOOT_CACHE', '/mnt/project-files/hose/boot-cache'), '%s-%s.npy' % (side, key))
+    if os.path.exists(cache) and not os.environ.get('BOOT_NOCACHE'):
+        Z = np.load(cache)
+        if Z.shape == X.shape:
+            o.data.vertices.foreach_set('co', Z.ravel())
+            if 'rest' in o.data.attributes:
+                o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
+            o.data.update()
+            log('boot crease %s: the folds taken from the cache (%s), no solve' % (o.name, os.path.basename(cache)))
+            return {'moved': 0.0, 'cached': True}
     an = bpy.data.objects.get('Ankle.' + side)
     if rig is None or an is None:
         log('boot crease %s: no rig, nothing to bend' % o.name)
@@ -518,8 +534,28 @@ def crease(o, pieces, rig, colliders, ankle_bend=None, P=LEATHER, C=CREASE, log=
     an.rotation_euler = was_rot
     rig.data.pose_position = was_pos
     bpy.context.view_layer.update()
+    # the folds are kept only where a foot's bend makes them: over the front of the ankle. Anywhere else the
+    # solver's moves are its settling (ripples under the cuff, a fold down the heel), not wear.
+    if zone is not None:
+        z0, z1, y_mid = zone
+        wz = _smooth(z0 - 0.5, z0, X[:, 2]) * (1.0 - _smooth(z1, z1 + 1.2, X[:, 2]))
+        wy = _smooth(y_mid + 0.3, y_mid - 0.9, X[:, 1])
+        Z = X + (Z - X) * (wz * wy)[:, None]
     o.data.vertices.foreach_set('co', Z.ravel())
     if 'rest' in o.data.attributes:
         o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
     o.data.update()
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        np.save(cache, Z)
+    except OSError as err:
+        log('boot crease %s: the folds could not be cached (%s)' % (o.name, err))
+    kept = np.linalg.norm(Z - X, axis=1)
+    log('boot crease %s: the folds kept over the front of the ankle: %.3f on average, %.3f at most'
+        % (o.name, kept.mean(), kept.max()))
     return {'moved': float(d.max())}
+
+
+def _smooth(a, b, x):
+    t = np.clip((x - a) / (b - a), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)

@@ -54,7 +54,10 @@ def build():
         for side in 'RL':
             sew.sew(boots[side], last.PIECES[side], rig, [ho])
             if CREASE:
-                sew.crease(boots[side], last.PIECES[side], rig, [ho])
+                M = hose.MEASURES
+                yc = 0.5 * (M['heel_y'] + M['toe_y']) + 0.35 * (M['heel_y'] - M['toe_y'])      # (the ankle's middle)
+                sew.crease(boots[side], last.PIECES[side], rig, [ho],
+                           zone=(M['ankle_z'] - 0.4, M['ankle_z'] + 0.14 * M['H'], yc))
             boots['stitches ' + side] = sew.stitches(boots[side], last.PIECES[side], rig=rig, material=female.mat(M_THREAD))
             boots['eyelets ' + side], boots['lace ' + side] = sew.lacing(
                 boots[side], last.PIECES[side], rig=rig, H=hose.MEASURES['H'], metal=female.mat(M_EYELET),

@@ -316,8 +316,9 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
         low = _node(nt, 'ShaderNodeMapRange', Value=zc, **{'From Min': 2.6, 'From Max': 0.8}).outputs['Result']
         scuff = _math(nt, 'MULTIPLY', scuff, _math(nt, 'MULTIPLY_ADD', low, 0.75, 0.25))
         wear = _math(nt, 'MAXIMUM', _math(nt, 'MULTIPLY', crease, 0.8), scuff)
-        c1 = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', wear, 0.6), A=base.outputs['Result'])
-        c1.inputs['B'].default_value = (*[lerp(a, b, 0.4) for a, b in zip(light, lighter)], 1)
+        # (worn leather goes a duller, warmer tan, a little lighter than the hide: never the pale grey of dust or paint)
+        c1 = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', wear, 0.4), A=base.outputs['Result'])
+        c1.inputs['B'].default_value = (*[lerp(a, b, 0.3) for a, b in zip(mid, light)], 1)
         # mud and wet: the foot darkened, fading up the shaft along a wavering tide line
         tide = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=1.1, Detail=2.0)
         # (kept low, on the foot below the welt's top and up over the toe, with a clean edge, not a smeared fade)
@@ -332,7 +333,8 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
         col = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', caked, 0.8), A=cw_.outputs['Result'])
         col.inputs['B'].default_value = (0.11, 0.09, 0.07, 1)
         mud = _math(nt, 'MAXIMUM', mud, caked)
-        h = _math(nt, 'MULTIPLY_ADD', peb.outputs['Distance'], 0.7, _math(nt, 'MULTIPLY', fine.outputs['Fac'], 0.5))
+        # (the grain is a fine, shallow pebble: smooth calf at this distance, not hammered)
+        h = _math(nt, 'MULTIPLY_ADD', peb.outputs['Distance'], 0.35, _math(nt, 'MULTIPLY', fine.outputs['Fac'], 0.25))
         h = _math(nt, 'MULTIPLY_ADD', pore, -0.45, h)
         h = _math(nt, 'MULTIPLY_ADD', ridge, _math(nt, 'MULTIPLY', band, 2.2), h)
         h = _math(nt, 'MULTIPLY_ADD', caked, 0.8, h)
