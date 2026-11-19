@@ -444,8 +444,29 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         over = r['lap'] / float(rad0[0])
         turn = 2 * np.pi + over
 
+        # what lies under the shaft's lap, each way round: how far the foot's pieces stand out past the last's shaft
+        # at their top edge (their grain side, a thickness out), spread a little round so the shaft eases over a
+        # lapped edge instead of stepping at it
+        nb = 96
+        under = np.zeros(nb)
+        for p in pieces:
+            top = p['V'][:, 2] > z_low - 0.05
+            if not top.any():
+                continue
+            Q = p['V'][top]
+            cq, _ = _at(T, Q[:, 2], np.zeros(len(Q)))
+            d = Q[:, :2] - cq
+            aq = np.arctan2(d[:, 0], -d[:, 1])
+            _, rq = _at(T, Q[:, 2], aq)
+            tq = np.mod((aq - a0) * sgn, 2 * np.pi)
+            np.maximum.at(under, (tq / (2 * np.pi) * nb).astype(int) % nb, np.linalg.norm(d, axis=1) + tl - rq)
+        for _ in range(3):
+            under = np.maximum(under, np.maximum(np.roll(under, 1), np.roll(under, -1)))
+        under = np.convolve(np.concatenate([under[-4:], under, under[:4]]), np.ones(5) / 5.0, 'same')[4:-4]
+
         def lift_shaft(zz, tt):
-            return (3.3 * tl * _ss(z_seam + 4.0 * r['lap'], z_seam, zz)       # (out over the vamp and the quarters)
+            sit = np.interp(np.mod(tt, 2 * np.pi), (np.arange(nb) + 0.5) * 2 * np.pi / nb, under, period=2 * np.pi)
+            return ((sit + 0.1 * tl) * _ss(z_seam + 8.0 * r['lap'], z_seam, zz)  # (a thickness over what is beneath)
                     + 1.1 * tl * _ss(turn - 6.0 * over, turn - over, tt))     # (and over its own first edge)
         G, gf, zz, tt, rm = _sheet(T, z_low, z_top, a0, turn, sgn, lift_shaft)
         d_side, d_low = rm * (turn - tt), zz - z_low
