@@ -218,7 +218,8 @@ def _union_hull(G, M, under, ease):
         e.to_mesh_clear()
     tree = BVHTree.FromPolygons(pts, tris)
     yc = M['yc']
-    moved = 0
+    # how far each point of the shell has to be let out to clear the corset (0 where it already clears it)
+    need = np.zeros(G.shape[:2])
     for i in range(G.shape[0]):
         for j in range(G.shape[1]):
             p = G[i, j]
@@ -227,15 +228,26 @@ def _union_hull(G, M, under, ease):
             if r < 1e-6:
                 continue
             d /= r
-            far = Vector((0.0, yc, p[2])) + d * 40.0
-            hit = tree.ray_cast(far, -d)[0]
-            if hit is None:
-                continue
-            rh = (hit - Vector((0.0, yc, p[2]))).length + ease
-            if rh > r:
-                G[i, j, 0] *= rh / r
-                G[i, j, 1] = yc + (p[1] - yc) * rh / r
-                moved += 1
+            hit = tree.ray_cast(Vector((0.0, yc, p[2])) + d * 40.0, -d)[0]
+            if hit is not None:
+                need[i, j] = max((hit - Vector((0.0, yc, p[2]))).length + ease - r, 0.0)
+    moved = int((need > 0).sum())
+    if moved:
+        # Cloth lies on the corset as a taut sheet, not as a cast of it: the boning's channels, the busk and the
+        # edge of its top (a step the thickness of the corset) must not print through the wool. The need is dilated
+        # to the width of a channel and then blurred, so the cloth rides over them (and is never inside them), and
+        # ramps over the corset's edges.
+        n_r, n_c = int(round(1.2 / fit.STEP)), int(round(0.5 / fit.STEP * G.shape[1] / 100.0))
+        grown = need
+        for ax, n in ((0, n_r), (1, n_c)):
+            stack = [np.roll(grown, k, ax) if ax else np.pad(grown, ((n, n), (0, 0)), mode='edge')[n + k:n + k + len(grown)]
+                     for k in range(-n, n + 1)]
+            grown = np.max(stack, axis=0)
+        need = np.maximum(fit._blur(fit._blur(grown, 0.5 * n_r, 0, False), 0.5 * n_c, 1, True), need)
+        r_now = np.hypot(G[..., 0], G[..., 1] - yc)
+        k = (r_now + need) / np.maximum(r_now, 1e-6)
+        G[..., 0] *= k
+        G[..., 1] = yc + (G[..., 1] - yc) * k
     return G, moved
 
 
