@@ -553,7 +553,7 @@ def review(req, thread, do_smoke=True):
             for t in rest:
                 if skip:
                     skip -= 1
-                elif t in ("--poses", "--pose-angle", "--crop-size", "--crop-angles", "--crop"):
+                elif t in ("--poses", "--pose-angle", "--pose-crop", "--crop-size", "--crop-angles", "--crop"):
                     skip = 1
                 else:
                     clean.append(t)
