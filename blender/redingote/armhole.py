@@ -14,8 +14,8 @@ The loop is on the body's rest shape, with no ease: each garment adds its own.
     armhole(P, aw, M)       {'L': side, 'R': side}: each side's closed seam loop and its measurements
     armhole_cut(M, loops)   f(p): the bodice's trim field (positive on the cloth that stays, negative in the
                             armhole), for fit.trim
+    sleeve_cut(M, loops)    f(p): the sleeve's (positive outside the seam: the sleeve's side of the same surface)
 """
-import math
 
 import numpy as np
 
@@ -126,7 +126,23 @@ def armhole_cut(M, loops, ratios=RATIOS):
 
     def f(p):
         p = np.asarray(p, dtype=float)
+        return np.maximum(_seam_x(p) - np.abs(p[:, 0]), z_u - p[:, 2])
+
+    def _seam_x(p):
         t = np.clip((p[:, 2] - z_u) / (z_s - z_u), 0.0, 1.0)
-        xs = x_u + (x_s - x_u) * t ** ratios['curve'] + ratios['tilt'] * (p[:, 1] - y_ref)
-        return np.maximum(xs - np.abs(p[:, 0]), z_u - p[:, 2])
+        return x_u + (x_s - x_u) * t ** ratios['curve'] + ratios['tilt'] * (p[:, 1] - y_ref)
+    f.seam_x = _seam_x
+    return f
+
+
+def sleeve_cut(M, loops, ratios=RATIOS):
+    """The sleeve's trim at the armhole, vectorised: positive outside the seam surface. Above the underarm it is
+    exactly the bodice's cut turned round, so the two pieces meet along one line; below the underarm (the sleeve's
+    tube, clear of the bodice) every point stays."""
+    seam_x = armhole_cut(M, loops, ratios).seam_x
+    z_u = loops['L']['z_under']
+
+    def f(p):
+        p = np.asarray(p, dtype=float)
+        return np.maximum(np.abs(p[:, 0]) - seam_x(p), z_u - p[:, 2])
     return f
