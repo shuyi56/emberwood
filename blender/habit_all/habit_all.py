@@ -8,7 +8,7 @@ Here the body is built once (sorceress_pendant.build is made to return the same 
 piece's build() then only adds its garment. Pieces share file names (draft.py, pattern.py, sew.py are in several folders),
 so every piece is imported and run with its own copies of those modules.
 
-The order, innermost first: the hose and boots, the chemise, the corset (its measures draw the body in, the petticoat is
+The order, innermost first: the hose (the boots only with HABIT_SHOW=boots), the chemise, the corset (its measures draw the body in, the petticoat is
 drafted on that), the petticoat, the riding skirt, the bodice, the sleeves. Settings: PIECES (a list of the names below, to
 build some), and each piece module's own settings through SETTINGS ({piece: {NAME: value}}), by default the layers
 over others shown as drafted (John's rule: a layer is first shown without the solver, on the layers below as they are)."""
@@ -25,8 +25,11 @@ os.environ.setdefault('NO_DRESS', '1')
 os.environ.setdefault('NO_ACC', '1')
 
 # (the piece, the module's folder, the folders it needs on its path: innermost first)
+# The boots are left out until John says otherwise (their stitching is too tight): the hose alone go under the skirt.
+# HABIT_SHOW=boots puts them back (the boot piece builds the hose itself, then the boots over them).
+SHOW_BOOTS = 'boots' in os.environ.get('HABIT_SHOW', '').split(',')
 ORDER = [
-    ('boot', 'boot', ['boot', 'hose', 'vest']),
+    ('boot', 'boot', ['boot', 'hose', 'vest']) if SHOW_BOOTS else ('hose', 'hose', ['hose', 'vest']),
     ('chemise', 'chemise', ['chemise', 'vest']),
     ('petticoat', 'petticoat', ['petticoat']),
     ('skirt', 'skirt', ['skirt']),
