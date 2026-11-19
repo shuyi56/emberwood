@@ -32,10 +32,10 @@ def build():
     res = hose.build()
     body = bpy.data.objects['Skin body']
     rig = bpy.data.objects.get('Rig')
-    boots = last.build_boots(body, hose.MEASURES, rig=rig, material=female.mat(M_LEATHER))
+    ho = bpy.data.objects['Hose']
+    boots = last.build_boots(body, hose.MEASURES, rig=rig, material=female.mat(M_LEATHER), colliders=[ho])
     if os.environ.get('BOOT_CHECK'):
         sc = bpy.context.scene
-        ho = bpy.data.objects['Hose']
         for f in [int(x) for x in os.environ['BOOT_CHECK'].split(',')]:
             sc.frame_set(f)
             for o in boots.values():
