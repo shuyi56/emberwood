@@ -2084,12 +2084,25 @@ def finish_rig():
     arm.hide_render = True
 
 
-def hand_mesh(s):
+# The fingers, index to pinky: place across the palm, length as a share of the middle finger's, thickness, and the
+# height of the knuckle below the wrist. The shares and the knuckle arc are a real hand's (index 0.92, ring 0.95,
+# pinky 0.76 of the middle; the pinky's knuckle a tenth of the palm nearer the wrist).
+FINGER_L = 1.3
+FINGERS = ((-0.86, 0.92, 0.26, -2.52), (-0.29, 1.0, 0.27, -2.6), (0.27, 0.95, 0.25, -2.5), (0.8, 0.76, 0.22, -2.32))
+PHALANGES = (0.48, 0.30, 0.22)     # first, second and tip bone as shares of a finger's length
+
+
+def hand_mesh(s, fist=False):
     """A hand hanging relaxed from the wrist (at the origin, fingers down), made as one fused surface: metaball
     pieces for the palm, the four fingers (two segments each, curled loosely toward the palm, longest at the
     middle) and the thumb lying forward along the index finger melt into each other, so the fingers grow out of
     the palm with webbing between them, and the result is converted to a mesh. The palm faces the body (s = 1
-    for the right hand, whose inside faces +X); the front is -Y."""
+    for the right hand, whose inside faces +X); the front is -Y.
+
+    fist: the same wrist and palm with the hand closed. Each finger's first bone turns in at the knuckle, square to
+    the palm, its second folds back up along the palm and its tip tucks in against it, so the knuckles stand in a
+    row along the hand's lower edge (the top of the fist when the forearm is raised); the thumb lies across the
+    front of the first two fingers' second bones."""
     inward = s
     mb = bpy.data.metaballs.new('hand')
     mb.resolution = mb.render_resolution = 0.09
@@ -2123,12 +2136,28 @@ def hand_mesh(s):
     # the palm: thick at the heel, broad at the knuckles
     blob((0.0, 0.05, -0.9), (0.42, 0.95, 0.8), 1.0)
     blob((0.02 * inward, 0.0, -2.1), (0.4, 1.12, 0.6), 1.0)
-    # fingers, index at the front to pinky at the back (the middle finger shorter than the palm: on a figure this
-    # size, slim fingers any longer read as spidery)
-    for y0, L, r in ((-0.86, 1.2, 0.26), (-0.29, 1.3, 0.27), (0.27, 1.23, 0.25), (0.8, 0.98, 0.22)):
+    # fingers, index at the front to pinky at the back. Lengths are shares of the middle finger's (itself shorter
+    # than the palm: on a figure this size, slim fingers any longer read as spidery), and the knuckles lie on an arc,
+    # the pinky's well back toward the wrist, so the four tips of the open hand fall on a curve and the four fingers
+    # of the fist fold to the same depth in the palm
+    for y0, share, r, zk in FINGERS:
+        L = FINGER_L * share
+        if fist:
+            # (the knuckle a little proud of the back of the hand; the first bone turns in square to the palm, the
+            # second folds back up along it, the tip tucks in against it, each its share of the finger's length)
+            b1, b2, b3 = (L * f for f in PHALANGES)
+            k0 = Vector((-0.06 * inward, y0 * 0.94, zk))
+            k1 = k0 + Vector((inward * 0.98 * b1, 0.0, -0.2 * b1))
+            k2 = k1 + Vector((inward * 0.1 * b2, 0.0, 0.995 * b2))
+            k3 = k2 + Vector((-inward * 0.9 * b3, 0.0, 0.43 * b3))
+            blob(k0, (0.9, 0.9, 0.9), r * 1.12)
+            capsule(k0, k1, r * 1.05)
+            capsule(k1, k2, r * 0.98)
+            capsule(k2, k3, r * 0.85)
+            continue
         # (the two pieces of each finger meet end to end at the middle joint with only a little overlap, and the
         # finger starts a touch lower in the palm: overlapping fully, their fields add up and swell into a knob)
-        p = Vector((0.05 * inward, y0, -2.6))
+        p = Vector((0.05 * inward, y0, zk - 0.05))
         ang = 0.3
         for frac, extra, rr in ((0.55, 0.0, r), (0.45, 0.6, r * 0.85)):
             ang += extra
@@ -2143,15 +2172,21 @@ def hand_mesh(s):
     blob((0.1 * inward, 0.5, -1.1), (0.4, 0.4, 0.75), 0.75)
     # the little-finger edge of the palm: one straight ridge from the wrist to the pinky knuckle, so the
     # outline runs smoothly down that side with no dip between the heel of the hand and the pinky
-    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, -2.3), 0.44)
-    # (tapering on into the pinky's first segment, so the edge narrows down into the finger instead of
-    # stepping in at the knuckle)
-    capsule((0.05 * inward, 0.72, -2.2), (0.15 * inward, 0.8, -2.95), 0.3)
+    zp = FINGERS[3][3]
+    capsule((0.05 * inward, 0.62, 0.3), (0.05 * inward, 0.7, zp + 0.2), 0.44)
+    # (tapering on into the open pinky's first segment, so the edge narrows down into the finger instead of
+    # stepping in at the knuckle; the fist has no finger hanging there, so its edge ends at the knuckle)
+    if not fist:
+        capsule((0.05 * inward, 0.72, zp + 0.3), (0.15 * inward, 0.8, zp - 0.4), 0.3)
     capsule((0.05 * inward, -0.2, -0.2), (0.22 * inward, -0.75, -1.1), 0.5)
     # the thumb, from the heel of the palm on the inner front edge, its tip bent in toward the fingers
     t0 = Vector((0.2 * inward, -0.7, -0.9))
     t1 = t0 + Vector((0.28 * inward, -0.22, -0.95))
     t2 = t1 + Vector((0.2 * inward, 0.05, -0.62))
+    if fist:
+        # (round the front of the fist and across the first two fingers, outside their second bones)
+        t1 = Vector((0.62 * inward, -1.02, -1.75))
+        t2 = Vector((0.98 * inward, -0.28, -2.02))
     # the web of skin from the thumb's first joint to the root of the index finger
     capsule(t0 + (t1 - t0) * 0.8, (0.1 * inward, -0.85, -2.3), 0.26)
     capsule(t0, t1, 0.34)
@@ -2175,6 +2210,23 @@ def hand_mesh(s):
     # toward the viewer, a life-size hand reads as far too big against the slim forearm and the sleeve)
     bmesh.ops.scale(bm, vec=(0.98, 0.98, 1.0), verts=bm.verts)
     return bm
+
+
+# ---- the fist
+def set_fists(amount):
+    """Close the hands into fists (amount over 0.5) or open them. A fist is a second mesh on the same wrist,
+    'Fist.R' and 'Fist.L' beside 'Hand.R' and 'Hand.L' (hand_mesh(s, fist=True): a closed hand rebuilt from the
+    hand's own pieces, since the open hand's skin has no finger joints to bend), and a pose shows one of the two.
+    A figure built without fist meshes keeps its open hands. The run closes them (pose_run); every other pose
+    opens them. (Posed frame by frame this is all it takes; an exporter keying a run clip has to carry the swap
+    itself.)"""
+    for side in 'RL':
+        hand, fist = bpy.data.objects.get(f'Hand.{side}'), bpy.data.objects.get(f'Fist.{side}')
+        if hand is None or fist is None:
+            continue
+        on = amount > 0.5
+        fist.hide_render = fist.hide_viewport = not on
+        hand.hide_render = hand.hide_viewport = on
 
 
 def dots(points, size=0.42):
@@ -3984,10 +4036,14 @@ def leg_fk(th, kb):
     return THIGH * math.sin(th) + SHIN * math.sin(sh), THIGH * math.cos(th) + SHIN * math.cos(sh)
 
 
+# how far ahead of the ankle the foot pivots as the heel lifts (the ball of a boot; a longer bare foot sets its own)
+FOOT_BALL = 3.0
+
+
 def foot_lift(pitch):
     """How far the ankle stands above its flat height when the foot is tipped onto its toes (pitch < 0) or its
     heel (pitch > 0)."""
-    return 3.0 * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
+    return FOOT_BALL * math.sin(-pitch) if pitch < 0 else 1.0 * math.sin(pitch)
 
 
 def pelvis_list(t):
@@ -4027,14 +4083,32 @@ LOCKED_WALK = False     # export_glb.py turns it on for the world model; the she
 SKIRT_ON_THIGH = 0.45   # (with LOCKED_WALK) how much of the jerkin's hem each thigh carries: see trunk_weights
 STRIDE = 46.0           # ground covered by one cycle (two steps), in model units
 STANCE_L = 0.6          # the part of a leg's cycle its foot is on the ground (heel strike at 0, toe-off here)
-AHEAD = 0.46            # how much of the stance's travel lies ahead of the hip at the heel strike
+AHEAD = 0.42            # how much of the stance's travel lies ahead of the hip at the heel strike
 SWING_LIFT = 4.0        # how high the ankle is lifted as the foot is carried through (early in the swing)
-BOB_RANGE = 2.4         # the most the hips rise and fall through a step
-BOB_SOFT, BOB_BLUR = 0.06, 0.03  # how far round the cycle the hips' path is widened into each trough, and smoothed
+# how the hips' path is rounded off where one step hands over to the next: held low for BOB_SOFT of the cycle after
+# each heel strike (the new standing knee gives a little as it takes the weight), blurred by BOB_BLUR, and joined
+# back onto the standing leg's reach within BOB_JOIN, so through the rest of the stance the body rides the standing
+# leg with its knee nearly straight instead of crouching under a path lowered all round the cycle
+BOB_SOFT, BOB_BLUR, BOB_JOIN = 0.03, 0.02, 0.12
+# the foot's pitch from level (toes up positive) in the locked walk: up on the heel as it strikes, flat through the
+# stance, the heel peeling up from about halfway and rolling well up onto the ball to push off, then easing level
+# through the swing and lifting the toes again to reach for the next heel strike
+L_GAIT_FOOT = [(0.0, 16), (0.07, 0), (0.30, 0), (0.40, -8), (0.46, -16), (0.5, -24), (0.56, -48), (0.6, -60),
+               (0.68, -33), (0.78, -6), (0.88, 6), (0.95, 14)]
 L_PELVIS_TURN = 0.08    # the pelvis's turn either way (the hip of the leg reaching forward carried with it)
 # the arms in the locked walk: the upper arm swings ARM_SWING either way; the forearm follows a little later and
 # folds more as it comes forward, so the swing travels down the arm instead of the arm swinging stiff from the shoulder
-L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.09, 0.3, 0.42
+L_ARM_LAG, L_ELBOW_LAG, L_BEND, L_FOLD = 0.04, 0.04, 0.22, 0.16
+# (John, 2026-11-18: the arms read too loose, the forearm and hand flopping after the swing. So the elbow keeps a
+# small, nearly steady bend, 13 to 22 degrees, the forearm follows almost in step, and the wrist barely moves:
+# the arm swings from the shoulder as one piece)
+L_WRIST, L_WRIST_SWING = 0.05, 0.02
+# (and the swing is centred a little behind straight down, as a relaxed arm swings: further back past the hip than
+# it comes forward, where the bending elbow already carries the hand ahead)
+L_ARM_BACK = 0.07
+# (and held a touch further out from the body than at rest, so the forearm clears the hip as the pelvis sways and
+# turns under it: on the wide-hipped figures the arm hanging at ARM_OUT passed half a unit into the hip)
+L_ARM_CLEAR = 0.05
 # the feet in the locked walk: each turned out a little, as a relaxed walk sets them (pointing dead ahead they read as
 # turned in), and set nearly under the hips, so the legs do not lean in and the knees do not come together
 L_TOE_OUT, L_FOOT_X = 0.13, 0.97
@@ -4052,12 +4126,12 @@ def locked_foot(t):
     lifted most early on, as the toes leave the ground."""
     t %= 1.0
     a = AHEAD * STANCE_L * STRIDE
-    pitch = math.radians(cyclic(GAIT_FOOT, t))
+    pitch = math.radians(cyclic(L_GAIT_FOOT, t))
     if t < STANCE_L:
         return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
     u = (t - STANCE_L) / (1 - STANCE_L)
     span = STRIDE * (1 - STANCE_L)
-    off = toe_roll(math.radians(cyclic(GAIT_FOOT, STANCE_L)))
+    off = toe_roll(math.radians(cyclic(L_GAIT_FOOT, STANCE_L)))
     fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
     return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
 
@@ -4065,7 +4139,7 @@ def locked_foot(t):
 def toe_roll(pitch):
     """How far forward the ankle moves as the heel lifts and the foot rolls over the ball of the foot (3 ahead of
     the ankle, as in foot_lift), so the ball stays where it was planted instead of sliding back under her."""
-    return 3.0 * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
+    return FOOT_BALL * (1.0 - math.cos(pitch)) if pitch < 0 else 0.0
 
 
 def locked_turn(tr):
@@ -4077,33 +4151,40 @@ _LOCKED_HIPS = {}
 
 
 def locked_hips(tr):
-    """The hip joints' height at walk phase tr. As high as both standing legs reach with the knee just off straight,
-    then smoothed (the step's own rhythm, twice a cycle, and its first two overtones) and kept under that reach by a
-    soft minimum, and held to BOB_RANGE of rise above the lowest point, so the body rises and falls in one easy wave."""
-    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_RANGE, BOB_SOFT, BOB_BLUR, L_PELVIS_TURN, PELVIS_LIST)
+    """The hip joints' height at walk phase tr. The body rides the standing leg: as high as each loaded leg reaches
+    with its knee just off straight (and the swing leg, at the end of its swing, reaching the ground with the knee
+    straight, so the heel lands where it is set down). Where one step hands over to the next that reach dips sharply
+    as the leading heel lands; there it is held low a little after the heel strike, blurred, and joined back onto the
+    reach by a soft minimum, so the hips never sit above it and nowhere else sit far below it. (A path smoothed and
+    lowered all round the cycle leaves every standing knee bent, a crouch.) The trailing leg, rolling up onto its
+    ball to push off, carries no weight then and does not hold the body up."""
+    key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_SOFT, BOB_BLUR, BOB_JOIN, L_PELVIS_TURN, PELVIS_LIST, FOOT_BALL,
+           tuple(L_GAIT_FOOT))
     if key not in _LOCKED_HIPS:
-        n = 96
+        n = 192
         reach = np.zeros(n)
         for i in range(n):
             t = i / n
             lst, turn, best = pelvis_list(t), locked_turn(t), 1e9
             for s, off in ((1, 0.0), (-1, 0.5)):
-                fwd, az, _, ground = locked_foot(t + off)
-                if ground:
-                    f = fwd - s * LEG_X * math.sin(turn)
+                tl = (t + off) % 1.0
+                fwd, az, _, ground = locked_foot(tl)
+                if ground and tl < 0.5:
                     leg = (THIGH + SHIN) * 0.997
-                    best = min(best, az + math.sqrt(max(0.0, leg * leg - f * f)) - s * LEG_X * math.sin(lst))
+                elif tl > 0.9:
+                    leg = (THIGH + SHIN) * 0.9995
+                else:
+                    continue
+                f = fwd - s * LEG_X * math.sin(turn)
+                best = min(best, az + math.sqrt(max(0.0, leg * leg - f * f)) - s * LEG_X * math.sin(lst))
             reach[i] = best
-        # (capped at the top of the rise, then each point lowered to the least reach around it, so the sharp dip
-        # as the leading heel lands is widened into a trough, then blurred round the cycle, and lowered by whatever
-        # the blur lifted above the reach)
-        h = np.minimum(reach, reach.min() + BOB_RANGE)
+        # (each point lowered to the least reach over the BOB_SOFT before it, so the dip at the heel strike lasts a
+        # little into the step; blurred; then the soft minimum with the reach itself)
         w = max(1, int(round(BOB_SOFT * n)))
-        h = np.min([np.roll(h, j) for j in range(-w, w + 1)], axis=0)
+        low = np.min([np.roll(reach, j) for j in range(w + 1)], axis=0)
         g = np.exp(-0.5 * (np.minimum(np.arange(n), n - np.arange(n)) / (BOB_BLUR * n)) ** 2)
-        h = np.real(np.fft.ifft(np.fft.fft(h) * np.fft.fft(g / g.sum())))
-        h -= max(0.0, float((h - reach).max()))
-        _LOCKED_HIPS[key] = h
+        low = np.real(np.fft.ifft(np.fft.fft(low) * np.fft.fft(g / g.sum())))
+        _LOCKED_HIPS[key] = -BOB_JOIN * np.logaddexp(-reach / BOB_JOIN, -low / BOB_JOIN)
     h = _LOCKED_HIPS[key]
     x = (tr % 1.0) * len(h)
     i = int(x)
@@ -4113,6 +4194,11 @@ def locked_hips(tr):
 def pose(col):
     ob = bpy.data.objects
     walking = col >= 2
+    # (the run carries the head forward on the leaning chest: every other pose has it at rest)
+    ob['Head'].location, ob['Head'].rotation_euler = (0, 0, HEAD_Z), (0, 0, 0)
+    set_fists(RUN_FIST if walking and RUN else 0.0)       # (and closes the hands)
+    if walking and RUN:
+        return pose_run(col)
     if walking and LOCKED_WALK:
         return pose_locked(col)
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
@@ -4161,7 +4247,7 @@ def pose(col):
         kn.rotation_euler = (kb, 0, 0)
         # (the foot is held at its pitch from level: the ankle takes out the shin's lean, and the foot is turned
         # back against the pelvis's turn, so it points down the line of the walk)
-        an.rotation_euler = (th - kb + pitch, 0, -s * toe - turn)
+        an.rotation_euler = (th - kb - pitch, 0, -s * toe - turn)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
@@ -4176,6 +4262,21 @@ def pose(col):
         sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-bend, s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
+
+
+# How far an ankle bends, degrees: toes drawn up toward the shin (ANKLE_UP) and pointed away from it (ANKLE_DOWN).
+# A foot in the air is posed by its pitch from level, which says nothing of the shin above it: with the shin swung
+# far back (the walk's swing, and far more the run's heel coming up behind) a nearly level foot was folded 50 to 60
+# degrees up against the shin, a bend no ankle makes (John, 2026-11-18, of the run: fix the ankles).
+ANKLE_UP, ANKLE_DOWN = 14.0, 38.0
+
+
+def ankle_limit(pitch, shn):
+    """The pitch (toes up positive) of a foot in the air, kept within what the ankle can bend from the shin, whose
+    angle forward of straight down is shn (as leg_ik gives it). The limits are eased into, not struck."""
+    w = 0.07
+    soft = lambda v: w * math.log1p(math.exp(min(30.0, v / w)))       # noqa: E731
+    return pitch - soft(pitch - shn - math.radians(ANKLE_UP)) + soft(shn - math.radians(ANKLE_DOWN) - pitch)
 
 
 def _euler_m(e):
@@ -4193,7 +4294,7 @@ def foot_level(pelvis, hip, knee, pitch, toe=0.0):
     roll above it. (Taking each of those out one angle at a time, as pose() does, leaves the foot turned and rolled
     by a few degrees once the shin leans far over, most at push-off, where it shows as the foot twisting on its toes.)"""
     parent = _euler_m(pelvis) @ _euler_m(hip) @ _euler_m(knee)
-    m = parent.T @ _euler_m((pitch, 0.0, toe))
+    m = parent.T @ _euler_m((-pitch, 0.0, toe))
     return (math.atan2(m[2, 1], m[2, 2]), -math.asin(max(-1.0, min(1.0, m[2, 0]))), math.atan2(m[1, 0], m[0, 0]))
 
 
@@ -4218,7 +4319,7 @@ def pose_locked(col):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
         sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
         t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
-        fwd, az, pitch, _ = locked_foot(t)
+        fwd, az, pitch, ground = locked_foot(t)
         f = fwd - s * LEG_X * math.sin(turn)            # (the pelvis's turn carries the hip forward or back)
         hz = hips + s * LEG_X * math.sin(lst)           # (and its list lifts or drops it)
         # the leg leans in under the body so the foot keeps to its track; the lean lengthens the reach a little
@@ -4226,16 +4327,192 @@ def pose_locked(col):
         roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * L_FOOT_X) / (hz - az)))) - lst
         th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
         kb = th - shn
+        if not ground:
+            pitch = ankle_limit(pitch, shn)
         hip.location = (-s * LEG_X, 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
-        a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG))
+        a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG)) - L_ARM_BACK
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
-        flick = 0.08 + 0.07 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
-        sh.rotation_euler = (-a, s * (ARM_OUT + 0.05 * max(0.0, -a)), 0)
+        flick = L_WRIST + L_WRIST_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
+        sh.rotation_euler = (-a, s * (ARM_OUT + L_ARM_CLEAR + 0.05 * max(0.0, -a)), 0)
         el.rotation_euler = (-(L_BEND + L_FOLD * fold), s * ARM_CARRY, 0)
         wr.rotation_euler = (flick, 0, 0)
+
+
+# ---- the run
+# Built like the world's walk (planted feet, the legs solved to reach them), but a run is a different gait, not a
+# fast walk: each foot is on the ground for only about a third of the cycle, so between one foot pushing off and the
+# other landing she is in the air; the body is lowest in mid-stance, the standing knee bent well under it like a
+# spring, and highest in mid-flight; the foot lands nearly flat and close under the hip instead of reaching out onto
+# the heel; behind her the heel is whipped up toward the seat, the knee folding past a right angle, and the knee is
+# then driven forward and up before the lower leg reaches down for the ground, already moving back as it lands.
+# The trunk leans into it, the elbows are held at about a right angle, and the arms pump from the shoulder.
+RUN = False             # pose() plays the run instead of the walk (views.py --run; an exporter keying a run clip)
+RUN_STRIDE = 2.8        # the ground one cycle (two steps) covers, in leg lengths, thigh + shin (see run_stride)
+RUN_SECONDS = 0.64      # one cycle at that pace
+RUN_STANCE = 0.32       # the part of a leg's cycle its foot is on the ground (the other lands at 0.5: flight between)
+RUN_AHEAD = 0.30        # how much of the stance's travel lies ahead of the hip as the foot lands
+RUN_SINK = 46.0         # the standing knee's bend in mid-stance, degrees
+RUN_RISE = 0.075        # how far the hips rise from mid-stance to mid-flight, in leg lengths
+# the hips' height through one step (half a cycle: how far through it, how much of RUN_RISE): already coming down as
+# the foot lands, lowest as the standing knee takes the weight, driven up through the push-off (the leg straightening
+# and the foot rolling onto its ball lift her far more than the short flight does), and over the top in the air
+R_HIPS = [(0.0, 0.34), (0.3, 0.0), (0.64, 0.86), (0.82, 1.0)]
+# the foot's pitch from level (toes up positive): landing nearly flat, the heel peeling up from mid-stance and the
+# foot rolled far onto the ball as it pushes off; trailing, toes pointed back, as the heel comes up behind; then
+# drawn level as the knee drives through, and the toes lifted a little to meet the ground
+R_GAIT_FOOT = [(0.0, 6), (0.04, 0), (0.14, 0), (0.21, -14), (0.27, -38), (0.32, -62), (0.42, -70), (0.56, -52),
+               (0.72, -20), (0.84, 2), (0.94, 8)]
+# the ankle's path through the swing: (how far through the swing, forward of the hip, height above its standing
+# height), the last two in leg lengths (thigh + shin), between leaving the ground and landing. Trailing behind and
+# rising; the heel at its highest behind the seat; the knee driven through; the lower leg reaching down ahead
+R_SWING = [(0.20, -0.66, 0.36), (0.42, -0.30, 0.47), (0.64, 0.17, 0.27), (0.86, 0.33, 0.10)]
+RUN_LEAN, RUN_HEAD = 0.15, 0.3      # the chest's lean into the run, and how much of it the head follows
+R_PELVIS_TURN, R_PELVIS_LIST, R_SWAY = 0.12, 0.05, 0.35
+# the arms: the upper arm pumps R_ARM_SWING either way about a line R_ARM_BACK behind straight down (the elbow is
+# drawn well back past the ribs, the hand comes forward to about chest height); the elbow is held near a right angle,
+# closing a little as the arm comes forward and opening as it drives back
+R_ARM_SWING, R_ARM_BACK, R_ARM_LAG = 0.62, 0.12, 0.02
+R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.5, 0.07
+# the wrist (John, 2026-11-19: the hand looked off, dead in line with the forearm like a paddle; then, of a wrist
+# that drooped: the hands should bend up, not down). A running fist is carried cocked: with the thumb on top it is
+# held a little up from the forearm's line (R_WRIST, toward the thumb, so negative about the wrist's X), gives a
+# touch with the arm's swing (R_WRIST_LAG), is curled in toward the body (R_WRIST_IN) and turned so the palm faces
+# partly down (R_WRIST_TURN). All well inside what a wrist bends: about 20 degrees toward the thumb, 60 folding in.
+R_WRIST, R_WRIST_LAG, R_WRIST_IN, R_WRIST_TURN = -0.2, 0.05, 0.14, 0.2
+# the ankle through the swing: (how far through the swing, the foot pointed away from the shin, degrees). In the air
+# the foot hangs from the shin, loose and pointed as the heel comes up behind, then drawn up to meet the ground. (It
+# is eased in from the push-off's pitch and out to the landing's over the first and last R_ANKLE_EASE of the swing.)
+R_SWING_ANKLE = [(0.0, 20), (0.2, 26), (0.5, 16), (0.75, 4), (0.9, -5), (1.0, -5)]
+R_ANKLE_EASE = 0.16
+RUN_FIST = 1.0          # how far the hands are closed into fists in the run (John, 2026-11-19: a closed fist)
+R_TOE_OUT, R_FOOT_X = 0.06, 0.8     # the feet point nearly straight ahead and land closer to the line of travel
+
+
+def run_stride():
+    """The ground one cycle of the run covers, in model units (what the world must move her by per cycle)."""
+    return RUN_STRIDE * (THIGH + SHIN)
+
+
+def run_foot(t):
+    """(forward of the hip's ground point, ankle height, foot pitch toes-up, on the ground) for a leg at point t of
+    its run cycle: on the ground for RUN_STANCE, moving back at the body's pace, then carried through R_SWING."""
+    t %= 1.0
+    S = run_stride()
+    a = RUN_AHEAD * RUN_STANCE * S
+    pitch = math.radians(cyclic(R_GAIT_FOOT, t))
+    if t < RUN_STANCE:
+        return a - S * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+    u = (t - RUN_STANCE) / (1 - RUN_STANCE)
+    L = THIGH + SHIN
+    off = math.radians(cyclic(R_GAIT_FOOT, RUN_STANCE))
+    keys = ([(0.0, a - RUN_STANCE * S + toe_roll(off), ANKLE_Z + foot_lift(off))]
+            + [(k, f * L, ANKLE_Z + z * L) for k, f, z in R_SWING]
+            + [(1.0, a, ANKLE_Z + foot_lift(math.radians(cyclic(R_GAIT_FOOT, 0.0))))])
+    # (a smooth curve through the keys that leaves the ground and meets it again at the ground's own pace)
+    span = S * (1 - RUN_STANCE)
+    tan = [(-0.3 * span, 0.8 * L)] + [((keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]),
+                                  (keys[i + 1][2] - keys[i - 1][2]) / (keys[i + 1][0] - keys[i - 1][0]))
+                                 for i in range(1, len(keys) - 1)] + [(-span, -0.12 * L)]
+    for i in range(len(keys) - 1):
+        if u <= keys[i + 1][0]:
+            break
+    d = keys[i + 1][0] - keys[i][0]
+    v = (u - keys[i][0]) / d
+    fwd = _hermite(keys[i][1], keys[i + 1][1], tan[i][0] * d, tan[i + 1][0] * d, v)
+    z = _hermite(keys[i][2], keys[i + 1][2], tan[i][1] * d, tan[i + 1][1] * d, v)
+    return fwd, max(z, ANKLE_Z + foot_lift(pitch)), pitch, False
+
+
+_RUN_HIPS = {}
+
+
+def run_hips(tr):
+    """The hip joints' height at run phase tr: lowest in each stance, where the standing knee is bent RUN_SINK
+    under the body, and RUN_RISE higher in each flight (R_HIPS). Never above what the standing leg can reach (a
+    soft minimum with that reach, as in locked_hips), so a planted foot stays planted on a figure whose legs or feet
+    are too short for the full rise at push-off."""
+    key = (RUN_STRIDE, RUN_STANCE, RUN_AHEAD, RUN_SINK, RUN_RISE, R_PELVIS_TURN, R_PELVIS_LIST, FOOT_BALL, THIGH, SHIN,
+           ANKLE_Z, BOB_JOIN, tuple(R_HIPS), tuple(R_GAIT_FOOT))
+    if key not in _RUN_HIPS:
+        n = 192
+        L = THIGH + SHIN
+        low = ANKLE_Z + math.sqrt(THIGH ** 2 + SHIN ** 2 + 2 * THIGH * SHIN * math.cos(math.radians(RUN_SINK)))
+        want, reach = np.zeros(n), np.full(n, 1e3)
+        for i in range(n):
+            t = i / n
+            want[i] = low + RUN_RISE * L * cyclic(R_HIPS, 2 * t)
+            turn, lst = run_turn(t), run_list(t)
+            for s, off in ((1, 0.0), (-1, 0.5)):
+                fwd, az, _, ground = run_foot(t + off)
+                if ground:
+                    f = fwd - s * LEG_X * math.sin(turn)
+                    reach[i] = min(reach[i], az + math.sqrt(max(0.0, (0.992 * L) ** 2 - f * f)) - s * LEG_X * math.sin(lst))
+        _RUN_HIPS[key] = -BOB_JOIN * np.logaddexp(-reach / BOB_JOIN, -want / BOB_JOIN)
+    h = _RUN_HIPS[key]
+    x = (tr % 1.0) * len(h)
+    i = int(x)
+    return float(h[i % len(h)] + (h[(i + 1) % len(h)] - h[i % len(h)]) * (x - i))
+
+
+def run_turn(tr):
+    """The pelvis's turn at run phase tr: the hip of the leg reaching forward carried forward with it."""
+    return R_PELVIS_TURN * math.cos(2 * math.pi * (tr - 0.04))
+
+
+def run_list(tr):
+    """The pelvis's list: it drops on the side of the leg in the air as the standing leg takes the landing."""
+    return R_PELVIS_LIST * math.sin(2 * math.pi * (tr + 0.07))
+
+
+def pose_run(col):
+    """The run at sheet column col (the same columns and phase as the walk: the right foot lands at the start of
+    the cycle). Same rig as pose_locked."""
+    ob = bpy.data.objects
+    ph = (col - 2 + 0.5) / WALK * 2 * math.pi
+    tr = ((ph - math.pi / 2) / (2 * math.pi)) % 1.0
+    hips = run_hips(tr)
+    turn, lst = run_turn(tr), run_list(tr)
+    sway = -R_SWAY * math.sin(2 * math.pi * (tr - 0.07))
+    ob['Body'].location = (sway, 0, hips - HIP_Z)
+    ob['Body'].rotation_euler = (0, 0, 0)
+    ob['Pelvis'].rotation_euler = (0, lst, turn)
+    # (the trunk folds a little further forward as each foot lands and comes up through the flight)
+    lean = RUN_LEAN + 0.02 * math.cos(4 * math.pi * (tr - 0.06))
+    ob['Chest'].rotation_euler = (lean, -CHEST_TILT * lst, -CHEST_TURN * turn)
+    # (the head is carried forward with the leaning chest, and stays nearly upright on it, looking where she runs)
+    up = HEAD_Z - CHEST_Z
+    ob['Head'].location = (0, -up * math.sin(lean), CHEST_Z + up * math.cos(lean))
+    ob['Head'].rotation_euler = (RUN_HEAD * lean, 0, 0)
+    for side, s in (('R', 1), ('L', -1)):
+        hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
+        sh, el, wr = ob[f'Shoulder.{side}'], ob[f'Elbow.{side}'], ob[f'Wrist.{side}']
+        t = (tr + (0.0 if s > 0 else 0.5)) % 1.0
+        fwd, az, pitch, ground = run_foot(t)
+        f = fwd - s * LEG_X * math.sin(turn)
+        hz = hips + s * LEG_X * math.sin(lst)
+        hip_x = sway - s * LEG_X * math.cos(lst)
+        roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * R_FOOT_X) / max(8.0, hz - az)))) - lst
+        th, shn = leg_ik(hz, f, hz - (hz - az) / math.cos(roll + lst))
+        kb = th - shn
+        if not ground:
+            u = (t - RUN_STANCE) / (1 - RUN_STANCE)
+            hang = shn - math.radians(float(np.interp(u, [k for k, _ in R_SWING_ANKLE], [v for _, v in R_SWING_ANKLE])))
+            e = min(1.0, u / R_ANKLE_EASE, (1 - u) / R_ANKLE_EASE)
+            e = e * e * (3 - 2 * e)
+            pitch = ankle_limit(pitch + (hang - pitch) * e, shn)
+        hip.location = (-s * LEG_X, 0, 0)
+        hip.rotation_euler = (-th, roll, 0)
+        kn.rotation_euler = (kb, 0, 0)
+        an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * R_TOE_OUT)
+        c = math.cos(2 * math.pi * (t - 0.5 - R_ARM_LAG))
+        a = R_ARM_SWING * c - R_ARM_BACK
+        sh.rotation_euler = (-a, s * (ARM_OUT + R_ARM_CLEAR + 0.06 * max(0.0, -a)), 0)
+        el.rotation_euler = (-(R_BEND + R_FOLD * (0.5 + 0.5 * c)), s * ARM_CARRY, 0)
+        droop = R_WRIST - R_WRIST_LAG * math.sin(2 * math.pi * (t - 0.5 - R_ARM_LAG - 0.04))
+        wr.rotation_euler = (droop, -s * R_WRIST_IN, s * R_WRIST_TURN)
 
 
 # ---------------------------------------------------------------- render and pixel-art conversion
