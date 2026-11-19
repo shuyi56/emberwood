@@ -228,6 +228,12 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
         R[1:-1] = 0.25 * R[:-2] + 0.5 * R[1:-1] + 0.25 * R[2:]
         R[:, 1:-1] = 0.25 * R[:, :-2] + 0.5 * R[:, 1:-1] + 0.25 * R[:, 2:]
     R[:, -1] = R[:, 0]
+    # the seat and the thighs do not show through a skirt hung over a petticoat: the outline spans them (a long
+    # vertical blur of the sections, kept where it stands out: the cloth never goes in past the body)
+    Rb = R.copy()
+    for _ in range(24):
+        Rb[1:-1] = 0.25 * Rb[:-2] + 0.5 * Rb[1:-1] + 0.25 * Rb[2:]
+    R = np.maximum(R, Rb)
 
     def body_r(z, phi):
         zi = np.clip((zs[0] - z) / (zs[0] - zs[-1]) * (NZ - 1), 0, NZ - 1.0001)
