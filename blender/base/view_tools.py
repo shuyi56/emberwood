@@ -15,6 +15,7 @@ cameras differ.
 import json
 import os
 import subprocess
+import sys
 
 # ------------------------------------------------------------------ presets and tiers
 FOUR = 'front,3/4,profile,back'
@@ -42,7 +43,7 @@ PRESETS = {
 # script's own samples and size, denoised, for John's sign-off. A tier only fills in flags the command leaves out, and
 # only when --preset or --tier is given, so no existing request changes or gets a new cache key.
 TIERS = {
-    'draft': {'--samples': '8', '--size': '320'},
+    'draft': {'--samples': '8', '--size': '320', '--look': 'clay'},
     'check': {'--samples': '32', '--size': '480', '--denoise': None},
     'final': {'--denoise': None},
 }
@@ -74,6 +75,13 @@ def expand(argv):
             if f not in out:
                 out += [f] if v is None else [f, v]
     return out
+
+
+def tier_asked(argv):
+    """The tier this command runs at (argv already expanded): --tier, or draft for a preset, or None."""
+    if '--tier' in argv:
+        return argv[argv.index('--tier') + 1]
+    return 'draft' if '--preset' in argv else None
 
 
 def looks(argv):
@@ -247,7 +255,8 @@ def commit():
 
 
 def stamp(path, text, tier):
-    """A strip under the image: the tier in its colour and what the image is, so a draft is never taken for a final."""
+    """A strip under the image: the tier in its colour and what the image is, so a draft is never taken for a final.
+    The text is wrapped at its ' | ' breaks onto as many lines as the image's width needs, so nothing is cut off."""
     from PIL import Image, ImageDraw, ImageFont
     im = Image.open(path).convert('RGB')
     h = max(16, im.width // 70)
@@ -255,12 +264,24 @@ def stamp(path, text, tier):
         font = ImageFont.load_default(size=int(h * 0.72))
     except TypeError:
         font = ImageFont.load_default()
+    draw = ImageDraw.Draw(im)
+    lines, cur = [], ''
+    for part in [p.strip() for p in text.split('|') if p.strip()]:
+        trial = f'{cur}  |  {part}' if cur else part
+        if cur and draw.textlength(trial, font=font) > im.width - 12:
+            lines.append(cur)
+            cur = part
+        else:
+            cur = trial
+    lines.append(cur)
     bg, fg = COLOURS[tier]
-    out = Image.new('RGB', (im.width, im.height + h), bg)
+    out = Image.new('RGB', (im.width, im.height + h * len(lines)), bg)
     out.paste(im, (0, 0))
-    ImageDraw.Draw(out).text((6, im.height + h * 0.12), text, fill=fg, font=font)
+    d = ImageDraw.Draw(out)
+    for i, line in enumerate(lines):
+        d.text((6, im.height + h * (i + 0.12)), line, fill=fg, font=font)
     out.save(path)
-    return h
+    return h * len(lines)
 
 
 def finish(out, argv, figure):
@@ -268,18 +289,25 @@ def finish(out, argv, figure):
     sha = commit()
     preset = argv[argv.index('--preset') + 1] if '--preset' in argv else None
     requested = argv[argv.index('--tier') + 1] if '--tier' in argv else None
+    try:
+        import layers
+        cloth = layers.summary()
+    except ImportError:
+        cloth = ''
     for im in IMAGES:
         im['tier'] = tier_of(im['samples'], im['denoised'], requested)
         what = f"{im['samples']} samples, {'denoised' if im['denoised'] else 'not denoised'}"
         text = (f"{im['tier'].upper()}  {what}  |  {im['look']}  |  {' / '.join(im['angles'])}  |  {figure}"
                 + ('  mannequin' if '--mannequin' in argv else '') + (f'  @ {sha}' if sha else '')
-                + (f'  |  preset {preset}' if preset else ''))
+                + (f'  |  preset {preset}' if preset else '') + (f'  |  {cloth}' if cloth else ''))
         p = os.path.join(out, im['file'])
         if os.path.exists(p):
             im['label_px'] = stamp(p, text, im['tier'])
     rec = {'figure': figure, 'commit': sha, 'preset': preset,
            'requested_tier': requested,
-           'mannequin': '--mannequin' in argv, 'argv': argv, 'images': IMAGES}
+           'mannequin': '--mannequin' in argv, 'argv': argv, 'images': IMAGES,
+           'cloth': [{'garment': n, 'state': st, 'seconds': round(t, 1)} for n, st, t in getattr(
+               sys.modules.get('layers'), 'LOG', [])]}
     with open(os.path.join(out, 'views.json'), 'w') as fh:
         json.dump(rec, fh, indent=1)
     print('wrote', os.path.join(out, 'views.json'), flush=True)

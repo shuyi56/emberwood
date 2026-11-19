@@ -11,6 +11,7 @@
              cuts the eyes' patch in a slightly different vertex order from run to run, so a few hundred new
              inputs turn up each time; those are worked out and added.) Any change to the head's code or settings
              gives a new key and the answers are worked out again.
+             The same DIR/cloth remembers every cloth settle (blender/base/layers.py), keyed by everything it reads.
 --gpu KIND   render Cycles on the graphics card (OPTIX or CUDA), on every device of that kind it finds.
 --quality    check: Cycles at 8 samples with the denoiser on, for a quick look (hair, cloth and light still
              read; fine noise and caustics do not). final (default): the script's own settings, untouched.
@@ -40,6 +41,8 @@ own, rest = argv[:cut], argv[cut + 1:]
 opt = lambda k, d=None: own[own.index(k) + 1] if k in own else d  # noqa: E731
 QUALITY = opt('--quality', 'final')
 MEMO = opt('--memo')
+if MEMO:            # (the cloth settles are remembered beside the head's surface: blender/base/layers.py)
+    os.environ.setdefault('EMBER_CLOTH_CACHE', os.path.join(MEMO, 'cloth'))
 GPU = opt('--gpu')          # OPTIX or CUDA: render on the graphics card (the desktop worker)
 script = os.path.abspath(rest[0]).replace('\\', '/')
 blender = script[:script.index('/blender/') + len('/blender/')] if '/blender/' in script else \

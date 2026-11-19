@@ -41,7 +41,7 @@ Add `--mannequin` for clothes. Every preset renders at the **draft** tier unless
 
 | Tier | Settings | For |
 | --- | --- | --- |
-| `draft` | 8 samples, no denoiser, 320 px | every iteration (the default) |
+| `draft` | 8 samples, no denoiser, 320 px, clay; the build without subdivision and without the cloth solver on any settle not already remembered (see "Layered clothes" below) | every iteration (the default) |
 | `check` | 32 samples, denoised, 480 px; add `"quality": "check"` and the queue drops it to 8 | a review look |
 | `final` | the script's own samples and size, denoised | John's sign-off only |
 
@@ -69,6 +69,45 @@ It takes the newest earlier result of the identical command (preferring one on m
 image whose camera differs from the after's, and writes the before above the after with both tier labels and a row
 marking every changed pixel in red, with the changed share of each angle in `compare.json`. The first render of a
 preset is the before for the next change of the same view.
+
+## Layered clothes: the settle memory and the layering rule
+
+A layered build spends most of its time in the cloth solver: chemise under doublet on the mannequin took 658 s, 514 s
+of it two chemise settles (288 s on the body, 226 s again against the doublet), 113 s the body, about 15 s the fits
+and 7 s the render. `blender/base/layers.py` cuts that out of every run that doesn't need it:
+
+* **Every cloth settle is remembered.** views.py wraps every `settle(o, rig, colliders, ...)` in a module under
+  `blender/` (chemise/solver.py, petticoat/cloth.py, hose's solver, any new one with that signature) without
+  changing the garment's files. A settle is looked up under a key of everything it reads: its module's code, the
+  garment's points, faces and bone weights as drafted, the rig's pose, the world-space surface of the body and of every
+  layer it falls against, the cloth's settings and the frame. Same key: the garment is put back exactly as the solver
+  left it, in under a second. Change the body's measurements, a garment's code or draft, a solver setting, or any layer
+  under it, and only the settles that read it run again: a layer settled against a changed one misses because that
+  layer's surface is in its key. A material change misses nothing.
+* **John's layering rule (2026-11-19): a new layer is first seen without the solver.** At the draft tier a settle
+  that is not remembered is not run: the new layer (and any layer it re-settles under it) is rendered as fitted, over
+  the remembered layers below, and the label says which layers are `cached`, `solved` or `unsettled`. Only once that
+  draft has been looked at and is worth it, ask for the second round with `--settle`: the solver runs on the new layer
+  and the layers beneath that it re-settles, at full quality, and the result is remembered for every tier after it.
+* The memory lives beside the head's (`rq_run.py --memo DIR` puts it in `DIR/cloth`; `EMBER_CLOTH_CACHE` elsewhere).
+  `python3 blender/base/layers.py --list` shows what it holds and the last settles with their hit or miss;
+  `--clear` empties it, `--clear chemise` only the settles of modules named so. `EMBER_SETTLE=0` runs no solver at
+  any tier, `--settle` (or `EMBER_SETTLE=1`) runs every miss at any tier.
+
+Measured on that build (one 3/4 `--head` view, 4 cores, no GPU):
+
+| Run | Wall time |
+| --- | --- |
+| final, nothing remembered (as before) | 662 s |
+| final, the same build again | 118 s |
+| draft, doublet changed (chemise on the body remembered, chemise against the doublet unsettled) | 116 s |
+| draft `--settle`, the second round (only the chemise against the new doublet solved) | 364 s |
+| final after that round (both settles remembered) | about 118 s |
+
+A remembered final renders the same pixels as the solved one (within the ±1 a single pixel varies between two
+identical runs), while two solver runs of the same build differ from each other (the solver is not deterministic:
+a third of the pixels changed between two cold runs), so the memory also makes a final reproducible. What is left in
+a draft is the body (about 110 s of the 116 s).
 
 ## How to ask for a render
 

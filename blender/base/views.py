@@ -70,6 +70,11 @@ sys.path.insert(0, HERE)
 import view_tools  # noqa: E402
 argv = view_tools.expand(argv)      # (--preset and --tier, spelled out as the flags below)
 VIEW_TOOLS_FLAGS = ('--preset', '--tier', '--look', '--area')   # (read in view_tools.py)
+# (the tier is the build's too: layers.py reads it, so a draft skips the subdivision and leaves an unremembered
+# cloth settle unsolved; --settle runs the solver anyway. No --tier and no --preset: final, the build untouched.)
+os.environ['EMBER_TIER'] = view_tools.tier_asked(argv) or os.environ.get('EMBER_TIER', 'final')
+if '--settle' in argv:
+    os.environ['EMBER_SETTLE'] = '1'
 opt = lambda k, d=None: argv[argv.index(k) + 1] if k in argv else d  # noqa: E731
 FIGURE = opt('--figure', 'ranger')
 sys.path.insert(0, os.path.join(HERE, '..', FIGURE))
@@ -366,7 +371,11 @@ def main():
         female.MANNEQUIN = True
     import time
     t0 = time.time()
+    import layers
+    layers.install()            # (every cloth settle remembered, and left unsolved in a draft: see layers.py)
     F.build()
+    if layers.tier() == 'draft':
+        layers.draft_scene()
     print(f'build {time.time() - t0:.0f} s' + (' (mannequin)' if female.MANNEQUIN else ''), flush=True)
     sc = bpy.context.scene
     sc.frame_set(1)
