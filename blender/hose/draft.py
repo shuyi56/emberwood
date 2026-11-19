@@ -56,6 +56,7 @@ RATIOS = {
 FOOT = 'footed'              # 'footed' (period joined hose, the whole foot), 'stirrup' or 'open'
 ARM_GROUPS = ('UpperArm', 'Forearm', 'Hand')
 RELAX_ROUNDS = 30
+BRIDGE_ROUNDS = 160
 
 
 def _ss(a, b, x):
@@ -270,7 +271,7 @@ def build_hose(body, M, rig=None, material=None, name='Hose', ratios=RATIOS, foo
     # outward (a hollow), never in, and never further off the skin than the bridge allows
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
     lift = np.zeros(n)
-    for _ in range(160):
+    for _ in range(BRIDGE_ROUNDS):
         acc = np.zeros_like(X)
         np.add.at(acc, E[:, 0], X[E[:, 1]])
         np.add.at(acc, E[:, 1], X[E[:, 0]])
