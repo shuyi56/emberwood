@@ -368,6 +368,20 @@ same view eight times in an afternoon:
 Render time is split among the requests a job served, so a shared set build is not charged twice. Being alone on the
 queue is never hogging: the share rules need a second thread that actually waited.
 
+### Repeats lose priority
+
+Asking for the same views again and again now costs priority as well as a warning (John, 2026-11-19). A request is a
+**repeat** when it follows another request from the same thread for the same views at the same quality, with no
+different request from that thread in between and no more than 45 minutes after it. The first request is repeat 0;
+the next is repeat 1, and so on. A repeat runs `repeat` steps behind other requests, up to 3, so while anything else
+is waiting it starts after them (a step is one priority level: finals and crops are 0, `glb` is 1, the sheet is 9).
+
+It never starves. Every 10 minutes a repeat waits it wins one step back, and when nothing else is waiting or
+rendering it runs at once. A different request from the thread, or 45 quiet minutes, resets the count. The penalty
+shows in `rq.py ping` ("priority -2: repeat 3") and on the dashboard next to the status, `rq.py add` says so when you
+send the repeat, and the nightly stats count the penalised requests and the steps per thread. The hogging warnings above
+stay as they are. The numbers are `PEN` in `rq.py`.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it

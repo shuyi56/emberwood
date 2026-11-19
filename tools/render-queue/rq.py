@@ -63,6 +63,11 @@ NOT_INPUTS = ("blender/facecheck/",)
 RENDERED = ("blender/ranger/ranger-blender.png",)   # the pngs the queue itself renders
 REQUESTABLE = ("frames", "views", "glb")
 PRIORITY = {"frames": 0, "views": 0, "glb": 1, "sheet": 9}
+# John, 2026-11-19: a thread that asks for the same views again and again loses priority each time. The request that
+# repeats the previous one (same thread, same views, same quality, not interrupted by a different request, and not
+# more than `quiet_s` after it) is `repeat` steps behind, up to `max`; each `age_s` it waits wins one step back, so
+# it is never starved, and an idle queue runs it at once. Hogging warnings stay as they were.
+PEN = {"quiet_s": 2700, "max": 3, "age_s": 600}
 MAX_BATCH = int(os.environ.get("RQ_MAX_BATCH", "4"))      # branches merged into one commit
 MAX_MERGE = int(os.environ.get("RQ_MAX_MERGE", "6"))      # requests in one combined views.py job
 WINDOW_S = int(os.environ.get("RQ_WINDOW", "45"))         # a job waits this long after its newest request
@@ -607,6 +612,7 @@ def plan(fetch=True):
             bjobs.append({"kind": kind, "param": param, "commit": b["commit"], "requests": [r["id"] for r in rs],
                           "combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"]} for r in b["requests"]],
                           "key": job_key(b["commit"], kind, param), "prio": PRIORITY[kind],
+                          "pen": min(eff_penalty(r) for r in rs),
                           "order": min(r["id"] for r in rs)})
         jobs += combine_views(bjobs, solo)
     # identical jobs (the same key) from different batches are one job for all their requests
@@ -614,6 +620,7 @@ def plan(fetch=True):
     for j in jobs:
         if j["key"] in seen:
             seen[j["key"]]["requests"] = sorted(set(seen[j["key"]]["requests"]) | set(j["requests"]))
+            seen[j["key"]]["pen"] = min(seen[j["key"]].get("pen", 0), j.get("pen", 0))
             seen[j["key"]]["dups"] = seen[j["key"]].get("dups", 0) + 1
         else:
             seen[j["key"]] = j
@@ -634,7 +641,7 @@ def plan(fetch=True):
     for j in jobs:
         j["cached"] = cached(j["key"])
     # cheap drafts before expensive finals
-    jobs.sort(key=lambda j: (j["prio"], 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
+    jobs.sort(key=lambda j: (j["prio"] + j.get("pen", 0), 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
     save(s)
     return main, held, batches, jobs
 
@@ -646,7 +653,7 @@ def show(main, held, batches, jobs):
         "batches": [{"combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"][:9], "changes": r["_footprint"],
                                    "not_combined_with": r.get("not_combined_with")} for r in b["requests"]]}
                     for b in batches],
-        "jobs": [{k: j[k] for k in ("key", "kind", "param", "prio", "requests", "cached")} for j in jobs]}, indent=2))
+        "jobs": [{k: j[k] for k in ("key", "kind", "param", "prio", "pen", "requests", "cached")} for j in jobs]}, indent=2))
 
 
 # ------------------------------------------------------------------ running
@@ -1198,6 +1205,7 @@ def cmd_add(a):
                     and o.get("quality") == r["quality"])):
             o["state"] = f"superseded by {r['id']}"
             event("coalesced", None, dropped=o["id"], by=r["id"], branch=a.branch)
+    r["repeat"] = repeat_count(s, a.thread, r["views"], r["quality"], time.time()) if r["views"] else 0
     figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
     for i in s.get("intents", []):    # the request an intent announced has come
         if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
@@ -1207,6 +1215,12 @@ def cmd_add(a):
         event("unreviewed", None, thread=a.thread, request=r["id"])
         print("rq note: the queue was idle, so this final request skipped the reviewer", flush=True)
     print(json.dumps(r, indent=2))
+    if r["repeat"]:
+        steps = min(r["repeat"], PEN["max"])
+        print(f"rq note: this is repeat {r['repeat']} of the same views: it runs {steps} step{'s' * (steps > 1)} behind other "
+              f"requests (each {PEN['age_s'] // 60} minutes it waits wins one step back; an idle queue runs it at once; "
+              f"a different request, or {PEN['quiet_s'] // 60} quiet minutes, resets it)", flush=True)
+        event("penalty", None, thread=a.thread, request=r["id"], repeat=r["repeat"], steps=steps)
     lp = last_ping(a.thread)
     if lp is None or time.time() - lp > PING_FRESH_S:
         print(f"rq note: no ping from this thread in the last {PING_FRESH_S // 60} minutes. Before the next request, run "
@@ -1241,6 +1255,28 @@ def request_seconds(r):
                     break
                 t += m.get("seconds", 0) / max(1, len(m.get("requests") or [1])); break
     return t
+
+
+def repeat_count(s, thread, views, quality, at):
+    """How many requests in a row, just before this one, this thread sent for the same views at the same quality.
+    A different request from the thread, or a gap over PEN["quiet_s"], ends the run."""
+    key = (sorted(views or []), quality)
+    n, prev = 0, at
+    for o in sorted((o for o in s["requests"] if o["thread"] == thread and o.get("created")), key=lambda o: -o["id"]):
+        if o["state"].startswith(("superseded", "cancelled")):
+            continue
+        if (sorted(o.get("views") or []), o.get("quality")) != key or prev - ts(o["created"]) > PEN["quiet_s"]:
+            break
+        n += 1; prev = ts(o["created"])
+    return n
+
+
+def eff_penalty(r, at=None):
+    """The steps a request is behind now: its repeat count (at most PEN["max"]) less one for every PEN["age_s"] waited."""
+    n = min(r.get("repeat", 0), PEN["max"])
+    if not n or r["state"] not in ("pending", "conflict") or not r.get("created"):
+        return n if r["state"] in ("pending", "conflict") else 0
+    return max(0, n - int(((at or time.time()) - ts(r["created"])) // PEN["age_s"]))
 
 
 HOG_RULES = ("over {hour_share:.0%} of the last hour's render time (at least {hour_min_s} s) or {day_share:.0%} of the "
@@ -1372,10 +1408,11 @@ def queue_state(s, thread=None, at=None):
         elif r["state"] == "pending" or r["state"] == "conflict":
             waiting.append({"id": r["id"], "thread": name(r["thread"]), "mine": r["thread"] == thread,
                             "state": r["state"], "waited_s": round(at - ts(r["created"])), "est_s": round(_est_seconds(r, done)),
+                            "penalty": eff_penalty(r, at), "repeat": r.get("repeat", 0),
                             "views": r.get("views"), "note": r.get("note")})
     # (a rough clock: PARALLEL slots, each job taking its estimate; the queue starts jobs in id order)
     slots = sorted([x["left_s"] for x in rendering] + [0] * max(0, PARALLEL - len(rendering)))[:PARALLEL] or [0]
-    for w in waiting:
+    for w in sorted(waiting, key=lambda w: (w["penalty"], w["id"])):    # (the queue starts the least penalised first)
         if w["state"] != "pending":
             continue
         i = min(range(len(slots)), key=slots.__getitem__)
@@ -1402,6 +1439,12 @@ def queue_state(s, thread=None, at=None):
         if out["you"]["rendering"] or out["you"]["waiting"]:
             adv.append(f"you already have #{', #'.join(map(str, out['you']['rendering'] + out['you']['waiting']))} in the queue: "
                        "wait for it, or send a newer request for the same views, which replaces a waiting one")
+        pens = [w for w in waiting if w["mine"] and w["penalty"]]
+        if pens:
+            adv.append("your waiting request is behind others because it repeats the same views: " +
+                       ", ".join(f"#{w['id']} by {w['penalty']}" for w in pens) +
+                       "; change the views, or wait, and it moves up one step every "
+                       f"{PEN['age_s'] // 60} minutes")
         if out["you"]["warnings"]:
             adv.append("you are flagged for hogging: send a cheaper crop or check that your edit changes the build before the next full render")
         if busy == "busy":
@@ -1453,7 +1496,8 @@ def cmd_ping(a):
         print(f"  rendering #{x['id']} {x['thread']}: {fmt_s(x['running_s'])} in, about {fmt_s(x['left_s'])} left  {x['note'] or ''}")
     for w in st["waiting"]:
         when = f"starts in about {fmt_s(w['starts_in_s'])}" if "starts_in_s" in w else w["state"]
-        print(f"  waiting   #{w['id']} {w['thread']}: {when}  {w['note'] or ''}")
+        pen = f" (priority -{w['penalty']}: repeat {w['repeat']})" if w["penalty"] else ""
+        print(f"  waiting   #{w['id']} {w['thread']}: {when}{pen}  {w['note'] or ''}")
     if st["open_intents"]:
         print("  announced: " + "; ".join(f"intent #{i['id']} {i['thread']} ({i['piece']})" for i in st["open_intents"]))
     if st["sheet_due"]:
@@ -1584,6 +1628,10 @@ def cmd_export(a):
             "warnings": (f"{len(r['warnings'])} undefined name(s) after the merge" if r.get("warnings") else ""),
             "piece": ", ".join(_figures(r.get("views"))),
             "quality": r.get("quality") or ("final" if "views" in r["outputs"] else ""),
+            "repeat": r["repeat"] if "repeat" in r else (repeat_count({"requests": [o for o in s["requests"] if o["id"] < r["id"]]},
+                                                                       r["thread"], r.get("views"), r.get("quality"), ts(r["created"]))
+                                                        if r.get("views") and r.get("created") else 0),
+            "priority": -eff_penalty(r) if state in ("pending", "conflict") else 0,
             "kind": ", ".join(_view_kinds(r.get("views"), r["outputs"])),
             "combined": "set" if any(k in sets_of for k in r.get("jobs") or []) else
                         ("shared" if any(k in shared for k in r.get("jobs") or []) else "alone"),
