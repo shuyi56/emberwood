@@ -46,7 +46,11 @@ HIDDEN = [x for x in os.environ.get('HABIT_HIDE', 'chemise').split(',') if x and
 # What the skirt must clear: the layers worn under it (by name prefix). Its draft stands its cloth off the larger of the
 # body's sections and theirs, so the corset's lower edge, which flares over the hips, is tucked under the skirt rather than
 # standing out through it.
-SKIRT_OVER = ('Corset', 'Petticoat')
+SKIRT_OVER = tuple(x for x in os.environ.get('HABIT_UNDER', 'Corset,Petticoat').split(',') if x)
+# One wool for the whole habit. The pieces were each coloured on their own bench (skirt 1c2a52, sleeves 161b2a, bodice
+# 121621), and together the skirt read as a brighter blue than the bodice above it. They are dyed alike here (the
+# bodice's: the darkest navy, picked on its swatch bench); HABIT_DYE=rrggbb for another.
+DYE = int(os.environ.get('HABIT_DYE', '121621'), 16)
 SHARED = ('sorceress_pendant', 'shared', 'base')
 PIECE_DIRS = tuple(os.path.join(ROOT, p) + os.sep for p in {d for _, _, ds in ORDER for d in ds} | {'corset', 'gown'})
 
@@ -82,7 +86,7 @@ class Piece:
         sys.modules.update(self.owned)
         sys.path[:0] = self.dirs
         try:
-            if self.name == 'skirt':
+            if self.name == 'skirt' and SKIRT_OVER:
                 self._fit_over_layers()
             for k, v in SETTINGS.get(self.name, {}).items():
                 setattr(self.mod, k, v)
@@ -125,9 +129,17 @@ def _fit_over_layers(self):
 Piece._fit_over_layers = _fit_over_layers
 
 
+def _dye():
+    import female
+    female.mat_def(87, 'skirt wool', female.ramp(DYE, 0.1), 0.0, surface='twill', closeup='skirt')
+    female.mat_def(96, 'sleeve wool', female.ramp(DYE, 0.10), 0.0, surface='wool', closeup='wool', soft_edge=True)
+    SETTINGS.setdefault('redingote_bodice', {})['DYE'] = DYE
+
+
 def build():
     import sorceress_pendant as SP
     res = SP.build()
+    _dye()
     SP.build = lambda: res                      # (the body is built once)
     names = PIECES or [p for p, _, _ in ORDER]
     for name, module, dirs in ORDER:
