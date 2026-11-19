@@ -820,6 +820,7 @@ def build():
         # (its parts, not the Head joint itself: the pose places the joint again on every frame)
         seat_head(list(hd.children), unit=fs)
         anatomy.head_stub(hd)
+        female.place_neck()      # (the neck's joints measured again on the head as it now sits)
     if HEAD_GLB:
         head = bpy.data.objects['Head']
         # (the Blender head goes, as merge-head.mjs drops it; the creator's runs down into the gown's neck)
@@ -885,6 +886,7 @@ def build():
                 o.scale = [c * fs for c in o.scale]
                 o.location.y += fy
         seat_head([o for o in new if o.parent is head])
+        female.place_neck()      # (the neck's joints measured on the creator's head as it sits)
         if os.environ.get('PROBE_CHIN'):
             bpy.context.view_layer.update()
             for o in new:
