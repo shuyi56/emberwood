@@ -82,13 +82,13 @@ RATIOS = {
     'sole': 0.035,           # the sole's thickness (two layers of sole leather, about 9 mm)
     'welt': 0.022,           # how far the sole stands out past the upper
     'stitch_in': 0.012,      # the stitches' row, this far in from the edge
-    'lace_gap': 0.030,       # the lacing's opening down the front, between the panels' front edges (about 1.2 cm)
+    'lace_gap': 0.075,       # the lacing's opening down the front, between the panels' front edges (about 1.8 cm)
     'tongue': 0.050,         # how far the tongue reaches under each panel past its front edge
-    'eyelet_in': 0.016,      # the eyelets' row, this far in from the front edge
+    'eyelet_in': 0.028,      # the eyelets' row, this far in from the front edge
     'eyelet_pitch': 0.085,   # and this far apart up it (about 2.2 cm)
     'eyelet_first': 0.045,   # the lowest, this far over the ankle seam
-    'eyelet': 0.0105,        # an eyelet's outer radius (its ring about 5 mm across)
-    'lace': 0.0028,          # the lace's radius (a round cord about 1.4 mm across)
+    'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
+    'lace': 0.0055,          # the lace's radius (a round cord about 2.7 mm across)
 }
 PLAIN = ('slope', 'ankle_girth', 'toe_long', 'vamp_back', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
@@ -302,14 +302,14 @@ def _object(name, V, faces, Wk, names, body, rig, material, seam_d, seam_u, thic
         m.use_rim = True
         m.use_even_offset = False
         m.use_quality_normals = True
-        # each lapped edge skived down toward a feather, as a currier thins it, so a lap reads as a line, not a ledge
+        # each lapped edge skived down to a feather, as a currier thins it, so a lap reads as a line, not a ledge
         if skive:
             sk = np.clip(seam_d / skive, 0.0, 1.0)
             g = o.vertex_groups.new(name='skive')
             for val in np.unique(np.round(sk, 2)):
                 g.add([int(i) for i in np.nonzero(np.abs(np.round(sk, 2) - val) < 1e-6)[0]], float(val), 'REPLACE')
             m.vertex_group = 'skive'
-            m.thickness_vertex_group = 0.2
+            m.thickness_vertex_group = 0.05
     return o
 
 
@@ -625,7 +625,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             k0 += len(p['V'])
         Vall = np.concatenate(V)
         o = _object('%s.%s' % (name, side), Vall, F, np.concatenate(WW), names, body, rig, material,
-                    np.concatenate(SD), np.concatenate(SU), thickness=tl, skive=1.5 * r['lap'])
+                    np.concatenate(SD), np.concatenate(SU), thickness=tl, skive=3.0 * r['lap'])
         res[side] = o
         log('boot: %s, %d points: %s' % (o.name, len(Vall), ', '.join('%s %d' % (p['name'], len(p['V'])) for p in pieces)))
         # the sole, under the upper's cut edge
