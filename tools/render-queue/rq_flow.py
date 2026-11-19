@@ -55,7 +55,7 @@ import time
 
 import numpy as np
 
-VERSION = 3
+VERSION = 4
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
@@ -67,8 +67,10 @@ DEFORM = {'ARMATURE', 'SHRINKWRAP', 'SURFACE_DEFORM', 'LATTICE', 'CORRECTIVE_SMO
 SKIP_NAMES = ('stitch', 'eyelet', 'button', 'buckle', 'plate', 'rivet', 'aglet', 'medallion', 'pendant', 'lace ')
 # Until flow_baseline.json is written: loose, so nothing is flagged on guesses.
 DEFAULT_LIMITS = {'stretch_p99': 1.35, 'squash_p1': 0.65, 'shear_p99': 25.0, 'strain_p99': 0.45, 'jag_p99': 0.12,
-                  'roughness': 0.9, 'peaks': 12, 'peak_max': 0.5, 'seam_mismatch_pct': 8.0, 'fold_radius_p1': 0.05}
+                  'roughness': 0.9, 'peaks': 12, 'peak_max': 0.5, 'seam_mismatch_pct': 8.0, 'fold_radius_p1': 0.05,
+                  'slit_len': 2.0, 'holes': 3, 'open_seam_len': 3.0}
 LOWER_IS_WORSE = ('squash_p1', 'fold_radius_p1')
+LAYER_LIMITS = {'poke_pct': 1.0, 'poke_max': 0.08}     # a layer through the one over it: share of its near points, depth
 SLIVER_DEG = 4.0          # triangles with a smaller angle than this on the reference are left out
 STRAIN_CAP = 2.0          # the jaggedness reads strain up to this (Green strain 2: the cloth twice its length)
 PEAK_JUMP = 0.05          # a peak stands this far (in strain) above its neighbourhood at least
@@ -263,6 +265,7 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
     peak_tris, peak = int(peak.sum()), keep
 
     seams = seam_check(X, tris, tri_e, E, t0, t1, Dm, mate, uv_island)
+    gaps = openings(X, tris, E, t1)
     gw = w[good]
     S = {
         'reference': ref_kind, 'tris': int(m), 'area': round(float(area_cur.sum()), 2),
@@ -277,6 +280,8 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
         'peaks': int(peak.sum()), 'peak_tris': peak_tris,
         'peak_max': _r(float((s - ring)[peak].max()) if peak.any() else 0.0, 4),
         'seam_mismatch_pct': _r(max([c['mismatch_pct'] for c in seams] or [0.0]), 2), 'seams': seams[:8],
+        'slit_len': _r(sum(h['length'] for h in gaps['holes']), 2), 'holes': len(gaps['holes']),
+        'open_seam_len': _r(gaps['open_len'], 2), 'openings': gaps,
     }
     F = {'X': X, 'tris': tris, 'strain': np.where(good, strain, 0.0), 'excess': excess, 'bend': bend_t,
          'normal': unit_n, 'peak': peak, 'ref2d': Dm, 'island': uv_island, 'ref_kind': ref_kind}
@@ -376,6 +381,80 @@ def seam_check(X, tris, tri_e, E, t0, t1, Dm, mate, uv_island):
     return out
 
 
+def openings(X, tris, E, t1, closed=0.06, reach=0.8):
+    """Where the cloth is open that should not be. Each loop of boundary edges is a hem, a neckline, a cuff, a slit or
+    a hole: a slit's two sides lie close together all along it (its width, the median distance from each point to
+    the loop's far side, is small for its length), a hole is a short loop. And separate pieces whose edges run near
+    each other but do not meet are an open seam (closer than reach, farther than closed)."""
+    bnd = np.where(t1 < 0)[0]
+    out = {'holes': [], 'open_len': 0.0, 'open_gap_max': 0.0}
+    if not len(bnd):
+        return out
+    be = E[bnd]
+    nb = {}
+    for a, b in be:
+        nb.setdefault(int(a), []).append(int(b))
+        nb.setdefault(int(b), []).append(int(a))
+    seen = set()
+    for v0 in nb:
+        if v0 in seen or len(nb[v0]) != 2:
+            continue
+        loop, prev, v = [v0], None, v0
+        seen.add(v0)
+        while True:
+            nxt = [u for u in nb[v] if u != prev]
+            if not nxt or len(nb[v]) != 2:
+                break
+            prev, v = v, nxt[0]
+            if v == v0 or v in seen:
+                break
+            seen.add(v)
+            loop.append(v)
+        if len(loop) < 6:
+            continue
+        P = X[loop]
+        seg = np.linalg.norm(np.roll(P, -1, 0) - P, axis=1)
+        L = float(seg.sum())
+        s_ = np.cumsum(seg) - seg
+        k = len(loop)
+        # the far side: points at least a quarter of the loop away along it
+        far = np.abs(s_[:, None] - s_[None, :])
+        far = np.minimum(far, L - far) > 0.25 * L
+        step = max(1, k // 400)
+        D = np.linalg.norm(P[::step, None] - P[None, :], axis=2)
+        D[~far[::step]] = np.inf
+        width = float(np.median(D.min(1)))
+        if L < 4.0 or width < 0.5:
+            c = P.mean(0)
+            out['holes'].append({'length': round(L / 2 if width < 0.5 else L, 2), 'width': round(width, 3),
+                                 'kind': 'slit' if width < 0.5 and L >= 4.0 else 'hole',
+                                 'at': [round(float(x), 2) for x in c]})
+    out['holes'].sort(key=lambda h: -h['length'])
+    # open seams: boundary points of one piece near another piece's boundary, but not on it
+    piece = components(len(X), np.r_[tris[:, 0], tris[:, 1]], np.r_[tris[:, 1], tris[:, 2]])
+    bv = np.unique(be)
+    if len(np.unique(piece[bv])) > 1:
+        cell = {}
+        q = np.floor(X[bv] / reach).astype(np.int64)
+        for i, c in zip(bv, map(tuple, q)):
+            cell.setdefault(c, []).append(i)
+        gap = np.full(len(X), np.inf)
+        for i, c in zip(bv, map(tuple, q)):
+            best = np.inf
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        for j in cell.get((c[0] + dx, c[1] + dy, c[2] + dz), ()):
+                            if piece[j] != piece[i]:
+                                best = min(best, float(np.linalg.norm(X[i] - X[j])))
+            gap[i] = best
+        op = (gap > closed) & (gap <= reach)
+        e_open = op[be[:, 0]] & op[be[:, 1]]
+        out['open_len'] = float(np.linalg.norm(X[be[e_open, 0]] - X[be[e_open, 1]], axis=1).sum())
+        out['open_gap_max'] = round(float(gap[op].max()) if op.any() else 0.0, 3)
+    return out
+
+
 def infer_mates(X, tris, bv0, bv1, tol=0.06):
     """Boundary points of separate pieces lying on each other after the sew (within tol units): partners."""
     piece = components(len(X), np.r_[tris[:, 0], tris[:, 1]], np.r_[tris[:, 1], tris[:, 2]])
@@ -451,6 +530,8 @@ def judge(S, lim):
     """Flags against the approved band: 'watch' past a limit, 'likely rejection' well past it."""
     flags, worst = [], 'ok'
     for k, v in lim.items():
+        if k in LAYER_LIMITS:
+            continue
         x = S.get(k)
         if x is None or v is None:
             continue
@@ -458,7 +539,7 @@ def judge(S, lim):
         over = (x < v) if low else (x > v)
         if not over:
             continue
-        far = (x < v / 1.5) if low else (x > (v * 1.5 if k != 'peaks' else v + max(3, v)))
+        far = (x < v / 1.5) if low else (x > (v * 1.5 if k not in ('peaks', 'holes') else v + max(3, v)))
         lvl = 'likely rejection' if far else 'watch'
         flags.append({'metric': k, 'value': x, 'limit': v, 'level': lvl})
         if lvl == 'likely rejection' or worst == 'ok':
@@ -473,7 +554,8 @@ def judge(S, lim):
 # ---------------------------------------------------------------------------------------------------- the band
 
 FLOORS = {'stretch_p99': 1.03, 'squash_p1': 0.97, 'shear_p99': 2.0, 'strain_p99': 0.02, 'jag_p99': 0.01,
-          'roughness': 0.3, 'peaks': 2, 'peak_max': 0.05, 'seam_mismatch_pct': 1.0, 'fold_radius_p1': None}
+          'roughness': 0.3, 'peaks': 2, 'peak_max': 0.05, 'seam_mismatch_pct': 1.0, 'fold_radius_p1': None,
+          'slit_len': 0.5, 'holes': 1, 'open_seam_len': 0.5}
 MARGIN = 1.25
 
 
@@ -497,12 +579,12 @@ def calibrate(approved, outliers=None):
         if not vals:
             out[k] = DEFAULT_LIMITS[k]
             continue
-        if len(vals) >= 3 and vals[0][0] > 3 * max(vals[1][0], 1e-6) and k != 'peaks':
+        if len(vals) >= 3 and vals[0][0] > 3 * max(vals[1][0], 1e-6) and k not in ('peaks', 'holes'):
             if outliers is not None:
                 outliers.setdefault(k, []).append([vals[0][1], vals[0][2]])
             vals = vals[1:]
         worst = vals[0][0]
-        if k == 'peaks':
+        if k in ('peaks', 'holes'):
             v = worst + 2
         elif k == 'stretch_p99':
             v = 1 + worst * MARGIN
@@ -846,6 +928,7 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     import bpy
     t = time.time()
     lim, src = limits(pose)
+    lim = dict(LAYER_LIMITS, **lim)
     place = body_places(female) if female is not None else None
     off = []
     for o in objects:
@@ -857,7 +940,7 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     dg = bpy.context.evaluated_depsgraph_get()
     rep = {'version': VERSION, 'pose': pose, 'limits': lim, 'limits_from': os.path.basename(src) if src else 'defaults',
            'garments': {}, 'skipped': {}}
-    items = []
+    items, geoms = [], []
     for o in objects:
         try:
             g = collect(o, dg)
@@ -865,6 +948,7 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
                 rep['skipped'][o.name] = 'not cloth, or no reference to measure against'
                 continue
             S, F = cached_analyse(o.name, g, place, lim)
+            geoms.append((o.name, g['X'], g['tris']))
             S['uv'] = g.get('uv')
             if g.get('pattern_rejected'):
                 S['pattern_rejected'] = g['pattern_rejected']
@@ -872,12 +956,22 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
             items.append((o.name, S, F))
         except Exception as e:          # (a check must never fail the render)
             rep['skipped'][o.name] = f'{type(e).__name__}: {e}'
+    if len(geoms) > 1:
+        try:
+            rep['layers'] = layer_check(geoms, place)
+            for r in rep['layers']:
+                lvl = 'likely rejection' if r['poke_pct'] > 3 * lim['poke_pct'] or r['poke_max'] > 3 * lim['poke_max'] \
+                    else 'watch' if r['poke_pct'] > lim['poke_pct'] or r['poke_max'] > lim['poke_max'] else 'ok'
+                r['verdict'] = lvl
+        except Exception as e:
+            rep['layers_error'] = f'{type(e).__name__}: {e}'
     for md in off:
         md.show_viewport = True
     if off:
         bpy.context.view_layer.update()
     order = {'ok': 0, 'watch': 1, 'likely rejection': 2}
-    rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] or ['ok'], key=order.get)
+    rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] +
+                         [r['verdict'] for r in rep.get('layers', [])] or ['ok'], key=order.get)
     if items and (heat == 'always' or rep['verdict'] != 'ok'):
         try:
             rep['heatmap'] = os.path.basename(heatmap(items, os.path.join(out, stem + '-heat.png'), lim,
@@ -892,6 +986,55 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     return rep
 
 
+def layer_check(geoms, place=None, reach=1.0, through=0.03, most=20000):
+    """Layers poking through the layer over them (the petticoat's gathers through the corset, a skirt through the
+    bodice). For each pair of garments, the points of one that lie within reach of the other's surface: if most of
+    them are on its inside, it is worn under it, and those standing out through it (more than through past its
+    surface) poke through. geoms: [(name, X [n, 3], tris)], every surface's normals facing out. Uses mathutils."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    trees = {n: BVHTree.FromPolygons([tuple(p) for p in X], [tuple(int(i) for i in t) for t in T])
+             for n, X, T in geoms}
+    out = []
+    for over, Xo, To in geoms:
+        lo, hi = Xo.min(0) - reach, Xo.max(0) + reach
+        for under, Xu, Tu in geoms:
+            if under == over:
+                continue
+            P = Xu[np.all((Xu > lo) & (Xu < hi), axis=1)]
+            P = P[::max(1, len(P) // most)]
+            if len(P) < 50:
+                continue
+            d, at = [], []
+            for p in P:
+                loc, nrm, _, dist = trees[over].find_nearest(Vector(p), reach)
+                if loc is None:
+                    continue
+                d.append((Vector(p) - loc).dot(nrm))
+                at.append(p)
+            if len(d) < 50:
+                continue
+            d, at = np.array(d), np.array(at)
+            inside = (d < 0).mean()
+            if inside < 0.7:            # (mostly outside it: worn over it, or beside it; not this pair's way round)
+                continue
+            poke = d > through
+            r = {'under': under, 'over': over, 'near': int(len(d)), 'poke_pct': round(100.0 * poke.mean(), 2),
+                 'poke_max': round(float(d.max()), 3), 'spots': []}
+            taken = []
+            for i in np.argsort(-d)[:2000]:
+                if not poke[i] or len(taken) >= 5:
+                    break
+                if taken and np.min(np.linalg.norm(np.array(taken) - at[i], axis=1)) < 1.5:
+                    continue
+                taken.append(at[i])
+                r['spots'].append({'at': [round(float(x), 2) for x in at[i]], 'out': round(float(d[i]), 3),
+                                   'where': place(at[i]) if place else None})
+            out.append(r)
+    out.sort(key=lambda r: -r['poke_pct'])
+    return out
+
+
 def line(rep):
     """One line for the log and the queue's reply."""
     bits = []
@@ -902,6 +1045,11 @@ def line(rep):
         sp = next((p for p in S['spots'] if p.get('where')), None)
         bits.append(f"{name} {S['verdict']}: {f['metric']} {f['value']} (limit {f['limit']})"
                     + (f", worst at the {sp['where']} ({sp['hint']})" if sp else ''))
+    for r in rep.get('layers', []):
+        if r['verdict'] != 'ok':
+            sp = r['spots'][0] if r['spots'] else {}
+            bits.append(f"{r['under']} pokes through {r['over']} ({r['poke_pct']}% of it near, {r['poke_max']} out)"
+                        + (f" at the {sp['where']}" if sp.get('where') else ''))
     n = len(rep['garments'])
     return f"{rep['verdict']}, {n} garment{'s' * (n != 1)} checked in {rep.get('seconds', 0)} s" + \
         ('; ' + '; '.join(bits) if bits else '')
@@ -909,7 +1057,7 @@ def line(rep):
 
 # ---------------------------------------------------------------------------------------------------- self test
 
-def _sleeve(n_u=48, n_v=40, r=2.2, length=16.0, bump=0.0, short_seam=0.0):
+def _sleeve(n_u=48, n_v=40, r=2.2, length=16.0, bump=0.0, short_seam=0.0, slit=False):
     """A sleeve: a flat rectangle rolled into a tube, its two long edges sewn (a pattern seam). bump stretches
     a small patch (an isolated fault); short_seam cuts one seam edge shorter on the pattern than the other."""
     W = 2 * math.pi * r
@@ -922,6 +1070,8 @@ def _sleeve(n_u=48, n_v=40, r=2.2, length=16.0, bump=0.0, short_seam=0.0):
             a, b, c, d = idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)
             ua, ub = us[i], us[i + 1]
             va, vb = vs[j], vs[j + 1]
+            if slit and i == 12 and 12 <= j < 28:      # (a strip of cloth left out: a slit 6.4 units long)
+                continue
             f = (lambda v: 1 - short_seam * v / length) if i == n_u - 1 else (lambda v: 1.0)
             tris += [(a, b, c), (a, c, d)]
             ref += [[(ua, -va), (ub, -va * f(va)), (ub, -vb * f(vb))], [(ua, -va), (ub, -vb * f(vb)), (ua, -vb)]]
@@ -934,14 +1084,15 @@ def _sleeve(n_u=48, n_v=40, r=2.2, length=16.0, bump=0.0, short_seam=0.0):
 
 
 def selftest(out):
-    """Three sleeves: a smooth one (the approved band is calibrated from it), one with a stretched patch, and one
-    whose seam edges were drawn 10% apart on the pattern. The smooth one must pass, the others be flagged."""
+    """Four sleeves: a smooth one (the approved band is calibrated from it), one with a stretched patch, one whose
+    seam edges were drawn 10% apart on the pattern, and one with a slit. The smooth one must pass, the others be
+    flagged."""
     os.makedirs(out, exist_ok=True)
     X, T, R = _sleeve()
     S0, _ = analyse('smooth', X, T, R, 'pattern', None, lim=dict(DEFAULT_LIMITS), uv_island=uv_islands(T, R))
     lim = calibrate({'smooth': S0})
     res, items = {}, []
-    for name, kw in (('smooth', {}), ('peak', {'bump': 0.5}), ('seam', {'short_seam': 0.1})):
+    for name, kw in (('smooth', {}), ('peak', {'bump': 0.5}), ('seam', {'short_seam': 0.1}), ('slit', {'slit': True})):
         X, T, R = _sleeve(**kw)
         X = X + np.array([7.0 * len(items), 0.0, 0.0])
         S, F = analyse(name, X, T, R, 'pattern', None, lim=lim, uv_island=uv_islands(T, R))
@@ -953,6 +1104,7 @@ def selftest(out):
     assert res['smooth']['verdict'] == 'ok', res['smooth']['flags']
     assert res['peak']['peaks'] >= 1 and res['peak']['verdict'] != 'ok', res['peak']['flags']
     assert res['seam']['seam_mismatch_pct'] > 5 and res['seam']['verdict'] != 'ok', res['seam']['seams']
+    assert res['slit']['holes'] == 1 and res['slit']['verdict'] != 'ok', res['slit']['openings']
     json.dump({'limits': lim, 'results': res}, open(os.path.join(out, 'selftest.json'), 'w'), indent=1)
     print('self test passed', flush=True)
 
@@ -967,11 +1119,13 @@ def main():
     elif '--calibrate' in a:
         i = a.index('--calibrate')
         dst, srcs = a[i + 1], a[i + 2:]
-        by_pose, per = {}, {}
+        by_pose, per, lay = {}, {}, {}
         for p in srcs:
             rep = json.load(open(p))
             reps = rep['poses'].items() if 'poses' in rep else [(rep.get('pose', 'rest'), rep)]
             for pose, r in reps:
+                for x in r.get('layers', []):
+                    lay.setdefault(pose, []).append(x)
                 for name, S in r['garments'].items():
                     by_pose.setdefault(pose, {})[name + ' / ' + os.path.basename(os.path.dirname(os.path.abspath(p)))] = S
                     per.setdefault(pose, {})[name] = {k: S.get(k) for k in DEFAULT_LIMITS}
@@ -982,6 +1136,10 @@ def main():
             poses[pose] = calibrate(g, o)
             if o:
                 outl[pose] = o
+        for pose, xs in lay.items():          # (the layers' band: the approved layers' worst, with the margin)
+            if pose in poses:
+                poses[pose]['poke_pct'] = round(max(LAYER_LIMITS['poke_pct'], MARGIN * max(x['poke_pct'] for x in xs)), 3)
+                poses[pose]['poke_max'] = round(max(LAYER_LIMITS['poke_max'], MARGIN * max(x['poke_max'] for x in xs)), 3)
         # (every approved garment judged again on the band it made: none may be flagged but on its outlier metrics)
         for pose, g in by_pose.items():
             for name, S in g.items():
