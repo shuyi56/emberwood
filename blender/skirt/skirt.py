@@ -40,6 +40,7 @@ SETTLE = os.environ.get('SKIRT_SETTLE') == '1'    # let the cloth solver drape i
                              # comes only after that render has been looked at, and never on the whole stack by default)
 PUSH = True                  # keep the legs out of the cloth through the walk
 MEASURES = {}
+DRAFT = {}                   # the last draft and its measures (pattern.draft_pieces reads them; see check.py --pattern)
 # Navy broadcloth, near black in the shade, blue where the light is on it.
 WOOL = dict(colour=(0.012, 0.020, 0.055), pitch=0.030, relief=0.35, rough=0.88, sheen=0.55, mottle=0.08, nap=0.55,
             seam_ridge=0.09)
@@ -374,6 +375,8 @@ def build():
     draft.report(M)
     MEASURES.update(M)
     sk, D = make_skirt(body, rig, M)
+    DRAFT.clear()
+    DRAFT.update(D=D, M=M)
     proxy = leg_proxy(body, rig, M)
     if PUSH:
         add_push(sk, body, M)

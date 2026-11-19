@@ -1,6 +1,7 @@
 """Checks of the skirt on a body that is not the default one, and through the walk, from one build.
 
     python3 blender/skirt/check.py --out DIR [--walk 8] [--angles 3/4,profile] [--size 300] [--samples 12]
+    python3 blender/skirt/check.py --out DIR --pattern --walk 0      (the flat pattern pieces and their paired edges)
     CANON_H=10.4 WAIST_W=4.6 python3 blender/skirt/check.py --out DIR          (an altered body: see anatomy.py)
 
 The build is the skirt's own (skirt.build(), on the mannequin). The numbers it prints are the checks: the measures
@@ -100,6 +101,14 @@ def main():
     female.MANNEQUIN = True
     female.LOCKED_WALK, female.ARM_SWING = True, 0.24        # (the world model's walk, as export_glb.py sets it)
     skirt.build()
+    if '--pattern' in argv:
+        # (the flat pattern pieces and their paired edges: drafted from the same skirt, nothing sewn)
+        import pattern
+        pieces, pairs, extra = pattern.draft_pieces(skirt.DRAFT['D'], skirt.DRAFT['M'])
+        pattern.report(pieces, pairs)
+        print('wrote', pattern.flat_sheet(pieces, os.path.join(out, 'pattern.png')))
+        if n == 0:
+            return
     sc = bpy.context.scene
     sk = bpy.data.objects['Riding skirt']
     body = bpy.data.objects['Skin body']

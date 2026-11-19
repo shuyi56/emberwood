@@ -39,6 +39,8 @@ RATIOS = {
     'hem_lift': 0.045,       # the hem's height above the floor in front, at the sides; it lies on the floor behind
     'hem_lift_side': 0.035,
     'flare_from': 0.0,       # the flare starts at the hips
+    'band': 0.04,            # the waistband's height (a strip folded double; pattern.py)
+    'allowance': 0.065,      # the seam allowance of every piece, about 1.6 cm (pattern.py)
     'hem_band': 0.105,       # the deep hem's depth (the turned and stitched edge)
     'wool': 0.0085,          # the wool's thickness (about 2 mm); the hem's turn doubles it
     'nap_roll': 0.012,       # the soft roll of the turned hem
@@ -209,7 +211,7 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
     attributes. Returns a dict."""
     H = M['H']
     r = {k: v * H if k in ('ease_waist', 'ease_hips', 'ease_hem', 'top_above', 'hem_front', 'hem_side', 'hem_back',
-                           'hem_lift', 'hem_lift_side', 'hem_band', 'wool', 'nap_roll', 'fold_depth') else v
+                           'hem_lift', 'hem_lift_side', 'hem_band', 'wool', 'nap_roll', 'fold_depth', 'band', 'allowance') else v
          for k, v in ratios.items()}
     z_top = M['waist_z'] + r['top_above']
     z_hem = M['floor_z']
@@ -246,21 +248,25 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
     top_d = np.zeros((rows, cols))
     phi_c = 2 * math.pi * np.arange(cols) / cols
     hem_z_c = hem_height(phi_c, M, r)
-    hx, hy = hem_shape(phi_c, M, r)
     fold_n = 6
-    for j, phi in enumerate(phi_c):
+
+    def column(phi):
+        """The finished skirt's outer surface down the angle phi, from the top edge to the hem: points (rows, 3) and
+        the hem's height there. (The pattern pieces are drafted from this, any angle.)"""
+        phi = phi % (2 * math.pi)          # (periodic: a gore through the front runs through phi 0)
+        hz = float(hem_height(np.array([phi]), M, r)[0])
+        hx, hy = hem_shape(np.array([phi]), M, r)
+        hx, hy = float(hx[0]), float(hy[0])
+        out = np.zeros((rows, 3))
         rmax = 0.0
-        run = 0.0
         for i in range(rows):
-            v = i / (rows - 1)
-            z = z_top + (hem_z_c[j] - z_top) * v
+            z = z_top + (hz - z_top) * (i / (rows - 1))
             br = float(body_r(z, phi)) + float(ease(z))
-            s = float(np.clip((zh - z) / (zh - hem_z_c[j]), 0.0, 1.0))
+            s = float(np.clip((zh - z) / (zh - hz), 0.0, 1.0))
             t = s ** FLARE
             x0, y0 = -br * math.sin(phi), -br * math.cos(phi)
-            x1, y1 = hx[j], hy[j]
             # (the flare in xy, as the gown's: the hips' outline let out toward the hem's)
-            x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+            x, y = x0 + (hx - x0) * t, y0 + (hy - y0) * t
             rr = math.hypot(x, y)
             # soft flutes where the flare is free of the legs: deepest toward the hem and at the back, none in front
             fl = r['fold_depth'] * t ** 1.6 * (0.35 + 0.65 * min(1.0, max(0.0, -math.cos(phi) + 0.35)))
@@ -272,8 +278,10 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
                 if rr3 < rmax:
                     x, y = x * rmax / rr3, y * rmax / rr3
             rmax = max(rmax, math.hypot(x, y))
-            P[i, j] = (x, y, z)
-        # the cloth's own lengths, down the column
+            out[i] = (x, y, z)
+        return out, hz
+    for j, phi in enumerate(phi_c):
+        P[:, j], _ = column(phi)
         d = np.linalg.norm(np.diff(P[:, j], axis=0), axis=1)
         down = np.concatenate([[0.0], np.cumsum(d)])
         UV[:, j, 1] = down
@@ -295,7 +303,7 @@ def draft(B, M, ratios=RATIOS, under=None, log=print):
             float(np.hypot(P[:, :, 0], P[:, :, 1])[np.argmin(abs(P[:, 0, 2] - zh))].max()),
             float(np.hypot(P[-1, 0, 0], P[-1, 0, 1])), float(np.hypot(P[-1, cols // 4, 0], P[-1, cols // 4, 1])),
             float(np.hypot(P[-1, cols // 2, 0], P[-1, cols // 2, 1]))))
-    return dict(P=P, UV=UV, seam=seam, hem_d=hem_d, top_d=top_d, rows=rows, cols=cols, r=r, z_top=z_top)
+    return dict(P=P, UV=UV, seam=seam, hem_d=hem_d, top_d=top_d, rows=rows, cols=cols, r=r, z_top=z_top, column=column)
 
 
 def sheet_mesh(D):
