@@ -32,6 +32,7 @@ M_LEATHER = female.mat_def(75, 'boot leather', female.ramp(0x4a2f1f, 0.1), 0.24,
 M_THREAD = female.mat_def(76, 'boot thread', female.ramp(0x8a6a3a, 0.1), 0.0)
 M_EYELET = female.mat_def(77, 'boot eyelet', female.ramp(0x9a7a3a, 0.15), 0.35)
 M_LACE = female.mat_def(78, 'boot lace', female.ramp(0x1c1814, 0.1), 0.0)
+SHAFT = 'lace'               # the shaft sewn on the foot (last.SHAFTS)
 SEW = True                   # the pieces sewn by the solver, and their stitches; False: the pieces as cut on the last
 
 
@@ -46,7 +47,7 @@ def build():
     rig = bpy.data.objects.get('Rig')
     ho = bpy.data.objects['Hose']
     leather = female.mat(M_LEATHER)
-    boots = last.build_boots(body, hose.MEASURES, rig=rig, material=leather)
+    boots = last.build_boots(body, hose.MEASURES, rig=rig, material=leather, shaft_name=SHAFT)
     if SEW:
         import sew
         for side in 'RL':

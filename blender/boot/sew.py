@@ -43,7 +43,8 @@ LEATHER = dict(
     steps=120,
 )
 HOLD = {'sole': 0.30, 'collar': 0.60}   # how far up from the upper's lower edge, and down from its top, it is held
-# The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge.
+# The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge. The foot's seams,
+# then each shaft's (last.SHAFTS); a seam whose pieces a boot does not have is passed over.
 SEAMS = (
     ('toe cap', ('vamp',), 'G', 'G'),
     ('inner quarter', ('vamp',), 'A inner', 'A inner'),
@@ -93,9 +94,13 @@ def pairs(pieces, X, log=print):
     by = {p['name']: p for p in pieces}
     out = []
     for top, unders, e_top, e_under in SEAMS:
+        if top not in by:                                      # (a seam of another shaft than this boot's)
+            continue
         pt = by[top]
         st = np.arange(pt['start'], pt['start'] + len(pt['V']))
         for un in unders:
+            if un not in by:
+                continue
             pu = by[un]
             su = np.arange(pu['start'], pu['start'] + len(pu['V']))
             if top == un:                                      # (the back seam: one piece, its two edges)
@@ -233,7 +238,7 @@ def _rows(o, pieces, sole):
     tl = o.modifiers['thickness'].thickness if 'thickness' in o.modifiers else 0.0
     rows = []
     for top, _, e_top, _ in SEAMS:
-        if e_top == 'top':
+        if e_top == 'top' or top not in by:
             continue
         p = by[top]
         sl = slice(p['start'], p['start'] + len(p['V']))
@@ -385,6 +390,8 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     X, Nv = _co(o), _normals(o)
     tl = o.modifiers['thickness'].thickness if 'thickness' in o.modifiers else 0.0
     by = {p['name']: p for p in pieces}
+    if not any('eyelets' in p for p in pieces):
+        return None, None
     rows = {}
     for q in ('inner', 'outer'):
         p = by[q + ' shaft']
