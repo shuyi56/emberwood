@@ -312,6 +312,9 @@ def add_push(sk, body, M):
     m2.wrap_mode = 'OUTSIDE'
     m2.offset = 0.02
     m2.vertex_group = 'push'
+    wrap('push last', 'push', 0.06 * H)         # (after the floor, which would otherwise lift a point back into a foot on it)
+    m3 = sk.modifiers.new('floor again', 'SHRINKWRAP')
+    m3.target, m3.wrap_method, m3.wrap_mode, m3.offset, m3.vertex_group = fl, 'NEAREST_SURFACEPOINT', 'OUTSIDE', 0.02, 'push'
 
 
 def smooth_weights(sk, fn, rounds=8):
@@ -425,6 +428,9 @@ def finish_skirt(sk, D):
     sol.offset = 1.0
     sm = sk.modifiers.new('smooth', 'SUBSURF')
     sm.levels = sm.render_levels = 1
+    # (smoothed FIRST, on the cloth as cut: the rig and the push then work on the finer cloth. Smoothing after the push
+    # drew the tent the push makes round a swinging foot back in over it, a foot's depth into the body)
+    sk.modifiers.move(len(sk.modifiers) - 1, 0)
 
 
 def build():

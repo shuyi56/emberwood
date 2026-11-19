@@ -10,6 +10,8 @@ What it settles to is carried back to the skirt's rest shape through the bones, 
 The figure is 63 units tall where a woman is 1.65 m, and the solver takes a unit for a metre, so cloth of real stiffness
 would hang like tissue. WOOL's numbers are for this scale: found by trial against how a broadcloth skirt hangs
 (folds a few centimetres across at the hem, the flare held), not copied from a preset."""
+import hashlib
+import json
 import os
 import time
 
@@ -107,6 +109,21 @@ def _ties(posed, faces, edges):
     return np.array(stretch), np.array(shear), np.array(bend)
 
 
+CACHE = os.environ.get('SKIRT_SOLVED_CACHE', '/mnt/project-files/skirt/solved')
+
+
+def _cache_key(start, faces_n, colliders_pts, P, pin, gaps):
+    """The solved folds depend on the cloth's shape as it stands (its points, to a thousandth of a unit), the body it
+    falls on, the solver's settings, the pin band and the stand-off: a texture or material run changes none of them."""
+    h = hashlib.sha1()
+    h.update(np.round(np.asarray(start), 3).tobytes())
+    h.update(np.round(np.asarray(colliders_pts), 2).tobytes())
+    h.update(json.dumps([sorted(P.items()), list(pin), faces_n], default=str).encode())
+    h.update(np.round(np.asarray(gaps), 3).tobytes())
+    h.update(open(__file__, 'rb').read())                    # (a change to the solver itself is a new key)
+    return h.hexdigest()[:20]
+
+
 def _colour(c, n):
     """The constraints in groups that share no point, so a group can be solved at once and the groups one after the
     other (Gauss-Seidel: the solver's stiffness, which a plain average of the corrections does not have)."""
@@ -179,6 +196,17 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
     w = 1.0 - hold
     w[hold > 0.999] = 0.0
     gaps = np.full(n, P['gap']) if gap is None else np.array([gap(p) for p in posed])      # (the cloth's stand-off from the skin, by height)
+    key = _cache_key(start, len(faces), np.array(pts)[::7], P, pin, gaps)
+    path = os.path.join(CACHE, 'skirt-%s.npy' % key)
+    if os.path.exists(path):
+        out = np.load(path)
+        log('skirt (local solver): the solved folds are in the cache (%s): the solver is skipped' % key)
+        Bi = np.linalg.inv(B)
+        back = np.einsum('nij,nj->ni', Bi[:, :3, :3], out) + Bi[:, :3, 3]
+        o.data.vertices.foreach_set('co', back.reshape(-1))
+        o.data.update()
+        bpy.context.scene.frame_set(1)
+        return out
     x, prev = posed.copy(), posed.copy()
     pushed = np.zeros(n, dtype=int)
     h = P['h']
@@ -221,6 +249,12 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
                     slide -= np.dot(slide, nn) * nn
                     prev[i] = x[i] - (1.0 - P['friction']) * slide
     out = x
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        np.save(path, out)
+        log('skirt (local solver): the solved folds saved to the cache (%s)' % key)
+    except OSError as err:
+        log('skirt (local solver): no cache (%s)' % err)
     if os.environ.get('SKIRT_SAVE_DRAPE'):                  # (the petticoat reuses the settled drape: PETTI_SKIRT_IN)
         np.save(os.environ['SKIRT_SAVE_DRAPE'], out)
     l0 = np.linalg.norm(start[e[:, 0]] - start[e[:, 1]], axis=1)
