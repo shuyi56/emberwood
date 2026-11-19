@@ -114,19 +114,31 @@ U, F = female.UPPER, female.FORE
 #                 then flat into its tendon over the lower third, so the back of the arm runs in to the elbow
 #   the biceps    in front, fullest lower, three fifths of the way down
 #   the elbow     the narrowest depth, wide across (the two knobs of the humerus), the point of the elbow behind
-#   the forearm   fullest a fifth of the way down, wide across, tapering to the wrist
+#   the forearm   its muscle in the upper half: fullest a fifth of the way down (0.86 of the shoulder across, 0.8
+#                 deep), still 0.73 at the middle, then running into tendon and the wrist's oval over the lower
+#                 half, so the depth seen from the side falls in one line (0.8, 0.73, 0.7, the wrist's 0.67) and
+#                 the width seen from the front tapers faster. With the wider wrist the old forearm (0.62 deep at
+#                 its middle, less than the wrist) read as bone (John, 2026-11-18). Over that, two masses
+#                 (forearm()): the brachioradialis and the extensors, from above the elbow down the outside and
+#                 front, and the flexors on the inside, a little lower.
 #   the wrist     an oval lying the other way: thin across and deep front to back, as the palm faces the thigh
 S_ARM = 1.82
+# The wrist comes from the hand, and the hand from the head (John, 2026-11-18: the hand looked too big for the wrist
+# from the side). The hand is as long as the face; the palm is 0.4 of that across; the wrist is a flat oval 0.78 of
+# the palm wide, as the palm lies (front to back, with the palm to the thigh), and 0.65 of its own width thick. The
+# forearm runs down into that oval and the heel of the hand opens out of it, so from the side the arm widens into
+# the hand in one line instead of a thin stalk carrying a paddle. (It was 1.45 wide under a palm of 3.1.)
+PALM_W = 0.2 * CANON['hand']           # half widths
+WRIST_W = 0.78 * PALM_W
+WRIST_T = 0.65 * WRIST_W
 ARM_SEC = [(1.5, 0.3, 0.276, 0.276), (1.25, 1.2, 1.104, 1.104), (0.8, 1.72, 1.58, 1.58), (0.0, S_ARM, 0.92 * S_ARM, 0.92 * S_ARM),
            (-1.0, 0.972 * S_ARM, 0.895 * S_ARM, 0.9 * S_ARM),
            (-0.23 * U, 0.90 * S_ARM, 0.86 * S_ARM, 0.96 * S_ARM), (-0.41 * U, 0.80 * S_ARM, 0.85 * S_ARM, 1.0 * S_ARM),
            (-0.61 * U, 0.74 * S_ARM, 0.84 * S_ARM, 0.86 * S_ARM), (-0.82 * U, 0.70 * S_ARM, 0.74 * S_ARM, 0.73 * S_ARM),
            (-U, 0.74 * S_ARM, 0.64 * S_ARM, 0.71 * S_ARM),
-           (-U - 0.22 * F, 0.80 * S_ARM, 0.72 * S_ARM, 0.72 * S_ARM), (-U - 0.5 * F, 0.66 * S_ARM, 0.62 * S_ARM, 0.61 * S_ARM),
-           (-U - 0.8 * F, 0.43 * S_ARM, 0.56 * S_ARM, 0.55 * S_ARM), (-U - F, 0.32 * S_ARM, 0.55 * S_ARM, 0.55 * S_ARM),
-           (-U - F - 0.4, 0.31 * S_ARM, 0.57 * S_ARM, 0.57 * S_ARM)]
-# (the wrist's section is the hand's own where they meet, measured on the hand's mesh: 0.57 thick and 1.08 wide, half
-# and half, at the forearm's end. It was 0.84 by 0.98, thicker than the hand it carried, which left a lip round it.)
+           (-U - 0.22 * F, 0.86 * S_ARM, 0.80 * S_ARM, 0.78 * S_ARM), (-U - 0.5 * F, 0.74 * S_ARM, 0.73 * S_ARM, 0.71 * S_ARM),
+           (-U - 0.8 * F, 0.52 * S_ARM, 0.5 * (0.73 * S_ARM + WRIST_W), 0.5 * (0.71 * S_ARM + WRIST_W)),
+           (-U - F, WRIST_T, WRIST_W, WRIST_W), (-U - F - 0.4, WRIST_T, WRIST_W, WRIST_W)]
 # (the one radius other code asks for, the hole a sleeve needs and the ribs' clearance: the section's widest)
 ARM_R = [(r[0], max(r[1:])) for r in ARM_SEC]
 
@@ -150,11 +162,22 @@ def deltoid(z, phi, s):
     return r
 
 
+def forearm(z, phi, s):
+    """The forearm's two muscle masses over its section, as shares of the shoulder's radius: the brachioradialis
+    and extensors on the outside and front, rising above the elbow's outer side and fullest just below it; the
+    flexors on the inside, fullest a quarter of the way down. Both run out before the wrist."""
+    o_, fr = s * math.sin(phi), math.cos(phi)
+    k = float(os.environ.get('FOREARM_K', '1.0'))
+    r = 0.09 * S_ARM * math.exp(-((z + U + 0.16 * F) / (0.2 * F)) ** 2) * max(0.0, 0.75 * o_ + 0.55 * fr) ** 1.5
+    r += 0.08 * S_ARM * math.exp(-((z + U + 0.27 * F) / (0.2 * F)) ** 2) * max(0.0, -0.85 * o_ + 0.3 * fr) ** 1.5
+    return k * r
+
+
 def arm_xy(z, phi, s, out=0.0):
     """The bare arm's surface at local height z and phi (0 the front), pushed out by `out`."""
     a, bf, bb = _table(ARM_SEC, z)
     sn, c = math.sin(phi), math.cos(phi)
-    d = deltoid(z, phi, s) + out
+    d = deltoid(z, phi, s) + forearm(z, phi, s) + out
     return -(a + d) * sn, -((bf if c >= 0 else bb) + 0.92 * d) * c
 
 
@@ -168,6 +191,13 @@ def patch():
     if LONG:
         # (the rig's legs are the canon's: the knee and the ankle joint where the body's are, the floor under them)
         female.THIGH, female.SHIN, female.ANKLE_Z = TH, SH, FLOOR_Z + 3.4
+        # (and the world walk's stride follows the longer legs: a cycle of 52 instead of the 46 the shorter-legged
+        # figures take, so the steps keep the same length against the leg and the standing knee stays nearly
+        # straight; a world model of this figure needs its own walk cycle in src/world/main.js to match)
+        female.STRIDE = 52.0
+        # (the bare foot is longer than a boot and has no toe joint, so it rolls up nearly over the tips of its toes
+        # to push off: rolling over a boot's ball put the toes 1.9 into the floor; at 5.8 they stay within 0.1 of it)
+        female.FOOT_BALL = 5.8
 
 
 # ---------------------------------------------------------------- pelvis
@@ -704,10 +734,10 @@ def fuse_lower():
             for v in o.data.vertices:
                 v.co = Vector((v.co.x * k, v.co.y * k, top + (v.co.z - top) * k))
             o.data.update()
-    # the wrist: the forearm ran down as a tube and stopped, wider than the hand's root, so the hand hung out of an
-    # open cuff with a lip round it. The forearm's last stretch is now drawn in to the hand's own section (measured
-    # from the hand's mesh, round the arm's axis, at each height), meets it flush at the wrist and ends just inside
-    # it, so the two surfaces run into each other with no edge between them.
+    # the wrist: the forearm ends in the wrist's oval (ARM_SEC), and the root of the hand is drawn out to the same
+    # oval. The hand's own root was a narrow dome that flared to the palm inside one unit; now its section runs
+    # from the wrist's oval at the joint to the palm's own a fifth of the hand lower, centred on the arm at the
+    # wrist. The two skins cross just under the joint, the forearm's end tucked inside the heel of the hand.
     bpy.context.view_layer.update()
     zw = female.SH_Z - U - F
     fore = np.array([sum(v for b_, v in w_.items() if b_.split('.')[0] in ('Forearm', 'Hand')) for w_ in Wn]) > 0.5
@@ -715,48 +745,44 @@ def fuse_lower():
         o = bpy.data.objects.get(nm)
         if o is None:
             continue
-        H_ = np.array([(o.matrix_world @ v.co)[:] for v in o.data.vertices])
+        mw_ = o.matrix_world.copy()
+        H_ = np.array([(mw_ @ v.co)[:] for v in o.data.vertices])
         axx, axy = sgn * female.SH_X, 0.2
-        NB, DZ = 48, 0.12
-        z_hi, z_lo = zw + 1.6, zw - 1.0
-        nz_ = int((z_hi - z_lo) / DZ) + 1
-        Rh = np.zeros((nz_, NB))
-        # (the hand's own middle at the wrist: its root is not exactly on the arm's axis, so the forearm's end is
-        # carried over onto it as it is drawn in)
-        top_ = np.abs(H_[:, 2] - zw) < 0.5
-        hcx = 0.5 * (H_[top_, 0].min() + H_[top_, 0].max())
-        hcy = 0.5 * (H_[top_, 1].min() + H_[top_, 1].max())
-        print(f'anatomy: wrist {nm} hand centre off the arm axis {hcx - axx:.2f}, {hcy - axy:.2f}', flush=True)
-        hx, hy = H_[:, 0] - hcx, H_[:, 1] - hcy
-        for dz_ in (1.2, 0.8, 0.4, 0.0, -0.4, -0.8, -1.2, -1.8, -2.6):
-            mm_ = np.abs(H_[:, 2] - (zw + dz_)) < 0.08
-            if mm_.any():
-                print(f'HANDSEC {nm} dz {dz_} x {H_[mm_, 0].min() - axx:.2f}..{H_[mm_, 0].max() - axx:.2f} y {H_[mm_, 1].min() - axy:.2f}..{H_[mm_, 1].max() - axy:.2f}', flush=True)
-        hb = (np.floor((np.arctan2(hy, hx) + math.pi) / (2 * math.pi) * NB).astype(int)) % NB
-        hz = np.round((z_hi - H_[:, 2]) / DZ).astype(int)
-        ok_ = (hz >= 0) & (hz < nz_)
-        np.maximum.at(Rh, (hz[ok_], hb[ok_]), np.hypot(hx, hy)[ok_])
-        for _ in range(2):      # (empty bins filled from, and the whole eased over, their neighbours)
-            Rh = np.maximum(Rh, 0.5 * (np.roll(Rh, 1, 1) + np.roll(Rh, -1, 1)))
-        Rh = (np.roll(Rh, 1, 1) + 2 * Rh + np.roll(Rh, -1, 1)) / 4
-        print(f'anatomy: wrist {nm} hand top {H_[:, 2].max():.2f} wrist z {zw:.2f} hand radius at wrist', Rh[int((z_hi - zw) / DZ)].round(2)[::6].tolist(), flush=True)
+        hx, hy, dz_ = H_[:, 0] - axx, H_[:, 1] - axy, H_[:, 2] - zw
+        # (the hand's section as built, by height: its middle and half sizes across and along the palm)
+        zb = np.arange(-2.6, dz_.max() + 0.11, 0.1)
+        ext = np.full((len(zb), 4), np.nan)
+        for q, z_ in enumerate(zb):
+            mm_ = np.abs(dz_ - z_) < 0.1
+            if mm_.sum() > 3:
+                ext[q] = (hx[mm_].min(), hx[mm_].max(), hy[mm_].min(), hy[mm_].max())
+        okq = ~np.isnan(ext[:, 0])
+        ext = np.stack([np.interp(zb, zb[okq], ext[okq, c_]) for c_ in range(4)], 1)
+        for _ in range(2):
+            ext[1:-1] = (ext[:-2] + 2 * ext[1:-1] + ext[2:]) / 4
+        cxc, hxc = np.interp(dz_, zb, 0.5 * (ext[:, 0] + ext[:, 1])), np.maximum(np.interp(dz_, zb, 0.5 * (ext[:, 1] - ext[:, 0])), 0.08)
+        cyc, hyc = np.interp(dz_, zb, 0.5 * (ext[:, 2] + ext[:, 3])), np.maximum(np.interp(dz_, zb, 0.5 * (ext[:, 3] - ext[:, 2])), 0.08)
+        qp = int(np.argmin(np.abs(zb + 2.0)))
+        cxp, hxp = 0.5 * (ext[qp, 0] + ext[qp, 1]), 0.5 * (ext[qp, 1] - ext[qp, 0])
+        cyp, hyp = 0.5 * (ext[qp, 2] + ext[qp, 3]), 0.5 * (ext[qp, 3] - ext[qp, 2])
+        u = _ssn(-2.0, -0.3, dz_)
+        inner = 1.0 - 0.1 * _ssn(-0.25, 0.3, dz_)          # (a little inside the forearm above the joint)
+        tx = cxp * (1 - u) + (hx - cxc) / hxc * (hxp + u * (WRIST_T - hxp)) * inner
+        ty = cyp * (1 - u) + (hy - cyc) / hyc * (hyp + u * (WRIST_W - hyp)) * inner
+        nx_, ny_ = hx + u * (tx - hx), hy + u * (ty - hy)
+        print(f'anatomy: wrist {nm} hand root at the joint was {2 * np.interp(0.0, zb, 0.5 * (ext[:, 1] - ext[:, 0])):.2f} thick, '
+              f'{2 * np.interp(0.0, zb, 0.5 * (ext[:, 3] - ext[:, 2])):.2f} wide; now {2 * WRIST_T:.2f} by {2 * WRIST_W:.2f}; '
+              f'palm {2 * hxp:.2f} by {2 * hyp:.2f}', flush=True)
+        inv_ = mw_.inverted()
+        for q, v in enumerate(o.data.vertices):
+            v.co = inv_ @ Vector((axx + nx_[q], axy + ny_[q], H_[q, 2]))
+        o.data.update()
+        # (the forearm's end, drawn in under the joint so its edge lies inside the heel of the hand)
         px, py = rest[:, 0] - axx, rest[:, 1] - axy
-        pr = np.hypot(px, py)
-        m = fore & (pr < 2.2) & (rest[:, 2] < zw + 1.6) & (rest[:, 2] > zw - 1.0)
-        ii = np.nonzero(m)[0]
-        pb = (np.floor((np.arctan2(py[ii], px[ii]) + math.pi) / (2 * math.pi) * NB).astype(int)) % NB
-        pz = np.clip(np.round((z_hi - rest[ii, 2]) / DZ).astype(int), 0, nz_ - 1)
-        t = 1.0 - _ssn(zw + 0.1, zw + 1.5, rest[ii, 2])
-        good = np.ones(len(ii), dtype=bool)
-        # (past the wrist the forearm's end is drawn in a little, so its edge lies inside the heel of the hand)
-        rn = pr[ii] * (1.0 - 0.3 * (1.0 - _ssn(zw - 0.38, zw + 0.1, rest[ii, 2])))
-        k_ = rn / np.maximum(pr[ii], 1e-6)
-        sh_ = np.where(good, t, 0.0)
-        axx_, axy_ = axx + sh_ * (hcx - axx), axy + sh_ * (hcy - axy)
-        print(f'anatomy: wrist {nm} forearm points {len(ii)}, at the wrist own radius {pr[ii][np.abs(rest[ii, 2] - zw) < 0.1].mean():.2f} to {rn[np.abs(rest[ii, 2] - zw) < 0.1].mean():.2f}', flush=True)
-        rest[ii, 0] = axx_ + px[ii] * k_
-        rest[ii, 1] = axy_ + py[ii] * k_
-    wr_ = fore & (np.abs(np.abs(rest[:, 0]) - female.SH_X) < 2.2) & (rest[:, 2] < zw + 1.8) & (rest[:, 2] > zw - 1.0)
+        ii = np.nonzero(fore & (np.hypot(px, py) < 2.4) & (rest[:, 2] < zw + 0.2) & (rest[:, 2] > zw - 1.0))[0]
+        k_ = 1.0 - 0.14 * (1.0 - _ssn(zw - 0.38, zw - 0.1, rest[ii, 2]))
+        rest[ii, 0] = axx + px[ii] * k_
+        rest[ii, 1] = axy + py[ii] * k_
     L = np.linalg.norm(rest[ed[:, 0]] - rest[ed[:, 1]], axis=1)
     lg_ = np.nonzero(L > 0.8)[0]
     print('anatomy: long edges', len(lg_), [(rest[ed[e, 0]].round(1).tolist(), rest[ed[e, 1]].round(1).tolist(), Wn[ed[e, 0]], Wn[ed[e, 1]]) for e in lg_[:4]], flush=True)
