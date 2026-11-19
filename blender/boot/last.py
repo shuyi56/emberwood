@@ -239,6 +239,52 @@ def _strip(T, z0, z1, half, lift):
     return X, faces, zz, uu
 
 
+def _panel_to_sole(T, foot, z_low, z_top, a0, dirn, reach, lift, q, r):
+    """A long panel as _panel, but from the welt to the top: below the ankle seam it lies on the foot's last (a ray
+    out from the shaft's centre line to it), and it is cut away ahead of the side seam (less a lap, which goes over
+    the vamp) there. Returns (points, faces, z, t, the distance in from its lower edges, its edges C, A and E)."""
+    from mathutils import Vector
+    D, mine, side_seam, kc, z_welt = foot['D'], foot['faces'], foot['side_seam'], foot['kc'], foot['z_welt']
+    bvh = BVHTree.FromPolygons([tuple(p) for p in D[:, 3:6]], mine)
+    nr = max(2, int(round((z_top - z_welt) / GRAIN)) + 1)
+    z = np.linspace(z_welt, z_top, nr)
+    span = reach(np.maximum(z, z_low))
+    _, rad = _at(T, z, np.full(nr, a0))
+    nc = max(2, int(round(float((span * rad).max()) / GRAIN)) + 1)
+    f = np.linspace(0.0, 1.0, nc)
+    zz = np.repeat(z, nc)
+    tt = (span[:, None] * f[None, :]).ravel()
+    a = a0 + dirn * tt
+    c, rad = _at(T, zz, a)
+    X = np.stack([c[:, 0] + np.sin(a) * rad, c[:, 1] - np.cos(a) * rad, zz], 1)
+    for i in np.nonzero(zz < z_low)[0]:                 # (on the foot's last below the ankle seam)
+        o = Vector((c[i, 0], c[i, 1], max(zz[i], z_welt + 0.02)))
+        hit, _, _, _ = bvh.ray_cast(o, Vector((np.sin(a[i]), -np.cos(a[i]), 0.0)), 50.0)
+        if hit is not None:
+            X[i, :2] = hit[0], hit[1]
+    faces = []
+    for j in range(nr - 1):
+        for i in range(nc - 1):
+            k = [j * nc + i, j * nc + i + 1, (j + 1) * nc + i + 1, (j + 1) * nc + i]
+            faces.append(k if dirn > 0 else k[::-1])
+    A = np.concatenate([X, X, zz[:, None], tt[:, None]], 1)       # (columns 3:6 as the foot's last, for side_seam)
+    keep = lambda B: np.maximum(B[:, 6] - z_low, side_seam(B) + r['lap'])
+    A, faces = _compact(*fit.trim(A, faces, keep))
+    zz, tt = A[:, 6], A[:, 7]
+    dA = (side_seam(A) + r['lap']) * kc
+    edges = {'C': (np.abs(zz - z_low) < NEAR) & (dA < -NEAR), 'A ' + q: (np.abs(dA) < NEAR) & (zz < z_low + NEAR),
+             'E': zz < z_welt + 1e-6}
+    G = A[:, :3].copy()
+    # each point lifted off the last along the panel's own outward direction there
+    nrm = np.zeros_like(G)
+    for fc in faces:
+        p0, p1, p2 = G[fc[0]], G[fc[1]], G[fc[2]]
+        nrm[fc] += np.cross(p1 - p0, p2 - p0)
+    nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+    G += nrm * lift(zz, tt)[:, None]
+    return G, faces, zz, tt, np.maximum(zz - z_low, dA), edges
+
+
 def _eyelet_line(G, zz, df, r, z_low, z_top):
     """Where a panel's eyelets go: a row eyelet_in in from its front edge, eyelet_pitch apart, from just over the
     ankle seam to just under the top. Returns the indices of the panel's points nearest each."""
@@ -391,11 +437,13 @@ def ankle_seat(T, pieces, z_low, z_seam, r):
     return seat
 
 
-def cut_lace(T, sgn, r, z_low, z_seam, z_top, seat, add, weights):
+def cut_lace(T, sgn, r, z_low, z_seam, z_top, seat, add, weights, foot=None):
     """The lace-up shaft (SHAFTS['lace']): two long panels, the inner and the outer, each from the back of the leg
     round to the front, from the ankle seam (lapped over the foot's pieces) to the top. The outer laps over the inner
     down the back (the back seam); at the front they stop short of each other by the lacing's opening, and a tongue
-    lies under it; a binding runs along each panel's top. Returns the pieces."""
+    lies under it; a binding runs along each panel's top. With foot (the foot's last, its side seam and the welt's
+    height), the panels run on down round the heel to the sole as the quarters too, their front edges lapped over
+    the vamp down the side seams, so no seam goes round the ankle. Returns the pieces."""
     tl = r['leather']
     pieces = []
     a0 = -sgn * np.pi                                  # (the back; the front is direction 0, and sgn turns inward)
@@ -422,16 +470,24 @@ def cut_lace(T, sgn, r, z_low, z_seam, z_top, seat, add, weights):
             if back:                                   # (over the inner panel's back edge, and its binding)
                 lp = lp + 1.1 * tl * _ss(6.0 * over, over, tt) * (1.0 + _ss(zb - 2.0 * r['lap'], zb, zz))
             return lp
-        G, gf, zz, tt = _panel(T, z_low, z_top, start, dirn, lambda z, back=back: reach(z, back), lift_panel)
+        if foot is None:
+            G, gf, zz, tt = _panel(T, z_low, z_top, start, dirn, lambda z, back=back: reach(z, back), lift_panel)
+            d_low = zz - z_low
+            edges = {'C': zz < z_low + 1e-6}
+        else:
+            lift_panel = (lambda zz, tt, lp=lift_panel: lp(zz, tt) - seat(zz, start + dirn * tt)
+                          + 1.1 * tl * _ss(z_seam + 8.0 * r['lap'], z_seam, zz))   # (a quarter's lift, eased off)
+            G, gf, zz, tt, d_low, edges = _panel_to_sole(T, foot, z_low, z_top, start, dirn,
+                                                         lambda z, back=back: reach(z, back), lift_panel, q, r)
         rf = front_r(zz)
         df = d_front(zz, tt, back)
         d_back = tt * rf if back else np.full(len(G), FAR)
-        d_low = zz - z_low
         sd = np.minimum(np.minimum(d_back, d_low), FAR)
         add(G, gf, sd, np.where(d_back < d_low, zz, rf * tt), weights(G))
-        pieces.append(dict(name=q + ' shaft', V=G, F=gf, up=(0, 0, 1), lift=lift_panel(zz, tt), edges={
-            'C': zz < z_low + 1e-6, 'D': tt < 1e-6, 'L': df < 1e-6, 'F': zz > z_top - 1e-6,
-            'H': np.abs(df - r['tongue']) < 0.5 * GRAIN}, eyelets=_eyelet_line(G, zz, df, r, z_low, z_top)))
+        edges.update({'D': tt < 1e-6, 'L': (df < 1e-6) & (zz >= z_low - 1e-6), 'F': zz > z_top - 1e-6,
+                      'H': (np.abs(df - r['tongue']) < 0.5 * GRAIN) & (zz >= z_low - 1e-6)})
+        pieces.append(dict(name=q + ' shaft', V=G, F=gf, up=(0, 0, 1), lift=lift_panel(zz, tt), edges=edges,
+                           eyelets=_eyelet_line(G, zz, df, r, z_low, z_top)))
         # its binding: a strip along the top edge, over the panel, stitched along its lower edge
         def lift_binding(zz, tt, lift_panel=lift_panel):
             return lift_panel(np.full_like(zz, z_top), tt) + 1.15 * tl
@@ -452,7 +508,7 @@ def cut_lace(T, sgn, r, z_low, z_seam, z_top, seat, add, weights):
 
 # The shafts that sew onto the foot's ankle seam, by name: each its own pieces cut by 'cut', and the numbers its
 # last is drafted with over the foot's (above the ankle seam).
-SHAFTS = {'lace': dict(cut=cut_lace, ratios={})}
+SHAFTS = {'lace': dict(cut=cut_lace, ratios={}, to_sole=True)}
 
 
 def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot', ratios=RATIOS, shaft_name='lace',
@@ -603,8 +659,9 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                            edges=foot_edges(
             Dc, G=np.abs(toe_seam(Dc) + r['lap']) < NEAR)))
         # the quarters: behind the side seams, their front edges lapped over the vamp; the outer one laps over the
-        # inner at the heel's back seam
-        for q, cut in (('inner', lambda A: -outer(A)), ('outer', lambda A: outer(A) + r['lap'])):
+        # inner at the heel's back seam (unless the shaft runs down to the sole, its panels the quarters too)
+        to_sole = SHAFTS[shaft_name].get('to_sole', False)
+        for q, cut in () if to_sole else (('inner', lambda A: -outer(A)), ('outer', lambda A: outer(A) + r['lap'])):
             Dq, fq = _compact(*fit.trim(*fit.trim(D0, mine, lambda A: side_seam(A) + r['lap']), cut))
             nq = Dq[:, 6:9] / np.maximum(np.linalg.norm(Dq[:, 6:9], axis=1, keepdims=True), 1e-9)
             d_front = (side_seam(Dq) + r['lap']) * kc
@@ -618,7 +675,9 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         n_foot = sum(len(v) for v in V)
         T = shafts[sgn]
         seat = ankle_seat(T, pieces, z_low, z_seam, r)
-        pieces += SHAFTS[shaft_name]['cut'](T, sgn, r, z_low, z_seam, z_top, seat, add, lambda G: _weights(Pl, Wl, G))
+        foot = dict(D=D0, faces=mine, side_seam=side_seam, kc=kc, z_welt=z_welt) if to_sole else None
+        pieces += SHAFTS[shaft_name]['cut'](T, sgn, r, z_low, z_seam, z_top, seat, add, lambda G: _weights(Pl, Wl, G),
+                                            foot=foot)
         k0 = 0
         for p in pieces:
             p['start'] = k0
@@ -629,7 +688,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         res[side] = o
         log('boot: %s, %d points: %s' % (o.name, len(Vall), ', '.join('%s %d' % (p['name'], len(p['V'])) for p in pieces)))
         # the sole, under the upper's cut edge
-        edge = Vall[:n_foot]
+        edge = Vall                                                     # (the foot's pieces, and a shaft's run to the sole)
         Sv, Sf, sd, su, path = _sole(edge[np.abs(edge[:, 2] - z_welt) < 0.12], z_welt, r)
         so = _object('%s sole.%s' % (name, side), Sv, Sf, _weights(Pl, Wl, Sv), names, body, rig,
                      sole_material or material, sd, su)

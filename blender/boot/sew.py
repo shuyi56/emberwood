@@ -53,6 +53,8 @@ SEAMS = (
     ('tongue', ('vamp',), 'C', 'C'),
     ('inner shaft', ('vamp', 'inner quarter', 'outer quarter'), 'C', 'C'),
     ('outer shaft', ('vamp', 'inner quarter', 'outer quarter'), 'C', 'C'),
+    ('inner shaft', ('vamp',), 'A inner', 'A inner'),            # (a shaft run down to the sole: its panels the quarters)
+    ('outer shaft', ('vamp',), 'A outer', 'A outer'),
     ('outer shaft', ('inner shaft',), 'D', 'D'),
     ('inner shaft', ('tongue',), 'H', 'H'),
     ('outer shaft', ('tongue',), 'H', 'H'),
