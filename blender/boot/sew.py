@@ -5,7 +5,7 @@
                 the shape they hold to is the last's. The shaft is cut flat and rolled round the leg (its flat
                 pattern is within a few percent of its lengths on the last, so it is drafted at those). Every lapped
                 seam is sewn along both its edges: the top piece's edge to the piece beneath it, the under piece's
-                edge to the top piece (SEAMS). The upper's lower edge is sewn to the sole and the collar is held up
+                edge to the top piece (SEAMS), each pair held at the distance it was cut at. The upper's lower edge is sewn to the sole and the collar is held up
                 by the calf, so both are held where they were cut (HOLD). Then the fabric solver, given leather's
                 numbers (LEATHER), draws the seams closed and keeps the leather off the hose. The pieces are sewn as
                 one sheet, then each is set back over the one beneath by its layer (its 'lift', a thickness or more).
@@ -165,7 +165,9 @@ def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
     fab = fabric.Fabric(base, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
     fab.pin(np.arange(n), pin)
     ties = fab.mesh([tuple(p.vertices) for p in o.data.polygons])
-    fab.tie(sew_ij[:, 0], sew_ij[:, 1], 0.0, rest=0.0)
+    # (each pair held at the distance it was cut at: the two pieces' points along a seam are not spaced alike, so
+    # drawing each to the other's nearest point gathers the seam into scallops)
+    fab.tie(sew_ij[:, 0], sew_ij[:, 1], 0.0)
     steps = fab.settle(body, most=P['steps'])
     Y = fab.pos.copy()
     log('boot sewing %s: settled by the fabric solver in %d steps (%.0f s): %d threads, %d diagonals, %d bend ties, '
@@ -184,8 +186,7 @@ def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
             % (o.name, p['name'], np.linalg.norm(d, axis=1).mean(), np.linalg.norm(d, axis=1).max(), -d[:, 2].mean(),
                (d * Nv[sl]).sum(1).mean()))
     # each piece set back over the one beneath
-    o.data.vertices.foreach_set('co', Y.ravel())
-    Z = Y + _normals(o) * lift[:, None]
+    Z = Y + (X - base)                                         # (by the same lift it was cut with)
     o.data.vertices.foreach_set('co', Z.ravel())
     if 'rest' in o.data.attributes:
         o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
