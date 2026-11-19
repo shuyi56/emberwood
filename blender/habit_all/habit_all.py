@@ -37,6 +37,8 @@ PIECES = [x for x in os.environ.get('HABIT_PIECES', '').split(',') if x] or None
 SETTINGS = {
     'skirt': {'SETTLE': 0},      # (shown as drafted over the petticoat: the solver comes after this is seen)
 }
+if os.environ.get('HABIT_SOLVE'):    # the solver on every layer that has one (the petticoat's is always on)
+    SETTINGS = {'skirt': {'SETTLE': 1}, 'redingote_bodice': {'SETTLE': True}}
 # The chemise is the loosest layer and nothing yet draws it in under the bodice and the sleeves (they fit over the corset
 # and the body, not over it), so it bursts out through both. It is built, so the layers over it can be fitted to it, but
 # not shown until they are: HABIT_SHOW=chemise shows it.
