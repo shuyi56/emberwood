@@ -351,7 +351,13 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     # down off the seam at once)
     # (only where the seam runs round in front of, under and behind the arm; over the shoulder the head
     # rises off its seam on its own)
-    toward = lambda C_: np.clip((0.6 - np.cos(C_[:, 0])) / 0.4, 0.0, 1.0)   # noqa: E731
+    def toward(C_):
+        t_ = np.clip((0.6 - np.cos(C_[:, 0])) / 0.4, 0.0, 1.0)
+        # (eased in and out along the seam over a fifth of it, or the cloth creases where the carry begins)
+        k_ = max(3, len(t_) // 10)
+        ker = np.exp(-0.5 * (np.arange(-2 * k_, 2 * k_ + 1) / k_) ** 2)
+        pad = np.concatenate([np.full(2 * k_, t_[0]), t_, np.full(2 * k_, t_[-1])])
+        return np.convolve(pad, ker / ker.sum(), 'valid')
     Xt = _carry(Xt.reshape(ROWS, ncols, 3), H3, Xt_f.reshape(ROWS, ncols, 2), Hf, toward(Hc)).reshape(-1, 3)
     Xu = _carry(Xu.reshape(ROWS, ncu, 3), Hu3, Xu_f.reshape(ROWS, ncu, 2), Huf, toward(Huc)).reshape(-1, 3)
     # (smoothed as pressed cloth: the drafted surface is found point by point, and shows its facets)
