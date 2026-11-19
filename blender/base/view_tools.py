@@ -140,11 +140,8 @@ def matcap_material(bpy):
     nt.nodes.clear()
     n = nt.nodes.new
     geo = n('ShaderNodeNewGeometry')
-    vt = n('ShaderNodeVectorTransform')
-    vt.vector_type, vt.convert_from, vt.convert_to = 'NORMAL', 'WORLD', 'CAMERA'
     sep = n('ShaderNodeSeparateXYZ')
-    nt.links.new(geo.outputs['Normal'], vt.inputs['Vector'])
-    nt.links.new(vt.outputs['Vector'], sep.inputs['Vector'])
+    nt.links.new(geo.outputs['Normal'], sep.inputs['Vector'])
 
     def math(op, a, b=None, clamp=False):
         x = n('ShaderNodeMath')
@@ -157,21 +154,24 @@ def matcap_material(bpy):
             else:
                 nt.links.new(v, x.inputs[k])
         return x.outputs[0]
-    # (camera space: +z faces the camera, +y is up.) A key from the upper left, in front: a surface reads by how far
-    # it turns from that light, so planes that face the camera but tilt apart still separate (the first version
-    # shaded by facing alone and came out nearly flat, render #179)
+    # views.py never moves its camera: it sits on -Y looking along +Y with Z up, and the figure turns instead. So
+    # world space is camera space (right +X, up +Z, towards the camera -Y) and the normal is used as it is.
+    # A key from the upper left, in front: a surface reads by how far it turns from that light, so planes that face
+    # the camera but tilt apart still separate.
     dot = n('ShaderNodeVectorMath')
     dot.operation = 'DOT_PRODUCT'
-    nt.links.new(vt.outputs['Vector'], dot.inputs[0])
-    dot.inputs[1].default_value = (-0.45, 0.55, 0.70)
-    key = math('MAXIMUM', dot.outputs['Value'], 0.0)
-    key = math('POWER', key, 1.6)
-    facing = math('MAXIMUM', sep.outputs['Z'], 0.0)
-    rim = math('MULTIPLY', math('POWER', math('SUBTRACT', 1.0, facing), 4.0), 0.18)
-    v = math('ADD', math('ADD', 0.06, math('MULTIPLY', key, 0.86)), rim, clamp=True)
+    nt.links.new(geo.outputs['Normal'], dot.inputs[0])
+    dot.inputs[1].default_value = (-0.50, -0.68, 0.53)
+    key = math('POWER', math('MAXIMUM', dot.outputs['Value'], 0.0), 1.4)
+    facing = math('MAXIMUM', math('MULTIPLY', sep.outputs['Y'], -1.0), 0.0)
+    rim = math('MULTIPLY', math('POWER', math('SUBTRACT', 1.0, facing), 4.0), 0.16)
+    v = math('ADD', math('ADD', 0.05, math('MULTIPLY', key, 0.88)), rim, clamp=True)
+    # (the ramp's colours are linear and the image is written as sRGB, which lifts the darks: the value is taken
+    #  to the 2.2 power first so the shading reads in the picture as computed. Without it render #180 was a flat grey)
+    v = math('POWER', v, 2.2)
     ramp = n('ShaderNodeValToRGB')
-    ramp.color_ramp.elements[0].color = (0.10, 0.09, 0.085, 1)
-    ramp.color_ramp.elements[1].color = (0.86, 0.83, 0.79, 1)
+    ramp.color_ramp.elements[0].color = (0.005, 0.0045, 0.004, 1)
+    ramp.color_ramp.elements[1].color = (0.78, 0.74, 0.68, 1)
     nt.links.new(v, ramp.inputs['Fac'])
     em = n('ShaderNodeEmission')
     nt.links.new(ramp.outputs['Color'], em.inputs['Color'])
