@@ -356,6 +356,33 @@ def footprint(base, tip):
     return fp
 
 
+def same_blob(c1, c2, path):
+    a = git("rev-parse", "--verify", "--quiet", f"{c1}:{path}", check=False).stdout.strip()
+    return bool(a) and a == git("rev-parse", "--verify", "--quiet", f"{c2}:{path}", check=False).stdout.strip()
+
+
+def _defs_src(rev, path):
+    src = git("show", f"{rev}:{path}", check=False).stdout
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return None
+    out = {}
+    for n in tree.body:
+        name = getattr(n, "name", None) or (ast.unparse(n.targets[0]) if isinstance(n, ast.Assign) else type(n).__name__)
+        out.setdefault(name, []).append(ast.get_source_segment(src, n))
+    return out
+
+
+def same_defs(c1, c2, hit):
+    """An overlap whose shared definitions read the same on both sides (each side brought the same change)."""
+    path, _, names = hit.partition(": ")
+    if not path.endswith(".py") or names in ("", "same file"):
+        return False
+    a, b = _defs_src(c1, path), _defs_src(c2, path)
+    return a is not None and b is not None and all(a.get(n) == b.get(n) for n in names.split(", "))
+
+
 def overlap(a, b):
     hits = []
     for p in set(a) & set(b):
@@ -544,6 +571,10 @@ def plan(fetch=True):
                     or any(x["state"] == "rendering" for x in b["requests"]):
                 continue
             clash = overlap(b["fp"], fp)
+            # (a file both sides changed to the very same text is no clash: two branches that each merged the same
+            # main, or share a new helper, as the sleeves and the bodice share armhole.py, 2026-11-19)
+            clash = [h for h in clash if not same_blob(b["commit"], r["merged"], h.split(":", 1)[0])
+                     and not same_defs(b["commit"], r["merged"], h)]
             c, code = (None, clash) if clash else merge(b["commit"], r["merged"], f"rq: + {r['branch']}")
             dup = duplicate_defs(c, r["base"]) if c else []
             if dup:
