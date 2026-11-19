@@ -10,6 +10,7 @@ What it settles to is carried back to the skirt's rest shape through the bones, 
 The figure is 63 units tall where a woman is 1.65 m, and the solver takes a unit for a metre, so cloth of real stiffness
 would hang like tissue. WOOL's numbers are for this scale: found by trial against how a broadcloth skirt hangs
 (folds a few centimetres across at the hem, the flare held), not copied from a preset."""
+import os
 import time
 
 import bpy
@@ -220,6 +221,8 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
                     slide -= np.dot(slide, nn) * nn
                     prev[i] = x[i] - (1.0 - P['friction']) * slide
     out = x
+    if os.environ.get('SKIRT_SAVE_DRAPE'):                  # (the petticoat reuses the settled drape: PETTI_SKIRT_IN)
+        np.save(os.environ['SKIRT_SAVE_DRAPE'], out)
     l0 = np.linalg.norm(start[e[:, 0]] - start[e[:, 1]], axis=1)
     l1 = np.linalg.norm(out[e[:, 0]] - out[e[:, 1]], axis=1)
     mv = np.linalg.norm(out - start, axis=1)
