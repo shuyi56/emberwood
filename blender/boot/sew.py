@@ -432,3 +432,94 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
+
+
+CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=1.2)  # (the ankle's bend in degrees, and the holds)
+
+
+def _deform(o, rig):
+    """Each point's deforming matrix on the rig as it is posed now (the bones' blend, as the armature moves it)."""
+    groups = {g.index: g.name for g in o.vertex_groups}
+    mats = {}
+    for pb in rig.pose.bones:
+        mats[pb.name] = np.array(rig.matrix_world @ pb.matrix @ pb.bone.matrix_local.inverted() @ rig.matrix_world.inverted())
+    out = np.zeros((len(o.data.vertices), 4, 4))
+    tot = np.zeros(len(o.data.vertices))
+    for v in o.data.vertices:
+        for g in v.groups:
+            nm = groups.get(g.group)
+            if nm in mats and g.weight > 0:
+                out[v.index] += g.weight * mats[nm]
+                tot[v.index] += g.weight
+    none = tot < 1e-6
+    out[~none] /= tot[~none][:, None, None]
+    out[none] = np.eye(4)
+    return out
+
+
+def crease(o, pieces, rig, colliders, ankle_bend=None, P=LEATHER, C=CREASE, log=print):
+    """Crease the sewn boot o where a foot bends it, and set the creases in, as a worn boot has them: the ankle is
+    bent (dorsiflexed by C['bend'] degrees), the leather carried along by the bones is drawn back to the lengths it
+    was cut at by the fabric solver against the hose (so the leather the bend gathers over the front of the ankle
+    folds out, with the sole and the collar held), and the folded leather is taken back to the rest pose through
+    the bones and kept as the boot's shape there."""
+    import time
+    from mathutils.bvhtree import BVHTree
+    uppers = [p for p in pieces if p['name'] != 'sole']
+    X = _co(o)
+    n = len(X)
+    rest_ij = pairs(uppers, X, log=lambda *a: None)
+    side = o.name.rsplit('.', 1)[-1]
+    an = bpy.data.objects.get('Ankle.' + side)
+    if rig is None or an is None:
+        log('boot crease %s: no rig, nothing to bend' % o.name)
+        return None
+    was_pos, was_rot = rig.data.pose_position, tuple(an.rotation_euler)
+    rig.data.pose_position = 'REST'
+    bpy.context.view_layer.update()
+    rig.data.pose_position = 'POSE'
+    bend = np.radians(C['bend'] if ankle_bend is None else ankle_bend)
+    an.rotation_euler = (was_rot[0] - bend, was_rot[1], was_rot[2])         # (the toe up)
+    bpy.context.view_layer.update()
+    Mv = _deform(o, rig)
+    Xh = np.concatenate([X, np.ones((n, 1))], 1)
+    Y0 = np.einsum('nij,nj->ni', Mv, Xh)[:, :3]
+    toe = np.argmin(X[:, 1])
+    log('boot crease %s: the ankle bent %.0f deg; the toe goes %+.2f up' % (o.name, np.degrees(bend), Y0[toe, 2] - X[toe, 2]))
+    pts, tris = [], []
+    for c in colliders:
+        e = c.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me = e.to_mesh()
+        me.calc_loop_triangles()
+        n0 = len(pts)
+        pts += [tuple(c.matrix_world @ v.co) for v in me.vertices]
+        tris += [tuple(n0 + i for i in t.vertices) for t in me.loop_triangles]
+        e.to_mesh_clear()
+    body = fabric.bvh_body(BVHTree.FromPolygons(pts, tris), P['gap'])
+    t0 = time.time()
+    fab = fabric.Fabric(X, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
+    z = X[:, 2]
+    pin = np.maximum(np.clip(1.0 - (z - z.min()) / C['hold_sole'], 0.0, 1.0),
+                     np.clip(1.0 - (z.max() - z) / C['hold_collar'], 0.0, 1.0)) ** 2
+    fab.pin(np.arange(n), pin)
+    fab.mesh([tuple(p.vertices) for p in o.data.polygons])         # (the ties at the lengths as cut, at rest)
+    fab.tie(rest_ij[:, 0], rest_ij[:, 1], 0.0)
+    fab.pos[:] = Y0
+    fab.prev[:] = Y0
+    steps = fab.settle(body, most=C['steps'])
+    Y = fab.pos.copy()
+    d = np.linalg.norm(Y - Y0, axis=1)
+    out = ((Y - Y0) * _normals(o)).sum(1)
+    log('boot crease %s: folded by the solver in %d steps (%.0f s): the leather moved %.3f on average, %.3f at most '
+        '(%.3f at most out from the leg)' % (o.name, steps, time.time() - t0, d.mean(), d.max(), out.max()))
+    # back to the rest pose through each point's own bones, the folds kept
+    Yh = np.concatenate([Y, np.ones((n, 1))], 1)
+    Z = np.einsum('nij,nj->ni', np.linalg.inv(Mv), Yh)[:, :3]
+    an.rotation_euler = was_rot
+    rig.data.pose_position = was_pos
+    bpy.context.view_layer.update()
+    o.data.vertices.foreach_set('co', Z.ravel())
+    if 'rest' in o.data.attributes:
+        o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
+    o.data.update()
+    return {'moved': float(d.max())}

@@ -33,6 +33,7 @@ M_THREAD = female.mat_def(76, 'boot thread', female.ramp(0x8a6a3a, 0.1), 0.0)
 M_EYELET = female.mat_def(77, 'boot eyelet', female.ramp(0x9a7a3a, 0.15), 0.35)
 M_LACE = female.mat_def(78, 'boot lace', female.ramp(0x1c1814, 0.1), 0.0)
 SHAFT = 'lace'               # the shaft sewn on the foot (last.SHAFTS)
+CREASE = True                # the ankle bent and the folds it makes set into the leather
 SEW = True                   # the pieces sewn by the solver, and their stitches; False: the pieces as cut on the last
 
 
@@ -52,6 +53,8 @@ def build():
         import sew
         for side in 'RL':
             sew.sew(boots[side], last.PIECES[side], rig, [ho])
+            if CREASE:
+                sew.crease(boots[side], last.PIECES[side], rig, [ho])
             boots['stitches ' + side] = sew.stitches(boots[side], last.PIECES[side], rig=rig, material=female.mat(M_THREAD))
             boots['eyelets ' + side], boots['lace ' + side] = sew.lacing(
                 boots[side], last.PIECES[side], rig=rig, H=hose.MEASURES['H'], metal=female.mat(M_EYELET),

@@ -64,8 +64,10 @@ RATIOS = {
     'ease': 0.035,           # the shaft's room over the leg's taut section (a finger's width all round)
     'slope': 0.20,           # the most the shaft closes in on the leg for each unit it goes down
     'ankle_girth': 1.05,     # the shaft's least girth, as a multiple of the ankle's (laced: the heel goes in open)
-    'flare': 0.025,          # the top's flare
+    'flare': 0.008,          # the top's flare
     'flare_span': 0.30,
+    'calf_swell': 0.015,     # the shaft's own swell over the calf, past the ease (as a laced boot is cut)
+    'calf_span': 0.25,       # over this far either way of the calf's fullest
     'room': 0.022,           # the foot's room over the hose
     'gap': 0.024,            # the least room between the skin and the leather anywhere (the hose is 0.0105 of it)
     'toe_room': 0.045,       # the toe box's height over the toe
@@ -138,6 +140,7 @@ def shaft(P, leg, M, z_top, r, log=print):
     dz = np.abs(zs[:, None] - zs[None, :])
     R = (R[None, :, :] - r['slope'] * dz[:, :, None]).max(1)
     R = R + r['ease'] + r['flare'] * _ss(z_top - r['flare_span'], z_top, zs)[:, None] ** 2
+    R = R + r['calf_swell'] * np.exp(-((zs - M['calf_z']) / r['calf_span']) ** 2)[:, None]
     girth = (R * (2 * np.pi / COLS)).sum(1)
     R *= np.maximum(1.0, r['ankle_girth'] * M['ankle'] / girth)[:, None]       # (the heel has to pass)
     R = fit._blur(fit._blur(R, 2.0, 1, True), 1.5, 0, False)
