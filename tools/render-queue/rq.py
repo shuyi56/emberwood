@@ -71,6 +71,7 @@ INTENT_TTL_S = 1800                                       # an intent nobody fol
 VIEWS_PY = "blender/base/views.py"
 RQ_VIEWS = "blender/base/rq_views.py"        # views.py plus crops and the pose strip (the queue's rq_views.py)
 RQ_VIEWS_SRC = os.path.join(HERE, "rq_views.py")
+RQ_FLOW_SRC = os.path.join(HERE, "rq_flow.py")       # the flow check rq_views.py runs (put beside it in the worktree)
 OUTFIT = os.path.join(HERE, "rq_outfit.py")
 ANGLES = ("front", "3/4", "profile", "back3/4", "back")
 # views.py options a combined job can take the union of (True: takes a value); any other option keeps a job apart
@@ -696,6 +697,9 @@ def start(job):
         shutil.copy(OUTFIT, os.path.join(wt, "blender", "outfit", "outfit.py"))
     if job["kind"] == "views" and (RQ_VIEWS in (job["param"] or "") or VIEWS_PY in (job["param"] or "")):
         shutil.copy(RQ_VIEWS_SRC, os.path.join(wt, RQ_VIEWS))
+        for src in (RQ_FLOW_SRC, os.path.join(HERE, "flow_baseline.json")):
+            if os.path.exists(src):
+                shutil.copy(src, os.path.join(wt, os.path.dirname(RQ_VIEWS), os.path.basename(src)))
     log = open(os.path.join(tmp_out, "render.log"), "w")
     cmd = command(job, tmp_out)
     log.write(f"$ {cmd}\n"); log.flush()
@@ -787,8 +791,25 @@ def telemetry(run, rc):
                             for k, v in (g.get("garments") or {}).items()}}
     except (OSError, ValueError):
         pass
+    flow = None
+    try:             # (the flow check's verdict and flags, per garment and per pose: rq_flow.py)
+        def brief(r):
+            return {"verdict": r.get("verdict"),
+                    "garments": {k: {"verdict": v.get("verdict"), "flags": [f"{f['metric']} {f['value']} > {f['limit']}"
+                                                                           if f['metric'] not in ("squash_p1", "fold_radius_p1")
+                                                                           else f"{f['metric']} {f['value']} < {f['limit']}"
+                                                                           for f in v.get("flags", [])][:4],
+                                     "worst": next((p.get("where") for p in v.get("spots", []) if p.get("where")), None)}
+                                 for k, v in (r.get("garments") or {}).items()}}
+        f = json.load(open(os.path.join(out, "flow.json")))
+        flow = brief(f)
+        if os.path.exists(os.path.join(out, "flow-poses.json")):
+            fp = json.load(open(os.path.join(out, "flow-poses.json")))
+            flow["poses"] = {k: brief(v) for k, v in fp.get("poses", {}).items()}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
     return {"queue_wait": round(run["t0"] - min(created)) if created else None, "phases": phases,
-            "settings": settings, "solver": solver, "geometry": geo,
+            "settings": settings, "solver": solver, "geometry": geo, "flow": flow,
             "cause": None if rc == 0 else failure_cause(log, rc),
             "warnings": len(re.findall(r"^(?:WARNING|Warning|warning)\b|rq geometry: skipped", log, re.M))}
 
