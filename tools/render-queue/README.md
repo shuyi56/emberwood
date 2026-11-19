@@ -25,10 +25,24 @@ A view job is any script in the requesting branch, run through `rq_run.py` with 
 
 ## How to ask for a render
 
-Push your commit, then send the **reviewer thread**, "Review render requests before queueing"
-(cmsg_01CnnKqGvuWEUi2G9X9cb9nBJkqDv7Ktra4a31euzvMxpx), a message with `message_thread` holding one JSON block.
-Do not send requests straight to the render-queue thread any more. The reviewer reads every request first (see
-"Review before the queue" below) and passes it on to the queue, or sends it back to you with fixes:
+Run `rq.py ping --thread <your id>` first (see "Ping the queue before you ask for more" below). Then, by the kind of request
+(John, 2026-11-19, to cut the messages between sessions):
+
+* **Check quality** (`--quality check`: a crop, a pose strip, a clay or lit look you only need to see): add it yourself,
+  with no reviewer and no message to anyone. Push your commit and run
+
+  ```
+  python3 /mnt/project-files/render-queue/rq.py add --thread <your id> --branch <branch> --sha <sha> \
+      --outputs views --view "<views.py command>" --quality check --note "what you are checking"
+  ```
+
+  The request goes into the queue at once. The answer to `add` prints your warnings.
+* **Final quality, `frames`, `glb`, or `ready`**: send the **reviewer thread**, "Review render requests before queueing"
+  (cmsg_01CnnKqGvuWEUi2G9X9cb9nBJkqDv7Ktra4a31euzvMxpx), a message with `message_thread` holding one JSON block. The
+  reviewer reads it first (see "Review before the queue" below) and passes it on to the queue, or sends it back to you
+  with fixes. `rq.py add` refuses a final-quality request that the reviewer has not passed.
+
+Do not message the render-queue thread to ask for a render or to ask whether it is done. The JSON block:
 
 ```json
 {
@@ -221,7 +235,8 @@ checked yet.
 
 ## Review before the queue
 
-The reviewer thread checks each request without rendering anything, in about two minutes:
+The reviewer thread checks each final-quality, `frames`, `glb` or `ready` request without rendering anything, in about
+two minutes. Check-quality requests skip it: a thread adds those itself with `rq.py add --quality check`.
 
 * the request itself: outputs, cells, view commands; no full sheet in any form (not as an output, not a character
   script run as a view, not `frames` covering most of the sheet); no before of main that is not cached
@@ -384,9 +399,12 @@ normally, so it fills on the first full-figure job that finishes there.
 
 ## What comes back
 
-A reply in your thread with the result folder `/mnt/project-files/render-queue/results/<key>/`: the images,
+**Your result is not sent to you as a message.** When a request finishes, it appears in `rq.py ping --thread <your id>`
+under "last result", with the result folder `/mnt/project-files/render-queue/results/<key>/`: the images,
 `render.log`, and `manifest.json` (the commit rendered, every branch combined into it, file sizes and git blob
-ids). Identical code is never rendered twice: an unchanged request is answered from the cache at once.
+ids). Ping, then open the images yourself. The render-queue thread messages you only when something needs a
+decision: a failed or killed job, a merge conflict, a hogging warning, or a request it had to refuse. Identical code
+is never rendered twice: an unchanged request is answered from the cache at once.
 
 ## Conflicts
 

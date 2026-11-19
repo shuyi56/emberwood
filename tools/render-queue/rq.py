@@ -1176,6 +1176,9 @@ def cmd_add(a):
     a.view = [expand_view(v) for v in (a.view or [])] or None
     if a.quality is None:     # crops and pose strips are cheap drafts unless the request says final
         a.quality = "check" if a.view and all(is_extra(v) for v in a.view) else "final"
+    if a.quality == "final" and not a.reviewed:
+        sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'). "
+                 "A check-quality request you can add yourself: add --quality check")
     before_only_from_cache(a, outs)
     r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
          "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
@@ -1634,6 +1637,7 @@ def main():
     q.add_argument("--outputs", required=True); q.add_argument("--view", action="append"); q.add_argument("--cells")
     q.add_argument("--mode", choices=("combined", "isolated"), default="combined"); q.add_argument("--note")
     q.add_argument("--quality", choices=("final", "check"), default=None, help="default: check for crops and pose strips alone, final otherwise")
+    q.add_argument("--reviewed", action="store_true", help="the reviewer thread passed this request (needed for final quality)")
     q = sub.add_parser("intent")
     q.add_argument("--thread", required=True); q.add_argument("--branch", required=True)
     q.add_argument("--piece", help="the figure module (blender/<piece>/<piece>.py) the render will be of")
