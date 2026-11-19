@@ -178,3 +178,5 @@ place when it turns out to be too broad; do not add a near copy.
 - **Seen:** Warden full front, 2026-11-18: `views.py --figure warden --angles front --size 480 --samples 48` was reviewed and queued as a job; --angles only picks the angles for --turn, --head and --pieces, so the build ran several minutes and wrote no image. The queue thread caught it and ran it as `--turn --angles front`.
 - **Spot:** A views.py command with none of --turn, --head, --pieces, --cells, --list, --walk, --run, --save or --preset.
 - **Fix:** Send it back: a full figure front is `--turn --angles front`. The reviewer's smoke build only proves the build reaches its first render, so check that the command has an output flag.
+
+Note on view presets (PR 53, 2026-11-19): `--preset turn-clay|turn-matcap|turn-lit|head-clay` expand to four angles and fall under P025 like --turn (--angles narrows them to one view). The reviewer also blocks unknown --preset, --tier, --look and --area values and `--preset closeup` without --area (names from blender/base/view_tools.py: PRESETS, TIERS, AREA_NAMES).

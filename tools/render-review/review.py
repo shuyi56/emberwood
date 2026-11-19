@@ -55,6 +55,8 @@ sys.path.insert(0, RQ_DIR)
 import rq  # noqa: E402  (the render queue's own module)
 
 WORK = os.environ["RQ_WORK"]
+PRESETS = {"view-clay", "turn-clay", "turn-matcap", "turn-lit", "head-clay", "head-lit", "closeup", "walk", "run"}
+AREAS = ("face", "head", "shoulders", "torso", "waist", "hips", "hands", "legs", "knees", "feet", "full")   # view_tools.AREA_NAMES
 REQ_ENV = {}   # the request's "env" (string variables the job needs); set in main, used by smoke builds
 PITFALLS = os.environ.get("RQ_PITFALLS", os.path.join(HERE, "PITFALLS.md"))
 LOG = os.path.join(RQ_DIR, "review", "reviews.jsonl")
@@ -725,6 +727,28 @@ def review(req, thread, do_smoke=True):
         one = "--angles" in tok and tok.index("--angles") + 1 < len(tok) \
             and "," not in tok[tok.index("--angles") + 1]
         multi = [f for f in ("--turn", "--head", "--pieces") if f in tok]
+        def tval(flag):
+            return tok[tok.index(flag) + 1] if flag in tok and tok.index(flag) + 1 < len(tok) else ""
+        preset = tval("--preset")
+        if preset in ("turn-clay", "turn-matcap", "turn-lit", "head-clay"):   # four angles each (view_tools.PRESETS)
+            multi.append("--preset " + preset)
+        if "--preset" in tok:
+            bad = []
+            if preset not in PRESETS:
+                bad.append(f"--preset {preset or '(none)'} (one of {', '.join(sorted(PRESETS))})")
+            if tval("--tier") and tval("--tier") not in ("draft", "check", "final"):
+                bad.append(f"--tier {tval('--tier')} (draft, check or final)")
+            for lk in [x for x in tval("--look").split(",") if x]:
+                if lk not in ("full", "clay", "matcap"):
+                    bad.append(f"--look {lk} (full, clay or matcap)")
+            if preset == "closeup" and not tval("--area"):
+                bad.append("--preset closeup without --area")
+            for ar in [x for x in tval("--area").split(",") if x]:
+                if ar not in AREAS and not ar.startswith("piece:"):
+                    bad.append(f"--area {ar} (one of {', '.join(AREAS)}, or piece:PREFIX)")
+            if bad:
+                rep.block("views", "views.py preset flags the presets do not know: " + "; ".join(bad) + ".",
+                          "Use the names in blender/base/view_tools.py (PRESETS, TIERS, AREA_NAMES).", "P010")
         if not any(f in tok for f in ("--turn", "--head", "--pieces", "--cells", "--list", "--walk", "--run", "--save", "--preset")):
             rep.block("views", "views.py command with none of --turn, --head, --pieces, --cells, --list, --walk, --run, --save or --preset: it builds "
                       "the figure and renders nothing (--angles only picks the angles of --turn, --head and --pieces).",
