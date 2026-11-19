@@ -7,7 +7,8 @@ wool's look and the buttons'.
 
 --head frames the garment here (HEAD_CZ, HEAD_H below): from under the basque to the chin.
 
-Settings (--set NAME=VALUE): DYE (the wool's colour), SETTLE (False: the basque as drafted, without the solver),
+Settings (--set NAME=VALUE): DYE (the wool's colour), SETTLE (True or False: settle the basque in the cloth solver or not; by default only when nothing is layered
+under it),
 CORSETED (False: on the body as built, without the corset's drawing in). To check that it re-fits, change the
 mannequin itself before it builds, through anatomy's own settings in the environment (WAIST_W, HIPS_H, CANON_H)."""
 import os
@@ -29,7 +30,10 @@ import bodice  # noqa: E402
 
 # A dark navy wool habit cloth (a fulled broadcloth: no weave to be seen, a soft nap). DYE=0xrrggbb for another.
 DYE = 0x121621              # (picked on swatch.py's bench: 1d2436 read slate blue under the views' lights)
-SETTLE = True
+# John's rule for layers (2026-11-19): a layer added over others is first shown without the solver, on the layers
+# below as they are; only after that is seen is another round run with the solver on both. So the basque is settled
+# only on its own (no corset or skirt mesh in the scene) unless SETTLE is set True; False never settles it.
+SETTLE = None
 CORSET = 'Corset'            # an object of this name in the scene is worn under the bodice, and the bodice fits over it
 CORSETED = True              # without one, the body drawn in by the corset's shared numbers (shared/habit.py), and the
                              # bodice over the corset's shell; False: the body as built, uncorseted
@@ -64,8 +68,12 @@ def build():
             moved, corset.natural_waist, corset.girth_waist_corseted), flush=True)
     # (the basque settles on the hands and on the skirt's waist, when the skirt is built first: it ends under the basque)
     hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R'), bpy.data.objects.get(SKIRT)) if o]
+    stacked = bool(under) or bpy.data.objects.get(SKIRT) is not None
+    settle = (not stacked) if SETTLE is None else bool(SETTLE)
+    if stacked and not settle:
+        print('redingote bodice: over other layers, so the basque is shown as drafted (SETTLE=True to settle it)', flush=True)
     o, m = bodice.build_bodice(body, heads, rig=bpy.data.objects.get('Rig'), cloth=cloth, button=btn, under=under,
-                               colliders=hands, settle=SETTLE, corset=corset)
+                               colliders=hands, settle=settle, corset=corset)
     MEASURES.update(m)
     lo, hi = m['z_hem'] - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
