@@ -234,7 +234,12 @@ def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
         len(P), len(T), len(S), float(gap0.mean()), float(gap0.max())))
     bpy.context.scene.frame_set(1)
     hands = [bpy.data.objects[n] for n in ('Hand.L', 'Hand.R') if n in bpy.data.objects]
-    pts, nrm = body_surface([body] + hands + [u for u in under_objs if u.type == 'MESH'])
+    shells = [u for u in under_objs if u.type == 'MESH']
+    pts, nrm = body_surface([body] + hands)
+    sp, sn = body_surface(shells)
+    keep = sew.outward_only(sp, sn)          # (the corset's outer face only: not the inner face past its rim)
+    log('petticoat sew: corset collider %d of %d points face outward' % (keep.sum(), len(keep)))
+    pts, nrm = np.vstack([pts, sp[keep]]), np.vstack([nrm, sn[keep]])
     if os.environ.get('PETTI_COLLIDER'):
         np.savez(os.environ['PETTI_COLLIDER'], pts=pts, nrm=nrm, floor=M['floor'])
     key = sew.settled_key(A['P'], A['T'], A['UV'], A['sew'], pts, nrm, np.float64(M['floor']))

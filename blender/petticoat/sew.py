@@ -576,7 +576,7 @@ FABRIC = dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping
 FLAT = 1e-6
 STEP = 1.0 / 240             # s
 SEW_SECONDS = 0.6            # the seams drawn up and the cloth let fall
-GAP = 0.06                   # off the body, in units
+GAP = 0.07                   # off the body, in units (the shell's thickness and subdivision take about 0.04 of it)
 
 
 def tethers(A, cuts):
@@ -722,6 +722,22 @@ def gathers(A):
                 weld.append((int(idx[jj]), int(b)))
                 used.add(jj)
     return np.array(out, np.int64), tg, np.array(weld, np.int64)
+
+
+def outward_only(pts, nrm, band=0.5):
+    """The points of a worn shell (the corset) that face away from her: a shell has an inner face too, and cloth
+    that slips past its rim would find that face nearest and be pushed in, through the corset. Each point's turn from
+    the shell's own centre line at its height (the mean of its points in a slab band units tall) is tested against
+    its normal."""
+    pts, nrm = np.asarray(pts, float), np.asarray(nrm, float)
+    slab = np.round(pts[:, 2] / band).astype(int)
+    keep = np.zeros(len(pts), bool)
+    for k in np.unique(slab):
+        on = slab == k
+        c = pts[on, :2].mean(0)
+        r = pts[on, :2] - c
+        keep[on] = np.einsum('ij,ij->i', r, nrm[on, :2]) > 0.0
+    return keep
 
 
 # ---------------------------------------------------------------- the solved folds, kept
