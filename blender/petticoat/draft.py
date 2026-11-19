@@ -18,23 +18,12 @@ How a petticoat of 1885-1895 is cut, and how that is followed here:
   the gores    from the fullest hip straight down to the hem, flaring little at the front, more at the sides and most
                at the back, to a hem of about 2.7 m (HEM, a share of the length): the pattern of the gored skirts of the time. The
                back runs on into a short train that lies on the floor (TRAIN); the front clears the floor.
-  the flounce  a deep gathered flounce set on above the hem (flounce.py), headed by tucks, that holds the hem out.
+  the flounce  a deep gathered flounce set on above the hem, headed by tucks, that holds the hem out.
 
-The garment is made in three steps:
-
-  1. the pattern  r(t, theta): the radius from the body's axis of each line of the cloth (theta round from the front,
-                  t from the band to the hem), with the girth of every row as cut. pattern() returns it.
-  2. the hang     the same rows hung from the hip plumb, each drawn in to where cloth that full would hang, its spare
-                  girth put into a few deep flutes (more of them, closer, at the back where the breadth is gathered),
-                  so that every row keeps the pattern's girth: the cloth's rest lengths are the pattern's. hang()
-                  builds that mesh; the solver (cloth.py) then lets it fall on the body and the floor.
-  3. the rig      the band and yoke follow the pelvis; lower down each side follows its thigh a little, more toward
-                  the hem, so the skirt moves with the legs without being cut by them.
-
-Rows are rings of their own length (more points round the hem than round the band, about GRID apart), joined by
-strips of triangles, so the cloth is evenly sampled from the band to the hem. The pattern is the UV map: u the
-distance round the row as cut, v the distance down the cloth, both in model units, so the weave runs true."""
-import os
+This module only measures. pattern() returns, for every angle round the body, the line the cloth takes from the band
+down over the corset and hips (taut over hollows, plumb below the fullest hip, with the gores' flare) and its length
+to the hem; pattern.py drafts the flat pieces from those numbers.
+"""
 
 import numpy as np
 
@@ -57,12 +46,7 @@ HEM = 2.55
 # How the gores' flare is shared round the skirt (front, side, back): the front falls almost plumb, the back breadth
 # is widest. The share at an angle theta from the front is interpolated between these.
 FLARE_SHARE = (0.45, 1.0, 1.55)
-# How far the cloth that full hangs out from the hip plumb, as a share of the pattern's flare: the rest of the girth
-# goes into flutes. (Cotton of this weight carries about a third of its cut flare; the solver settles the rest.)
-HANG = 0.38
-GRID = float(os.environ.get('PETTI_GRID', '0.36'))   # the cloth's sampling, in units (about 1 cm)
 NTH = 720                    # angles the profile is tabled at
-SEED = 7
 
 
 def _ss(a, b, x):
@@ -268,143 +252,3 @@ def pattern(M, ratios=RATIOS, hem=HEM, share=FLARE_SHARE, log=print):
             girth(r[hem_i], th) * 165 / 63, slope[0], slope[NTH // 4], slope[NTH // 2], length[0], length[NTH // 2]))
     return dict(th=th, z=z, r=r, plumb=plumb, flare=slope, s=s, length=length, band_top=band_top, band_bot=band_bot,
                 flare_z=flare_z, hem_z=hem_z)
-
-
-# ---------------------------------------------------------------- 2. the hang
-
-def _at(pat, key, t):
-    """A pattern table read at a fraction t of each line's length: [NTH] values (r or z) for the rows at t."""
-    s = pat['s']
-    L = pat['length']
-    out = np.empty(NTH)
-    for j in range(NTH):
-        sj = t * L[j]
-        col = pat[key][:, j] if key != 'z' else pat['z']
-        out[j] = np.interp(sj, s[:, j], col)
-    return out
-
-
-def _flutes(th, n, rng):
-    """The flutes' phase round the skirt: n of them, closer where the flare's share is larger (the gathered back),
-    each a little off its even place. Returns phase(th) in turns."""
-    dens = _share(th) ** 1.6
-    cdf = np.cumsum(dens)
-    cdf = (cdf - cdf[0]) / (cdf[-1] - cdf[0] + (cdf[-1] - cdf[0]) / len(th))
-    jitter = 0.12 * np.sin(2 * np.pi * (3 * cdf + rng.uniform())) + 0.07 * np.sin(2 * np.pi * (5 * cdf + rng.uniform()))
-    return n * cdf + jitter + 0.25
-
-
-def hang(M, pat, ratios=RATIOS, hang_share=HANG, grid=GRID, seed=SEED, log=print):
-    """The petticoat's mesh as it is put on the body before the solver: rows at fractions of each line's length,
-    each ring drawn in toward the hip plumb and fluted so that its girth stays the pattern's. Returns (V, F, info)
-    with info holding per point: t (down the cloth, 0 at the band's top, 1 at the hem), u, v (the pattern, in units),
-    th, row index, and the list of rows (index arrays)."""
-    H = M['H']
-    th = pat['th']
-    rng = np.random.default_rng(seed)
-    Lmax = float(pat['length'].max())
-    nrows = max(8, int(round(Lmax / grid)) + 1)
-    ts = np.linspace(0.0, 1.0, nrows)
-    floor = M['floor']
-    gap = 0.03 * H
-    # the flutes: count from the hem's spare girth and the flute width
-    hem_hang = pat['plumb'][int(np.argmin(np.abs(pat['z'] - pat['hem_z'])))]
-    n_flutes = int(round(girth(hem_hang, th) / (ratios['flute'] * H)))
-    n_flutes += n_flutes % 2
-    phase = _flutes(th, n_flutes, rng)
-    wave = np.sin(2 * np.pi * phase)
-    # (a flute is rounder at its crest outside than in its valley: the cloth turns over the crest, folds in the valley)
-    wave = np.where(wave > 0, np.abs(wave) ** 0.8, -np.abs(wave) ** 1.25)
-    V, U, Vv, T, TH, rows, Gs, R = [], [], [], [], [], [], [], []
-    for i, t in enumerate(ts):
-        r_pat = _at(pat, 'r', t)
-        z_pat = _at(pat, 'z', t)
-        plumb = _at(pat, 'plumb', t)
-        G = girth(r_pat, th)
-        hang_r = plumb + hang_share * (r_pat - plumb)
-        # the flutes: as deep as it takes for the ring to keep the pattern's girth
-        lo, hi = 0.0, 0.5 * float(np.max(r_pat - plumb)) + 1e-3
-        if girth(hang_r, th) < G - 1e-3:
-            for _ in range(40):
-                A = 0.5 * (lo + hi)
-                if girth(hang_r + A * wave, th) < G:
-                    lo = A
-                else:
-                    hi = A
-                if girth(hang_r + hi * wave, th) < G:
-                    hi *= 2
-            A = 0.5 * (lo + hi)
-        else:
-            A = 0.0
-        rr = hang_r + A * wave
-        zz = z_pat.copy()
-        # the train: what would go through the floor turns out along it
-        below = zz < floor + gap
-        if below.any():
-            rr = np.where(below, rr + (floor + gap - zz), rr)
-            zz = np.where(below, floor + gap, zz)
-        # resample the ring to points about grid apart, evenly by its own length
-        x, y = rr * np.sin(th), -rr * np.cos(th)
-        seg = np.hypot(np.diff(np.append(x, x[0])), np.diff(np.append(y, y[0])))
-        cum = np.concatenate([[0.0], np.cumsum(seg)])
-        n = max(24, int(round(cum[-1] / grid)))
-        n += (-n) % 8
-        want = np.linspace(0.0, cum[-1], n, endpoint=False)
-        k = np.searchsorted(cum, want, side='right') - 1
-        f = (want - cum[k]) / np.maximum(seg[k], 1e-9)
-        th_k = th[k] + f * (2 * np.pi / NTH)
-        x_ = np.interp(th_k, np.append(th, 2 * np.pi), np.append(x, x[0]))
-        y_ = np.interp(th_k, np.append(th, 2 * np.pi), np.append(y, y[0]))
-        z_ = np.interp(th_k, np.append(th, 2 * np.pi), np.append(zz, zz[0]))
-        # the pattern's u: round the row as cut (its girth G), v: down the line of cloth
-        Lk = np.interp(th_k, np.append(th, 2 * np.pi), np.append(pat['length'], pat['length'][0]))
-        idx = np.arange(len(V), len(V) + n)
-        rows.append(idx)
-        V += list(np.stack([x_, y_, z_], 1))
-        U += list(want / cum[-1] * G)
-        Vv += list(t * Lk)
-        T += [t] * n
-        TH += list(th_k)
-        Gs.append(G)
-        R += [i] * n
-    V = np.array(V)
-    F = []
-    for a, b in zip(rows[:-1], rows[1:]):
-        F += _zip(a, np.array(TH)[a], b, np.array(TH)[b])
-    info = dict(t=np.array(T), u=np.array(U), v=np.array(Vv), th=np.array(TH), rows=rows, n_flutes=n_flutes, ts=ts,
-                G=np.array(Gs), row=np.array(R))
-    log('petticoat hang: %d rows, %d points, %d faces, %d flutes' % (len(rows), len(V), len(F), n_flutes))
-    return V, F, info
-
-
-def _zip(a, ta, b, tb):
-    """Triangles joining ring a (angles ta, ascending) to ring b (angles tb): walk both rings round by angle."""
-    na, nb = len(a), len(b)
-    i = j = 0
-    out = []
-    while i < na or j < nb:
-        ai, aj = a[i % na], a[(i + 1) % na]
-        bi, bj = b[j % nb], b[(j + 1) % nb]
-        ta_next = ta[(i + 1) % na] + (2 * np.pi if i + 1 >= na else 0.0)
-        tb_next = tb[(j + 1) % nb] + (2 * np.pi if j + 1 >= nb else 0.0)
-        if j >= nb or (i < na and ta_next <= tb_next):
-            out.append((ai, aj, bi))
-            i += 1
-        else:
-            out.append((ai, bj, bi))
-            j += 1
-    return out
-
-
-# ---------------------------------------------------------------- 3. the rig
-
-def weights(V, info, M, pat):
-    """Each point's bones: the pelvis above the fullest hip; below it, its own side's thigh takes over toward the hem,
-    up to THIGH_SHARE, on the side it lies (through the middle, both alike)."""
-    t = info['t']
-    z = V[:, 2]
-    hips = M['hips_z']
-    down = _ss(hips, M['floor'], z) * (t > 0.05)
-    k = 0.45 * down
-    side = _ss(-1.2, 1.2, V[:, 0])           # 1 on her left (+x), 0 on her right
-    return {'Pelvis': 1.0 - k, 'Thigh.L': k * side, 'Thigh.R': k * (1.0 - side)}

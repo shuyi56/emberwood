@@ -1,13 +1,13 @@
-"""A standalone garment: the petticoat under the riding habit (about 1885-1895), on the bare mannequin over the corset,
-with nothing worn over it. It is drafted in draft.py from the body's own measurements and the corset's shared numbers
-(habit.py), hung by Blender's cloth solver in cloth.py, and finished with its flounce in flounce.py; this module
-supplies the body and the cotton's look.
+"""A standalone garment: the petticoat under the riding habit (about 1885-1895), over the corset on the bare mannequin.
 
-    python3 blender/base/views.py --figure petticoat --mannequin --turn --clay --out DIR
-    python3 blender/base/views.py --figure petticoat --mannequin --head --set VIEW=1 --out DIR
+Drafted flat first (the project's rule): the body is drawn in and corseted by the corset thread's habit.py, the
+petticoat is measured over the corset (draft.py), and its pieces are drafted flat from those measures with every seam
+edge paired (pattern.py). Sewing the pieces, the stitch lines and the drape (cloth.py, tuned on swatch.py's bench)
+wait for John's go.
 
-VIEW frames the --head close-up on a part, by its place in FRAMES: 0 'skirt' (the band to the floor), 1 'yoke' (the
-band to below the hips), 2 'hem' (the flounce and the train). SETTLE=False skips the solver (the drafted hang)."""
+    PETTI_OUT=DIR/pattern python3 blender/base/views.py --figure petticoat --mannequin --list
+
+writes the laid-out pattern (DIR/pattern.png) and its pieces and seams (DIR/pattern.json) after the build."""
 import os
 import sys
 
@@ -24,13 +24,9 @@ import numpy as np  # noqa: E402
 import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 import draft  # noqa: E402
-import cloth  # noqa: E402
+import pattern  # noqa: E402
 import habit  # noqa: E402
 
-FRAMES = ('skirt', 'yoke', 'hem')
-VIEW = 0
-SETTLE = True
-FLOUNCE = True
 CORSET = True                # wear the corset under it (False: the skin drawn in, the corset's surface measured but not built)
 MEASURES = {}
 M_COTTON = female.mat_def(76, 'petticoat cotton', female.ramp(0xe6e2d8, 0.1), 0.0, closeup='cloth')
@@ -84,48 +80,6 @@ def corset_surface(HM, H):
             r = float(habit.corseted_section(HM, z, t)) + habit.CORSET_THICK * H
             pts.append((-r * np.sin(t), HM.cy - r * np.cos(t), z))
     return np.array(pts)
-
-
-def make_object(V, F, info, wts, rig, name='Petticoat'):
-    me = bpy.data.meshes.new(name)
-    me.from_pydata([tuple(p) for p in V], [], [tuple(f) for f in F])
-    for p in me.polygons:
-        p.use_smooth = True
-    uv = me.uv_layers.new(name='pattern')
-    u, v = info['u'], info['v']
-    lo = np.empty(len(me.loops), dtype=np.int64)
-    me.loops.foreach_get('vertex_index', lo)
-    # (a ring's u wraps at the centre back: a face that spans the wrap takes its far corners round by the girth)
-    uu = u[lo].reshape(-1, 3)
-    G = np.array([info['G'][info['row'][i]] for i in lo]).reshape(-1, 3)
-    wrap = (uu.max(1) - uu.min(1)) > 0.5 * G.min(1)
-    uu = np.where(wrap[:, None] & (uu < 0.5 * G), uu + G, uu)
-    uv.data.foreach_set('uv', np.stack([uu.reshape(-1), v[lo]], 1).reshape(-1))
-    rest = me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT')
-    rest.data.foreach_set('vector', V.reshape(-1))
-    t = me.attributes.new('down', 'FLOAT', 'POINT')
-    t.data.foreach_set('value', info['t'])
-    # (how far up the cloth from the hem, for the tucks above the flounce)
-    up = me.attributes.new('to_hem', 'FLOAT', 'POINT')
-    up.data.foreach_set('value', info['v'] / np.maximum(info['t'], 1e-6) * (1.0 - info['t']))
-    o = bpy.data.objects.new(name, me)
-    bpy.context.scene.collection.objects.link(o)
-    me.materials.append(female.mat(M_COTTON))
-    for bone, w in wts.items():
-        g = o.vertex_groups.new(name=bone)
-        for i in np.nonzero(w > 1e-4)[0]:
-            g.add([int(i)], float(w[i]), 'REPLACE')
-    m = o.modifiers.new('rig', 'ARMATURE')
-    m.object = rig
-    return o
-
-
-def finish(o, M):
-    m = o.modifiers.new('thickness', 'SOLIDIFY')
-    m.thickness = draft.RATIOS['thickness'] * M['H']
-    m.offset = -1.0
-    m = o.modifiers.new('smooth', 'SUBSURF')
-    m.levels = m.render_levels = 1
 
 
 def cotton_closeup(name, P=COTTON):
@@ -206,41 +160,19 @@ def cotton_closeup(name, P=COTTON):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
-def wear_on_points(body, rig, H, pts, log=print):
-    return wear(body, rig, H, (), log=log, extra=pts)
-
-
-def wear(body, rig, H, under_objs=(), log=print, extra=None):
-    """Put the petticoat on a body that is already corseted (habit.compress_body) with the corset on it: under_objs are
-    what it goes over (the corset's meshes). Another garment over it (the habit's skirt) calls this and measures the
-    returned objects as the petticoat measures the corset. Returns (objects, M, pattern)."""
+def draft_on(body, H, under_objs=(), extra=None, log=print):
+    """The petticoat's flat pattern for a body that is already corseted (habit.compress_body) with the corset on it:
+    under_objs are what it goes over (the corset's meshes). Returns (pieces, seams, measures). The pieces are not sewn
+    or draped yet: that waits for John's go (the project's rule: draft flat first)."""
     P, W, names = body_arrays(body)
     if extra is None:
         extra = under(under_objs, H)
     M = draft.measure(P, W, names, H, extra=extra)
     draft.report(M, log)
     pat = draft.pattern(M, log=log)
-    V, F, info = draft.hang(M, pat, log=log)
-    wts = draft.weights(V, info, M, pat)
-    o = make_object(V, F, info, wts, rig)
-    if SETTLE:
-        bpy.context.scene.frame_set(1)
-        pinned = (V[:, 2] > pat['band_bot'] - 0.02).astype(float)
-        hands = [bpy.data.objects[n] for n in ('Hand.L', 'Hand.R') if n in bpy.data.objects]
-        # (it falls on what it is worn over: the body, the hands, and the corset)
-        cloth.settle(o, rig, [body] + hands + [u for u in under_objs if u.type == 'MESH'], pinned, M['floor'], log=log)
-    objs = [o]
-    if FLOUNCE:
-        import flounce
-        objs.append(flounce.build(o, M, pat, info, rig, female.mat(M_COTTON), log=log))
-    for ob in objs:
-        finish(ob, M)
-    # three tucks a hand's width above the flounce, about 1.2 cm apart (they shorten the cloth and stiffen the hem)
-    D = draft.RATIOS['flounce'] * M['H']
-    gap = 0.05 * M['H']
-    cotton_closeup('petticoat cotton', dict(COTTON, tucks=tuple(D + gap * (1.2 + k) for k in range(3))))
-    bpy.context.view_layer.update()
-    return objs, M, pat
+    pieces, seams, m = pattern.draft_pieces(M, pat, log=log)
+    pattern.report(pieces, seams, m, log)
+    return pieces, seams, m
 
 
 def build():
@@ -263,17 +195,12 @@ def build():
     bpy.context.view_layer.update()
     print('petticoat: corset %s, natural waist %.2f, corseted %.2f' % (
         'worn' if CORSET else 'measured only', HM.natural_waist, HM.girth_waist_corseted))
-    if not CORSET:
-        # (no corset built: its surface as habit gives it is what the band sits on)
-        objs, M, pat = wear_on_points(body, rig, H, corset_surface(HM, H))
-    else:
-        objs, M, pat = wear(body, rig, H, worn)
-    MEASURES.update({k: v for k, v in M.items() if isinstance(v, float)})
-    floor = M['floor']
-    frames = {'skirt': (floor - 0.5, pat['band_top'] + 1.5), 'yoke': (M['hips_z'] - 4.0, pat['band_top'] + 2.0),
-              'hem': (floor - 0.5, floor + 1.4 * H)}
-    lo, hi = frames[FRAMES[VIEW] if isinstance(VIEW, int) else VIEW]
-    os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
-    os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
+    extra = None if CORSET else corset_surface(HM, H)
+    pieces, seams, m = draft_on(body, H, worn, extra=extra)
+    MEASURES.update({'band': m['band'], 'H': m['H']})
+    out = os.environ.get('PETTI_OUT')
+    if out:
+        pattern.layout(pieces, seams, m, out + '.png')
+        pattern.save(pieces, seams, m, out + '.json')
     bpy.context.view_layer.update()
     return res
