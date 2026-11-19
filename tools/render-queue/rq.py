@@ -567,6 +567,8 @@ def plan(fetch=True):
                 for v in (r["views"] if o == "views" else [None]):
                     if o == "views" and r.get("quality") == "check":
                         v += CHECK      # a check render is its own job, cached apart from the final one
+                    if o == "views" and v in (r.get("parts_done") or {}):
+                        continue        # (rendered already, in a job it shared with a request that has finished)
                     want.setdefault((o, v), []).append(r)
         for (kind, param), rs in want.items():
             if kind == "frames":
@@ -587,6 +589,7 @@ def plan(fetch=True):
     jobs = list(seen.values())
     for r in ready:
         r["jobs"] = [j["key"] for j in jobs if r["id"] in j["requests"]]
+        r["jobs"] += [k for k in dict.fromkeys((r.get("parts_done") or {}).values()) if k not in r["jobs"]]
         if "cache_hits" not in r and r["jobs"]:       # (the cache-hit rate: what it found ready when first planned)
             r["cache_hits"] = sum(1 for k in r["jobs"] if cached(k))
     # full sheets: only once the scheduled task has marked them due; main first, then the branches marked ready
@@ -772,6 +775,19 @@ def settle(s):
     done = []
     for r in s["requests"]:
         if r["state"] in ("pending", "rendering") and r.get("jobs"):
+            # the parts of this request a finished job covered: when the job it shared with another request is
+            # done and that request leaves, this one is planned again, and without this its part rendered twice
+            # (#216 and #217, 2026-11-19: the sleeves pose strip, in 286db5 with #216's turn and again alone)
+            for k in r["jobs"]:
+                if cached(k):
+                    try:
+                        m = json.load(open(os.path.join(RESULTS, k, "manifest.json")))
+                    except (OSError, ValueError):
+                        continue
+                    for v in (m.get("merged_from") or [m.get("param")]):
+                        if m.get("kind") == "views" and v in [x + (CHECK if r.get("quality") == "check" else "")
+                                                              for x in r.get("views") or []]:
+                            r.setdefault("parts_done", {})[v] = k
             bad = [k for k in r["jobs"] if failed(k)]
             if bad and not r.get("solo") and any(_retry_alone(k) for k in bad):
                 r["solo"] = True; r.pop("jobs", None); r.pop("batch_commit", None); r["state"] = "pending"
