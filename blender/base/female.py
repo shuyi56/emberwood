@@ -1350,6 +1350,13 @@ NECK_RINGS = [(53.5, 1.4, 1.6, 0, 0.43), (53.0, 1.75, 1.85, 0, 0.3), (NECK_Z, 2.
 # neck, and looking up tips the skull back on the atlas instead of bowing the whole neck.
 NECK_SHARE = (15 / 50, 10 / 61, 45 / 77)
 NECK_SHARE_EXT = 32 / 62
+# The rest of each motion is the lower cervical spine's, which bends along its length, not at one point: a third
+# joint at the C3-C4 disc takes the share of the C2-C3 and C3-C4 levels (White & Panjabi, of C2-T1's): flexion and
+# extension 25 of 91 degrees, lateral bend 21 of 51, rotation 10 of 32. The C7 joint takes the rest. So a nod or a
+# tilt curves down the neck instead of leaning it over as a straight column from its base.
+MID_SHARE = (25 / 91, 21 / 51, 10 / 32)
+C34_ALONG = 4 / 7       # the C3-C4 disc up the column from C7-T1 to the atlas: C7, C6, C5, C4 below it; C3, C2, C1 above
+LORDOSIS = 0.04         # how far forward of the line from C7 to the atlas the mid-neck's vertebrae lie, head heights
 NECK_ROM = {'flex': 50, 'ext': 60, 'tilt': 45, 'turn': 80}    # the neck's active range, degrees each way
 NECK_PIT = 0.36                      # the pit of the neck under the chin, head heights (ANSUR II women: suprasternale)
 C7_BACK = 0.12                       # the C7 spine under the chin, head heights (ANSUR II women: cervicale)
@@ -2023,9 +2030,9 @@ def build_rig(body):
     bpy.ops.object.mode_set(mode='EDIT')
     eb = arm_data.edit_bones
     nk = neck_joints()
-    at, cv = nk['atlas'], nk['cervical']
+    at, md, cv = nk['atlas'], nk['mid'], nk['cervical']
     for name, h, t in (('Pelvis', (0, 0, HIP_Z), (0, 0, CHEST_Z - 1.0)), ('Chest', (0, 0, CHEST_Z), (0, 0, NECK_Z)),
-                       ('Cervical', cv, at), ('Neck', at, (at[0], at[1], at[2] + 3.0))):
+                       ('Cervical', cv, md), ('Midneck', md, at), ('Neck', at, (at[0], at[1], at[2] + 3.0))):
         b = eb.new(name)
         b.head, b.tail = h, t
     for side, s in (('R', 1), ('L', -1)):
@@ -2044,7 +2051,7 @@ def build_rig(body):
 
 
 def seat_neck():
-    """The neck's joints as pivots on the spine: Chest -> Cervical (C7-T1) -> Atlas (the skull's base) -> Head, so
+    """The neck's joints as pivots on the spine: Chest -> Cervical (C7-T1) -> Midneck (C3-C4) -> Atlas (the skull's base) -> Head, so
     the head rides the chest and bends at both joints. The Head empty keeps its own frame (the chin at its origin,
     which the Face Creator's head and every head part are built in) and its rest place in the world: only its
     parent changes. Call once, in the rest pose, after the head is built."""
@@ -2054,7 +2061,8 @@ def seat_neck():
     head = ob['Head']
     rest = head.matrix_world.translation.copy()
     cerv = empty('Cervical', (0, 0, 0), ob['Chest'])
-    atlas = empty('Atlas', (0, 0, 0), cerv)
+    mid = empty('Midneck', (0, 0, 0), cerv)
+    atlas = empty('Atlas', (0, 0, 0), mid)
     head.parent = atlas
     head.matrix_parent_inverse.identity()
     place_neck(rest)
@@ -2072,6 +2080,7 @@ def neck_joints():
     the head's middle front to back at the ears, then:
       atlas     the occipital condyles: under the ear's opening (EAR_Y), level with the lobe (EAR_BOTTOM)
       pit       the base of the neck at the front, NECK_PIT under the chin
+      mid       the C3-C4 disc: C34_ALONG of the way up the column from C7-T1 to the atlas, LORDOSIS forward of it
       cervical  the C7-T1 disc: halfway between the base of the neck at the back (C7_BACK) and the pit in height,
                 VERTEBRA_BACK of the neck's depth from its back, measured on the neck at that height
       bottom    the lowest point of the head's rigid sculpt (it runs on down the neck, see HEAD_NECK_Z)
@@ -2102,9 +2111,12 @@ def neck_joints():
         if len(q) >= 2:
             yf, yb = float(q[:, 1].min()), float(q[:, 1].max())
             break
+    at = (hx, ymid + EAR_Y * H, chin + EAR_BOTTOM * H)
+    cv = (hx, yb - VERTEBRA_BACK * (yb - yf), c7z)
+    md = tuple(c + C34_ALONG * (a - c) for c, a in zip(cv, at))
+    md = (md[0], md[1] - LORDOSIS * H, md[2])
     return {'chin': chin, 'H': H, 'bottom': bottom, 'pit': chin - NECK_PIT * H, 'ymid': ymid,
-            'atlas': (hx, ymid + EAR_Y * H, chin + EAR_BOTTOM * H),
-            'cervical': (hx, yb - VERTEBRA_BACK * (yb - yf), c7z)}
+            'atlas': at, 'mid': md, 'cervical': cv}
 
 
 def place_neck(rest=None):
@@ -2115,7 +2127,7 @@ def place_neck(rest=None):
     ob = bpy.data.objects
     if 'Atlas' not in ob:
         return
-    head, cerv, atlas = ob['Head'], ob['Cervical'], ob['Atlas']
+    head, cerv, mid, atlas = ob['Head'], ob['Cervical'], ob['Midneck'], ob['Atlas']
     keyed = bool(head.animation_data and head.animation_data.action)
     if 'head_rest' in NECK:
         pose(0)          # (the rest of the neck and head: the idle stands the trunk straight)
@@ -2123,16 +2135,17 @@ def place_neck(rest=None):
     rest = Vector(rest) if rest is not None else head.matrix_world.translation.copy()
     NECK.clear()
     NECK.update(neck_joints())
-    cv, at = Vector(NECK['cervical']), Vector(NECK['atlas'])
-    cerv.rotation_euler = atlas.rotation_euler = head.rotation_euler = (0, 0, 0)
+    cv, md, at = Vector(NECK['cervical']), Vector(NECK['mid']), Vector(NECK['atlas'])
+    cerv.rotation_euler = mid.rotation_euler = atlas.rotation_euler = head.rotation_euler = (0, 0, 0)
     cerv.location = ob['Chest'].matrix_world.inverted() @ cv
-    atlas.location = at - cv
+    mid.location = md - cv
+    atlas.location = at - md
     head.location = rest - at
     NECK['head_rest'] = tuple(head.location)
     bpy.context.view_layer.update()
     arm = RIG.get('arm')
     if arm is not None:
-        for name in ('Cervical', 'Neck'):
+        for name in ('Cervical', 'Midneck', 'Neck'):
             pb = arm.pose.bones.get(name)
             for c in (pb.constraints if pb else ()):
                 if c.type == 'CHILD_OF':
@@ -2144,9 +2157,9 @@ def place_neck(rest=None):
 
 
 def resplit_neck():
-    """Split each trunk point's share of the chest and neck (its Chest, Cervical and Neck weights together) again
-    on the neck's joints as they are now placed (neck_shares)."""
-    names = ('Chest', 'Cervical', 'Neck')
+    """Split each trunk point's share of the chest and neck (its Chest, Cervical, Midneck and Neck weights
+    together) again on the neck's joints as they are now placed (neck_shares)."""
+    names = ('Chest', 'Cervical', 'Midneck', 'Neck')
     for o in bpy.data.objects:
         if o.type != 'MESH' or not any(m.type == 'ARMATURE' for m in o.modifiers):
             continue
@@ -2160,8 +2173,7 @@ def resplit_neck():
             t = sum(g.weight for g in v.groups if g.group in idx)
             if t <= 1e-6:
                 continue
-            lower, upper = neck_shares(mw @ v.co)
-            for n, w in zip(names, (t * (1 - lower), t * lower * (1 - upper), t * lower * upper)):
+            for n, w in zip(names, [t * w for w in neck_split(mw @ v.co)]):
                 if w > 1e-4:
                     gs[n].add([v.index], w, 'REPLACE')
                 else:
@@ -2169,7 +2181,7 @@ def resplit_neck():
 
 
 PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
-            'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Cervical': 'Cervical', 'Neck': 'Head'}
+            'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Cervical': 'Cervical', 'Midneck': 'Midneck', 'Neck': 'Head'}
 
 
 def _ease(a, b, v):
@@ -2179,8 +2191,9 @@ def _ease(a, b, v):
 
 
 def neck_shares(co):
-    """How a rest point of the neck splits between its joints: (lower, upper). lower is the share carried past
-    the base of the neck by the lower cervical spine (0 on the chest, 1 on the neck), upper the share carried on by
+    """How a rest point of the neck splits between its joints: (lower, middle, upper). lower is the share carried
+    past the base of the neck by the lower cervical spine (0 on the chest, 1 on the neck), middle the share of that
+    carried on past the mid-neck (reaching 1 where the head's sculpt begins, as lower does), upper the share carried on by
     the skull (1 on the head; the jaw and face always 1). The lower blend runs over the visible lower neck, from a little under its base at the
     front (the skin over the top of the breastbone is drawn up as the head goes back) up to where the head's sculpt
     begins; the upper one over the whole neck, from the pit up to just under the
@@ -2190,12 +2203,19 @@ def neck_shares(co):
     nk = NECK or neck_joints()
     H = nk['H']
     lower = _ease(nk['pit'] - 0.12 * H, nk['bottom'] - 0.1, co.z)
+    middle = _ease(nk['pit'], nk['bottom'] - 0.1, co.z)
     # the skull's own surface starts at the jaw's lower edge in front of the ramus (a little under it, so the edge
     # stays crisp), and behind the ramus rises to the skull's base, level with the atlas, at the nape
     hy = (co.y - nk['ymid']) / H
     top = jaw_edge(hy) - 0.03 + (EAR_BOTTOM + 0.03 - jaw_edge(RAMUS_BACK)) * _ease(RAMUS_BACK, 0.3, hy)
     upper = _ease(nk['pit'], nk['chin'] + top * H, co.z)
-    return lower, upper
+    return lower, middle, upper
+
+
+def neck_split(co):
+    """(Chest, Cervical, Midneck, Neck) shares of a rest point's chest-and-neck weight (see neck_shares)."""
+    lower, middle, upper = neck_shares(co)
+    return (1 - lower, lower * (1 - middle), lower * middle * (1 - upper), lower * middle * upper)
 
 
 def trunk_weights(co):
@@ -2203,9 +2223,8 @@ def trunk_weights(co):
     the waist, so the body twists there in one piece), then the neck: the lower cervical spine over the lower neck
     and the head's bone (Neck, which follows the Head empty) at the top (see neck_shares)."""
     chest = 1.0 - _smooth(CHEST_Z + 2.5, CHEST_Z - 5.5, co.z)
-    lower, upper = neck_shares(co)
-    w = {'Pelvis': 1.0 - chest, 'Chest': chest * (1.0 - lower), 'Cervical': chest * lower * (1.0 - upper),
-         'Neck': chest * lower * upper}
+    c, cv, md, nk = neck_split(co)
+    w = {'Pelvis': 1.0 - chest, 'Chest': chest * c, 'Cervical': chest * cv, 'Midneck': chest * md, 'Neck': chest * nk}
     if LOCKED_WALK:
         # (the world model) the jerkin's short skirt is carried part of the way by the thigh under it, more toward
         # the hem, so the leg lifting forward lifts the skirt over it instead of pushing out past its front edge.
@@ -2282,10 +2301,10 @@ def nape_hooks():
     """The head's sculpt runs on down the neck below the chin (to HEAD_NECK_Z), and the head is rigid: left so,
     the whole upper neck and the nape swung with the skull, and a nod tore it away from the neck under it. Its
     points below the skull take the lower neck's motion instead, by the same shares as the neck's own surface
-    (neck_shares), through a hook on the Cervical pivot: a hooked point follows that pivot from its rest place, and
+    (neck_shares), through a hook on the Midneck pivot (below the head's sculpt the neck is all past the mid-neck: see neck_shares): a hooked point follows that pivot from its rest place, and
     the rest follows the head. Weighted in the rest pose; place_neck weights it again when the head is moved."""
     ob = bpy.data.objects
-    if 'Cervical' not in ob or 'Head shape' not in ob:
+    if 'Midneck' not in ob or 'Head shape' not in ob:
         return
     o = ob['Head shape']
     if 'nape' in o.modifiers:
@@ -2294,7 +2313,7 @@ def nape_hooks():
         o.vertex_groups.remove(o.vertex_groups['nape'])
     bpy.context.view_layer.update()
     mw = o.matrix_world
-    lw = [1.0 - neck_shares(mw @ v.co)[1] for v in o.data.vertices]
+    lw = [1.0 - neck_shares(mw @ v.co)[2] for v in o.data.vertices]
     idx = [i for i, w in enumerate(lw) if w > 1e-4]
     if not idx:
         return
@@ -2302,7 +2321,7 @@ def nape_hooks():
     for i in idx:
         g.add([i], lw[i], 'REPLACE')
     m = o.modifiers.new('nape', 'HOOK')
-    m.object = ob['Cervical']
+    m.object = ob['Midneck']
     m.vertex_group = 'nape'
     m.falloff_type = 'NONE'
     o.modifiers.move(len(o.modifiers) - 1, 0)    # (before the head's smoothing)
@@ -2310,7 +2329,7 @@ def nape_hooks():
 
 
 def rehook_nape():
-    """Take the nape hook's rest from the head and the Cervical pivot as they are now (the rest pose)."""
+    """Take the nape hook's rest from the head and the Midneck pivot as they are now (the rest pose)."""
     ob = bpy.data.objects
     o = ob.get('Head shape')
     m = o and o.modifiers.get('nape')
@@ -4447,19 +4466,23 @@ HEAD_POSES = {
 def carry_head(nod=0.0, tilt=0.0, turn=0.0, share=None):
     """Carry the head on the neck, looking where (nod, tilt, turn) say (radians, in the world: nod chin down,
     tilt toward her left, turn toward her left; all 0 is level and straight ahead), whatever the chest under it
-    is doing. The neck takes the turn from the chest to there, split between its two joints by share (the upper
-    joints' share of nod, tilt and turn; NECK_SHARE by default). So a leaning, twisting chest carries the head
-    with it, and the neck keeps the face level, as a real neck does in a walk."""
+    is doing. The neck takes the turn from the chest to there, split between its joints: share is the upper
+    joints' (the atlas's) share of nod, tilt and turn (NECK_SHARE by default), and the rest is split between the
+    mid-neck and the base of the neck by MID_SHARE. So a leaning, twisting chest carries the head with it, and
+    the neck keeps the face level, as a real neck does in a walk."""
     ob = bpy.data.objects
-    if 'Atlas' not in ob or 'head_rest' not in NECK:
+    if 'Midneck' not in ob or 'head_rest' not in NECK:
         return
     chest = ob['Body'].rotation_euler.to_matrix() @ ob['Chest'].rotation_euler.to_matrix()
     rel = chest.transposed() @ Euler((nod, tilt, turn), 'XYZ').to_matrix()
     e = rel.to_euler('XYZ')
     sn, st, sr = share or (NECK_SHARE[0] if e.x >= 0 else NECK_SHARE_EXT,) + NECK_SHARE[1:]
-    low = Euler(((1 - sn) * e.x, (1 - st) * e.y, (1 - sr) * e.z), 'XYZ')
+    rest = [(1 - u) * a for u, a in zip((sn, st, sr), e)]
+    low = Euler([r * (1 - m) for r, m in zip(rest, MID_SHARE)], 'XYZ')
+    mid = Euler([r * m for r, m in zip(rest, MID_SHARE)], 'XYZ')
     ob['Cervical'].rotation_euler = low
-    ob['Atlas'].rotation_euler = (low.to_matrix().transposed() @ rel).to_euler('XYZ')
+    ob['Midneck'].rotation_euler = mid
+    ob['Atlas'].rotation_euler = ((low.to_matrix() @ mid.to_matrix()).transposed() @ rel).to_euler('XYZ')
     ob['Head'].location, ob['Head'].rotation_euler = NECK['head_rest'], (0, 0, 0)
 
 
