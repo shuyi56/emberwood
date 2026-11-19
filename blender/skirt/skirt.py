@@ -171,6 +171,7 @@ def wool_closeup(name, P=WOOL):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
+DRAG = float(os.environ.get('SKIRT_DRAG', '0'))      # how far the back of the hem follows a leg that swings behind it
 NEAR = tuple(float(v) for v in os.environ.get('SKIRT_NEAR', '0.05,1.3').split(','))     # how far from the skin the cloth follows a leg
 
 
@@ -214,6 +215,9 @@ def skirt_weights(M, body=None, near=None):
                 # (only above the shins: the hem hangs free of the calves and feet, as a long skirt does; cloth glued to
                 # a swinging leg is dragged out of the skirt with it as a sleeve)
                 k *= ss(M['knee_z'] - 0.45 * H, M['knee_z'], co.z)
+                # (but the back of the hem is drawn along by the foot that swings behind it, DRAG of the way)
+                if DRAG > 0.0 and co.y > 0.05 * H and co.z < M['knee_z']:
+                    k = max(k, DRAG * (1.0 - ss(0.0, 0.5 * H, d)) * ss(0.05 * H, 0.2 * H, co.y))
                 if k > 1e-3:
                     vi = min(faces[fi], key=lambda i: (pts[i] - loc).length_squared)
                     legs = vw[vi]
@@ -274,9 +278,9 @@ def add_push(sk, body, M):
         w = ss(z0, z1, v.co.z)
         if w > 1e-3:
             vg.add([v.index], w, 'REPLACE')
-        w = 1.0 - ss(z0, z1, v.co.z)
-        if w > 1e-3:
-            hp.add([v.index], w, 'REPLACE')
+        # (the close push holds everywhere: a weight that eases off would leave a point half-pushed, partly inside the
+        # thigh, where it meets the wide push's ramp: the leg came through the cloth there)
+        hp.add([v.index], 1.0, 'REPLACE')
     def wrap(name, group, offset):
         m = sk.modifiers.new(name, 'SHRINKWRAP')
         m.target = body
@@ -318,6 +322,7 @@ def add_push(sk, body, M):
     wrap('push last', 'push', 0.06 * H)         # (after the floor, which would otherwise lift a point back into a foot on it)
     m3 = sk.modifiers.new('floor again', 'SHRINKWRAP')
     m3.target, m3.wrap_method, m3.wrap_mode, m3.offset, m3.vertex_group = fl, 'NEAREST_SURFACEPOINT', 'OUTSIDE', 0.02, 'push'
+    wrap('push final', 'push hips', 0.012 * H)       # (and last, whatever came before: nothing is left inside the skin)
 
 
 def smooth_weights(sk, fn, rounds=8):
