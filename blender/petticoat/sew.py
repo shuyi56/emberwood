@@ -667,7 +667,7 @@ TUCK_BEND = 0                # the tuck zone is simulated flat: a 5 mm tuck is t
 
 
 FLOUNCE_FLAT = None           # the flounce is lighter than the skirt and gathered, not starched to stand: it falls in
-FLOUNCE_BEND = 2e-4           # many small folds from its gathers
+FLOUNCE_BEND = 1e-6           # stiff enough that its gathers fold in a few wide folds, not point by point
 FLOUNCE_PLEAT = 2.4           # its gathers laid in folds this long in the cloth (several points across, so they show)
 FLOUNCE_ITERATIONS = 12       # gathered 1.6 times, its threads need the passes to stay their length and fold
 
@@ -729,22 +729,32 @@ def gathers(A):
 CACHE = os.environ.get('PETTI_CACHE', '/mnt/project-files/petticoat/cache')
 
 
-def settled_key(*arrays, extra=''):
-    """What the solved folds depend on: the shape the solver was given (its arrays), every solver and lay setting
-    in this file, and the solver's own code (shared/fabric.py). A material or texture run changes none of these,
-    so it finds its folds already solved."""
+_SKIRT_CODE = ('cut', '_shared_params', '_full_outline', '_cut_darts', 'hem_distance', 'tuck_zones', '_tucked', 'lay',
+               'band_ring', 'assemble', 'tethers', 'drape', 'one_hold', 'gathers')
+_FLOUNCE_CODE = ('flounce_ring', 'flounce', '_outward_normals', 'cloth_surface')
+
+
+def settled_key(*arrays, scope='skirt', extra=''):
+    """What the solved folds depend on: the shape the solver was given (its arrays), the settings and the code that
+    make the layer (the skirt's: everything but the flounce's; the flounce's: all of them, and the skirt it lies on
+    comes in as an array), and the solver's own code (shared/fabric.py). A material or texture run changes none of
+    these, so it finds its folds already solved; a change to the flounce does not re-solve the skirt."""
     import hashlib
+    import inspect
     h = hashlib.sha256()
     for a in arrays:
         a = np.ascontiguousarray(a)
         h.update(str(a.shape).encode() + str(a.dtype).encode() + a.tobytes())
+    skirt = scope == 'skirt'
     sets = {k: v for k, v in sorted(globals().items())
-            if k.isupper() and isinstance(v, (int, float, str, tuple, dict, type(None))) and k != 'CACHE'}
+            if k.isupper() and isinstance(v, (int, float, str, tuple, dict, type(None))) and k != 'CACHE'
+            and not (skirt and k.startswith('FLOUNCE'))}
     h.update(repr(sets).encode())
     h.update(extra.encode())
-    for f in (xf.__file__, __file__):
-        with open(f, 'rb') as fh:
-            h.update(fh.read())
+    for name in (_SKIRT_CODE if skirt else _FLOUNCE_CODE):
+        h.update(inspect.getsource(globals()[name]).encode())
+    with open(xf.__file__, 'rb') as fh:
+        h.update(fh.read())
     return h.hexdigest()[:20]
 
 

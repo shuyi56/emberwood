@@ -249,7 +249,7 @@ def sew_and_drape(body, rig, M, pat, pieces, m, under_objs=(), log=print):
             X, weld = sew.drape(A, cuts, pts, nrm, M['floor'], log=log)
             sew.settled_save('skirt', key, log, X=X)
     # the flounce: the layer above, set on the settled skirt (which it does not move); its folds kept the same way
-    fkey = sew.settled_key(X, extra=key)
+    fkey = sew.settled_key(X, scope='flounce')
     hit = None if os.environ.get('PETTI_RESOLVE') else sew.settled_load('flounce', fkey, log)
     if hit is not None:
         Y, FT, FUV = hit.pop('pts'), hit.pop('tris'), hit.pop('flat')
