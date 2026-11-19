@@ -1406,6 +1406,8 @@ def queue_state(s, thread=None, at=None):
             adv.append("you are flagged for hogging: send a cheaper crop or check that your edit changes the build before the next full render")
         if busy == "busy":
             adv.append(f"the queue is busy: a new request would start in about {fmt_s(new_wait)}; prefer a check-quality crop")
+        if busy == "idle":
+            adv.append("the queue is idle: a final-quality request can skip the reviewer, add it yourself with rq.py add")
         out["you"]["advice"] = adv or ["the queue has room: go ahead"]
     return out
 
