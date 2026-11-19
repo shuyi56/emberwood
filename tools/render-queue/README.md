@@ -17,6 +17,7 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_flow.py` | the flow check: each garment's strain field, seams and jaggedness, with a heatmap, before the render |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -232,6 +233,41 @@ checked yet.
 - garments past the geometry bands (over 2% inside, stretched past 1.3x, squashed below 0.7x)
 - body-ratio drift past 1% from the median
 - rejections by tag, garment and who, and the rounds of requests per piece
+
+## The flow check: strain before the render
+
+John's request (2026-11-19): after a build or solve and before the render, read the stress and strain across each
+garment. A smooth field means the cut and the body agree; jagged peaks mark the faults that come back as
+rejections: dart tips and seam corners where curvature concentrates, paired seam edges of unequal length, grain or
+bias errors, too little ease at the armholes, shoulders or seat. `rq_flow.py` does it, and `rq_views.py` runs it
+right after the build, beside the geometry checks:
+
+- **On by itself for outfit jobs** (`--figure outfit`) **and pose strips** (`--poses`), where it also runs in every
+  pose (the rig poses the garment and it is read back, so the poses cost no render). Any other views job asks for
+  it with `--flow`. `RQ_FLOW=0` turns it off.
+- **Report-only.** It never stops a render. It flags `watch` (past the approved band) or `likely rejection` (well
+  past it, or a sharp peak at a seam end), and the log, the manifest's `flow` and the nightly report say so.
+- **Files in the result:** `flow.json` (per garment: the numbers, the flags and the worst spots with where they are
+  on the body, such as "left armhole, back", and what they most likely are), `flow-heat.png` (strain, jaggedness
+  and bending in four views and on the flat pattern, the worst spots ringed and numbered as in `flow.json`), and
+  with poses `flow-poses.json` and `flow-heat-pose-NAME.png` for each flagged pose. Attach the heatmap beside the
+  render it came with.
+- **What it measures:** against the flat pattern when the mesh has one (a UV layer `pattern`, `flat` or `cut`, or a
+  UV in model units), otherwise against the garment as built (then only what a pose does shows): principal
+  stretch and squash, shear of the threads (grain), Green strain, bending energy density (as a fold radius), how
+  far each triangle's strain stands above its neighbours (jaggedness, roughness, gradient, isolated peaks), and
+  each seam's paired edge lengths on the pattern. A garment script can declare its seams exactly with a `seam_mate`
+  point attribute (each point's partner, -1 for none); otherwise they are found from the UV seams and from
+  separate pieces' edges that lie on each other.
+- **The band comes from John's approved garments.** `flow_baseline.json` holds the limits, calibrated by
+  `python3 rq_flow.py --calibrate flow_baseline.json RESULT/flow-poses.json ...` on main's hose, boots, chemise
+  and vest (each the worst approved value with a 25% margin). Re-run it when John approves more garments.
+- **Cached.** Each garment's result is stored under a key made of its posed points, its reference, its triangles,
+  the check's version and the band (`RQ_FLOW_CACHE`, else `RQ_HOME/flow-cache`). The fold cache gives a
+  texture-only or material-only re-run the same settled points, so it gets the same key and costs nothing.
+- **Measure without rendering:** `tools/render-queue/rq_views.py --figure F --mannequin --poses all --flow-only`
+  builds, checks in every pose and renders nothing. `python3 rq_flow.py --selftest DIR` checks the metrics on
+  three test sleeves (smooth, a stretched patch, a seam drawn 10% short) outside Blender.
 
 ## Review before the queue
 
