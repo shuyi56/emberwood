@@ -88,8 +88,8 @@ def main():
     x0 = -step * (len(dyes) - 1) / 2
     for i, dye in enumerate(dyes):
         RB.DYE = dye
-        female.MATS.pop(90, None)
-        female.MATS.pop(91, None)
+        female.MATS.pop(94, None)
+        female.MATS.pop(95, None)
         cloth, btn = RB.materials()
         cloth.name = 'bodice wool %06x' % dye
         x = x0 + step * i

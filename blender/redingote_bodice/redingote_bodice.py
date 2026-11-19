@@ -42,8 +42,8 @@ MEASURES = {}
 
 
 def materials():
-    cloth = female.mat_def(90, 'bodice wool', female.ramp(DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True)
-    btn = female.mat_def(91, 'bodice button', female.ramp(0x0e0f12, 0.12), 0.0, closeup='leather')    # (black horn)
+    cloth = female.mat_def(94, 'bodice wool', female.ramp(DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True)
+    btn = female.mat_def(95, 'bodice button', female.ramp(0x0e0f12, 0.12), 0.0, closeup='leather')    # (black horn)
     return female.mat(cloth), female.mat(btn)
 
 
@@ -66,6 +66,7 @@ def build():
         moved = habit.compress_body(body, corset)
         print('redingote bodice: the body drawn in by the corset, by up to %.2f; waist %.2f -> %.2f' % (
             moved, corset.natural_waist, corset.girth_waist_corseted), flush=True)
+    # (material ids 94 and 95: 90 to 93 are the corset's, and 90 and 91 the sleeves' too: a shared id shows one piece in the other's cloth)
     # (the basque settles on the hands and on the skirt's waist, when the skirt is built first: it ends under the basque)
     hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R'), bpy.data.objects.get(SKIRT)) if o]
     stacked = bool(under) or bpy.data.objects.get(SKIRT) is not None
