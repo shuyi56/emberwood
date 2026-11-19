@@ -730,6 +730,15 @@ def review(req, thread, do_smoke=True):
         def tval(flag):
             return tok[tok.index(flag) + 1] if flag in tok and tok.index(flag) + 1 < len(tok) else ""
         preset = tval("--preset")
+        try:
+            cost = int(tval("--size") or 360) ** 2 * int(tval("--samples") or 32)
+        except ValueError:
+            cost = 0
+        if multi and cost > 40_000_000 and "--angles" not in tok:
+            rep.warn("views", f"A five-angle {' '.join(multi)} at size {tval('--size') or 360} and {tval('--samples') or 32} samples "
+                     f"({cost / 1e6:.0f} million sample-pixels per angle). The queue killed a 720 px, 128 sample turn at its "
+                     "30-minute limit; 600 px with 48 samples and --denoise finished.",
+                     "Use --size 600 --samples 48 --denoise for a final turn, or ask for one angle at the larger size.", "P028")
         if preset in ("turn-clay", "turn-matcap", "turn-lit", "head-clay"):   # four angles each (view_tools.PRESETS)
             multi.append("--preset " + preset)
         if "--preset" in tok:

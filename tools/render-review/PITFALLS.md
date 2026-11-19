@@ -180,3 +180,9 @@ place when it turns out to be too broad; do not add a near copy.
 - **Fix:** Send it back: a full figure front is `--turn --angles front`. The reviewer's smoke build only proves the build reaches its first render, so check that the command has an output flag.
 
 Note on view presets (PR 53, 2026-11-19): `--preset turn-clay|turn-matcap|turn-lit|head-clay` expand to four angles and fall under P025 like --turn (--angles narrows them to one view). The reviewer also blocks unknown --preset, --tier, --look and --area values and `--preset closeup` without --area (names from blender/base/view_tools.py: PRESETS, TIERS, AREA_NAMES).
+
+## P028 A final render too heavy for the queue's 30-minute limit
+
+- **Seen:** Redingote sleeves final turn, 2026-11-19: `--turn --denoise --size 720 --samples 128` (five angles) ran past the queue's 30-minute limit and was killed; the same turn at `--size 600 --samples 48 --denoise` finished. The reviewer had passed the 720/128 request because its build reached the first render in 95 s.
+- **Spot:** A five-angle --turn or --head with size squared times samples above about 40 million (720 x 720 x 128 is 66 million; 600 x 600 x 48 is 17 million; 480 x 480 x 96 is 22 million).
+- **Fix:** Send it back at 600 px, 48 samples and --denoise. A bigger frame goes one angle at a time (--angles NAME) with the larger size.
