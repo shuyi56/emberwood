@@ -157,11 +157,18 @@ def matcap_material(bpy):
             else:
                 nt.links.new(v, x.inputs[k])
         return x.outputs[0]
-    # (camera space: +z faces the camera, +y is up)
+    # (camera space: +z faces the camera, +y is up.) A key from the upper left, in front: a surface reads by how far
+    # it turns from that light, so planes that face the camera but tilt apart still separate (the first version
+    # shaded by facing alone and came out nearly flat, render #179)
+    dot = n('ShaderNodeVectorMath')
+    dot.operation = 'DOT_PRODUCT'
+    nt.links.new(vt.outputs['Vector'], dot.inputs[0])
+    dot.inputs[1].default_value = (-0.45, 0.55, 0.70)
+    key = math('MAXIMUM', dot.outputs['Value'], 0.0)
+    key = math('POWER', key, 1.6)
     facing = math('MAXIMUM', sep.outputs['Z'], 0.0)
-    rim = math('MULTIPLY', math('POWER', math('SUBTRACT', 1.0, facing), 3.0), 0.22)
-    v = math('ADD', math('ADD', 0.16, math('MULTIPLY', facing, 0.62)), math('MULTIPLY', sep.outputs['Y'], 0.14))
-    v = math('ADD', v, rim, clamp=True)
+    rim = math('MULTIPLY', math('POWER', math('SUBTRACT', 1.0, facing), 4.0), 0.18)
+    v = math('ADD', math('ADD', 0.06, math('MULTIPLY', key, 0.86)), rim, clamp=True)
     ramp = n('ShaderNodeValToRGB')
     ramp.color_ramp.elements[0].color = (0.10, 0.09, 0.085, 1)
     ramp.color_ramp.elements[1].color = (0.86, 0.83, 0.79, 1)
@@ -250,15 +257,28 @@ def stamp(path, text, tier):
     """A strip under the image: the tier in its colour and what the image is, so a draft is never taken for a final."""
     from PIL import Image, ImageDraw, ImageFont
     im = Image.open(path).convert('RGB')
-    h = max(16, im.width // 70)
+    line = max(15, min(22, im.width // 40))
     try:
-        font = ImageFont.load_default(size=int(h * 0.72))
+        font = ImageFont.load_default(size=int(line * 0.72))
     except TypeError:
         font = ImageFont.load_default()
+    d = ImageDraw.Draw(im)
+    lines, cur = [], ''
+    for part in text.split('  |  '):           # (wrapped between fields, so a small image keeps the whole label)
+        trial = f'{cur}  |  {part}' if cur else part
+        if cur and d.textlength(trial, font=font) > im.width - 12:
+            lines.append(cur)
+            cur = part
+        else:
+            cur = trial
+    lines.append(cur)
+    h = line * len(lines) + 4
     bg, fg = COLOURS[tier]
     out = Image.new('RGB', (im.width, im.height + h), bg)
     out.paste(im, (0, 0))
-    ImageDraw.Draw(out).text((6, im.height + h * 0.12), text, fill=fg, font=font)
+    dr = ImageDraw.Draw(out)
+    for k, t in enumerate(lines):
+        dr.text((6, im.height + 2 + k * line + line * 0.12), t, fill=fg, font=font)
     out.save(path)
     return h
 
