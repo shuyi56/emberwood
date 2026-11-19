@@ -1,7 +1,7 @@
 """The Warden's cloak, rebuilt as a tailored garment on the bare mannequin: measured off the body (measure.py),
-drafted flat (pattern.py), cut as cloth and sewn (sew.py), then hung by the project's fabric solver
-(src/world/fabric-core.js, through fabric_settle.mjs) on its own (the body is a fixed surface under it; nothing
-beneath it is re-solved).
+drafted flat (pattern.py), cut as cloth and sewn (sew.py), and worn as sewn: its cut silhouette is the look. With
+CLOAK_SOLVER=1 it is hung by the project's fabric solver (src/world/fabric-core.js, through fabric_settle.mjs) on
+its own (the body is a fixed surface under it; nothing beneath it is re-solved).
 
     python3 blender/base/views.py --figure cloak --mannequin --tier draft --preset turn-clay --out DIR
                                                      (the cloak as sewn and fitted, no solver: a draft's settle is
@@ -40,7 +40,9 @@ M_WOOL = female.mat_def(77, 'cloak wool', female.ramp(0x3b2244, 0.1), 0.1, surfa
 M_LINING = female.mat_def(78, 'cloak lining', female.ramp(0x8e2b22, 0.1), 0.05, closeup='cloth', form=True)
 M_BRONZE = female.mat_def(79, 'cloak clasp', female.ramp(0xa8783a, 0.12), 0.0, closeup='gold')
 M_THREAD = female.mat_def(80, 'cloak thread', female.ramp(0x2a1830, 0.06), 0.0, closeup='cloth')
-SETTLE = os.environ.get('CLOAK_SOLVER', '1') != '0'
+# (the cloak is worn as sewn: its cut silhouette reads better than any settle of it. CLOAK_SOLVER=1 hangs it with
+# the fabric solver, for a look)
+SETTLE = os.environ.get('CLOAK_SOLVER', '0') != '0'
 RESULT = {}
 
 

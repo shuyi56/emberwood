@@ -68,10 +68,12 @@ export class CapeSim {
     const root = this.dummy.root;
     root.updateMatrixWorld(true);
     const { chains, links } = findChains(root, 'cape', this.settings, 1);
-    // (opts.solver: 'gait', fabric walking and spring bones running (CapeGait, with opts.runSettings or
-    // CAPE_RUN_SETTINGS); 'fabric', the cape as cloth; 'springs', spring bones; all on the same bones and colliders)
+    // (opts.solver: 'gait', spring bones walking and running (CapeGait, running on opts.runSettings or
+    // CAPE_RUN_SETTINGS); 'gait-fabric', fabric walking; 'fabric', the cape as cloth; 'springs', spring bones; all on
+    // the same bones and colliders)
     const sv = this.opts.solver || 'springs';
-    const Solver = sv === 'gait' ? class extends CapeGait { constructor(o) { super(o, { run: run }); } } : sv === 'fabric' ? FabricBones : SpringBones;
+    const walkOn = sv === 'gait-fabric' ? 'fabric' : 'springs';
+    const Solver = sv.startsWith('gait') ? class extends CapeGait { constructor(o) { super(o, { run, walkOn }); } } : sv === 'fabric' ? FabricBones : SpringBones;
     const run = { ...CAPE_RUN_SETTINGS, ...(this.opts.runSettings || {}) };
     this.springs = new Solver({ chains, links, root, colliders: makeColliders(root, this.colliderDefs()),
       fit: 'surface' });

@@ -106,15 +106,17 @@ export function makeColliders(model, defs = WARDEN_COLLIDERS) {
 }
 
 // model: the character's root (the object whose axes are hers: +y up, +z forward)
-// solver: 'gait' (the game's cape: fabric walking, spring bones running, see CapeGait), 'fabric' or 'springs';
+// solver: 'gait' (the game's cape: spring bones walking and running, each gait with its own settings, see CapeGait),
+// 'gait-fabric' (fabric walking, spring bones running), 'fabric' or 'springs';
 // settings default to that solver's (for 'gait', the walking settings; runSettings the running ones)
 export function attachCapeSprings(model, settings = null, colliders = WARDEN_COLLIDERS, solver = 'gait', runSettings = WARDEN_RUN_SETTINGS) {
-  settings = settings || (solver === 'springs' ? WARDEN_MODEL_SETTINGS : WARDEN_FABRIC_SETTINGS);
+  const fabricWalk = solver === 'fabric' || solver === 'gait-fabric';
+  settings = settings || (fabricWalk ? WARDEN_FABRIC_SETTINGS : WARDEN_MODEL_SETTINGS);
   model.updateMatrixWorld(true);
   const { chains, links } = findChains(model, 'cape', settings, 1);
   if (!chains.length) return null;
   const o = { chains, links, root: model, colliders: makeColliders(model, colliders), fit: 'surface' };
-  const springs = solver === 'gait' ? new CapeGait(o, { run: runSettings }) : solver === 'fabric' ? new FabricBones(o) : new SpringBones(o);
+  const springs = solver.startsWith('gait') ? new CapeGait(o, { run: runSettings, walkOn: fabricWalk ? 'fabric' : 'springs' }) : solver === 'fabric' ? new FabricBones(o) : new SpringBones(o);
   springs.reset();
   return springs;
 }

@@ -53,10 +53,11 @@ controls.enableDamping = false;
 controls.enabled = false;
 
 // ---- the character ----
-// the cape as in the game: fabric walking and spring bones running (CapeGait, src/world/fabric.js); ?solver=fabric or
-// ?solver=springs for one solver throughout, on the same bones and colliders
+// the cape as in the game: spring bones walking and running, each gait with its own settings (CapeGait,
+// src/world/fabric.js); ?solver=gait-fabric for fabric walking, ?solver=fabric or ?solver=springs for one solver
+// throughout, on the same bones and colliders
 const SOLVER = new URLSearchParams(location.search).get('solver') || 'gait';
-const FABRIC = SOLVER !== 'springs';
+const FABRIC = SOLVER === 'fabric' || SOLVER === 'gait-fabric';
 const settings = { ...(FABRIC ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, slow: 1 };
 const opts = { walk: new URLSearchParams(location.search).get('walk') || 'clip', columns: 7, rows: 5, scenario: 'turn', view: 'back3q', showBody: true, showColliders: false, showBones: false, springs: true, solver: SOLVER };
 let sim, colliderGroup, boneHelper;

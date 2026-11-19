@@ -23,10 +23,11 @@ const arg = (name, def) => {
   const i = process.argv.indexOf('--' + name);
   return i > 0 ? process.argv[i + 1] : def;
 };
-// --solver: gait (the game's: fabric walking, spring bones running, src/world/fabric.js CapeGait), fabric or springs,
-// each with its own settings (gait's are fabric's, and CAPE_RUN_SETTINGS running)
+// --solver: gait (the game's: spring bones walking and running, src/world/fabric.js CapeGait), gait-fabric (fabric
+// walking), fabric or springs, each with its own settings (CAPE_RUN_SETTINGS running)
 const solver = arg('solver', 'gait');
-const settings = { ...(solver === 'springs' ? CAPE_SETTINGS : CAPE_FABRIC_SETTINGS), colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
+const fabricWalk = solver === 'fabric' || solver === 'gait-fabric';
+const settings = { ...(fabricWalk ? CAPE_FABRIC_SETTINGS : CAPE_SETTINGS), colliderScale: 1, ...JSON.parse(arg('settings', '{}')) };
 // --walk new|main: a baked walk (public/cape-lab/walk-<name>.json) in place of the stand-in's walk made in code
 const walkName = arg('walk', null);
 const walkData = walkName ? JSON.parse(fs.readFileSync(new URL(`../../public/cape-lab/walk-${walkName}.json`, import.meta.url))) : null;

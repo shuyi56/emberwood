@@ -165,19 +165,20 @@ export function attachFabric(model, { prefix = 'cape', settings = FABRIC_SETTING
   return cloth;
 }
 
-// The cape by her gait: fabric while she walks or stands, spring bones while she runs. Both solve the same bones and
+// The cape by her gait: spring bones while she walks or stands (walkOn 'springs', the game's), or fabric (walkOn
+// 'fabric'), and spring bones with their running settings while she runs. Both solve the same bones and
 // keep their state on them (each joint's tail and where it was a step ago), so the cape passes from one to the
 // other without a jump. The game says which she is doing (`setGait('run')` while it plays her run, 'walk' otherwise):
 // her arms pump and her heels kick up from the run's first step, and fabric let a hand through then. Left unsaid
 // (setGait(null)), it goes by her speed: her root's, eased over GAIT_EASE seconds; she runs above runAbove (model
 // units a second) and walks again below walkBelow, the gap between them keeping it from flicking back and forth.
-// walk, run: the chains' settings in each (FABRIC_SETTINGS and the spring bones' own, cape-rig.js)
+// walk, run: the chains' settings in each (the spring bones' own or FABRIC_SETTINGS, and the running springs, cape-rig.js)
 const GAIT_EASE = 0.15;
 export class CapeGait extends FabricBones {
-  constructor(o, { walk, run, runAbove = 100, walkBelow = 85 } = {}) {
+  constructor(o, { walk, run, runAbove = 100, walkBelow = 85, walkOn = 'springs' } = {}) {
     super(o);
     for (const ch of this.chains) { ch.walkSettings = walk ? { ...ch.settings, ...walk } : ch.settings; ch.runSettings = { ...ch.settings, ...(run || {}) }; ch.settings = ch.walkSettings; }
-    Object.assign(this, { runAbove, walkBelow, running: false, speed: 0, _at: null, gait: null });
+    Object.assign(this, { runAbove, walkBelow, walkOn, running: false, speed: 0, _at: null, gait: null });
   }
   setGait(g) { this.gait = g; }
   reset() { this.speed = 0; this._at = null; this._set(false); super.reset(); }
@@ -200,7 +201,7 @@ export class CapeGait extends FabricBones {
     super.update(dt);
   }
   _step(h) {
-    if (this.running) return SpringBones.prototype._step.call(this, h);
+    if (this.running || this.walkOn === 'springs') return SpringBones.prototype._step.call(this, h);
     return super._step(h);
   }
 }
