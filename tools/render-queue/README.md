@@ -63,8 +63,136 @@ cached renders of main to compare against. Don't fake a before on your branch ei
 hides your new layer. Ask only for your after views and compare them with a cached main render.
 
 Every request is combined with the other waiting branches whenever it merges cleanly with them and changes
-different functions of the scripts. One render then covers all of them, and the reply says what else was in it.
+different functions of the scripts (see "Batching" below for sets and the collation window). One render then covers all of them, and the reply says what else was in it.
 `mode: isolated` is still accepted but ignored. Up to three quick jobs render side by side.
+
+## Batching: sets, intents and the collation window
+
+John's rules (2026-11-19). The queue does all of this itself; a thread only has to announce its work.
+
+**Announce a render before you do the work.** When you start on a change you will want rendered, send the
+reviewer thread an intent along with your plan, and the reviewer passes it to the queue:
+
+```json
+{"intent": true, "branch": "claude/project-thread-xxxxxx", "piece": "sleeves", "quality": "check",
+ "eta_minutes": 10, "view": "blender/base/views.py --figure sleeves --mannequin --head --angles 3/4 --clay-only"}
+```
+
+The queue records it with `rq.py intent --thread T --branch B --piece FIGURE [--set NAME] [--view CMD]
+[--quality check|final] [--eta MINUTES] [--note TEXT]` (`rq.py intents` lists the open ones). `piece` is the
+figure module, `blender/<piece>/<piece>.py`, and its set comes from `sets.json`. The intent is closed when your
+request comes. A newer intent from you for the same piece replaces the old one.
+
+**Pieces of one set render together, always.** When pieces of one set are waiting together (in
+`sets.json`: the riding habit is chemise, corset, petticoat, skirt, redingote bodice and sleeves), the queue
+renders them in one build, with every piece on one body, in wearing order. The job is `views.py --figure outfit`,
+using the queue's own `rq_outfit.py` with `OUTFIT=skirt,sleeves`, and every piece's thread gets the same
+pictures. The views and angles are the union of what was asked, and the size and samples are the largest. The
+`--head` close-up is framed on the pieces that asked for it. Each piece is still fitted by its own module, so
+the combined render shows where the layers meet.
+
+**The collation window.** The clock starts when the first piece of a set is ready (its request). The queue holds
+that job for up to **5 minutes** (`READY_CUTOFF_S`) while another piece of the set or another view of the same
+figure is announced and not yet sent. When the window ends, the batch renders with whichever pieces are ready.
+A slower piece goes in the next batch, and its thread is not held up either. Once every announced piece has
+come, the job starts at once. A job nothing is announced for waits only 45 s (`WINDOW_S`) after its newest
+request, to catch requests sent together, and never longer.
+
+**Other batching rules:**
+- **One build per scene.** Views of one figure on one commit, with the same body, pose (`--frame`), env and
+  quality, run as one `views.py` call when that renders no more images than the separate calls would.
+- **Drafts with drafts.** A check render never shares a job with a final, and checks run before finals.
+- **Identical requests render once.** A job with the same key serves every request that asks for it, and the
+  cache serves repeats.
+- **Edits coalesce.** A new request for the same branch with the same views replaces one that is still waiting,
+  whether pinned to a commit or not, so a stale commit is never rendered.
+- **Caps.** A merged commit holds at most 4 branches (`MAX_BATCH`) and a combined job at most 6 requests
+  (`MAX_MERGE`). If a combined job fails (other than by being killed at 30 minutes), each of its requests is
+  retried alone, so one broken piece does not lose the lot.
+
+Every job start writes a `batch` line to `events.jsonl`: what it combined, how long its first request waited,
+what it was held for, and the announced pieces it left out. Coalesced requests and solo retries are logged
+there too. The nightly job's `rq_stats.py` reports these numbers (builds saved, duplicates, coalesced
+requests, holds that gained a partner, stragglers and how late they came) and proposes changes to the window,
+the cutoff and the caps from them.
+
+## Crops and the pose test strip
+
+Two cheap views the queue adds to `views.py` (its own `rq_views.py`, put in the job's worktree). Both run at check
+quality unless the request says `"quality": "final"`. Both batch with the figure's other views and with the
+other pieces of its set: the crops and the poses come from the same build as the turn.
+
+**Crops: render only the problem area.** Use `"views": ["crop shoulder,armhole --figure sleeves --mannequin"]`, or
+add `--crop SPECS` to a `views.py` line. Each spec gives `crop-NAME.png`, a row over `--crop-angles` (default:
+`--angles`, else 3/4). Crops use the same fixed camera and lights as `--head`, so crops of two commits line up
+pixel for pixel. A spec is:
+- **A region by name:** `head`, `face`, `neck`, `shoulder`, `armhole`, `bust`, `elbow`, `waist`, `wrist`,
+  `hand`, `hips`, `knee`, `hem` or `ankle`. Each is measured from the base figure's sizes at that commit and
+  centred on the figure, so both sides show at every angle.
+- **A widened region:** add `+PAD`, as in `hem+0.3` for 30% more.
+- **A box from a turn you already have:** `box:X0:Y0:X1:Y1@S`, in pixels of one tile of a `turn.png` rendered at
+  `--size S`. A fault seen in a turn is cropped exactly where it is.
+
+`--crop-size N` sets the height in pixels (default 384). `--clay` and `--clay-only` apply to crops as well.
+
+**Pose test strip: joint extremes before a full turn.** Use `"views": ["pose-strip --figure sleeves"]`. It
+renders one clay tile per pose from one fixed 3/4 camera, laid out as `poses.png`. The poses:
+- `rest`
+- `arms-up` (arms raised out to the side)
+- `arms-fwd` (arms reached forward)
+- `elbows` (hard bend)
+- `step` (deep stride)
+- `crouch`
+- `twist` (chest against hips)
+
+`--poses arms-up,step` picks some poses, and `--pose-angle front` changes the camera. Shoulder, armhole and
+hem faults show here first. On the riding habit's skirt and sleeves (`views-57cafbc602ee`), the arms-up pose
+tore the sleeve caps off the shoulder, and the skirt folded into itself in the step and the crouch. Check a
+garment's pose strip before asking for a final turn. The rig itself is weighted for the walk, so a pose that
+tears the body as well as the cloth is a rig limit, not a fault of yours.
+
+The nightly report counts crops, pose strips, how long jobs with only crops or poses take, and the rejections
+that came out of a pose strip.
+
+## Telemetry and the early geometry check
+
+John's telemetry (2026-11-19). Every `views.py` job now runs through the queue's `rq_views.py`, which runs
+`views.py`'s own code unchanged and adds measurements. The job's key is unchanged, so cached results stay valid.
+
+**Per job, in `manifest.json`:**
+- `queue_wait`, the time from the first request to the start
+- `phases`: Blender's startup, loading the scripts, the build, the geometry checks, the renders, the crops and
+  the poses
+- `settings`: quality, size, samples, the scene or set, and the mannequin
+- `solver`: the git blob of every solver, settle, sew, xpbd or drape script at that commit
+- `cause`, a short reason when the job failed
+- `geometry`, the geometry check's numbers
+
+The same phases and cause go on the job's `done` or `failed` line in `events.jsonl`.
+
+**The geometry checks run after the build, before the first render,** and are saved as `geometry.json`:
+- `inside_pct` and `max_depth`: the share of each garment's vertices inside the body, and the deepest. This is
+  penetration and clipping through the body.
+- `stretch_p99` and `squash_p1`: how far the garment's edges are stretched or squashed from the garment as
+  built.
+- The body's height, shoulder width and hip width and depth, so a drift in its ratios shows from commit to
+  commit.
+
+The checks never fail a render on their own. `RQ_PRECHECK` holds thresholds, for example
+`{"inside_pct": 5, "stretch_p99": 1.6}`. With it set, a garment past a threshold stops the job before it
+renders, and `precheck.json` says why. The thresholds stay unset until the nightly job has matched the
+numbers against the logged rejections. Seam-length mismatch needs each garment's seam pairs, so it is not
+checked yet.
+
+**The nightly report** (`rq_stats.py`, section "Telemetry") gives:
+- the phase medians and totals
+- failures by cause
+- the cache-hit rate (jobs already rendered when a request was first planned)
+- requests by quality (drafts against finals)
+- each thread's cost: requests, checks and finals, and render time, with a shared job split among its requests
+- garments past the geometry bands (over 2% inside, stretched past 1.3x, squashed below 0.7x)
+- body-ratio drift past 1% from the median
+- rejections by tag, garment and who, and the rounds of requests per piece
 
 ## Review before the queue
 
@@ -127,6 +255,24 @@ fix; push the fix and send the request again. To check your own branch before as
 The render-queue thread still does everything it did: planning, combining, rendering, the cache, conflicts it
 can resolve, and delivering results to your thread.
 
+## Log every rejected render
+
+John's rule (2026-11-19): when a render is rejected, by John, by the reviewer or by your own look at it, log it with
+the reason before you fix it:
+
+```
+python3 /mnt/project-files/render-queue/rq_reject.py add --request 177 --tags crease,seam \
+    --reason "side seam shows through the sleeve cap in the 3/4 and profile" \
+    --fix "pushed the sleeve cap 2 mm out over the seam" --by John \
+    [--file /mnt/project-files/render-queue/results/views-KEY/head.png] [--artifacts black_patches] [--region x0,y0,x1,y1]
+```
+
+`--request` is the queue's number, which fills in the branch, commit, views and result folders. Tags: clipping, gap,
+crease, spike, stretch, seam, silhouette, proportion, pose, shading, colour, noise, framing, blank, other (`rq_reject.py
+--help` says what each means). `--artifacts` takes the post-render flag ids when an image check could have caught it.
+The nightly job reads the new rejections, proposes PITFALLS.md rules and flag thresholds for the tags that repeat, and
+opens a pull request for John.
+
 ## Speed-ups every job gets
 
 Every script runs under `rq_run.py`, which remembers the head's surface between runs: the eyes' sculpt and the
@@ -145,6 +291,20 @@ and pasted onto main's image) is built and exact, but at the queue's sizes (480 
 about as much as the whole frame, because loading the scene, not the pixels, is most of a render. It is kept for
 big, high-sample renders and is not used by the queue's jobs.
 
+Since 2026-11-19, final renders of the 3D look use Cycles' adaptive sampling (`--adaptive 0.01`, set by
+`RQ_ADAPTIVE`, where 0 turns it off). Each pixel stops sampling once its noise is under the threshold. On a
+sleeves final (two angles, 600 px, 48 samples, denoised) the renders took 191 s instead of 213 s, and no pixel
+moved by more than 1 level in 255. Check renders are already 8 samples and denoised, so they are unchanged.
+
+**Where a check job's time goes** (the first telemetry, 2026-11-19). A mannequin check job of about 140 s spends
+about 85 s building the bare body (`sorceress_pendant.build`: the anatomy, the skin and the head), 30 to 40 s
+building the garment, and under 20 s rendering. Blender's start and loading the scripts take 2 to 10 s. So a warm
+Blender process saves only those few seconds. The large saving is the body: it is the same for every garment
+on one main, and caching it would cut a check job by about 60%. Forking a Blender process after the body is
+built deadlocks in the child (tested: the garment's build hangs in a thread wait). Caching the body needs the
+scene saved after the body build, plus the base modules' Python state restored. That is the next speed-up to
+build.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it
@@ -152,6 +312,15 @@ crosses the line, and a job running past **30 minutes** is killed and comes back
 `[killed: over the 30-minute limit]`. The limits are per job, on this machine and on John's desktop alike. If
 your job is that slow, split it (one view first, the mannequin, check quality, fewer frames) rather than asking
 again unchanged.
+
+
+**Size a final turn to fit** (nightly, 2026-11-19). A final job's time is its image count times about 1.5 to 2
+minutes at 600 px and 48 samples with `--denoise`, plus about 3.5 minutes of setup. A turn is five images and `--head`
+adds five more, so a turn with a head is ten images and runs about 18 minutes (#188, 1110 s). At 720 px and 128 samples
+an image takes 5 to 6 minutes, and that turn was killed at 30 minutes (#187). To stay under the 10-minute warning, send
+the turn and the head as separate jobs, or split the turn (`--angles front,3/4,profile` and `--angles back3/4,back`).
+Check a navy or near-black dye on a swatch first: three rejections were a navy that read slate blue under the figure's
+light.
 
 ## John's desktop (GPU worker)
 
