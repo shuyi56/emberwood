@@ -42,7 +42,7 @@ RATIOS = {
     'gather_pitch': 0.9 / CM,    # the gathers' spacing along the stitching, sewn (a running stitch drawn up: small,
                                  # close gathers; the bench's puff stood its folds 3 mm deep)
     'gather_open': 1.2,          # how far the gathers run down into the head before they open out, in w
-    'stitch_draw': 1.4 / CM,     # the gathers rise to their depth this far from the stitching
+    'stitch_draw': 2.0 / CM,     # the gathers rise to their depth this far from the stitching
     'seam_w': 0.45 / CM,         # each side of a seam drawn in by the stitching (to the allowances pressed under it)
     'seam_depth': 0.12 / CM,     # how far the stitching draws the cloth in
     'lap_proud': 1.2,            # the vent's lap and the cuff's lap stand out by this many cloth thicknesses
@@ -50,6 +50,21 @@ RATIOS = {
     'stitch_gap': 0.12 / CM,     # and the gap between two
     'stitch_in': 0.30 / CM,      # topstitching this far in from the edge
     'cols_mm': 0.4,              # the mesh's spacing along the head's stitching (sewn), in mm per gather pitch share
+}
+class Draft(sleeve.Draft):
+    """The sleeve's drafted surface for the sewn head: as sleeve.Draft's, but the head rises from its seam lying on
+    the shoulder (no slope at the stitching) and swells out past the shoulder point, rather than standing straight
+    up off the seam (render #196: its inner face showed as a ledge above the shoulder from behind)."""
+
+    def puff_at(self, u):
+        r, w = self.r, self.M['w']
+        a, b = HEAD['rise'] * w, r['puff_out'] * w
+        return HEAD['puff'] * w * sleeve._ss(0.0, a, u) * (1.0 - sleeve._ss(a, b, u))
+
+
+HEAD = {
+    'puff': 0.42,                # the head's crown off the shoulder, in w (sleeve.RATIOS['puff'] 0.50 stood as a ledge)
+    'rise': 1.00,                # it reaches it this far from the seam, in w, rising from the seam as a smooth step
 }
 ROWS = 150                       # rows from the head to the wrist
 COLS_UNDER = 64                  # columns across the undersleeve
@@ -128,7 +143,7 @@ def _unwrap_from(a, ref):
     return a + 2 * math.pi * round((ref - a[0]) / (2 * math.pi))
 
 
-def _project_star(D, X, keep=None, steps=28, rounds=16):
+def _project_star(D, X, keep=None, steps=40, rounds=16):
     """Points brought onto the sleeve's drafted surface along rays from inside the arm: straight out from the axis
     round the tube, and fanned out from a point inside the shoulder over the head. Neighbours stay in order along
     their rays, so the cloth cannot fold over itself; keep: points held."""
@@ -141,6 +156,9 @@ def _project_star(D, X, keep=None, steps=28, rounds=16):
     C = np.stack([cx, cy, zc], 1)
     d = Y - C
     n = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    # (of the crossings along the ray, the one nearest the point's own place on the sewn shape: deep inside the
+    # shoulder the drafted field is no distance, and may cross near the ray's start)
+    t0 = np.linalg.norm(d, axis=1)
     ts = np.linspace(0.3, 5.0, steps)
     e = D.r['ease_head'] * D.M['w']
     z_lo = D.z_under - 0.5 * D.M['w']
@@ -159,7 +177,8 @@ def _project_star(D, X, keep=None, steps=28, rounds=16):
         return f
     f = np.stack([field(C + t * n) for t in ts], 1)
     cross = (f[:, :-1] <= 0) & (f[:, 1:] > 0)
-    pick = np.where(cross.any(1), np.argmax(cross, axis=1), -1)
+    near = np.argmin(np.where(cross, np.abs(0.5 * (ts[:-1] + ts[1:])[None] - t0[:, None]), 1e9), axis=1)
+    pick = np.where(cross.any(1), near, -1)
     a = np.where(pick >= 0, ts[np.maximum(pick, 0)], 0.0)
     b = np.where(pick >= 0, ts[np.maximum(pick, 0) + 1], 0.0)
     for _ in range(rounds):
@@ -379,7 +398,10 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     wave = np.sin(ph + 0.35 * np.sin(0.23 * ph))
     Xu = _taubin(Xu.reshape(ROWS, ncu, 3)).reshape(-1, 3)
     nt = _grid_normals(Xt.reshape(ROWS, ncols, 3), D)
-    Xt = Xt + (0.5 * A * inside * fade * wave)[:, None] * nt
+    # (laid down where the head faces up over the shoulder's top: there the bodice's shoulder presses the gathers
+    # flat into the seam, and standing up they make a ragged ledge above the shoulder point, render #196)
+    flat = (1.0 - np.clip(nt[:, 2], 0.0, 1.0)) ** 2
+    Xt = Xt + (0.5 * A * inside * fade * wave * flat)[:, None] * nt
     # -- the stitching: each seam draws the cloth in along its line (allowances pressed open behind it)
     thick = sleeve.RATIOS['thick'] * w
     v_vent = 1.0 - pr['vent'] / _len(Bf)
@@ -572,7 +594,7 @@ def build_sewn(body, M, rig=None, material=None, button_material=None, log=print
         gi = {g.name: g.index for g in body.vertex_groups}
         fore = [v.index for v in body.data.vertices if any(g.group == gi.get('Forearm.L') and g.weight > 0.5 for g in v.groups)]
         z_elbow, z_wrist = float(P[fore, 2].max()), float(P[fore, 2].min())
-    D = sleeve.Draft(P, T, aw, M, loops, z_elbow, z_wrist, sleeve.RATIOS, log)
+    D = Draft(P, T, aw, M, loops, z_elbow, z_wrist, sleeve.RATIOS, log)
     m, _ = pattern.measure(P, T, aw, M, z_elbow, z_wrist)
     pieces = pattern.draft(m)
     for line in pattern.report(pieces, m):
