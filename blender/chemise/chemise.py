@@ -26,13 +26,18 @@ import linen_texture  # noqa: E402
 
 M_LINEN = female.mat_def(72, 'chemise linen', female.ramp(0xdcd8cc, 0.12), 0.0, closeup='linen')
 MEASURES = {}
+# White cloth shows its folds only by their shadows. The views' warm light from below (the floor's bounce) is strong
+# enough to light the inside of a hanging sleeve as brightly as its outside and to fill every fold, so for this
+# garment's own views it is turned down, and the fill a little, and the key's shadows are left to do the work.
+LIGHT_SCALE = {'Bounce': 0.25, 'Fill': 0.6}
 PITCH = 0.0139               # one thread, in units: 70 threads to the inch on a 165 cm figure 63 units tall
 
 # The linen's look (the reasons are in linen_texture.py): bleached, so a white just off toward cream; the weave too
 # fine to see from a step back, where the cloth is even but for short faint streaks, mostly weft-wise; pressed flat, so
-# a smooth face with the soft polish of line flax, most on the yarns' crowns; a single layer passes a little light.
+# a smooth face with the soft polish of line flax, most on the yarns' crowns. It is opaque: a see-through layer let the
+# light under the sleeve shine through it, and the folds lost their shadows.
 LINEN = dict(colour=(0.800, 0.780, 0.715), streak=0.07, yarn=0.5, rough=(0.52, 0.72), specular=0.45, sheen=0.06,
-             through=0.08, relief=0.35)
+             relief=0.35)
 
 
 def linen_closeup(name, P=LINEN):
@@ -106,26 +111,8 @@ def linen_closeup(name, P=LINEN):
     pb.inputs['Specular IOR Level'].default_value = P['specular']
     pb.inputs['Sheen Weight'].default_value = P['sheen']
     pb.inputs['Sheen Roughness'].default_value = 0.3
-    # light through the single layer; the two looks mixed inside a group, so the material still has one node named
-    # 'close bsdf' with a 'BSDF' output for the views to switch to
-    g = bpy.data.node_groups.new('linen layer', 'ShaderNodeTree')
-    g.interface.new_socket('Lit', in_out='INPUT', socket_type='NodeSocketShader')
-    g.interface.new_socket('Colour', in_out='INPUT', socket_type='NodeSocketColor')
-    g.interface.new_socket('BSDF', in_out='OUTPUT', socket_type='NodeSocketShader')
-    gi, go = g.nodes.new('NodeGroupInput'), g.nodes.new('NodeGroupOutput')
-    tr = g.nodes.new('ShaderNodeBsdfTranslucent')
-    mx = g.nodes.new('ShaderNodeMixShader')
-    mx.inputs['Fac'].default_value = P['through']
-    g.links.new(gi.outputs['Colour'], tr.inputs['Color'])
-    g.links.new(gi.outputs['Lit'], mx.inputs[1])
-    g.links.new(tr.outputs['BSDF'], mx.inputs[2])
-    g.links.new(mx.outputs['Shader'], go.inputs['BSDF'])
-    close = N('ShaderNodeGroup')
-    close.node_tree = g
-    close.name = 'close bsdf'
-    nt.links.new(pb.outputs['BSDF'], close.inputs['Lit'])
-    nt.links.new(col, close.inputs['Colour'])
-    nt.links.new(close.outputs['BSDF'], out.inputs['Surface'])
+    pb.name = 'close bsdf'
+    nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
 def build():
@@ -142,7 +129,9 @@ def build():
     hp = np.array([(o.matrix_world @ v.co)[:] for o in heads for v in o.data.vertices]) if heads else None
     m = fit.measure(P, aw, hp)
     MEASURES.update(m)
-    _, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN))
+    _, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
+                                settle=os.environ.get('CHEMISE_DRAWN') is None,
+                                colliders=[o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o])
     linen_closeup('chemise linen')
     # the --head view on the garment: from under its hem to the chin
     lo, hi = d.z_hem - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']

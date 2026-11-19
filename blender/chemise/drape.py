@@ -27,10 +27,11 @@ from mathutils.kdtree import KDTree
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vest'))
 import fit  # noqa: E402
+import solver  # noqa: E402
 
 RATIOS = {
     'ease': 0.05,            # the gap between skin and linen where the linen rests on the body, in w
-    'loose': 0.32,           # how far the body's cloth stands out from its plumb line, in w
+    'loose': 0.50,           # how far the body's cloth stands out from its plumb line, in w
     'flare': 0.18,           # and how much further by the hem, in w
     'neck_side': 1.60,       # the neckline: half its width, in w
     'neck_front': 1.55,      # how far forward of the neck's axis it scoops, in w
@@ -41,17 +42,18 @@ RATIOS = {
     'gather': 0.075,         # the depth of the gathers at the neckline, in w
     'gathers': 38,           # how many round the neckline
     'gather_len': 1.4,       # how far down they run before they have opened out, in w
-    'sleeve_full': 0.42,     # how far the sleeve stands off the arm's plumb line, in w
+    'sleeve_full': 0.55,     # how far the sleeve stands off the arm's plumb line, in w
     'sleeve_bell': 0.35,     # and how much further by its open end, in w
     'sleeve_fold': 0.75,     # the depth of the sleeve's creases, in w
     'sleeve_folds': 7,       # how many round the sleeve
-    'cuff': 0.5,             # the sleeve ends this far above the wrist, in w
+    'cuff': 1.3,             # the sleeve ends this far above the wrist, in w
     'blend': 0.85,           # the radius of the run from sleeve into body over the shoulder, in w
     'swell': 0.22,           # the slow in-and-out of the hanging cloth round the body and the sleeve, by the hem, in w
     'slit': 0.13,            # the gap left between the sleeve's cloth and the body's under the arm, in w
     'thick': 0.008,          # the linen's thickness, in w
 }
-VOXEL = 0.1                  # the grid the whole piece is drawn on, in units
+VOXEL = 0.2                  # the grid the whole piece is drawn on, in units (the cloth's own grain for the solver:
+                             # the render smooths between its points)
 NB, NA = 180, 96             # directions round the body's axis and round an arm's
 
 
@@ -126,6 +128,13 @@ class Draft:
         # armpit (the shoulder's end is the sleeve's to hang from, not the body's)
         cap = (x_pit + 0.1 * w) / np.maximum(np.abs(sn), 1e-6)
         plumb = _hang(np.minimum(rest, cap[None, :]))
+        # (and wide enough all the way up to pass over the widest place below it, down to the hem: the hips. A shift
+        # is a straight tube; cut narrower than the hip its hem would sit on the hip and the cloth pouch over it)
+        i_hem = int(np.argmin(np.abs(zs - self.z_hem)))
+        over = np.minimum(rest, cap[None, :])[i_hem:].copy()
+        for i in range(1, len(over)):
+            over[i] = np.maximum(over[i], over[i - 1])
+        plumb[i_hem:] = np.maximum(plumb[i_hem:], np.where((zs[i_hem:] < M['z_bust'])[:, None], over, 0.0))
         # the neckline's height in each direction: where the resting cloth is as far out as the neckline's oval
         a, bf, bk = ratios['neck_side'] * w, ratios['neck_front'] * w, ratios['neck_back'] * w
         r_neck = 1.0 / np.sqrt((sn / a) ** 2 + (cs / np.where(cs > 0, bf, bk)) ** 2)
@@ -313,8 +322,17 @@ def _relax(V, faces, rounds, keep=None):
     return V
 
 
-def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIOS, log=print):
-    """Draft the chemise on the body (M: fit.measure's measurements) and hand it to the body's bones."""
+# The pattern for the solver: the same loose piece cut plain, with no folds drawn into it (the solver makes them) and
+# standing a little further off the skin to start from, so it begins clear of the body and falls onto it.
+PLAIN = {'fold': 0.0, 'sleeve_fold': 0.0, 'swell': 0.0, 'gather': 0.0, 'ease': 0.14}
+
+
+def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIOS, log=print, settle=True,
+                  colliders=()):
+    """Draft the chemise on the body (M: fit.measure's measurements) and hand it to the body's bones. settle: let
+    the cloth solver hang it on the posed body (and the colliders with it); without it the folds are drawn."""
+    if settle:
+        ratios = dict(ratios, **PLAIN)
     P, T, aw = fit.body_arrays(body)
     w = M['w']
     gi = {g.name: g.index for g in body.vertex_groups}
@@ -437,6 +455,10 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
         m = o.modifiers.new('rig', 'ARMATURE')
         m.object = rig
         m.use_deform_preserve_volume = True
+        if settle:
+            solver.settle(o, rig, [body, *colliders], log=log)
+    m = o.modifiers.new('smooth', 'SUBSURF')
+    m.levels = m.render_levels = 1
     m = o.modifiers.new('thickness', 'SOLIDIFY')
     m.thickness = ratios['thick'] * w
     m.offset = 1.0
