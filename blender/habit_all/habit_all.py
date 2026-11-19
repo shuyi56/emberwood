@@ -33,10 +33,14 @@ ORDER = [
     ('redingote_bodice', 'redingote_bodice', ['redingote_bodice', 'redingote', 'vest', 'chemise', 'doublet']),
     ('sleeves', 'sleeves', ['sleeves', 'redingote', 'chemise', 'vest']),
 ]
-PIECES = None                    # None: all of ORDER
+PIECES = [x for x in os.environ.get('HABIT_PIECES', '').split(',') if x] or None      # None: all of ORDER
 SETTINGS = {
     'skirt': {'SETTLE': 0},      # (shown as drafted over the petticoat: the solver comes after this is seen)
 }
+# The chemise is the loosest layer and nothing yet draws it in under the bodice and the sleeves (they fit over the corset
+# and the body, not over it), so it bursts out through both. It is built, so the layers over it can be fitted to it, but
+# not shown until they are: HABIT_SHOW=chemise shows it.
+HIDDEN = [x for x in os.environ.get('HABIT_HIDE', 'chemise').split(',') if x and x not in os.environ.get('HABIT_SHOW', '').split(',')]
 SHARED = ('sorceress_pendant', 'shared', 'base')
 PIECE_DIRS = tuple(os.path.join(ROOT, p) + os.sep for p in {d for _, _, ds in ORDER for d in ds} | {'corset', 'gown'})
 
@@ -91,7 +95,15 @@ def build():
         if name not in names:
             continue
         print('habit_all: %s' % name, flush=True)
+        import bpy
+        before = set(bpy.data.objects)
         Piece(name, module, dirs).run()
+        if name in HIDDEN:
+            new = [o for o in bpy.data.objects if o not in before]
+            for o in new:
+                o.hide_render = True
+                o.hide_viewport = True
+            print('habit_all: %s built and hidden (%d objects)' % (name, len(new)), flush=True)
     import bpy
     bpy.context.view_layer.update()
     return res
