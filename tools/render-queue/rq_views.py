@@ -206,7 +206,7 @@ def flow_poses(out, names):
     reps = {}
     for name in names:
         apply(name)
-        r = flow(out, stem=f'flow-pose-{name}', heat='flagged',
+        r = flow(out, stem=f'flow-pose-{name}', heat='flagged', pose=name,
                  write=False, title=f'flow in the pose {name}')
         if r is not None:
             if r.get('heatmap'):

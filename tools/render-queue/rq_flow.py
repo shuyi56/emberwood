@@ -53,7 +53,7 @@ import time
 
 import numpy as np
 
-VERSION = 1
+VERSION = 2
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
@@ -67,14 +67,21 @@ SKIP_NAMES = ('stitch', 'eyelet', 'button', 'buckle', 'plate', 'rivet', 'aglet',
 DEFAULT_LIMITS = {'stretch_p99': 1.35, 'squash_p1': 0.65, 'shear_p99': 25.0, 'strain_p99': 0.45, 'jag_p99': 0.12,
                   'roughness': 0.9, 'peaks': 12, 'seam_mismatch_pct': 8.0, 'fold_radius_p1': 0.05}
 LOWER_IS_WORSE = ('squash_p1', 'fold_radius_p1')
+SLIVER_DEG = 4.0          # triangles with a smaller angle than this on the reference are left out
+STRAIN_CAP = 2.0          # the jaggedness reads strain up to this (Green strain 2: the cloth twice its length)
+PEAK_JUMP = 0.05          # a peak stands this far (in strain) above its neighbourhood at least
+PEAK_SPACING = 1.5        # units: peaks closer than this are one peak
 
 
-def limits():
-    """The approved band: flow_baseline.json beside this file (its 'limits'), else DEFAULT_LIMITS."""
+def limits(pose='rest'):
+    """The approved band for a pose: flow_baseline.json beside this file ('poses'[pose], else its 'limits', the
+    rest pose's), else DEFAULT_LIMITS. Each pose has its own band, from the approved garments in that pose: the rig
+    strains even an approved garment in arms-up, so a new garment is flagged only when it does worse than they do."""
     for p in (os.path.join(HERE, 'flow_baseline.json'),
               os.path.join(HERE, '..', '..', 'tools', 'render-queue', 'flow_baseline.json')):
         try:
-            return dict(DEFAULT_LIMITS, **json.load(open(p))['limits']), p
+            b = json.load(open(p))
+            return dict(DEFAULT_LIMITS, **(b.get('poses', {}).get(pose) or b['limits'])), p
         except (OSError, ValueError, KeyError):
             continue
     return dict(DEFAULT_LIMITS), None
@@ -171,6 +178,10 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
     area_ref = 0.5 * np.abs(det)
     good = area_ref > 1e-9 * max(1e-12, np.median(area_ref) if m else 1)
     good &= area_ref > 1e-10
+    # (slivers out: a trim's cut leaves needle triangles whose strain is noise, not cloth)
+    e0, e1, e2 = A, B, B - A
+    l2 = np.stack([(e0 * e0).sum(1), (e1 * e1).sum(1), (e2 * e2).sum(1)], 1)
+    good &= 2 * area_ref > np.sin(np.radians(SLIVER_DEG)) * np.sqrt(l2.max(1) * np.sort(l2, 1)[:, 1])
     Ds1, Ds2 = P[:, 1] - P[:, 0], P[:, 2] - P[:, 0]
     sd = np.where(good, det, 1.0)
     # F = Ds Dm^-1, Dm^-1 = [[B1, -B0], [-A1, A0]] / det
@@ -217,7 +228,7 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
     np.maximum.at(bend_t, b_, bend_e)
 
     # jaggedness: each triangle's strain against its neighbours'
-    s = np.where(good, strain, 0.0)
+    s = np.where(good, np.minimum(strain, STRAIN_CAP), 0.0)    # (past the cap it is torn: how far does not matter)
     ok_pair = good[a_] & good[b_]
     pa, pb = a_[ok_pair], b_[ok_pair]
     nsum, ncnt, nmax = np.zeros(m), np.zeros(m), np.full(m, -np.inf)
@@ -237,8 +248,17 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
     spread = math.sqrt(max(_wvar(s, w), 0.0))
     rough = float(math.sqrt(np.average(excess ** 2, weights=w + 1e-12)) / (spread + 0.005)) if w.sum() else None
     mad = float(np.median(np.abs(excess[good]))) if good.any() else 0.0
-    peak = good & (ncnt > 0) & (s >= nmax) & (s - ring > max(0.03, 6.0 * mad)) & \
+    peak = good & (ncnt > 0) & (s >= nmax) & (s - ring > max(PEAK_JUMP, 6.0 * mad)) & \
         (s > (_wpct(s[good], w[good], 95) or 0))
+    # (one peak per place: the strongest, the others within PEAK_SPACING of it folded into it)
+    keep = np.zeros(m, bool)
+    taken = []
+    for t in np.where(peak)[0][np.argsort(-(s - ring)[peak])][:2000]:
+        if taken and np.min(np.linalg.norm(np.array(taken) - cen[t], axis=1)) < PEAK_SPACING:
+            continue
+        taken.append(cen[t])
+        keep[t] = True
+    peak_tris, peak = int(peak.sum()), keep
 
     seams = seam_check(X, tris, tri_e, E, t0, t1, Dm, mate, uv_island)
     gw = w[good]
@@ -252,7 +272,7 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
         'jag_p99': _r(_wpct(np.abs(excess[good]), gw, 99), 4), 'roughness': _r(rough, 3),
         'grad_p99': _r(float(np.percentile(grad, 99)) if len(grad) else None, 4),
         'smooth_pct': _r(100.0 * gw[np.abs(excess[good]) < 0.02].sum() / max(gw.sum(), 1e-12), 1),
-        'peaks': int(peak.sum()),
+        'peaks': int(peak.sum()), 'peak_tris': peak_tris,
         'seam_mismatch_pct': _r(max([c['mismatch_pct'] for c in seams] or [0.0]), 2), 'seams': seams[:8],
     }
     F = {'X': X, 'tris': tris, 'strain': np.where(good, strain, 0.0), 'excess': excess, 'bend': bend_t,
@@ -717,15 +737,29 @@ def collect(o, dg):
                 else:
                     ref = ref / max(ratio, 1e-9)
                     kind = 'pattern-scaled'
+            why = None
             if uvl is not None:
                 # the pattern's pieces: triangles joined across edges where the pattern agrees
                 isl = uv_islands(T, ref)
-                return dict(X=X, tris=T, ref=ref, kind=kind, mate=mate, island=isl, uv=uvl.name)
+                why = pattern_fault(T, ref, R3, isl) if R3 is not None else None
+                if why is None:
+                    return dict(X=X, tris=T, ref=ref, kind=kind, mate=mate, island=isl, uv=uvl.name)
         if R3 is None:
             return None
-        return dict(X=X, tris=T, ref=R3, kind='rest-shape', mate=mate, island=None, uv=None)
+        return dict(X=X, tris=T, ref=R3, kind='rest-shape', mate=mate, island=None, uv=None,
+                    pattern_rejected=why if uvl is not None else None)
     finally:
         ev.to_mesh_clear()
+
+
+def pattern_fault(T, ref, R3, isl):
+    """Why a UV is not the garment's flat pattern, or None if it is. A pattern laid on the body as built takes it with
+    a smooth, moderate strain; a texture map (banded, stretched or folded where it was never cut) does not."""
+    S, _ = analyse('pattern', R3, T, ref, 'pattern', None, lim=dict(DEFAULT_LIMITS), uv_island=isl)
+    if (S['strain_p50'] or 0) > 0.08 or (S['strain_p99'] or 0) > 1.0 or (S['roughness'] or 0) > 0.6:
+        return (f"the UV is not a flat pattern of the garment as built (strain median {S['strain_p50']}, "
+                f"99% {S['strain_p99']}, roughness {S['roughness']}): measured against the garment as built")
+    return None
 
 
 def uv_islands(T, ref):
@@ -785,13 +819,13 @@ def cached_analyse(name, g, place, lim):
     return S, F
 
 
-def run(objects, out, female=None, stem='flow', title='', heat='always', write=True):
+def run(objects, out, female=None, stem='flow', title='', heat='always', write=True, pose='rest'):
     """The flow check on the given Blender objects (the garments): DIR/flow.json (or STEM.json) and the heatmap.
     Returns the report. Never raises: a garment that cannot be read is listed with why. heat: 'always', or
     'flagged' (a heatmap only when something is flagged); write=False returns the report without writing it."""
     import bpy
     t = time.time()
-    lim, src = limits()
+    lim, src = limits(pose)
     place = body_places(female) if female is not None else None
     off = []
     for o in objects:
@@ -801,7 +835,7 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
                 off.append(md)
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
-    rep = {'version': VERSION, 'limits': lim, 'limits_from': os.path.basename(src) if src else 'defaults',
+    rep = {'version': VERSION, 'pose': pose, 'limits': lim, 'limits_from': os.path.basename(src) if src else 'defaults',
            'garments': {}, 'skipped': {}}
     items = []
     for o in objects:
@@ -812,6 +846,8 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
                 continue
             S, F = cached_analyse(o.name, g, place, lim)
             S['uv'] = g.get('uv')
+            if g.get('pattern_rejected'):
+                S['pattern_rejected'] = g['pattern_rejected']
             rep['garments'][o.name] = S
             items.append((o.name, S, F))
         except Exception as e:          # (a check must never fail the render)
@@ -911,20 +947,28 @@ def main():
     elif '--calibrate' in a:
         i = a.index('--calibrate')
         dst, srcs = a[i + 1], a[i + 2:]
-        approved, per = {}, {}
+        by_pose, per = {}, {}
         for p in srcs:
             rep = json.load(open(p))
-            reps = rep['poses'].items() if 'poses' in rep else [('rest', rep)]
+            reps = rep['poses'].items() if 'poses' in rep else [(rep.get('pose', 'rest'), rep)]
             for pose, r in reps:
                 for name, S in r['garments'].items():
-                    approved[f'{name} ({pose})'] = S
-                    per[f'{name} ({pose})'] = {k: S.get(k) for k in DEFAULT_LIMITS}
-        json.dump({'_doc': 'The approved band for rq_flow.py: each limit is the worst value among the garments '
-                           'John approved (listed below, per pose) with a margin (rq_flow.calibrate). Re-run '
-                           'rq_flow.py --calibrate on new approved flow.json files to widen or tighten it.',
+                    by_pose.setdefault(pose, {})[name + ' / ' + os.path.basename(os.path.dirname(os.path.abspath(p)))] = S
+                    per.setdefault(pose, {})[name] = {k: S.get(k) for k in DEFAULT_LIMITS}
+        poses = {pose: calibrate(g) for pose, g in sorted(by_pose.items())}
+        # (every approved garment judged again on the band it made: none may be flagged)
+        for pose, g in by_pose.items():
+            for name, S in g.items():
+                fl, verdict = judge(S, poses[pose])
+                assert verdict == 'ok', (pose, name, fl)
+        json.dump({'_doc': 'The approved band for rq_flow.py, per pose: each limit is the worst value among the '
+                           'garments John approved (listed under approved) in that pose, with a margin '
+                           '(rq_flow.calibrate). limits is the rest pose. Re-run rq_flow.py --calibrate on new '
+                           'approved flow-poses.json files to widen or tighten it.',
                    'from': [os.path.basename(os.path.dirname(os.path.abspath(p))) + '/' + os.path.basename(p)
                             for p in srcs],
-                   'limits': calibrate(approved), 'approved': per}, open(dst, 'w'), indent=1)
+                   'limits': poses.get('rest') or next(iter(poses.values())), 'poses': poses, 'approved': per},
+                  open(dst, 'w'), indent=1)
         print('wrote', dst, flush=True)
 
 
