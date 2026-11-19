@@ -23,7 +23,8 @@ RATIOS = dict(
     gap=0.10,                # the room between the plates and what is under them, in w
     plate=0.055,             # the plate's thickness, in w
     cop=58.0,                # the cop reaches this far down from the top of the shoulder, in degrees
-    lame=17.0,               # the height of one lame showing, in degrees
+    curl=11.0,               # below that the cop's rim runs on this far, bent in toward the first lame, in degrees
+    lame=15.5,               # the height of one lame showing, in degrees
     lames=4,
     lap=6.0,                 # how far a plate runs up under the one above, in degrees
     round_cop=122.0,         # how far round from straight out the cop reaches, front and back, in degrees
@@ -36,6 +37,7 @@ RATIOS = dict(
                              # thicknesses: the groove between two lames
     flare_cop=0.34,          # the cop's lower edge is turned out by this much, in w: the top plate flares, a
                              # brim over the lames
+    curl_in=0.70,            # the rim comes back in by this share of the flare
     flare_lame=0.16,         # and each lame's lower edge, by this much
     flare_last=0.30,         # the lowest lame's the most of the lames: the fall ends in a kick
     box=3.2,                 # the outline's squareness seen from the front: 2 follows the shoulder's round,
@@ -117,9 +119,13 @@ def _lift(S, name, u, th):
     square = (np.abs(np.sin(th)) ** n + np.abs(np.cos(th)) ** n) ** (-1.0 / n) - 1.0      # (0 at the top and the side)
     box = (r['box_out'] * w + S.R_side * 1.0) * square * (th < 0.5 * math.pi)
     if name == 'cop':
-        # (the cop swells out from its top and its edge turns down again: a round dome over the lames, not a brim
-        # turned up to a point)
-        return box + t_pl * r['step'] + r['flare_cop'] * w * (2.0 * u - u * u) ** 1.5
+        # (the cop swells out from its top to its widest, where the plain cop ended, and from there its rim bends
+        # in again toward the first lame: a round dome closed over the lames, not a brim turned up to a point)
+        peak = r['cop'] / (r['cop'] + r['curl'])
+        v = np.clip(u / peak, 0.0, 1.0)
+        back = np.clip((u - peak) / (1.0 - peak), 0.0, 1.0)
+        swell = (2.0 * v - v * v) ** 1.5 * (1.0 - r['curl_in'] * np.sin(0.5 * math.pi * back) ** 2)
+        return box + t_pl * r['step'] + r['flare_cop'] * w * swell
     k = r['flare_last'] if name == 'lame %d' % r['lames'] else r['flare_lame']
     return box + t_pl * (r['step'] * u + r['dome'] * np.sin(math.pi * u)) + k * w * u ** 2
 
@@ -127,14 +133,17 @@ def _lift(S, name, u, th):
 def plates(S):
     """The plates' places on the shoulder: (name, top, bottom, how far round), angles in radians, the cop first."""
     r = S.r
-    out = [('cop', 0.0, math.radians(r['cop']), math.radians(r['round_cop']))]
+    curl = math.radians(r['curl'])
+    out = [('cop', 0.0, math.radians(r['cop']) + curl, math.radians(r['round_cop']))]
     a = math.radians(r['cop'])
     for k in range(r['lames']):
         # (the first lame runs twice as far up under the cop: the cop's edge is turned out, and the shirt showed
         # in the gap under it)
         lap = math.radians(r['lap']) * (2.0 if k == 0 else 1.0)
-        out.append(('lame %d' % (k + 1), a - lap, a + math.radians(r['lame']), math.radians(r['round_lame'])))
-        a += math.radians(r['lame'])
+        # (and it is taller by the cop's curled rim, which covers that much of it)
+        b = a + math.radians(r['lame']) + (curl if k == 0 else 0.0)
+        out.append(('lame %d' % (k + 1), a - lap, b, math.radians(r['round_lame'])))
+        a = b
     return out
 
 
