@@ -69,14 +69,14 @@ def _bone_matrices(o, rig):
 
 # the local solver's numbers (units of this figure: 1 unit is about 2.6 cm, so gravity is 9.8 m/s^2 over 0.026 m)
 XPBD = dict(
-    gravity=-373.0,
+    gravity=-650.0,          # (heavy broadcloth: about 1.7 times the weight of the first, light pass)
     h=1.0 / 120.0,           # the step
     steps=150,
     iterations=20,
     damping=0.06,
     stretch=0.0,             # compliance of the threads: broadcloth keeps its length
-    shear=2e-5,
-    bend=6e-5,               # stiff for its weight: the flare holds
+    shear=1e-5,
+    bend=3e-5,               # stiff for its weight: the flare holds
     friction=0.5,
     gap=0.08,
 )

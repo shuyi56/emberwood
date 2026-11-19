@@ -29,7 +29,7 @@ from mathutils import Vector
 
 # Every size as a share of the head's height H (9.4 units on the mannequin; one unit is about 2.6 cm).
 RATIOS = {
-    'ease_waist': 0.02,     # the cloth's stand-off from the skin at the waist: close, the wool's thickness only
+    'ease_waist': 0.03,     # the cloth's stand-off from the skin at the waist: close, the wool's thickness only
     'ease_hips': 0.05,      # over the hips: the petticoat's bulk under it (the petticoat thread's published value
     'ease_hem': 0.10,        # at the hem, and the petticoat's own flare below that, replace these when it lands)
     'top_above': 0.005,      # the gores' top edge above the waist; the waistband stands above it (its top is under the basque)
@@ -42,7 +42,7 @@ RATIOS = {
     'band': 0.04,            # the waistband's height (a strip folded double; pattern.py)
     'allowance': 0.065,      # the seam allowance of every piece, about 1.6 cm (pattern.py)
     'hem_band': 0.105,       # the deep hem's depth (the turned and stitched edge)
-    'wool': 0.0085,          # the wool's thickness (about 2 mm); the hem's turn doubles it
+    'wool': 0.012,           # the wool's thickness (about 2 mm); the hem's turn doubles it
     'nap_roll': 0.012,       # the soft roll of the turned hem
     'fold_depth': 0.11,     # the soft flutes the flare falls into at the hem, before the cloth settles
 }
@@ -197,7 +197,7 @@ def hem_height(phi, M, r):
     back = np.maximum(-c, 0.0) ** 2
     side = np.sin(phi) ** 2
     # (the fold of the turned hem hangs a fold radius below the cloth's end: raised by it, so the fold lies on the floor)
-    return M['floor_z'] + r.get('fold_r', 0.0) + r['hem_lift'] * front + r['hem_lift_side'] * side + 0.0 * back
+    return M['floor_z'] + r.get('fold_r', 0.0) + r['wool'] + r['hem_lift'] * front + r['hem_lift_side'] * side + 0.0 * back
 
 
 def under_body(points):

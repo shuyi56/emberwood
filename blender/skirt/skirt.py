@@ -46,7 +46,7 @@ PUSH = True                  # keep the legs out of the cloth through the walk
 MEASURES = {}
 DRAFT = {}                   # the last draft and its measures (pattern.draft_pieces reads them; see check.py --pattern)
 # Navy broadcloth, near black in the shade, blue where the light is on it.
-WOOL = dict(colour=(0.012, 0.020, 0.055), pitch=0.030, relief=0.35, rough=0.88, sheen=0.55, mottle=0.08, nap=0.55,
+WOOL = dict(colour=(0.012, 0.020, 0.055), pitch=0.030, relief=0.35, rough=0.88, sheen=0.3, mottle=0.08, nap=0.55,
             seam_ridge=0.09)
 M_THREAD = female.mat_def(88, 'skirt thread', female.ramp(0x2c3a66, 0.1), 0.0)
 M_WOOL = female.mat_def(87, 'skirt wool', female.ramp(0x1c2a52, 0.1), 0.0, surface='twill', closeup='skirt')

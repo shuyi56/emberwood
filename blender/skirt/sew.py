@@ -147,7 +147,9 @@ def sew(D, M, pieces, log=print):
         outer = [P0 + (top_o - P0) * t for t in np.linspace(0.0, 1.0, 5)]
         arc = [top_o + u * rho * (1 - math.cos(th)) + np.array([0.0, 0.0, rho * math.sin(th)])
                for th in (math.pi / 4, math.pi / 2, 3 * math.pi / 4)]
-        facing = [top_o + u * 2 * rho + (P0 - top_o) * t for t in np.linspace(0.0, 1.0, 5)]
+        # (the facing lies against the body: no deeper inside the band than the waist's stand-off allows)
+        face_in = max(0.04, min(2 * rho, r['ease_waist'] - r['wool'] - 0.03))
+        facing = [top_o + u * face_in + (P0 - top_o) * t for t in np.linspace(0.0, 1.0, 5)]
         ring.append(outer + arc + facing)
     total = len(ring[0])
     vw = [[bm.verts.new(tuple(p)) for p in col] for col in ring]
