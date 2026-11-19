@@ -28,7 +28,7 @@ import fit  # noqa: E402
 import bodice  # noqa: E402
 
 # A dark navy wool habit cloth (a fulled broadcloth: no weave to be seen, a soft nap). DYE=0xrrggbb for another.
-DYE = 0x1d2436
+DYE = 0x121621              # (picked on swatch.py's bench: 1d2436 read slate blue under the views' lights)
 SETTLE = True
 CORSET = 'Corset'            # an object of this name in the scene is worn under the bodice, and the bodice fits over it
 CORSETED = True              # without one, the body drawn in by the corset's shared numbers (shared/habit.py), and the
@@ -39,7 +39,7 @@ MEASURES = {}
 
 def materials():
     cloth = female.mat_def(90, 'bodice wool', female.ramp(DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True)
-    btn = female.mat_def(91, 'bodice button', female.ramp(0x15171c, 0.12), 0.0, closeup='leather')
+    btn = female.mat_def(91, 'bodice button', female.ramp(0x0e0f12, 0.12), 0.0, closeup='leather')    # (black horn)
     return female.mat(cloth), female.mat(btn)
 
 
