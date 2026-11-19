@@ -211,6 +211,9 @@ def skirt_weights(M, body=None, near=None):
             loc, nrm, fi, d = tree.find_nearest(co)
             if loc is not None:
                 k = 1.0 - ss(near[0] * H, near[1] * H, d)
+                # (only above the shins: the hem hangs free of the calves and feet, as a long skirt does; cloth glued to
+                # a swinging leg is dragged out of the skirt with it as a sleeve)
+                k *= ss(M['knee_z'] - 0.45 * H, M['knee_z'], co.z)
                 if k > 1e-3:
                     vi = min(faces[fi], key=lambda i: (pts[i] - loc).length_squared)
                     legs = vw[vi]
