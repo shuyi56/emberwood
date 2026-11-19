@@ -356,6 +356,80 @@ def _relax(V, faces, rounds, keep=None):
 PLAIN = {'fold': 0.0, 'sleeve_fold': 0.0, 'swell': 0.0, 'gather': 0.0, 'ease': 0.14}
 
 
+LAYER_GAP = 0.03             # the least room between the shirt's cloth and the outside of a garment it lies against, in w
+
+
+def _posed(o, without=('SUBSURF', 'SOLIDIFY', 'BEVEL')):
+    """An object's own points as they stand posed now (its sheet: without the modifiers that add points)."""
+    off = [m for m in o.modifiers if m.type in without and m.show_viewport]
+    for m in off:
+        m.show_viewport = False
+    dg = bpy.context.evaluated_depsgraph_get()
+    e = o.evaluated_get(dg)
+    me = e.to_mesh()
+    pts = np.array([(o.matrix_world @ v.co)[:] for v in me.vertices])
+    polys = [tuple(p.vertices) for p in me.polygons]
+    e.to_mesh_clear()
+    for m in off:
+        m.show_viewport = True
+    return pts, polys
+
+
+def clear_of(o, garment, gap, log=print):
+    """The shirt's free cloth (what is not held under the garment) kept off the garment's outside by gap: a sleeve
+    hanging against a padded skirt lies on the padding, it does not pass into it. The shirt's shape was settled
+    against the garment's sheet; the garment is then given its thickness outward (its SOLIDIFY), and the cloth
+    that touched the sheet would be inside it. Moved by geometry, not by the solver, where the two meet: on the
+    posed body (a sleeve meets the skirt only where the arm hangs). Each point that is in the garment or within gap
+    of its outside is put out to gap along the garment's facing, the move feathered out over the cloth round it so
+    it leaves no dent, and carried back to the rest shape through the point's own skinning."""
+    me = o.data
+    th = next((m.thickness for m in garment.modifiers if m.type == 'SOLIDIFY'), 0.0)
+    bpy.context.scene.frame_set(1)                       # (the pose every view is rendered in)
+    G, gp = _posed(garment)
+    tree = BVHTree.FromPolygons([Vector(q) for q in G], gp)
+    R = np.array([v.co[:] for v in me.vertices])
+    P, _ = _posed(o)
+    held = np.zeros(len(R), dtype=np.float32)
+    if 'held' in me.attributes:
+        me.attributes['held'].data.foreach_get('value', held)
+    need = th + gap
+    D = np.zeros_like(P)
+    for i in np.nonzero(held < 0.5)[0]:
+        loc, nrm, _, _ = tree.find_nearest(Vector(P[i]), need + 0.5)
+        if loc is None:
+            continue
+        d = (Vector(P[i]) - loc).dot(nrm)
+        if -th < d < need:                               # (deeper in than the garment's thickness: under it, left)
+            D[i] = np.array(nrm[:]) * (need - d)
+    moved = int((np.abs(D).sum(1) > 0).sum())
+    if moved:
+        E = np.array([e.vertices[:] for e in me.edges])
+        for _ in range(6):                               # (feathered out: a point not moved takes a share of its
+            S, n = np.zeros_like(D), np.zeros(len(D))    # neighbours' moves, so the cloth round a push eases with it)
+            np.add.at(S, E[:, 0], D[E[:, 1]]); np.add.at(S, E[:, 1], D[E[:, 0]])
+            np.add.at(n, E[:, 0], 1); np.add.at(n, E[:, 1], 1)
+            avg = 0.6 * S / np.maximum(n, 1)[:, None]
+            take = np.linalg.norm(avg, axis=1) > np.linalg.norm(D, axis=1)
+            D[take] = avg[take]
+        # the posed move taken back to the rest shape: each point's skinning, measured (rest nudged along each axis)
+        h = 0.05
+        J = np.empty((len(R), 3, 3))
+        for k in range(3):
+            Rk = R.copy()
+            Rk[:, k] += h
+            me.vertices.foreach_set('co', Rk.reshape(-1))
+            me.update()
+            J[:, :, k] = (_posed(o)[0] - P) / h
+        rest_move = np.linalg.solve(J + 1e-6 * np.eye(3)[None], D[:, :, None])[:, :, 0]
+        Q = R + rest_move
+        me.vertices.foreach_set('co', Q.reshape(-1))
+        if 'rest' in me.attributes:
+            me.attributes['rest'].data.foreach_set('vector', Q.reshape(-1))
+        me.update()
+    log('chemise: %d free points put out to %.3f off the %s (the most %.3f)' % (moved, gap, garment.name, float(np.linalg.norm(D, axis=1).max()) if moved else 0.0))
+
+
 def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIOS, log=print, settle=True,
                   colliders=(), under=None):
     """Draft the chemise on the body (M: fit.measure's measurements) and hand it to the body's bones. settle: let
@@ -552,6 +626,8 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
                         keep['held'] = h
                     np.savez_compressed(cache, **keep)
                     log('chemise: settled shape kept in %s' % cache)
+    if under is not None and rig is not None and settle:
+        clear_of(o, under['garment'], ratios['thick'] * w + LAYER_GAP * w, log=log)
     m = o.modifiers.new('smooth', 'SUBSURF')
     m.levels = m.render_levels = 1
     m = o.modifiers.new('thickness', 'SOLIDIFY')

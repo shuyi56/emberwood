@@ -66,3 +66,8 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
 - Check a layered figure with `blender/base/spots.py`: it measures where the under layer shows through and
   renders only crops of those places. Render the full turn once, at the end.
 - Find a cloth's settings on `blender/chemise/swatch.py` (seconds a trial), not on the whole garment.
+- Every layer clears the outside of the one under it, thickness included: the vest and the shoulder plates are fitted
+  over the rest shape of what is worn (`fit.rest_tree`, solidify on), and the shirt's free cloth is put out to
+  `drape.LAYER_GAP` off the gambeson's outside on the posed body (`drape.clear_of`, geometry, no solver). A cloth
+  settle collides with a garment's thin sheet; its thickness is added after, so check with `spots.py`, which counts
+  free cloth lying inside the outer garment's thickness as well as held cloth through it.

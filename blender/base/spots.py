@@ -61,7 +61,20 @@ def showing(under, over, log=print):
             at.append(P[i])
             depth.append(d - thick)
             way.append(nrm[:])
-    log('spots: %d of %d held points of %s show through %s' % (len(at), int((held > 0.5).sum()), under.name, over.name))
+    n_held = len(at)
+    # and the free cloth that lies against the outer garment's outside: it must not lie inside the garment's own
+    # thickness (where the garment's cloth would show through it)
+    for i in np.nonzero(held < 0.5)[0]:
+        loc, nrm, _, dist = tree.find_nearest(Vector(P[i]), thick + 0.2)
+        if loc is None:
+            continue
+        d = (Vector(P[i]) - loc).dot(nrm)
+        if -0.5 * thick < d < thick:
+            at.append(P[i])
+            depth.append(thick - d)
+            way.append(nrm[:])
+    log('spots: %d of %d held points of %s show through %s; %d free points lie inside its thickness' % (
+        n_held, int((held > 0.5).sum()), under.name, over.name, len(at) - n_held))
     return np.array(at).reshape(-1, 3), np.array(depth), np.array(way).reshape(-1, 3)
 
 
