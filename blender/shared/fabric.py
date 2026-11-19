@@ -11,7 +11,21 @@ its slide along it (`friction`).
 
 The game's solver walks the ties one by one (Gauss-Seidel). Here they are solved all at once and each point takes the
 mean of the moves its ties ask of it (Jacobi, with over-relaxation `relax`): the same answer, walked in numpy, at the
-cost of more walks a step (`iterations`). Units are the caller's; positions are an array [n, 3], z up."""
+cost of more walks a step (`iterations`). Units are the caller's; positions are an array [n, 3], z up.
+
+The API (kept stable: the boot, and the skirt, sleeves and petticoat scripts use it):
+
+    f = Fabric(points [n, 3], settings)    settings: FABRIC_DEFAULTS' names, the game's where it has them
+    f.pin(indices, weight=None)            hold points (weight 1, or partly: an inverse mass of 1 - weight)
+    f.tie(i, j, compliance, rest=None)     ties between point arrays, at their present lengths or rest
+    f.mesh(faces)                          a mesh's threads, quad diagonals and bend ties; returns their counts
+    f.step(h, body, neutral=False)         one step; body(points) -> (points pushed out, touched mask)
+    f.settle(body, h, most, tol, damping)  run to rest; returns the steps taken
+    f.pos                                  the points as they are now
+    bvh_body(tree, gap)                    a body from a mathutils BVHTree (normals outward)
+
+It follows src/world/fabric-core.js: what is added there (per-point mass, angle bends, creases that set) is to be
+added here under the same names."""
 import numpy as np
 
 FABRIC_DEFAULTS = dict(
