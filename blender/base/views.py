@@ -18,8 +18,15 @@
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
            a build), with the clothes, armour and gear built and fitted exactly as on the real figure. For clothes
            changes that need a body under them.
+--walk N   the world's walk (female.LOCKED_WALK, the planted-feet cycle the world model plays) in the 3D look:
+           N evenly spaced frames of one cycle from each of --angles, on a ground plane, laid out with a row per angle
+           (DIR/walk.png) and played as a loop per angle (DIR/walk-ANGLE.gif, one cycle in --walk-seconds, default
+           0.69 s: the world's pace, 2.2 a second over a cycle of 46 model units). Use it with --mannequin.
+--run N    the run (female.RUN: see pose_run) the same way, in a wider frame for its longer reach: DIR/run.png and
+           DIR/run-ANGLE.gif, one cycle in --run-seconds (default female.RUN_SECONDS).
 --set      NAME=VALUE: set a module setting of the character before it builds (e.g. FUSE=False), repeatable; a base
-           figure setting such as SKIN_LOOK=5 (by its place in female.SKIN_LOOKS) is set on the base module too
+           figure setting such as SKIN_LOOK=5 (by its place in female.SKIN_LOOKS) or AHEAD=0.4 is set on the base
+           module too
 --denoise  with --turn or --head: denoise the 3D look (OpenImageDenoise, albedo and normal passes)
 
 Rendering pieces on their own (any of the views above):
@@ -280,6 +287,53 @@ def list_meshes():
         print(f'{o.name:40s} {m.name if m else "-":24s} {len(o.data.vertices)}')
 
 
+def walk(n, out, stem='walk', seconds=0.69, wide=1.0):
+    """N frames of the world's walk cycle (or, with female.RUN set, the run: stem 'run') from each of VIEWS (see
+    --walk and --run), on a ground plane. `wide` widens the frame for a gait that reaches further."""
+    sc = bpy.context.scene
+    size = int(opt('--size', 360))
+    cam = look_3d(int(opt('--samples', 32)))
+    for o in sc.objects:          # (the sheet's columns are keyed on the timeline: pose each frame by hand instead)
+        if o.animation_data:
+            o.animation_data_clear()
+    floor = bpy.data.meshes.new('Walk floor')
+    fz = female.ANKLE_Z - 3.4      # (the sole is 3.4 under the ankle: the floor, wherever the figure's legs put it)
+    floor.from_pydata([(-60, -60, fz), (60, -60, fz), (60, 60, fz), (-60, 60, fz)], [], [(0, 1, 2, 3)])
+    fo = bpy.data.objects.new('Walk floor', floor)
+    sc.collection.objects.link(fo)
+    fm = bpy.data.materials.new('walk floor')
+    fm.use_nodes = True
+    fm.node_tree.nodes.get('Principled BSDF').inputs['Base Color'].default_value = (0.32, 0.31, 0.29, 1)
+    fo.data.materials.append(fm)
+    root = female.FIG['root']
+    sc.render.resolution_x, sc.render.resolution_y = int(size * wide), int(size * 1.75)
+    cam.data.type, cam.data.ortho_scale, cam.data.sensor_fit = 'ORTHO', (64.0 - fz) * 1.06, 'VERTICAL'
+    grid = [[None] * n for _ in VIEWS]
+    with tempfile.TemporaryDirectory() as tmp:
+        for k in range(n):
+            female.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
+            for i, (name, yaw) in enumerate(VIEWS):
+                root.rotation_euler = (0, 0, math.radians(yaw))
+                cam.location = Vector((0, -200, (64.0 + fz) / 2))
+                cam.rotation_euler = (math.pi / 2, 0, 0)
+                p = os.path.join(tmp, f'w{k}-{i}.png')
+                sc.render.filepath = p
+                bpy.ops.render.render(write_still=True)
+                grid[i][k] = Image.open(p).convert('RGB')
+                print(f'rendered {stem} frame {k} {name}', flush=True)
+    root.rotation_euler = (0, 0, 0)
+    w, h = grid[0][0].size
+    sheet = Image.new('RGB', (w * n, h * len(VIEWS)))
+    for i, frames in enumerate(grid):
+        for k, im in enumerate(frames):
+            sheet.paste(im, (k * w, i * h))
+        ms = int(round(1000 * float(opt(f'--{stem}-seconds', seconds)) / n))
+        frames[0].save(os.path.join(out, f'{stem}-{VIEWS[i][0].replace("/", "").replace(" ", "")}.gif'), save_all=True,
+                       append_images=frames[1:], duration=max(20, ms), loop=0)
+    sheet.save(os.path.join(out, f'{stem}.png'))
+    print('wrote', os.path.join(out, f'{stem}.png'))
+
+
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), f'{FIGURE}-views'))
     os.makedirs(out, exist_ok=True)
@@ -288,7 +342,9 @@ def main():
             k, v = argv[i + 1].split('=', 1)
             setattr(F, k, eval(v))
             if hasattr(female, k):
-                setattr(female, k, eval(v))     # (a base figure setting, such as SKIN_LOOK)
+                setattr(female, k, eval(v))     # (a base figure setting, such as SKIN_LOOK or the walk's)
+    if opt('--walk') or opt('--run'):
+        female.LOCKED_WALK, female.ARM_SWING = True, 0.24     # (as export_glb.py sets them for the world model)
     if '--mannequin' in argv:
         female.MANNEQUIN = True
     import time
@@ -331,9 +387,15 @@ def main():
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
                     row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), centre, h)
                 if '--head' in argv:
-                    centre, h = fit(shown, 1.0) if framed else ((0, 0, float(os.environ.get('HEAD_CZ', 55.5))), float(os.environ.get('HEAD_H', 17.0)))
+                    centre, h = fit(shown, 1.0) if framed else ((float(os.environ.get('HEAD_CX', 0)), float(os.environ.get('HEAD_CY', 0)), float(os.environ.get('HEAD_CZ', 55.5))), float(os.environ.get('HEAD_H', 17.0)))
                     row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), centre, h)
             clay(False, saved)
+    if opt('--walk'):
+        walk(int(opt('--walk')), out)
+    if opt('--run'):
+        female.RUN = True
+        walk(int(opt('--run')), out, 'run', female.RUN_SECONDS, 1.45)
+        female.RUN = False
     if opt('--pieces'):
         if not ('--turn' in argv or '--head' in argv):
             cam = look_3d(int(opt('--samples', 32)))

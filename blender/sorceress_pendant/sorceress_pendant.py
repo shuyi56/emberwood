@@ -646,7 +646,7 @@ def build():
         import skin_layers
         _zw = female.SH_Z - female.UPPER - female.FORE
         skin_layers.paint_body(bpy.data.objects['Skin body'],
-                               hands=[o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o],
+                               hands=[o for o in (bpy.data.objects.get(n_) for n_ in ('Hand.L', 'Hand.R', 'Fist.L', 'Fist.R')) if o],
                                neck=bpy.data.objects.get('Neck'),
                                wrists=[(-female.SH_X, 0.2, _zw), (female.SH_X, 0.2, _zw)])
         if hasattr(skin_layers, 'paint_face'):       # (the head's freckle and pore maps, where the module has them)
@@ -820,6 +820,7 @@ def build():
         # (its parts, not the Head joint itself: the pose places the joint again on every frame)
         seat_head(list(hd.children), unit=fs)
         anatomy.head_stub(hd)
+        female.place_neck()      # (the neck's joints measured again on the head as it now sits)
     if HEAD_GLB:
         head = bpy.data.objects['Head']
         # (the Blender head goes, as merge-head.mjs drops it; the creator's runs down into the gown's neck)
@@ -885,6 +886,7 @@ def build():
                 o.scale = [c * fs for c in o.scale]
                 o.location.y += fy
         seat_head([o for o in new if o.parent is head])
+        female.place_neck()      # (the neck's joints measured on the creator's head as it sits)
         if os.environ.get('PROBE_CHIN'):
             bpy.context.view_layer.update()
             for o in new:
@@ -1015,6 +1017,8 @@ def build():
     if os.environ.get('SKIN_LAYERS') and not FLAT_BODY and bpy.data.materials.get('skin') is not None:
         import skin_layers      # (the layered skin itself, for the 3D look only: it replaces the skin material's nodes)
         skin_layers.apply(bpy.data.materials['skin'])
+    if os.environ.get('FIST'):      # (the closed hands, for a look at them: a pose picks with anatomy.use_fist)
+        anatomy.use_fist(True)
     if os.environ.get('MEASURE'):
         bpy.context.view_layer.update()
         anatomy.measure()
