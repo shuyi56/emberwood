@@ -33,7 +33,7 @@ import pattern  # noqa: E402
 LEATHER = dict(
     stretch=0.0,
     shear=1e-7,
-    bend=2e-5,                # (softer: it gives at the ankle, and the folds it makes there are fewer and rounder)
+    bend=8e-6,                # (softer: it gives at the ankle, and the folds it makes there are fewer and rounder)
     friction=0.6,            # leather on wool
     gravity=(0.0, 0.0, 0.0), # (the boot stands on the leg: leather this stiff does not sag between its seams, and the
                              # solver's ties, walked all at once, cannot hold a sheet a hundred points long up
@@ -434,7 +434,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     return eyelets, lace
 
 
-CREASE = dict(bend=9.0, steps=360, hold_sole=0.45, hold_collar=1.2)  # (the ankle's bend in degrees, and the holds)
+CREASE = dict(bend=13.0, steps=360, hold_sole=0.45, hold_collar=1.2)  # (the ankle's bend in degrees, and the holds)
 
 
 def _deform(o, rig):
