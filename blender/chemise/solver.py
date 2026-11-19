@@ -7,18 +7,18 @@ folds and not into many limp ones); gravity does the rest. What it settles to is
 shape through the bones, so the garment still follows the rig.
 
 The figure is 63 units tall where a woman is 1.65 m, and the solver takes a unit for a metre, so cloth of real
-stiffness would hang like tissue. LINEN's numbers are for this scale: found by trial against how a linen sleeve
-breaks (folds a few centimetres across, 1 to 2 units), not copied from a preset."""
+stiffness would hang like tissue. LINEN's numbers are for this scale: found by trial on swatch.py's bench against how a linen
+sleeve breaks (folds a few centimetres across, 1 to 2 units), not copied from a preset."""
 import bpy
 import numpy as np
 
 LINEN = dict(
-    mass=0.25,               # of one point of the cloth
-    tension=120.0,            # linen barely stretches
-    compression=120.0,
+    mass=0.5,                # of one point of the cloth
+    tension=120.0,           # linen barely stretches
+    compression=15.0,        # but gives way at once when pushed along its threads: it folds where a stiffer sheet
+                             # would stand and crumple (at 120 the gathered cloth rolled into thick, heavy folds)
     shear=20.0,              # and gives a little on the bias
-    bending=1.0,             # crisp for its weight: it folds, it does not crumple (0.4 crumpled like paper, 6 stood
-                             # like a shell)
+    bending=0.35,            # a fine linen: soft enough to fall into narrow folds under its own weight
     damping=(8.0, 8.0, 6.0, 1.5),      # tension, compression, shear, bending
     air=0.6,
     friction=6.0,            # linen on skin
@@ -26,9 +26,41 @@ LINEN = dict(
     self_gap=0.015,          # and off itself (small: at 0.045 the cloth's own close points pushed each other apart,
                              # and the whole garment swelled and drew its hems in)
     quality=9,
-    frames=80,
-    let_out=30,              # the frames over which a fuller cloth is let out to its fullness
+    frames=120,
+    let_out=50,              # the frames over which a fuller cloth is let out to its fullness
 )
+# (These were found on swatch.py's bench, not on the garment. Its gathered curtain, by the weight of a point at
+# bending 0.35 and compression 15: 0.3 folds 8.7 cm wide and a little crumpled (0.18); 0.5 folds 6.5 cm wide and
+# clean (0.03); 0.8 folds 5.6 cm wide but shallow. A stiffer bend (3, 10) widens the folds again.)
+
+
+def weave(s, P):
+    """Give a cloth modifier's settings s the cloth P's behaviour (the garment's and swatch.py's swatches' alike)."""
+    s.quality = P['quality']
+    s.mass = P['mass']
+    s.tension_stiffness, s.compression_stiffness = P['tension'], P['compression']
+    s.shear_stiffness, s.bending_stiffness = P['shear'], P['bending']
+    s.tension_damping, s.compression_damping, s.shear_damping, s.bending_damping = P['damping']
+    s.air_damping = P['air']
+
+
+def let_out(cloth, s, full, P):
+    """Let the cloth out (or draw it in) point by point: full, a share for each point (see settle)."""
+    if full is None or np.ptp(full) == 0:
+        return
+    # (the solver's 'shrink': weight 0 the fullest cloth, weight 1 the most drawn in)
+    lo, hi = -float(full.max()), -float(full.min())
+    g = cloth.vertex_groups.new(name='full')
+    wt = (-full - lo) / (hi - lo)
+    for i in range(len(full)):
+        g.add([i], float(wt[i]), 'REPLACE')
+    s.vertex_group_shrink = 'full'
+    # (little by little, so the cloth is not thrown: keyed, since a setting changed by hand between frames starts
+    # the solver over)
+    for f, k in ((1, 0.0), (P['let_out'], 1.0)):
+        s.shrink_min, s.shrink_max = k * lo, k * hi
+        s.keyframe_insert('shrink_min', frame=f)
+        s.keyframe_insert('shrink_max', frame=f)
 
 
 def _posed(objs):
@@ -101,30 +133,11 @@ def settle(o, rig, colliders, pinned=None, full=None, P=LINEN, log=print):
             g.add([int(i)], float(pinned[i]), 'REPLACE')
     m = cloth.modifiers.new('cloth', 'CLOTH')
     s, c = m.settings, m.collision_settings
-    s.quality = P['quality']
-    s.mass = P['mass']
-    s.tension_stiffness, s.compression_stiffness = P['tension'], P['compression']
-    s.shear_stiffness, s.bending_stiffness = P['shear'], P['bending']
-    s.tension_damping, s.compression_damping, s.shear_damping, s.bending_damping = P['damping']
-    s.air_damping = P['air']
+    weave(s, P)
     if pinned is not None and np.any(pinned > 0):
         s.vertex_group_mass = 'pin'
         s.pin_stiffness = 1.0
-    lo = hi = 0.0
-    if full is not None and np.ptp(full) > 0:
-        # (the solver's 'shrink': weight 0 the fullest cloth, weight 1 the most drawn in)
-        lo, hi = -float(full.max()), -float(full.min())
-        g = cloth.vertex_groups.new(name='full')
-        wt = (-full - lo) / (hi - lo)
-        for i in range(n):
-            g.add([i], float(wt[i]), 'REPLACE')
-        s.vertex_group_shrink = 'full'
-        # (let out little by little, so the cloth is not thrown: keyed, since a setting changed by hand between
-        # frames starts the solver over)
-        for f, k in ((1, 0.0), (P['let_out'], 1.0)):
-            s.shrink_min, s.shrink_max = k * lo, k * hi
-            s.keyframe_insert('shrink_min', frame=f)
-            s.keyframe_insert('shrink_max', frame=f)
+    let_out(cloth, s, full, P)
     c.use_collision, c.collision_quality, c.distance_min = True, 4, 0.02
     c.use_self_collision, c.self_distance_min, c.self_friction = True, P['self_gap'], 8.0
     m.point_cache.frame_start, m.point_cache.frame_end = 1, P['frames']
