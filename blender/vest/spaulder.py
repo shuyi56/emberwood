@@ -30,10 +30,11 @@ RATIOS = dict(
     round_lame=94.0,         # and the lames (the inside of the arm is left bare)
     inner=0.80,              # toward the neck the cop stops at this share of the way out to the shoulder point
     corner=0.35,             # the radius of a plate's corners, in w
+    corner_cop=2.4,          # the cop's corners are rounder by this many times
     dome=0.8,                # how far a lame is raised along its middle, in plate thicknesses
     step=2.6,                # a lame's bottom edge stands this far proud of the next lame's top, in plate
                              # thicknesses: the groove between two lames
-    flare_cop=0.42,          # the cop's lower edge is turned out by this much, in w: the top plate flares, a
+    flare_cop=0.34,          # the cop's lower edge is turned out by this much, in w: the top plate flares, a
                              # brim over the lames
     flare_lame=0.16,         # and each lame's lower edge, by this much
     flare_last=0.30,         # the lowest lame's the most of the lames: the fall ends in a kick
@@ -78,10 +79,19 @@ class Shoulder:
         for _ in range(3):
             smooth = np.maximum(smooth, fit._blur(fit._blur(np.maximum(R, smooth), 2.0, 0, False), 3.0, 1, True))
         self.R = np.maximum(smooth, R) + ratios['gap'] * w
+        # the cop is raised from a smoother shoulder still: one even dome, with none of the lumps of what is under it
+        # (stood off by the most the dressed shoulder comes through it, within the cop's reach)
+        # (measured over the arm's side of the shoulder only: toward the neck the rays find the collar, far off)
+        side_r = float(self.R[int(round(90.0 / D_TH)), int(round(180.0 / D_AL))])
+        near = np.minimum(self.R, 1.35 * side_r)
+        even = fit._blur(fit._blur(near, 9.0, 0, False), 12.0, 1, True)
+        reach = (self.th <= math.radians(ratios['cop']))[:, None] & (np.abs(self.al) <= math.radians(100.0))[None, :]
+        self.R_cop = even + min(max(float(np.percentile((near - even)[reach], 95)), 0.0), 0.25 * w)
         self.R_side = float(self.R[int(round(90.0 / D_TH)), int(round(180.0 / D_AL))])
 
-    def radius(self, th, al):
-        """The measured radius at angles th and al (between the grid's entries)."""
+    def radius(self, th, al, cop=False):
+        """The measured radius at angles th and al (between the grid's entries); cop: the cop's even dome."""
+        R = self.R_cop if cop else self.R
         f = np.clip(th / math.radians(D_TH), 0.0, len(self.th) - 1.001)
         i = np.floor(f).astype(int)
         t = f - i
@@ -89,7 +99,7 @@ class Shoulder:
         j = np.floor(g).astype(int) % len(self.al)
         s = g - np.floor(g)
         j1 = (j + 1) % len(self.al)
-        return (self.R[i, j] * (1 - s) + self.R[i, j1] * s) * (1 - t) + (self.R[i + 1, j] * (1 - s) + self.R[i + 1, j1] * s) * t
+        return (R[i, j] * (1 - s) + R[i, j1] * s) * (1 - t) + (R[i + 1, j] * (1 - s) + R[i + 1, j1] * s) * t
 
     def angles(self, p):
         q = p - self.C[None, :]
@@ -107,7 +117,9 @@ def _lift(S, name, u, th):
     square = (np.abs(np.sin(th)) ** n + np.abs(np.cos(th)) ** n) ** (-1.0 / n) - 1.0      # (0 at the top and the side)
     box = (r['box_out'] * w + S.R_side * 1.0) * square * (th < 0.5 * math.pi)
     if name == 'cop':
-        return box + t_pl * r['step'] + r['flare_cop'] * w * u ** 3
+        # (the cop swells out from its top and its edge turns down again: a round dome over the lames, not a brim
+        # turned up to a point)
+        return box + t_pl * r['step'] + r['flare_cop'] * w * (2.0 * u - u * u) ** 1.5
     k = r['flare_last'] if name == 'lame %d' % r['lames'] else r['flare_lame']
     return box + t_pl * (r['step'] * u + r['dome'] * np.sin(math.pi * u)) + k * w * u ** 2
 
@@ -197,7 +209,7 @@ def raise_plates(S, log=print):
         al = np.arange(-half - math.radians(6), half + math.radians(6), math.radians(1.5))
         TH, AL = np.meshgrid(th, al, indexing='ij')
         u = np.clip((TH - a) / (b - a), 0.0, 1.0)                 # (0 at the plate's top edge, 1 at its bottom)
-        R = S.radius(TH.reshape(-1), AL.reshape(-1)).reshape(TH.shape) + _lift(S, name, u, TH)
+        R = S.radius(TH.reshape(-1), AL.reshape(-1), cop=name == 'cop').reshape(TH.shape) + _lift(S, name, u, TH)
         V = (S.C[None, None, :] + R[:, :, None] * _dirs(TH, AL, S.side)).reshape(-1, 3)
         n0, n1 = TH.shape
         idx = np.arange(n0 * n1).reshape(n0, n1)
@@ -205,7 +217,7 @@ def raise_plates(S, log=print):
 
         def edge(p, a=a, b=b, half=half, name=name):
             th_, al_, rr = S.angles(p)
-            k = r['corner'] * w
+            k = r['corner'] * w * (r['corner_cop'] if name == 'cop' else 1.0)
             across = np.minimum(th_ - a, b - th_) * rr if name != 'cop' else (b - th_) * rr
             round_ = (half - np.abs(al_)) * rr * np.maximum(np.sin(th_), 0.15)
             f = fit._smin(across, round_, k)
