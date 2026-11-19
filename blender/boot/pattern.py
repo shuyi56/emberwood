@@ -16,7 +16,8 @@ import numpy as np
 CM = 165.0 / 63.0            # a unit in centimetres (a 165 cm figure is 63 units tall)
 SEAMS = {'A': ('vamp to quarter', (196, 60, 50)), 'B': ('heel back seam', (40, 110, 190)),
          'C': ('ankle seam', (30, 140, 80)), 'D': ('shaft back seam', (150, 70, 170)),
-         'E': ('upper to sole', (210, 130, 20)), 'F': ('binding', (90, 90, 90))}
+         'E': ('upper to sole', (210, 130, 20)), 'F': ('binding', (90, 90, 90)),
+         'G': ('toe cap to vamp', (20, 150, 160))}
 
 
 def flatten(piece):
@@ -152,7 +153,7 @@ def sheet(pieces, path, px=22.0, title='Boot pattern', log=print):
             x, y, row = pad, y + row + pad + 2.5, 0.0
         spots.append((p, uv, give, x, y))
         x, row = x + w + pad, max(row, h)
-    height = y + row + pad + 6.0
+    height = y + row + pad + 7.2
     im = Image.new('RGB', (int(width * px), int(height * px)), (247, 243, 234))
     dr = ImageDraw.Draw(im)
     f_big, f_mid, f_small = (ImageFont.load_default(size=s) for s in (int(1.3 * px), int(0.85 * px), int(0.7 * px)))
@@ -186,10 +187,12 @@ def sheet(pieces, path, px=22.0, title='Boot pattern', log=print):
             dr.text((x0 * px, (y0 + h + 1.5) * px), 'gives %.0f to %.0f%%' % (100 * give[0], 100 * give[2]),
                     fill=(110, 95, 80), font=f_small)
     # the key and the scale
-    ky = (height - 4.6) * px
+    ky = (height - 5.8) * px
     kx = pad * px
     for lab in sorted(SEAMS):
         nm, colr = SEAMS[lab]
+        if kx + (len(nm) * 0.42 + 4.5) * px > width * px:
+            kx, ky = pad * px, ky + 1.1 * px
         dr.line([(kx, ky + 0.5 * px), (kx + 1.6 * px, ky + 0.5 * px)], fill=colr, width=7)
         dr.text((kx + 2.0 * px, ky), '%s  %s' % (lab, nm), fill=(40, 30, 20), font=f_small)
         kx += (len(nm) * 0.42 + 4.5) * px

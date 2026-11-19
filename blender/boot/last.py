@@ -15,7 +15,10 @@ leather is worked over, and then the pieces are cut from it:
                a toe box (the toe region carried a little forward from the ball of the foot, and raised). The two
                meet over the ankle.
 
-  the pieces   the vamp      the front of the foot, from the toe back to the side seams.
+  the pieces   the toe cap   the toe, ahead of a seam curved across the foot just short of the ball; it laps
+                             back over the vamp. (Leather will not lie flat over the toe's dome in one piece with
+                             the instep: the cap takes the dome, and is blocked to it wet.)
+               the vamp      the instep, from the toe cap back to the side seams.
                two quarters  the inner and the outer, round the heel from the side seams to the heel's back seam;
                              their front edges lap over the vamp, and the outer laps over the inner at the back.
                the shaft     one sheet wrapped round the leg from the ankle seam to the top. Its two edges meet
@@ -32,7 +35,7 @@ them, stitch_in in from the edge), and the welt carries the row that holds the u
 The pieces are kept as they were cut (PIECES, for each side: every piece's points on the last, its faces, and its
 seam edges by letter, each edge paired with the edge of the same letter on the piece it is sewn to), so pattern.py
 can lay them flat. The seams: A the vamp to each quarter, B the quarters' back seam, C the ankle seam, D the
-shaft's back seam, E the upper to the sole, F the binding to the top.
+shaft's back seam, E the upper to the sole, F the binding to the top, G the toe cap to the vamp.
 
 The figure stands on the sole: its under face is M['boot_floor']."""
 import os
@@ -67,13 +70,15 @@ RATIOS = {
     'join': 0.16,            # the span over the ankle where the last's shaft meets its foot
     'lap': 0.040,            # how far one piece laps over the next at a seam (about 1 cm)
     'vamp_back': 0.20,       # the vamp's side seam reaches the sole this share of the foot's length ahead of the ankle
+    'cap_at': 0.24,          # the toe cap's seam crosses the middle of the foot this share of its length behind the toe
+    'cap_sweep': 0.08,       # and sweeps back this share of the length further at the sides of the foot
     'binding': 0.050,        # the top binding's depth
     'under': 0.035,          # how far the upper comes down past the foot's under face, to the sole
     'sole': 0.035,           # the sole's thickness (two layers of sole leather, about 9 mm)
     'welt': 0.022,           # how far the sole stands out past the upper
     'stitch_in': 0.012,      # the stitches' row, this far in from the edge
 }
-PLAIN = ('slope', 'ankle_girth', 'toe_long', 'vamp_back')
+PLAIN = ('slope', 'ankle_girth', 'toe_long', 'vamp_back', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -393,12 +398,27 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             e.update(more)
             return e
         pieces = []
-        # the vamp: ahead of the side seams, under everything
-        Dv, fv = _compact(*fit.trim(D0, mine, lambda A: -side_seam(A)))
+        # the toe cap's seam: an arc across the foot, its middle nearest the toe
+        toe_c = D0[np.unique(np.concatenate([f for f in mine]))]
+        fx = float(np.median(toe_c[toe_c[:, 4] < M['toe_y'] + r['cap_at'] * L, 3])) if len(toe_c) else xc
+        half = 0.5 * float(np.ptp(toe_c[np.abs(toe_c[:, 4] - (M['toe_y'] + r['cap_at'] * L)) < 0.2, 3]))
+        y_cap = M['toe_y'] + r['cap_at'] * L
+        k_cap = r['cap_sweep'] * L / max(half, 1e-3) ** 2
+
+        def toe_seam(A):                                                    # (ahead of the seam: above zero)
+            return y_cap + k_cap * (A[:, 3] - fx) ** 2 - A[:, 4]
+        # the vamp: ahead of the side seams and behind the toe cap's, under everything
+        Dv, fv = _compact(*fit.trim(*fit.trim(D0, mine, lambda A: -side_seam(A)), lambda A: -toe_seam(A)))
         add(Dv[:, 3:6], fv, np.full(len(Dv), FAR), np.zeros(len(Dv)), Dv[:, 9:9 + nw])
         on = np.abs(side_seam(Dv)) < NEAR
-        pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35),
-                           edges=foot_edges(Dv, **{'A inner': on & (outer(Dv) < 0), 'A outer': on & (outer(Dv) > 0)})))
+        pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), edges=foot_edges(
+            Dv, **{'A inner': on & (outer(Dv) < 0), 'A outer': on & (outer(Dv) > 0), 'G': np.abs(toe_seam(Dv)) < NEAR})))
+        # the toe cap: ahead of its seam, its back edge lapped over the vamp
+        Dc, fc = _compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap']))
+        nc = Dc[:, 6:9] / np.maximum(np.linalg.norm(Dc[:, 6:9], axis=1, keepdims=True), 1e-9)
+        add(Dc[:, 3:6] + nc * 1.1 * tl, fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
+        pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), edges=foot_edges(
+            Dc, G=np.abs(toe_seam(Dc) + r['lap']) < NEAR)))
         # the quarters: behind the side seams, their front edges lapped over the vamp; the outer one laps over the
         # inner at the heel's back seam
         for q, cut in (('inner', lambda A: -outer(A)), ('outer', lambda A: outer(A) + r['lap'])):
