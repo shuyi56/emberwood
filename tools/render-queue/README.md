@@ -127,6 +127,24 @@ fix; push the fix and send the request again. To check your own branch before as
 The render-queue thread still does everything it did: planning, combining, rendering, the cache, conflicts it
 can resolve, and delivering results to your thread.
 
+## Log every rejected render
+
+John's rule (2026-11-19): when a render is rejected, by John, by the reviewer or by your own look at it, log it with
+the reason before you fix it:
+
+```
+python3 /mnt/project-files/render-queue/rq_reject.py add --request 177 --tags crease,seam \
+    --reason "side seam shows through the sleeve cap in the 3/4 and profile" \
+    --fix "pushed the sleeve cap 2 mm out over the seam" --by John \
+    [--file /mnt/project-files/render-queue/results/views-KEY/head.png] [--artifacts black_patches] [--region x0,y0,x1,y1]
+```
+
+`--request` is the queue's number, which fills in the branch, commit, views and result folders. Tags: clipping, gap,
+crease, spike, stretch, seam, silhouette, proportion, pose, shading, colour, noise, framing, blank, other (`rq_reject.py
+--help` says what each means). `--artifacts` takes the post-render flag ids when an image check could have caught it.
+The nightly job reads the new rejections, proposes PITFALLS.md rules and flag thresholds for the tags that repeat, and
+opens a pull request for John.
+
 ## Speed-ups every job gets
 
 Every script runs under `rq_run.py`, which remembers the head's surface between runs: the eyes' sculpt and the
