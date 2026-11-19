@@ -40,7 +40,9 @@ Run `rq.py ping --thread <your id>` first (see "Ping the queue before you ask fo
 * **Final quality, `frames`, `glb`, or `ready`**: send the **reviewer thread**, "Review render requests before queueing"
   (cmsg_01CnnKqGvuWEUi2G9X9cb9nBJkqDv7Ktra4a31euzvMxpx), a message with `message_thread` holding one JSON block. The
   reviewer reads it first (see "Review before the queue" below) and passes it on to the queue, or sends it back to you
-  with fixes. `rq.py add` refuses a final-quality request that the reviewer has not passed.
+  with fixes. `rq.py add` refuses a final-quality request that the reviewer has not passed, **unless the queue is idle**: with
+  nothing rendering or waiting (check with `rq.py ping`), add the final yourself and skip the reviewer (John,
+  2026-11-19; the add logs an `unreviewed` event). The no-sheet and no-before checks still apply.
 
 Do not message the render-queue thread to ask for a render or to ask whether it is done. The JSON block:
 
@@ -236,7 +238,8 @@ checked yet.
 ## Review before the queue
 
 The reviewer thread checks each final-quality, `frames`, `glb` or `ready` request without rendering anything, in about
-two minutes. Check-quality requests skip it: a thread adds those itself with `rq.py add --quality check`.
+two minutes. Check-quality requests skip it (a thread adds those itself with `rq.py add --quality check`), and so
+does any request sent while the queue is idle.
 
 * the request itself: outputs, cells, view commands; no full sheet in any form (not as an output, not a character
   script run as a view, not `frames` covering most of the sheet); no before of main that is not cached

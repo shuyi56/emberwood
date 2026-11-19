@@ -1176,9 +1176,15 @@ def cmd_add(a):
     a.view = [expand_view(v) for v in (a.view or [])] or None
     if a.quality is None:     # crops and pose strips are cheap drafts unless the request says final
         a.quality = "check" if a.view and all(is_extra(v) for v in a.view) else "final"
+    unreviewed = False
     if a.quality == "final" and not a.reviewed:
-        sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'). "
-                 "A check-quality request you can add yourself: add --quality check")
+        # John, 2026-11-19: with nothing rendering or waiting, a request may skip the reviewer (a crash costs nobody a wait)
+        busy = [o["id"] for o in s["requests"] if o["state"] in ("pending", "rendering", "conflict")]
+        if busy:
+            sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'), "
+                     f"unless the queue is idle; #{', #'.join(map(str, busy))} is rendering or waiting now. "
+                     "A check-quality request you can add yourself: add --quality check")
+        unreviewed = True
     before_only_from_cache(a, outs)
     r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
          "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
@@ -1197,6 +1203,9 @@ def cmd_add(a):
         if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
             i["state"] = f"sent as #{r['id']}"
     s["next"] += 1; s["requests"].append(r); save(s)
+    if unreviewed:
+        event("unreviewed", None, thread=a.thread, request=r["id"])
+        print("rq note: the queue was idle, so this final request skipped the reviewer", flush=True)
     print(json.dumps(r, indent=2))
     lp = last_ping(a.thread)
     if lp is None or time.time() - lp > PING_FRESH_S:
