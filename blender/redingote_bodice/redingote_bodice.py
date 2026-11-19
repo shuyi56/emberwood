@@ -33,6 +33,7 @@ SETTLE = True
 CORSET = 'Corset'            # an object of this name in the scene is worn under the bodice, and the bodice fits over it
 CORSETED = True              # without one, the body drawn in by the corset's shared numbers (shared/habit.py), and the
                              # bodice over the corset's shell; False: the body as built, uncorseted
+SKIRT = 'Riding skirt'       # the skirt thread's mesh: the basque hangs over its waistband
 MEASURES = {}
 
 
@@ -61,7 +62,8 @@ def build():
         moved = habit.compress_body(body, corset)
         print('redingote bodice: the body drawn in by the corset, by up to %.2f; waist %.2f -> %.2f' % (
             moved, corset.natural_waist, corset.girth_waist_corseted), flush=True)
-    hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o]
+    # (the basque settles on the hands and on the skirt's waist, when the skirt is built first: it ends under the basque)
+    hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R'), bpy.data.objects.get(SKIRT)) if o]
     o, m = bodice.build_bodice(body, heads, rig=bpy.data.objects.get('Rig'), cloth=cloth, button=btn, under=under,
                                colliders=hands, settle=SETTLE, corset=corset)
     MEASURES.update(m)
