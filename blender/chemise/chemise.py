@@ -116,6 +116,16 @@ def linen_closeup(name, P=LINEN):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
+def dress(body, m, under=None):
+    """The chemise on a body already built (m: fit.measure's measurements), under another garment or alone (see
+    drape.build_chemise). Returns the object and its draft."""
+    o, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
+                               settle=os.environ.get('CHEMISE_DRAWN') is None, under=under,
+                               colliders=[c for c in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if c])
+    linen_closeup('chemise linen')
+    return o, d
+
+
 def build():
     res = SP.build()
     body = bpy.data.objects['Skin body']
@@ -130,10 +140,7 @@ def build():
     hp = np.array([(o.matrix_world @ v.co)[:] for o in heads for v in o.data.vertices]) if heads else None
     m = fit.measure(P, aw, hp)
     MEASURES.update(m)
-    _, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
-                                settle=os.environ.get('CHEMISE_DRAWN') is None,
-                                colliders=[o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o])
-    linen_closeup('chemise linen')
+    _, d = dress(body, m)
     # the --head view on the garment: from under its hem to the chin
     lo, hi = d.z_hem_worn - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))

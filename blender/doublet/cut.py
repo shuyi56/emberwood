@@ -278,7 +278,8 @@ def _cloth_uv(o, M, R0):
 
 def build_doublet(body, head_objs=(), rig=None, cloth=None, thread=None, lace=None, metal=None, name='Doublet',
                   ratios=RATIOS, log=print):
-    """Measure the body, make the whole piece, cut it, quilt it, and trim it. Returns (object, measures)."""
+    """Measure the body, make the whole piece, cut it, quilt it, and trim it. Returns (object, measures, covered: how far inside the
+    doublet's edges a point lies, for whatever is worn under it)."""
     P, T, aw = fit.body_arrays(body)
     hp, hb = None, None
     if head_objs:
@@ -323,4 +324,9 @@ def build_doublet(body, head_objs=(), rig=None, cloth=None, thread=None, lace=No
         for nm, pieces, mat in (('eyelets', t_, thread or lace), ('laces', l_, lace), ('aiglets', m_, metal or lace)):
             if pieces:
                 fit._sheet('%s %s' % (name, nm), pieces, M, mat, body, kd, rig, lift=0.0, thickness=0.0)
-    return o, M
+    def covered(p):
+        """How far inside the doublet's edges a point of the body lies (negative where it is not covered). The
+        front's two edges are laced shut below the collar's opening, so they are no edge here."""
+        out = np.minimum(lines[0][1](p), lines[1][1](p))
+        return np.minimum(out, np.where(p[:, 2] < M['z_v'], 1e3, lines[2][1](p)))
+    return o, M, covered

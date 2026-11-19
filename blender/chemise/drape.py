@@ -357,9 +357,13 @@ PLAIN = {'fold': 0.0, 'sleeve_fold': 0.0, 'swell': 0.0, 'gather': 0.0, 'ease': 0
 
 
 def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIOS, log=print, settle=True,
-                  colliders=()):
+                  colliders=(), under=None):
     """Draft the chemise on the body (M: fit.measure's measurements) and hand it to the body's bones. settle: let
-    the cloth solver hang it on the posed body (and the colliders with it); without it the folds are drawn."""
+    the cloth solver hang it on the posed body (and the colliders with it); without it the folds are drawn.
+    under: a garment worn over it, as dict(covered=f, gap=g, garment=object): f(points) is how far inside that
+    garment's edges a point of the body lies (negative where the garment does not cover), g the room it leaves
+    between itself and the skin. The chemise's body is tucked into that room wherever it is covered, and its free
+    cloth (the sleeves, the hem) settled again round the garment."""
     ratios = dict(ratios, **PLAIN) if settle else dict(ratios, full=0.0)
     P, T, aw = fit.body_arrays(body)
     w = M['w']
@@ -499,6 +503,28 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
             at_cuff = near((share[edge] >= 0.5) & (V[edge, 2] < D.z_cuff + 1.5 * VOXEL), 0.7 * band, 2.5 * band)
             full = ratios['full'] * (1.0 - at_neck) * (1.0 - at_cuff) - ratios['cuff_in'] * at_cuff
             solver.settle(o, rig, [body, *colliders], full=full, log=log)
+            if under is not None:
+                # tucked: where the outer garment covers the body's cloth, the cloth is pressed into the room under
+                # it (its folds flattened against the skin, as a shirt's are under a laced doublet), held there, and
+                # the rest let go again with the garment itself to fall against
+                now = np.array([v.co[:] for v in me.vertices])
+                # (held right out to the garment's edge and let go over a short way beyond it: cloth half held under
+                # the edge is caught between the garment and the body and torn about)
+                held = (1.0 - share) * fit._ss(-0.3 * w, 0.0, under['covered'](now))
+                moved = 0
+                for i in np.nonzero(held > 0)[0]:
+                    p = Vector(now[i])
+                    loc, nrm, _, dist = trees[0].find_nearest(p)
+                    d = dist if (p - loc).dot(nrm) >= 0 else -dist
+                    if d > under['gap']:
+                        now[i] = p + (loc + nrm * under['gap'] - p) * float(held[i])
+                        moved += 1
+                me.vertices.foreach_set('co', now.reshape(-1))
+                me.update()
+                # (kept on the mesh: base/spots.py checks that every held point is still under the garment)
+                me.attributes.new('held', 'FLOAT', 'POINT').data.foreach_set('value', held.astype(np.float32))
+                log('chemise: %d points held under the %s, %d of them pressed in' % (int((held > 0).sum()), under['garment'].name, moved))
+                solver.settle(o, rig, [body, *colliders, under['garment']], pinned=held, P=dict(solver.LINEN, frames=60), log=log)
     m = o.modifiers.new('smooth', 'SUBSURF')
     m.levels = m.render_levels = 1
     m = o.modifiers.new('thickness', 'SOLIDIFY')

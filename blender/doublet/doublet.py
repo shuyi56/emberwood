@@ -1,8 +1,10 @@
-"""A standalone garment: an arming doublet on the bare mannequin (the anatomy thread's head-driven body), with none
-of the gown's pieces, nothing under it and nothing over it. The doublet is drafted in cut.py from the body's own
-measurements; this module supplies the body and the cloth's look.
+"""An arming doublet over the linen chemise, on the bare mannequin (the anatomy thread's head-driven body), with none
+of the gown's pieces and nothing over it. The doublet is drafted in cut.py from the body's own measurements; the
+chemise (blender/chemise) is tucked under it and its sleeves and hem settled round it; this module supplies the body
+and the doublet's cloth.
 
     python3 blender/base/views.py --figure doublet --mannequin --head --out DIR
+    DOUBLET_BARE=1 ...        the doublet alone, nothing under it
 
 --head frames the garment here (HEAD_CZ, HEAD_H below): from its hem to the chin."""
 import os
@@ -31,6 +33,9 @@ M_THREAD = female.mat_def(74, 'doublet thread', female.ramp(0xcdbf9c, 0.12), 0.0
 M_LACE = female.mat_def(75, 'doublet lace', female.ramp(0xb9a67c, 0.12), 0.0, closeup='cloth')
 M_AIGLET = female.mat_def(76, 'doublet aiglet', female.ramp(0xb08a3c, 0.12), 0.0, closeup='gold')
 MEASURES = {}
+BARE = os.environ.get('DOUBLET_BARE') is not None
+if not BARE:
+    LIGHT_SCALE = chemise.LIGHT_SCALE          # (the white sleeves need the same light: see chemise.py)
 
 
 def _rgb(h):
@@ -53,12 +58,17 @@ def build():
             o.hide_render = True
             o.visible_camera = o.visible_shadow = o.visible_diffuse = o.visible_glossy = False
     bpy.context.view_layer.update()
-    o, m = cut.build_doublet(body, heads, rig=bpy.data.objects.get('Rig'), cloth=female.mat(M_CLOTH),
+    o, m, covered = cut.build_doublet(body, heads, rig=bpy.data.objects.get('Rig'), cloth=female.mat(M_CLOTH),
                              thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET))
     MEASURES.update(m)
     chemise.linen_closeup('doublet fustian', FUSTIAN)
-    # the --head view on the garment: from under its hem to the chin
-    lo, hi = m['z_hem'] - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
+    lo = m['z_hem']
+    if not BARE:
+        # (the shirt has half the doublet's ease to lie in: the rest is the doublet's own lining and the lacing's pull)
+        _, d = chemise.dress(body, m, under=dict(covered=covered, gap=0.5 * cut.RATIOS['ease'] * m['w'], garment=o))
+        lo = min(lo, d.z_hem_worn)
+    # the --head view on the garments: from under the lowest hem to the chin
+    lo, hi = lo - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()
