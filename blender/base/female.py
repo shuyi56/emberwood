@@ -4322,7 +4322,13 @@ R_PELVIS_TURN, R_PELVIS_LIST, R_SWAY = 0.12, 0.05, 0.35
 # drawn well back past the ribs, the hand comes forward to about chest height); the elbow is held near a right angle,
 # closing a little as the arm comes forward and opening as it drives back
 R_ARM_SWING, R_ARM_BACK, R_ARM_LAG = 0.62, 0.12, 0.02
-R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.3, 0.07
+R_BEND, R_FOLD, R_ARM_CLEAR = 1.38, 0.5, 0.07
+# the wrist (John, 2026-11-19: the hand looked off, dead in line with the forearm like a paddle). A running hand is
+# carried loose: with the thumb on top it droops a little from the forearm's line (R_WRIST, toward the little finger),
+# trails the arm's swing (R_WRIST_LAG: dropped back as the arm drives forward, flicked through as it swings back),
+# is curled in a touch toward the body (R_WRIST_IN) and turned so the palm faces partly down (R_WRIST_TURN). All
+# well inside what a wrist bends: about 30 degrees toward the little finger, 60 folding in.
+R_WRIST, R_WRIST_LAG, R_WRIST_IN, R_WRIST_TURN = 0.24, 0.1, 0.14, 0.2
 # the ankle through the swing: (how far through the swing, the foot pointed away from the shin, degrees). In the air
 # the foot hangs from the shin, loose and pointed as the heel comes up behind, then drawn up to meet the ground. (It
 # is eased in from the push-off's pitch and out to the landing's over the first and last R_ANKLE_EASE of the swing.)
@@ -4451,7 +4457,8 @@ def pose_run(col):
         a = R_ARM_SWING * c - R_ARM_BACK
         sh.rotation_euler = (-a, s * (ARM_OUT + R_ARM_CLEAR + 0.06 * max(0.0, -a)), 0)
         el.rotation_euler = (-(R_BEND + R_FOLD * (0.5 + 0.5 * c)), s * ARM_CARRY, 0)
-        wr.rotation_euler = (0.04, 0, 0)
+        droop = R_WRIST - R_WRIST_LAG * math.sin(2 * math.pi * (t - 0.5 - R_ARM_LAG - 0.04))
+        wr.rotation_euler = (droop, -s * R_WRIST_IN, s * R_WRIST_TURN)
 
 
 # ---------------------------------------------------------------- render and pixel-art conversion
