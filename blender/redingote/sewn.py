@@ -39,6 +39,7 @@ import sleeve  # noqa: E402
 
 CM = pattern.CM
 RATIOS = {
+    'gather_ramp': 3.0,                    # (the gathers eased in from each notch over this many of them)
     'lie_slope': 0.35,                     # (over the top, the cloth's least rise off the skin per its distance from the seam)
     'clear': 0.03,                         # (the least the cloth stands off the skin as sewn, in w)
     'under_hang': 8.0 / CM,                  # (the undersleeve hung from its seam over this, flat, before it lies on the arm)
@@ -503,7 +504,10 @@ def cut_and_sew(D, m, loops, pieces, ratios=RATIOS, log=print):
     # (down its own column from the head: the gathers hang from the stitching, they do not run down the seams)
     u = np.maximum(u, (Xt_f[:, :, 1] - Hf[None, :, 1]).ravel())
     tt = np.repeat(t_flat[None], ROWS, 0).ravel()
-    inside = sleeve._ss(n_in, n_in + 0.4 * pitch * full, tt) * (1.0 - sleeve._ss(L_head - n_in - 0.4 * pitch * full, L_head - n_in, tt))
+    # (eased in and out over a few gathers from each notch: begun at once, they stopped in a hard upright line at the
+    # bodice's front armhole edge, the fit test)
+    ramp = r['gather_ramp'] * pitch * full
+    inside = sleeve._ss(n_in, n_in + ramp, tt) * (1.0 - sleeve._ss(L_head - n_in - ramp, L_head - n_in, tt))
     k = _sine_amp(full)
     A = k * pitch                                              # (at the stitching: all the extra length in the folds)
     fade = sleeve._ss(0.0, r['stitch_draw'], u) * np.exp(-u / (r['gather_open'] * w))
@@ -789,6 +793,14 @@ def build_sewn(body, M, rig=None, material=None, button_material=None, log=print
             if rig is not None:
                 mo = extra.modifiers.new('rig', 'ARMATURE')
                 mo.object = rig
+        if rig is not None:
+            # (the thread kept off the skin as the cloth is, and on the cloth's face: on the left wrist the posed
+            # body came up through the cuff's topstitching, 0.22 deep, the fit test's geometry check)
+            mo = st.modifiers.new('keep off', 'SHRINKWRAP')
+            mo.target = body                                   # (the hand's too: the thumb's root is at the cuff)
+            mo.wrap_method = 'NEAREST_SURFACEPOINT'
+            mo.wrap_mode = 'OUTSIDE_SURFACE'
+            mo.offset = sleeve.KEEP_OFF * w + sleeve.RATIOS['thick'] * w
         sleeves.append(o)
         buttons.append(bt)
         stitches.append(st)
