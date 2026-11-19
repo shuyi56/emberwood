@@ -162,7 +162,7 @@ def _hem_stitches(o, posed):
     return np.array(pairs, dtype=int).reshape(-1, 2)
 
 
-def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, log=print):
+def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, floor_hard=False, log=print):
     """The same job as settle(), by the local XPBD solver (fabric-core.js's method: small steps, constraints with a
     compliance, the body pushes the points out) on the sewn mesh's own edges, in numpy. The skirt o is put on the
     posed body and let go: the top (from pin[1] up) is held as the waistband holds it, easing off to pin[0]."""
@@ -171,12 +171,19 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
     arm = next(m for m in o.modifiers if m.type == 'ARMATURE')
     arm.use_deform_preserve_volume = False
     B = _bone_matrices(o, rig)
+    # (the cloth as cut, rigged and pushed: without the thickness and the smoothing, which add points)
+    finish = [m for m in o.modifiers if m.name in ('thickness', 'smooth')]
+    shown = [m.show_viewport for m in finish]
+    for m in finish:
+        m.show_viewport = False
     bpy.context.view_layer.update()
     ev0 = o.evaluated_get(bpy.context.evaluated_depsgraph_get())
     posed = np.empty(n * 3)
     ev0.data.vertices.foreach_get('co', posed)
     posed = posed.reshape(-1, 3)
     start = posed.copy()
+    for m, v in zip(finish, shown):
+        m.show_viewport = v
     pts, polys = _posed(colliders)
     tree = BVHTree.FromPolygons(pts, polys)
     faces = [tuple(p.vertices) for p in o.data.polygons]
@@ -196,7 +203,7 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
     w = 1.0 - hold
     w[hold > 0.999] = 0.0
     gaps = np.full(n, P['gap']) if gap is None else np.array([gap(p) for p in posed])      # (the cloth's stand-off from the skin, by height)
-    key = _cache_key(start, len(faces), np.array(pts)[::7], P, pin, gaps)
+    key = _cache_key(start, len(faces) + (7 if floor_hard else 0), np.array(pts)[::7], P, pin, gaps)
     path = os.path.join(CACHE, 'skirt-%s.npy' % key)
     if os.path.exists(path):
         out = np.load(path)
@@ -212,7 +219,8 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
     h = P['h']
     keep = (1.0 - P['damping']) ** (h * 60)
     free = np.nonzero(w > 0)[0]
-    low = np.minimum(floor_z + 0.02, start[:, 2])        # (the floor; the hem's fold already on it stays)
+    # (the floor; at rest the hem's fold already on it stays, and in a pose every point is held above it)
+    low = np.full(n, floor_z + 0.02) if floor_hard else np.minimum(floor_z + 0.02, start[:, 2])        # (the floor; the hem's fold already on it stays)
     t0 = time.time()
     for step in range(P['steps']):
         v = (x - prev) * keep
@@ -241,7 +249,20 @@ def settle_xpbd(o, rig, colliders, floor_z, P=XPBD, pin=(0.0, 1.0), gap=None, lo
                 p = np.array(x[i]) - np.array(loc)
                 side = float(np.dot(p, np.array(nrm)))
                 if side < gaps[i]:
-                    x[i] = np.array(loc) + np.array(nrm) * gaps[i]
+                    nrm = np.array(nrm)
+                    target = np.array(loc) + nrm * gaps[i]
+                    if side < 0.0:
+                        # inside a leg: the skirt's own outside is the way out (away from its axis), not the nearest
+                        # side, which is the leg's inner face when the leg has come out through the cloth behind it
+                        r = np.array([x[i, 0], x[i, 1], 0.0])
+                        rl = np.linalg.norm(r)
+                        if rl > 1e-6:
+                            r /= rl
+                            hit = tree.ray_cast(tuple(x[i]), tuple(r), 12.0)
+                            if hit[0] is not None:
+                                target = np.array(hit[0]) + r * gaps[i]
+                                nrm = r
+                    x[i] = target
                     pushed[i] += 1
                     # (friction: the push takes away the slide along the body, and the speed it gave)
                     nn = np.array(nrm)

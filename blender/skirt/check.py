@@ -2,6 +2,7 @@
 
     python3 blender/skirt/check.py --out DIR [--walk 8] [--angles 3/4,profile] [--size 300] [--samples 12]
     python3 blender/skirt/check.py --out DIR --pattern --walk 0      (the flat pattern pieces and their paired edges)
+    SKIRT_SETTLE=1 python3 blender/skirt/check.py --out DIR --solve  (every walk frame solved against the posed legs, cached)
     CANON_H=10.4 WAIST_W=4.6 python3 blender/skirt/check.py --out DIR          (an altered body: see anatomy.py)
 
 The build is the skirt's own (skirt.build(), on the mannequin). The numbers it prints are the checks: the measures
@@ -134,6 +135,11 @@ def main():
     sc.cycles.use_denoising = True
     sc.render.resolution_x, sc.render.resolution_y = size, int(size * 1.75)
     root = female.FIG['root']
+    rest0 = [v.co.copy() for v in sk.data.vertices]
+    rig_obj = bpy.data.objects['Rig']
+    for o in ('Riding skirt stitches', 'Riding skirt seams'):
+        if '--solve' in argv and bpy.data.objects.get(o):
+            bpy.data.objects[o].hide_render = True
     floor = skirt.MEASURES['floor_z']
     cam.data.ortho_scale = (64.0 - floor) * 1.06
     from PIL import Image
@@ -143,6 +149,21 @@ def main():
             if not rest:
                 female.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
             bpy.context.view_layer.update()
+            if '--solve' in argv:
+                # (the cloth solved against the legs as they stand in this pose, from the rest drape: John's per-pose solve)
+                import settle
+                for v, co in zip(sk.data.vertices, rest0):
+                    v.co = co
+                sk.data.update()
+                M, H = skirt.MEASURES, skirt.MEASURES['H']
+
+                def stand_off(p):
+                    t = min(1.0, max(0.0, (p[2] - (M['crotch_z'] + 0.1 * H)) / (-0.3 * H)))
+                    t = t * t * (3 - 2 * t)
+                    return 0.012 * H + (0.06 * H - 0.012 * H) * t
+                settle.settle_xpbd(sk, rig_obj, [body] + hands, floor, pin=(M['hips_z'] - 0.2 * H, M['hips_z']), gap=stand_off,
+                                   floor_hard=True)
+                bpy.context.view_layer.update()
             if '--stacks' in argv:
                 # (the push's own work: the same frame with the modifiers that move the cloth on, one more at a time)
                 for stack in (['rig'], ['rig', 'push', 'push hips'], ['rig', 'push', 'push hips', 'push smooth', 'push again', 'push hips again', 'floor']):
