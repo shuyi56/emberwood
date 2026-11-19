@@ -1236,13 +1236,60 @@ THREAD_NAMES = {
     "cmsg_01CnnKqGvuWEUi2G9X9cb9nB58A32xihrD4suX2WgSKk5h": "World walk",
     "cmsg_01CnnKqGvuWEUi2G9X9cb9nBU9x4GTj8QLYGorRA6gLuHc": "Creator heads",
     "cmsg_01CnnKqGvuWEUi2G9X9cb9nBUhdiu12Gy6W5kaV1SvyEVc": "Face creator",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBA3b81CneeuYShgwNpSXbXe": "Sleeves",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBQkfRWVrSdTJkEPgPFsn9m6": "Hose and boots",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBBfxoRfhjYNDgEMgK2GDcKJ": "Riding skirt",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nB4hFTQqChHhnYciZn4Te2QE": "Vest, chemise and doublet",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBWHNmAC96iG7dkSuFhMvCv4": "Head and neck",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nB8K2NHFFcGop9VHSKeLiCHR": "Bodice",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBPFTNW92soZDZD4MFuoM2uf": "Petticoat",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nB4anKPy38sg1qeMmhbwzNnt": "Corset",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBYUips3shtbgvsGwsUspf95": "Cloak",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBQCTaqo5NACgyA2VUZDR8Rq": "Necklaces",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBPFdbEQxN22vaxHSoyHyetD": "Ranger hair",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBG3u7qgVcdd4PjmWwFqtjfQ": "Cape physics",
+    "cmsg_01CnnKqGvuWEUi2G9X9cb9nBDY4MDu8mY63XYh5NxKA37m": "Mannequin anatomy",
 }
+
+
+def _view_kinds(views, outputs):
+    """What a request renders, in plain words, for the tracking page's filter."""
+    out = [o for o in outputs if o != "views"]
+    for v in views or []:
+        w = v.split()
+        if w and w[0] == "pose-strip" or "--poses" in w:
+            out.append("pose strip")
+        if w and w[0] == "crop" or "--crop" in w:
+            out.append("crop")
+        if "--turn" in w:
+            out.append("turn")
+        if "--head" in w:
+            out.append("close-up")
+        if "--walk" in w or "--run" in w:
+            out.append("walk")
+    return list(dict.fromkeys(out)) or list(outputs)
+
+
+def _figures(views):
+    out = []
+    for v in views or []:
+        w = v.split()
+        if "--figure" in w and w.index("--figure") + 1 < len(w):
+            out.append(w[w.index("--figure") + 1])
+    return list(dict.fromkeys(out))
 
 
 def cmd_export(a):
     """Write the queue as JSON rows for the tracking page: one row per request, newest first."""
     s = load()
     rows = []
+    users = {}
+    for r in s["requests"]:
+        for k in r.get("jobs") or []:
+            users.setdefault(k, set()).add(r["id"])
+    shared = {k for k, ids in users.items() if len(ids) > 1}
+    sets_of = {k for k in users if "OUTFIT=" in k or os.path.exists(os.path.join(RESULTS, k, "manifest.json"))
+               and json.load(open(os.path.join(RESULTS, k, "manifest.json"))).get("set")}
     for r in s["requests"]:
         secs, fin, kinds = 0, r.get("finished"), []
         for k in r.get("jobs") or []:
@@ -1263,6 +1310,11 @@ def cmd_export(a):
             "results": ", ".join(os.path.join("render-queue/results", os.path.basename(p))
                                  for p in (r.get("results") or {}).values()),
             "warnings": (f"{len(r['warnings'])} undefined name(s) after the merge" if r.get("warnings") else ""),
+            "piece": ", ".join(_figures(r.get("views"))),
+            "quality": r.get("quality") or ("final" if "views" in r["outputs"] else ""),
+            "kind": ", ".join(_view_kinds(r.get("views"), r["outputs"])),
+            "combined": "set" if any(k in sets_of for k in r.get("jobs") or []) else
+                        ("shared" if any(k in shared for k in r.get("jobs") or []) else "alone"),
         })
     rows.sort(key=lambda x: -x["id"])
     sched = [{"item": "Full sheet, .blend and world model", "when": "Daily, 2:41 AM Toronto, only when the queue is idle",
