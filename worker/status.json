@@ -1,0 +1,269 @@
+﻿{
+    "state":  "BUSY free memory N GB (under N GB)",
+    "job":  null,
+    "pending":  [
+                    "demo-mannequin-front"
+                ],
+    "recent":  [
+                   {
+                       "key":  "test-views-7177cd1b9b5a",
+                       "sha":  "20ff3afa8d511f40314438da223ce9b8370627c0",
+                       "outcome":  "failed",
+                       "seconds":  8,
+                       "build_seconds":  null,
+                       "peak_gb":  null,
+                       "reason":  "exit 1",
+                       "at":  "2026-11-18T05:39:48Z",
+                       "log_tail":  [
+                                        {
+                                            "value":  "00:05.406  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  1
+                                        },
+                                        {
+                                            "value":  "rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  2
+                                        },
+                                        {
+                                            "value":  "rq memo: head key 1b59eb4bed3ddbaf33e6",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  3
+                                        },
+                                        {
+                                            "value":  "hair clearance 64 s",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  4
+                                        }
+                                    ]
+                   },
+                   {
+                       "key":  "test-views-7177cd1b9b5a",
+                       "sha":  "20ff3afa8d511f40314438da223ce9b8370627c0",
+                       "outcome":  "failed",
+                       "seconds":  3,
+                       "build_seconds":  null,
+                       "peak_gb":  null,
+                       "reason":  "exit 1",
+                       "at":  "2026-11-18T05:40:25Z",
+                       "log_tail":  [
+                                        {
+                                            "value":  "00:05.406  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  1
+                                        },
+                                        {
+                                            "value":  "rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  2
+                                        },
+                                        {
+                                            "value":  "rq memo: head key 1b59eb4bed3ddbaf33e6",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  3
+                                        },
+                                        {
+                                            "value":  "hair clearance 64 s",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  4
+                                        }
+                                    ]
+                   },
+                   {
+                       "key":  "test-views-7177cd1b9b5a",
+                       "sha":  "20ff3afa8d511f40314438da223ce9b8370627c0",
+                       "outcome":  "failed",
+                       "seconds":  3,
+                       "build_seconds":  null,
+                       "peak_gb":  null,
+                       "reason":  "exit 1",
+                       "at":  "2026-11-18T05:41:06Z",
+                       "log_tail":  [
+                                        {
+                                            "value":  "00:05.406  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  1
+                                        },
+                                        {
+                                            "value":  "rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  2
+                                        },
+                                        {
+                                            "value":  "rq memo: head key 1b59eb4bed3ddbaf33e6",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  3
+                                        },
+                                        {
+                                            "value":  "hair clearance 64 s",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  4
+                                        }
+                                    ]
+                   },
+                   {
+                       "key":  "test-views-7177cd1b9b5a",
+                       "sha":  "20ff3afa8d511f40314438da223ce9b8370627c0",
+                       "outcome":  "aborted",
+                       "seconds":  278,
+                       "build_seconds":  null,
+                       "peak_gb":  null,
+                       "reason":  "free memory 1.0 GB (under 1.5 GB)",
+                       "at":  "2026-11-18T05:41:28Z",
+                       "log_tail":  [
+                                        {
+                                            "value":  "00:05.406  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  1
+                                        },
+                                        {
+                                            "value":  "rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  2
+                                        },
+                                        {
+                                            "value":  "rq memo: head key 1b59eb4bed3ddbaf33e6",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  3
+                                        },
+                                        {
+                                            "value":  "hair clearance 64 s",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  4
+                                        }
+                                    ]
+                   },
+                   {
+                       "key":  "test-views-7177cd1b9b5a",
+                       "sha":  "20ff3afa8d511f40314438da223ce9b8370627c0",
+                       "outcome":  "aborted",
+                       "seconds":  294,
+                       "build_seconds":  null,
+                       "peak_gb":  null,
+                       "reason":  "free memory 0.6 GB (under 1.5 GB)",
+                       "at":  "2026-11-18T05:47:39Z",
+                       "log_tail":  [
+                                        {
+                                            "value":  "00:05.406  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  1
+                                        },
+                                        {
+                                            "value":  "rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  2
+                                        },
+                                        {
+                                            "value":  "rq memo: head key 1b59eb4bed3ddbaf33e6",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  3
+                                        },
+                                        {
+                                            "value":  "hair clearance 64 s",
+                                            "PSPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a\\render.log",
+                                            "PSParentPath":  "C:\\ai\\rq\\out\\test-views-7177cd1b9b5a",
+                                            "PSChildName":  "render.log",
+                                            "PSDrive":  "C",
+                                            "PSProvider":  "Microsoft.PowerShell.Core\\FileSystem",
+                                            "ReadCount":  4
+                                        }
+                                    ]
+                   },
+                   {
+                       "key":  "test-mannequin-2db9565",
+                       "sha":  "2db9565bdd9732dc63a0a529184dfe4b66388202",
+                       "outcome":  "done",
+                       "seconds":  84,
+                       "build_seconds":  null,
+                       "peak_gb":  2.03,
+                       "reason":  null,
+                       "at":  "2026-11-18T05:53:29Z"
+                   },
+                   {
+                       "key":  "test2-mannequin-2db9565",
+                       "sha":  "2db9565bdd9732dc63a0a529184dfe4b66388202",
+                       "outcome":  "done",
+                       "seconds":  89,
+                       "build_seconds":  61,
+                       "peak_gb":  2.02,
+                       "reason":  null,
+                       "at":  "2026-11-18T05:55:41Z"
+                   }
+               ]
+}
