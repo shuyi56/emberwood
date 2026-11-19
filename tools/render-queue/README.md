@@ -305,6 +305,26 @@ built deadlocks in the child (tested: the garment's build hangs in a thread wait
 scene saved after the body build, plus the base modules' Python state restored. That is the next speed-up to
 build.
 
+## Hogging warnings
+
+The queue warns, and never blocks or reorders, when one thread takes more than its share. `rq.py add` prints an
+`rq warning:` line to the thread that sent the request and logs a `hog` event; the dashboard shows the warnings in
+force under "Queue hogging"; and the nightly stats (`rq_stats.py`) list each thread's share of the day's render time
+and every warning it would have raised, replayed every 15 minutes. `rq.py hogs` prints the warnings in force now.
+
+The rules (`HOG` in `rq.py`), picked from the telemetry of 19 November, when the boots and the sleeves each sent the
+same view eight times in an afternoon:
+
+| Rule | Fires when |
+|------|------------|
+| `hour_share` | a thread used over 50% of the last hour's render time (and at least 10 minutes) while another thread waited 2 minutes or more for a slot |
+| `day_share` | the same over the last 24 hours, at 35% and at least 30 minutes |
+| `repeat` | a thread asked for the same views 4 times in 3 hours (superseded requests don't count) |
+| `streak` | a thread sent 5 requests in a row while another thread had one waiting or rendering (the parts of one set, sent within 15 s, count as one) |
+
+Render time is split among the requests a job served, so a shared set build is not charged twice. Being alone on the
+queue is never hogging: the share rules need a second thread that actually waited.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it
