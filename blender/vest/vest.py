@@ -21,16 +21,12 @@ import bpy  # noqa: E402
 import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 import fit  # noqa: E402
-import chemise  # noqa: E402
 
 M_VEST = female.mat_def(70, 'vest leather', female.ramp(int(os.environ.get('VEST', '8a5a34'), 16), 0.12), 0.0,
                         surface='leather', closeup='leather')
 # (the plate is the warden's bronze: the same ramp for the sprite, and for the 3D look her bronze_closeup itself,
 # read out of warden.py, so the two stay one material; importing her module would set her face and hair on this figure)
 M_BRASS = female.mat_def(71, 'vest bronze', female.ramp(0x9a6438, 0.12), 0.0, closeup='steel')
-# (the chemise under it: bleached linen; its 3D look is chemise.linen_closeup)
-M_LINEN = female.mat_def(72, 'chemise linen', female.ramp(0xdcd8cc, 0.12), 0.0, closeup='linen')
-CHEMISE = os.environ.get('VEST_CHEMISE', '1') != '0'
 BRASS = os.environ.get('VEST_PLAIN') is None     # (VEST_PLAIN=1: the leather alone)
 MEASURES = {}
 
@@ -214,14 +210,8 @@ def build():
         warden_bronze()('vest bronze')
         if os.environ.get('VEST_GLAZE', '1') != '0':
             glaze_coat('vest bronze')
-    if CHEMISE:
-        shirt, _ = chemise.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
-                                         vest_objs=[o for o in (vest, bpy.data.objects.get('Vest plates')) if o])
-        chemise.linen_closeup('chemise linen')
-        chemise.under_vest(shirt, vest)
-    # the --head view on the bust and neck: from under the bust to the chin, centred between them (with the chemise,
-    # from the elbows up, wide enough for the sleeves)
-    lo, hi = m['z_bust'] - (3.6 if CHEMISE else 2.0) * m['w'], m['z_chin'] + 1.1 * m['w']
+    # the --head view on the bust and neck: from under the bust to the chin, centred between them
+    lo, hi = m['z_bust'] - 2.0 * m['w'], m['z_chin'] + 1.1 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()
