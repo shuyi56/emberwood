@@ -114,8 +114,11 @@ def main():
     body = bpy.data.objects['Skin body']
     hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o]
     # (what the sheet keyed on the timeline: the walk is posed by hand here, a frame at a time)
+    rest = '--rest' in argv                     # (the pose the skirt was built and settled in: frame 1, as views.py shows it)
+    if rest:
+        sc.frame_set(1)
     for o in sc.objects:
-        if o.animation_data:
+        if o.animation_data and not rest:
             o.animation_data_clear()
     cam = lights()
     sc.render.engine = 'CYCLES'
@@ -137,7 +140,8 @@ def main():
     grid = [[None] * n for _ in names]
     with tempfile.TemporaryDirectory() as tmp:
         for k in range(n):
-            female.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
+            if not rest:
+                female.pose(2 - 0.5 + female.WALK + k * female.WALK / n)
             bpy.context.view_layer.update()
             if '--stacks' in argv:
                 # (the push's own work: the same frame with the modifiers that move the cloth on, one more at a time)

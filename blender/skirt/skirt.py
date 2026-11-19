@@ -28,6 +28,7 @@ os.environ.setdefault('NO_DRESS', '1')
 os.environ.setdefault('NO_ACC', '1')
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
+from mathutils import Vector  # noqa: E402
 import female  # noqa: E402
 import draft  # noqa: E402
 import settle  # noqa: E402
@@ -37,7 +38,8 @@ import sorceress_pendant as SP  # noqa: E402
 
 FRAMES = ('skirt', 'waist', 'hem', 'train')
 VIEW = 0
-SETTLE = os.environ.get('SKIRT_SETTLE') == '1'    # let the cloth solver drape it; off by default: the drafted pattern as cut
+SETTLE = int(os.environ.get('SKIRT_SETTLE', '0') or 0)   # 0: the pattern as cut; 1: the local solver drapes it (settle.settle_xpbd);
+                             # 2: Blender's cloth (final renders only). views.py: --set SETTLE=1
                              # (John's rule, 2026-11-19: a new layer is seen first without the solver; the solver round
                              # comes only after that render has been looked at, and never on the whole stack by default)
 PUSH = True                  # keep the legs out of the cloth through the walk
@@ -357,6 +359,39 @@ def carry_weights(src, o):
             groups[nm].add([v.index], g.weight, 'REPLACE')
 
 
+def _tris(sk):
+    return [(p.vertices[0], p.vertices[k], p.vertices[k + 1]) for p in sk.data.polygons for k in range(1, len(p.vertices) - 1)]
+
+
+def carry_move(sk, o, before, after):
+    """Carry another object's points to where the settled cloth is: each point keeps its place on the cloth it lay on
+    (the triangle under it, the weights in it, and its depth below the surface), so the stitches and the pressed
+    allowances stay on the cloth through folds and pools instead of poking out of it."""
+    from mathutils.bvhtree import BVHTree
+    tris = _tris(sk)
+    B = [Vector(tuple(p)) for p in before]
+    A = [Vector(tuple(p)) for p in after]
+    tb = BVHTree.FromPolygons(B, tris)
+    for v in o.data.vertices:
+        loc, nrm, fi, d = tb.find_nearest(v.co)
+        if loc is None:
+            continue
+        i, j, k = tris[fi]
+        # barycentric weights of loc in the old triangle
+        a, b, c = B[i], B[j], B[k]
+        n = (b - a).cross(c - a)
+        area = n.dot(n) or 1e-12
+        wa = (b - loc).cross(c - loc).dot(n) / area
+        wb = (c - loc).cross(a - loc).dot(n) / area
+        wc = 1.0 - wa - wb
+        depth = (v.co - loc).dot(nrm)
+        nn = (A[j] - A[i]).cross(A[k] - A[i])
+        nn = nn.normalized() if nn.length > 1e-12 else nrm
+        if nn.dot(nrm) < 0:
+            nn = -nn
+        v.co = A[i] * wa + A[j] * wb + A[k] * wc + nn * depth
+
+
 def make_skirt(body, rig, M, name='Riding skirt', under=None):
     """Draft the skirt on the body from its measures M, cut the pattern's pieces as cloth, sew them (sew.py) and hand
     the result to the body's bones. Returns the object, the draft and the sewing's extras (the stitches and the
@@ -411,10 +446,19 @@ def build():
             add_push(o, body, M)
     if SETTLE:
         hands = [o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o]
-        P = dict(settle.WOOL)
-        P['pin_to'], P['pin_from'] = M['hips_z'], M['hips_z'] - 0.2 * H
         bpy.context.scene.frame_set(1)
-        settle.settle(sk, rig, [proxy] + hands, M['floor_z'], P)
+        before = np.array([tuple(v.co) for v in sk.data.vertices])
+        if SETTLE == 2:
+            P = dict(settle.WOOL)
+            P['pin_to'], P['pin_from'] = M['hips_z'], M['hips_z'] - 0.2 * H
+            settle.settle(sk, rig, [proxy] + hands, M['floor_z'], P)
+        else:
+            settle.settle_xpbd(sk, rig, [proxy] + hands, M['floor_z'], pin=(M['hips_z'] - 0.2 * H, M['hips_z']))
+        after = np.array([tuple(v.co) for v in sk.data.vertices])
+        for o in aux:                    # (the stitches and the pressed allowances go with the cloth they lie on)
+            carry_move(sk, o, before, after)
+            if os.environ.get('SKIRT_NOAUX'):
+                o.hide_render = o.hide_viewport = True
     finish_skirt(sk, D)
     wool_closeup('skirt wool')
     floor = M['floor_z']
