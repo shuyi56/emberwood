@@ -27,7 +27,7 @@ RATIOS = dict(
     lame=15.5,               # the height of one lame showing, in degrees
     lames=4,
     lap=6.0,                 # how far a plate runs up under the one above, in degrees
-    round_cop=122.0,         # how far round from straight out the cop reaches, front and back, in degrees
+    round_cop=100.0,         # how far round from straight out the cop reaches, front and back, in degrees
     round_lame=94.0,         # and the lames (the inside of the arm is left bare)
     inner=0.80,              # toward the neck the cop stops at this share of the way out to the shoulder point
     corner=0.35,             # the radius of a plate's corners, in w
@@ -37,6 +37,8 @@ RATIOS = dict(
                              # thicknesses: the groove between two lames
     flare_cop=0.34,          # the cop's lower edge is turned out by this much, in w: the top plate flares, a
                              # brim over the lames
+    cop_sit=1.0,             # the cop stands this far off the shoulder's smoothed round, in plate thicknesses
+    cop_ride=1.4,            # and this far proud of the first lame where it laps it
     curl_in=0.70,            # the rim comes back in by this share of the flare
     flare_lame=0.16,         # and each lame's lower edge, by this much
     flare_last=0.30,         # the lowest lame's the most of the lames: the fall ends in a kick
@@ -85,10 +87,21 @@ class Shoulder:
         # (stood off by the most the dressed shoulder comes through it, within the cop's reach)
         # (measured over the arm's side of the shoulder only: toward the neck the rays find the collar, far off)
         side_r = float(self.R[int(round(90.0 / D_TH)), int(round(180.0 / D_AL))])
-        near = np.minimum(self.R, 1.35 * side_r)
-        even = fit._blur(fit._blur(near, 9.0, 0, False), 12.0, 1, True)
-        reach = (self.th <= math.radians(ratios['cop']))[:, None] & (np.abs(self.al) <= math.radians(100.0))[None, :]
-        self.R_cop = even + min(max(float(np.percentile((near - even)[reach], 95)), 0.0), 0.25 * w)
+        # (clamped only toward the neck, past where the cop reaches round: within its reach, front and back, it has
+        # to clear the breastplate's own chest and back, which stand well out from the shoulder's centre)
+        neckward = (np.abs(self.al) > math.radians(ratios['round_cop'] + 12.0))[None, :]
+        near = np.where(neckward, np.minimum(self.R, 1.35 * side_r), self.R)
+        # (a smooth envelope over it: blurred, lifted to everything it was blurred from, and blurred again, until it
+        # lies over the dressed shoulder everywhere and follows none of its lumps)
+        even = near.copy()
+        for _ in range(12):
+            even = fit._blur(fit._blur(np.maximum(near, even), 5.0, 0, False), 7.0, 1, True)
+        reach = (self.th <= math.radians(ratios['cop'] + ratios['curl']))[:, None] & (np.abs(self.al) <= math.radians(ratios['round_cop']))[None, :]
+        # (and lifted only where something still comes through it, locally, not the whole dome by its worst point)
+        rest = np.maximum(near - even, 0.0)
+        for _ in range(4):
+            rest = np.maximum(rest, fit._blur(fit._blur(rest, 2.5, 0, False), 3.5, 1, True))
+        self.R_cop = even + rest
         self.R_side = float(self.R[int(round(90.0 / D_TH)), int(round(180.0 / D_AL))])
 
     def radius(self, th, al, cop=False):
@@ -109,6 +122,10 @@ class Shoulder:
         return np.arccos(np.clip(q[:, 2] / np.maximum(r, 1e-9), -1.0, 1.0)), np.arctan2(q[:, 1], self.side * q[:, 0]), r
 
 
+def fit_smin(a, b, k):
+    return fit._smin(a, b, k)
+
+
 def _lift(S, name, u, th):
     """How far a plate stands off the measured shoulder at u across it (0 its top edge, 1 its bottom), at th down
     from straight up. Tucked under the plate above at its top, proud at its bottom where it laps the next, raised
@@ -119,13 +136,14 @@ def _lift(S, name, u, th):
     square = (np.abs(np.sin(th)) ** n + np.abs(np.cos(th)) ** n) ** (-1.0 / n) - 1.0      # (0 at the top and the side)
     box = (r['box_out'] * w + S.R_side * 1.0) * square * (th < 0.5 * math.pi)
     if name == 'cop':
-        # (the cop swells out from its top to its widest, where the plain cop ended, and from there its rim bends
-        # in again toward the first lame: a round dome closed over the lames, not a brim turned up to a point)
-        peak = r['cop'] / (r['cop'] + r['curl'])
-        v = np.clip(u / peak, 0.0, 1.0)
-        back = np.clip((u - peak) / (1.0 - peak), 0.0, 1.0)
-        swell = (2.0 * v - v * v) ** 1.5 * (1.0 - r['curl_in'] * np.sin(0.5 * math.pi * back) ** 2)
-        return box + t_pl * r['step'] + r['flare_cop'] * w * swell
+        # The cop sits close on the shoulder: a plate's thickness off its smoothed round, with none of the lames'
+        # squaring or flare. Only where it laps the first lame does it stand out, just enough to ride over it.
+        fit = t_pl * r['cop_sit']
+        a1 = math.radians(r['cop'] - 2.0 * r['lap'])
+        b1 = math.radians(r['cop'] + r['lame'] + r['curl'])
+        u1 = np.clip((th - a1) / (b1 - a1), 0.0, 1.0)
+        over = (_lift(S, 'lame 1', u1, th) + t_pl * r['cop_ride']) * (th > a1)
+        return -fit_smin(-fit, -over, 3.0 * t_pl)
     k = r['flare_last'] if name == 'lame %d' % r['lames'] else r['flare_lame']
     return box + t_pl * (r['step'] * u + r['dome'] * np.sin(math.pi * u)) + k * w * u ** 2
 
