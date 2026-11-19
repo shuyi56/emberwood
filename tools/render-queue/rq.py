@@ -1083,6 +1083,11 @@ def expand_view(v):
     """The named views a thread may ask for: "pose-strip ARGS" and "crop SPECS ARGS", and views.py with --crop or
     --poses, all run as the queue's rq_views.py."""
     w = shlex.split(v)
+    env = []
+    while w and (w[0] == "env" or ("=" in w[0] and not w[0].startswith("-"))):
+        env.append(w.pop(0))
+    if env and env[0] != "env":
+        env.insert(0, "env")
     if not w:
         return v
     if w[0] == "pose-strip":
@@ -1091,14 +1096,11 @@ def expand_view(v):
             rest += ["--poses", "all"]
         if "--mannequin" not in rest:
             rest.append("--mannequin")
-        return shlex.join([RQ_VIEWS] + rest)
+        return shlex.join(env + [RQ_VIEWS] + rest)
     if w[0] == "crop":
         if len(w) < 2:
             sys.exit("crop needs the regions: crop shoulder,hem --figure F (see rq_views.py for the names)")
-        return shlex.join([RQ_VIEWS] + w[2:] + ["--crop", w[1]])
-    env = []
-    while w and (w[0] == "env" or ("=" in w[0] and not w[0].startswith("-"))):
-        env.append(w.pop(0))
+        return shlex.join(env + [RQ_VIEWS] + w[2:] + ["--crop", w[1]])
     if w and w[0] == VIEWS_PY and ("--crop" in w or "--poses" in w):
         return shlex.join(env + [RQ_VIEWS] + w[1:])
     return v
