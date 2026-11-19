@@ -77,6 +77,8 @@ HEAD = {
     'rise': 1.30,                # it reaches it this far from the seam, in w, rising from the seam as a smooth step
     'dir_floor': 0.12,           # the least of it, where the skin faces up or forward and back into the bodice
 }
+BODICE = 'Redingote bodice'        # the bodice worn over the sleeve's head, when it is in the scene
+BODICE_REACH = 0.6               # (its armhole edge looked for this near the seam, in w)
 ROWS = 150                       # rows from the head to the wrist
 COLS_UNDER = 64                  # columns across the undersleeve
 
@@ -111,14 +113,49 @@ class Sewing:
         # (on the skin itself: in front of and behind the arm the loop spans the armpit's hollow and stood off the
         # chest, and the sleeve's edge hung there as a rim with a dark slot under it, #206 and #212)
         c = 0.3 * D.r['ease_head'] * w
-        pts = []
+        pts, ns = [], []
         for p in fine:
             loc, nrm, _, _ = D.b_all.find_nearest(Vector(p))
             pts.append(np.array(loc) + c * np.array(nrm) if loc is not None else p)
+            ns.append(np.array(nrm) if loc is not None else np.zeros(3))
         pts = np.array(pts)
+        off_n = np.array(ns)
         k = max(2, len(pts) // 120)                            # (eased along the loop: the snap is ragged)
         for _ in range(3):
             pts = sum(np.roll(pts, i, 0) for i in range(-k, k + 1)) / (2 * k + 1)
+        # (worn under a bodice, the stitching tucked just under the bodice's own armhole edge: over the corset that
+        # edge stands off the skin across the armpit's hollow, and the sleeve on the skin below it showed as a dark
+        # notch at the front of the armhole, #232)
+        bod = bpy.data.objects.get(BODICE)
+        if bod is not None and bod.type == 'MESH':
+            from mathutils.bvhtree import BVHTree
+            dg = bpy.context.evaluated_depsgraph_get()
+            e = bod.evaluated_get(dg)
+            me = e.to_mesh()
+            me.calc_loop_triangles()
+            bv = BVHTree.FromPolygons([bod.matrix_world @ v.co for v in me.vertices],
+                                      [tuple(t.vertices) for t in me.loop_triangles])
+            e.to_mesh_clear()
+            tuck = 0.5 * c
+            mv = np.zeros((len(pts), 3))
+            for i, p in enumerate(pts):
+                loc, nrm, _, dist = bv.find_nearest(Vector(p))
+                if loc is None or dist > BODICE_REACH * w:
+                    continue
+                # (to just under the bodice's nearest cloth: let out onto its inside face, and where the bodice's
+                # armhole is cut wider than the loop, as under the arm's front, carried to its cut edge, so no skin
+                # shows between the two)
+                q = np.array(loc) - tuck * (np.array(loc) - p) / max(dist, 1e-9)
+                d = q - p
+                if float(np.dot(d, off_n[i])) < 0:                 # (never drawn in under the skin)
+                    d = d - float(np.dot(d, off_n[i])) * off_n[i]
+                mv[i] = d
+            k2 = max(2, len(pts) // 160)
+            for _ in range(3):
+                mv = sum(np.roll(mv, i, 0) for i in range(-k2, k2 + 1)) / (2 * k2 + 1)
+            pts = pts + mv
+            if os.environ.get('SEWN_DEBUG'):
+                print('sewn: tucked under the bodice, moved up to %.3f' % np.linalg.norm(mv, axis=1).max())
         self.seam_pts = pts
 
     def at(self, sig):

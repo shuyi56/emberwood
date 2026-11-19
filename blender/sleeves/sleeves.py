@@ -28,8 +28,8 @@ import sewn  # noqa: E402
 # a riding habit's navy broadcloth (the reference, MoMu's habit of ca. 1885-1895: a blue so dark it reads near black,
 # matte, with the faint sheen of a fulled, pressed face), and small black buttons
 NAVY = int(os.environ.get('SLEEVE_NAVY', '161b2a'), 16)
-M_WOOL = female.mat_def(90, 'sleeve wool', female.ramp(NAVY, 0.10), 0.0, surface='wool', closeup='wool', soft_edge=True)
-M_BUTTON = female.mat_def(91, 'sleeve buttons', female.ramp(0x18181c, 0.10), 0.0, closeup='leather')
+M_WOOL = female.mat_def(96, 'sleeve wool', female.ramp(NAVY, 0.10), 0.0, surface='wool', closeup='wool', soft_edge=True)
+M_BUTTON = female.mat_def(97, 'sleeve buttons', female.ramp(0x18181c, 0.10), 0.0, closeup='leather')
 MEASURES = {}
 
 
