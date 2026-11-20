@@ -41,6 +41,7 @@ import json
 import math
 import os
 import tempfile
+import time
 
 import numpy as np
 
@@ -345,6 +346,7 @@ class Report:
         self.creases = []          # per crease: dict(name, target_deg, achieved_deg, worst_deg, band, hinges)
         self.steps = 0
         self.corrections = 0
+        self.sheet = None
         self.ok = False
         self.why = ''
 
@@ -365,7 +367,8 @@ class Report:
         return '\n'.join([head] + rows)
 
     def as_dict(self):
-        return dict(ok=self.ok, why=self.why, steps=self.steps, corrections=self.corrections, creases=self.creases)
+        return dict(ok=self.ok, why=self.why, steps=self.steps, corrections=self.corrections, creases=self.creases,
+                    sheet=self.sheet)
 
 
 class Folds:
@@ -451,6 +454,38 @@ class Folds:
             out.append((float(angs.mean()), float(angs[np.argmax(np.abs(angs - tgt))])))
         return out
 
+    def measure_segments(self, x=None):
+        """Per crease: (t from, t to, angle in degrees) for each segment of its line, measured as measure() does."""
+        x = self.fab.pos if x is None else x
+        P = self.flat[:, :2]
+        cen = P[self.T].mean(1)
+        N = np.cross(x[self.T[:, 1]] - x[self.T[:, 0]], x[self.T[:, 2]] - x[self.T[:, 0]])
+        N /= np.maximum(np.linalg.norm(N, axis=1), 1e-12)[:, None]
+        out = []
+        for c in self.creases:
+            k, t, s = c.frame(cen)
+            W = c.width(self.h)
+            lo = (s < -0.5 * self.h) & (s > -2.5 * self.h)
+            hi = (s > W + 0.5 * self.h) & (s < W + 2.5 * self.h)
+            rows = []
+            # (each segment in pieces of about four rows, so a fold that varies along its line shows it)
+            for seg in range(len(c.line) - 1):
+                ts = t[(k == seg) & (lo | hi)]
+                if not len(ts):
+                    continue
+                edges = np.arange(ts.min(), ts.max() + 4 * self.h, 4 * self.h)
+                for a_, b_ in zip(edges[:-1], edges[1:]):
+                    inside = (k == seg) & (t >= a_) & (t < b_)
+                    A, B = lo & inside, hi & inside
+                    if A.sum() < 2 or B.sum() < 2:
+                        continue
+                    n0, n1 = N[A].mean(0), N[B].mean(0)
+                    n0 /= np.linalg.norm(n0)
+                    n1 /= np.linalg.norm(n1)
+                    rows.append((float(a_), float(b_), math.degrees(math.acos(np.clip(n0 @ n1, -1, 1)))))
+            out.append(rows)
+        return out
+
     # -- solving
 
     def _walk(self, H, rest, comp, h, batches, lam, w=None):
@@ -531,7 +566,7 @@ class Folds:
                 x[mv] = O + t[:, None] * ax + sa[:, None] * pa + F3[:, 2:3] * n
 
     def bake(self, body=None, h=1.0 / 240, ramp=None, speed=6.0, tol_deg=1.0, tol=2e-4, most=3000, passes=4,
-             damping=0.35, guide=True, correct=True, log=print):
+             damping=0.35, guide=True, correct=True, sheet=None, target=None, log=print):
         """Fold the sheet:
 
           1. over ramp seconds (default: the largest angle over speed, radians a second) the creases' rest angles
@@ -549,6 +584,11 @@ class Folds:
              cloth either side curved, so the angle across the fold is not the hinges' angle), its rests are scaled
              by the shortfall and the hold goes on (report.corrections counts these; report.gain the scales).
 
+        Every time it converges it draws the contour sheet (contours.py: sections across each fold and at heights,
+        the profiles, the angle along each crease, strain and bend on the pattern) to sheet (a .png path; default
+        a new file in the fold cache's sheets folder; False: none), over target ([n, 3]: the shape it should take,
+        if there is one), and report.sheet names it: look at it before any render (John's rule, 2026-11-20).
+
         passes: hinge walks a step. Returns a Report; report.ok is False if `most` steps ran out first, and
         report.why says by how much and where."""
         fab = self.fab
@@ -557,6 +597,7 @@ class Folds:
         comp = np.concatenate(self._comp)
         owner = np.concatenate(self._owner)
         gain = np.ones(len(self.creases))          # (each crease's rests scaled to make up what the measure lacks)
+        self.gain = gain
         batches = _colour(H, fab.w == 0)
         if ramp is None:
             ramp = max(abs(c.angle) for c in self.creases) / speed
@@ -622,9 +663,22 @@ class Folds:
             short = [c for c in rep.creases if not abs(c['achieved_deg'] - c['target_deg']) <= tol_deg]
             rep.why = ('%s %.1f deg off' % (short[0]['name'], short[0]['achieved_deg'] - short[0]['target_deg'])
                        if short else 'still moving') + ' after %d steps' % k
+        if rep.ok and sheet is not False:
+            rep.sheet = self.sheet(sheet, target)
         if log:
-            log(str(rep))
+            log(str(rep) + ('\n  contours: %s' % rep.sheet if rep.sheet else ''))
         return rep
+
+    def sheet(self, path=None, target=None):
+        """The contour sheet of the sheet as it is now (see contours.py); returns its path."""
+        import contours
+        if path is None:
+            d = os.path.join(cache_dir(), 'sheets')
+            os.makedirs(d, exist_ok=True)
+            name = '-'.join(''.join(ch if ch.isalnum() else '_' for ch in c.name) for c in self.creases)[:60]
+            path = os.path.join(d, '%s-%s.png' % (name, time.strftime('%Y%m%d-%H%M%S')))
+        self.contours = contours.contour_sheet(self, path, target=target)
+        return path
 
 
 # ------------------------------------------------------------------ the fold cache

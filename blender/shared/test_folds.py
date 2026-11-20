@@ -11,7 +11,8 @@ is held by the bodice below its roll line), the far side folds over. Checked for
   - crisp: the turn lies within the band it was given (a pressed fold on the one row along the line, a rolled one
     over r * angle), and the cloth either side stays flat (no hinge outside the band bent more than 3 degrees);
   - a slanted line that runs across the grid's edges rather than along them still reaches its target;
-  - the fold cache: a second bake of the same piece loads the solved points and runs no step."""
+  - the fold cache: a second bake of the same piece loads the solved points and runs no step;
+  - a contour sheet (contours.py) is written with every converged bake, and the cloth is not strained (< 1%)."""
 import math
 import os
 import sys
@@ -40,6 +41,7 @@ def sheet(w=12.0, d=8.0, h=0.25):
     return flat, np.array(T), h
 
 
+SHEETS = os.environ.get('FOLD_SHEETS') or tempfile.mkdtemp(prefix='fold-sheets-')
 THICK = 0.08                                                  # (wool, 2 mm: the gap a folded layer lies off the one under it)
 PRESS = 0.5 * THICK                                           # (a pressed fold's radius: its two layers' middles a thickness apart)
 
@@ -84,7 +86,8 @@ def bake(line, angle, radius, label, flat, T, h, gravity=(0, 0, 0), supported=Fa
     F = fo.Folds(fab, flat, T)
     c = F.add(line, angle, radius=radius, name=label)
     t0 = time.time()
-    rep = F.bake(body=table(s) if supported else None, log=None)
+    rep = F.bake(body=table(s) if supported else None, log=None,
+                 sheet=os.path.join(SHEETS, label.replace(' ', '_').replace(',', '') + '.png'))
     took = time.time() - t0
     # crisp: where the sheet bends (every inner edge, by its distance across the line)
     Hall = fo.hinges(T)
@@ -100,6 +103,9 @@ def bake(line, angle, radius, label, flat, T, h, gravity=(0, 0, 0), supported=Fa
     print('%-26s %6.1f of %5.1f deg in %4d steps (%.1f s); bent across s = %.2f..%.2f (band %.2f), outside it %.1f deg'
           % (label, r['achieved_deg'], r['target_deg'], rep.steps, took, span[0], span[1], band, stray))
     assert rep.ok, str(rep)
+    # the contour sheet (John's rule: contours inspected after every solve, before any render)
+    assert rep.sheet and os.path.exists(rep.sheet) and os.path.exists(rep.sheet[:-4] + '.json'), 'no contour sheet'
+    assert F.contours['strain_max_pct'] < 1.0, '%s: strained %.1f%%' % (label, F.contours['strain_max_pct'])
     assert abs(r['achieved_deg'] - r['target_deg']) <= 1.0
     assert stray < 3.0, '%s: the cloth outside the band bends %.1f deg' % (label, stray)
     return fab, F, rep, span
@@ -149,6 +155,7 @@ def main():
         assert state == ('solved' if k == 0 else 'cached')
         pos.append(p)
     assert np.array_equal(pos[0], pos[1])
+    print('contour sheets in', SHEETS)
     print('all fold checks passed')
 
 
