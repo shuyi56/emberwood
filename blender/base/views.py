@@ -44,6 +44,19 @@ Rendering pieces on their own (any of the views above):
 --list     print every mesh's name, material and vertex count after the build, and stop
 --save     PATH: with --turn or --head, save the built figure with the 3D look's camera and lights as a .blend
            instead of rendering
+
+Standard views by name (blender/base/view_tools.py has the table; flags given on the command line win):
+--preset   NAME: view-clay (one 3/4 clay view), turn-clay, turn-matcap, turn-lit (front, 3/4, profile, back),
+           head-clay, head-lit, closeup (needs --area), walk, run. Renders at the draft tier unless --tier says.
+--tier     draft (8 samples, no denoiser, 320), check (32 samples, denoised, 480; the queue's "quality": "check"
+           drops it to 8), final (the script's own samples and size, denoised). Fills in only the flags not given.
+--look     NAMES: full, clay, matcap (comma separated) for --turn, --head and --area, instead of --clay. matcap is
+           unlit, shaded by the surface's angle to the camera: noise-free form at any sample count.
+--area     NAMES: square close-ups of named parts of the body (face, head, shoulders, torso, waist, hips, hands,
+           legs, knees, feet, full), framed from the figure's measurements so the camera never moves when clothes
+           change (DIR/area-NAME.png), or piece:PREFIX framed on those meshes (that camera follows the piece)
+Every image is labelled with the tier it really rendered at (a strip under it) and DIR/views.json records each
+image's look, angles, samples and exact camera, for before/after (tools/render-queue/rq_compare.py).
 """
 import importlib
 import math
@@ -53,6 +66,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
+sys.path.insert(0, HERE)
+import view_tools  # noqa: E402
+argv = view_tools.expand(argv)      # (--preset and --tier, spelled out as the flags below)
+VIEW_TOOLS_FLAGS = ('--preset', '--tier', '--look', '--area')   # (read in view_tools.py)
 opt = lambda k, d=None: argv[argv.index(k) + 1] if k in argv else d  # noqa: E731
 FIGURE = opt('--figure', 'ranger')
 sys.path.insert(0, os.path.join(HERE, '..', FIGURE))
@@ -188,6 +205,9 @@ def row(cam, out, tmp, size, centre, height, ortho=True, dist=200.0):
     root.rotation_euler = (0, 0, 0)
     Image.fromarray(np.concatenate(tiles, axis=1)).save(out)
     print('wrote', out)
+
+
+row = view_tools.recorded(row, bpy, lambda: VIEWS)     # (each image's camera and samples, for its label)
 
 
 def clay(on, saved):
@@ -330,6 +350,7 @@ def walk(n, out, stem='walk', seconds=0.69, wide=1.0):
         frames[0].save(os.path.join(out, f'{stem}-{VIEWS[i][0].replace("/", "").replace(" ", "")}.gif'), save_all=True,
                        append_images=frames[1:], duration=max(20, ms), loop=0)
     sheet.save(os.path.join(out, f'{stem}.png'))
+    view_tools.note(bpy, os.path.join(out, f'{stem}.png'), [v[0] for v in VIEWS])
     print('wrote', os.path.join(out, f'{stem}.png'))
 
 
@@ -361,7 +382,7 @@ def main():
     if opt('--cells'):
         sc.render.use_persistent_data = True
         cells(out, opt('--cells'))
-    if '--turn' in argv or '--head' in argv:
+    if '--turn' in argv or '--head' in argv or opt('--area'):
         sc.frame_set(int(opt('--frame', 0)) + 1)
         size = int(opt('--size', 360))
         cam = look_3d(int(opt('--samples', 32)))
@@ -379,15 +400,29 @@ def main():
             return
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
-            for look in ('', '-clay') if '--clay' in argv else ('',):
-                clay(look == '-clay', saved)
+            for look in view_tools.looks(argv):
+                view_tools.STATE['look'] = look
+                view_tools.set_look(bpy, look, saved, clay)
                 if '--turn' in argv:
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
                     row(cam, os.path.join(out, f'turn{look}.png'), tmp, (size, int(size * 1.75)), centre, h)
                 if '--head' in argv:
                     centre, h = fit(shown, 1.0) if framed else ((float(os.environ.get('HEAD_CX', 0)), float(os.environ.get('HEAD_CY', 0)), float(os.environ.get('HEAD_CZ', 55.5))), float(os.environ.get('HEAD_H', 17.0)))
                     row(cam, os.path.join(out, f'head{look}.png'), tmp, (size, size), centre, h)
-            clay(False, saved)
+                for name in (a.strip() for a in (opt('--area') or '').split(',') if a.strip()):
+                    if name.startswith('piece:'):
+                        pick = tuple(p for p in name[6:].split('+') if p)
+                        meshes = [o for o in bpy.data.objects if o.type == 'MESH' and not o.hide_render
+                                  and o.name.startswith(pick)]
+                        if not meshes:
+                            sys.exit(f'views.py: --area {name}: no showing mesh starts with {pick} (see --list)')
+                        centre, h = fit(meshes, 1.0)
+                    else:
+                        centre, h = view_tools.area_frame(female, name)
+                    stem = name.replace(':', '-').replace('+', '-')
+                    row(cam, os.path.join(out, f'area-{stem}{look}.png'), tmp, (size, size), centre, h)
+            view_tools.STATE['look'] = ''
+            view_tools.set_look(bpy, '', saved, clay)
     if opt('--walk'):
         walk(int(opt('--walk')), out)
     if opt('--run'):
@@ -403,6 +438,7 @@ def main():
         centre, h = fit(shown, 1 / 1.75)
         with tempfile.TemporaryDirectory() as tmp:
             row(cam, os.path.join(out, 'pieces.png'), tmp, (size, int(size * 1.75)), centre, h)
+    view_tools.finish(out, argv, FIGURE)
 
 
 main()
