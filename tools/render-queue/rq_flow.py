@@ -55,7 +55,7 @@ import time
 
 import numpy as np
 
-VERSION = 5
+VERSION = 6
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
@@ -159,7 +159,7 @@ def _wpct(v, w, q):
 
 # ---------------------------------------------------------------------------------------------------- the check
 
-def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_island=None):
+def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_island=None, exempt=None):
     """The flow of one garment.
     X [n, 3]        its points as they will render (world, posed)
     tris [m, 3]     its triangles
@@ -265,7 +265,7 @@ def analyse(name, X, tris, ref, ref_kind, regions=None, mate=None, lim=None, uv_
     peak_tris, peak = int(peak.sum()), keep
 
     seams = seam_check(X, tris, tri_e, E, t0, t1, Dm, mate, uv_island)
-    gaps = openings(X, tris, E, t1)
+    gaps = openings(X, tris, E, t1, exempt=exempt)
     gw = w[good]
     S = {
         'reference': ref_kind, 'tris': int(m), 'area': round(float(area_cur.sum()), 2),
@@ -381,11 +381,13 @@ def seam_check(X, tris, tri_e, E, t0, t1, Dm, mate, uv_island):
     return out
 
 
-def openings(X, tris, E, t1, closed=0.06, reach=0.8):
+def openings(X, tris, E, t1, closed=0.06, reach=0.8, exempt=None, exempt_r=1.2):
     """Where the cloth is open that should not be. Each loop of boundary edges is a hem, a neckline, a cuff, a slit or
     a hole: a slit's two sides lie close together all along it (its width, the median distance from each point to
     the loop's far side, is small for its length), a hole is a short loop. And separate pieces whose edges run near
-    each other but do not meet are an open seam (closer than reach, farther than closed)."""
+    each other but do not meet are an open seam (closer than reach, farther than closed). exempt [k, 3]: points
+    (the lacing's) whose neighbourhood is open on purpose: the panels' edges across a lacing gap are not an open
+    seam."""
     bnd = np.where(t1 < 0)[0]
     out = {'holes': [], 'open_len': 0.0, 'open_gap_max': 0.0}
     if not len(bnd):
@@ -448,6 +450,9 @@ def openings(X, tris, E, t1, closed=0.06, reach=0.8):
                             if piece[j] != piece[i]:
                                 best = min(best, float(np.linalg.norm(X[i] - X[j])))
             gap[i] = best
+        if exempt is not None and len(exempt):
+            near = np.array([np.linalg.norm(exempt - X[i], axis=1).min() < exempt_r for i in bv])
+            gap[bv[near]] = np.inf
         op = (gap > closed) & (gap <= reach)
         e_open = op[be[:, 0]] & op[be[:, 1]]
         out['open_len'] = float(np.linalg.norm(X[be[e_open, 0]] - X[be[e_open, 1]], axis=1).sum())
@@ -554,8 +559,9 @@ def judge(S, lim):
 # ---------------------------------------------------------------------------------------------------- lacework
 
 LACE_NAMES = ('lace',)        # objects whose name holds one of these are lacing: checked as laces, not as cloth
-# float, sink and dev in the lace's own radii (a lace lifted over another at a crossing stands 2 radii off)
-LACE_LIMITS = {'lace_float_max': 3.0, 'lace_sink_max': 0.5, 'lace_dev_max': 3.0, 'lace_tension_min': 0.97,
+# float, sink and dev in the lace's own radii (a lace lifted over another at a crossing stands 2 to 3 radii off the
+# contour; the contour path is the Hermite curve over the panels, so a gap between two panels is bridged)
+LACE_LIMITS = {'lace_float_max': 4.5, 'lace_sink_max': 0.5, 'lace_dev_max': 4.5, 'lace_tension_min': 0.97,
                'lace_slack_max': 1.25, 'lace_arch_min': 0.5, 'lace_flips': 0, 'lace_hits': 0}
 LACE_LOWER = ('lace_tension_min', 'lace_arch_min')
 
@@ -590,87 +596,116 @@ def _len(P):
     return float(np.linalg.norm(np.diff(P, axis=0), axis=1).sum())
 
 
+def _hermite(A, B, nA, nB, s):
+    """The contour path between two seats on a surface: a cubic Hermite curve that leaves each seat along the
+    surface there (the chord projected on its tangent plane, a chord long), so it arches over a curved shape as the
+    shape does, and across a gap between two panels it bridges at the panels' height instead of dipping onto
+    whatever lies in the gap. s [k, 1] in 0..1. Returns the points [k, 3] and the normals [k, 3] along it."""
+    d = B - A
+    L = float(np.linalg.norm(d))
+
+    def tang(n_):
+        t = d - n_ * float(d @ n_)
+        return t / max(float(np.linalg.norm(t)), 1e-12) * L
+    tA, tB = tang(nA), tang(nB)
+    h00, h10, h01, h11 = 2 * s ** 3 - 3 * s ** 2 + 1, s ** 3 - 2 * s ** 2 + s, -2 * s ** 3 + 3 * s ** 2, s ** 3 - s ** 2
+    H = h00 * A + h10 * tA + h01 * B + h11 * tB
+    N = (1 - s) * nA + s * nB
+    return H, N / np.maximum(np.linalg.norm(N, axis=1, keepdims=True), 1e-12)
+
+
 def lace_check(name, X, T, nearest, place=None, lim=None):
-    """How one lace object's runs lie on what they cross. nearest(p) -> (point on the surface, its normal outward)
-    or None, for the surfaces under the lace (the boot, the leg). Per run, along its centre line:
-      float / sink   how far the lace stands off the surface, or sinks into it (its gap: distance less its radius),
-                     in lace radii
-      dev            how far it leaves the contour path: the chord between its ends laid on the surface (each point
-                     of the chord taken to the surface and lifted by the lace's radius), which a lace drawn over a
-                     shin follows; a taut lace cuts straight across the curve and leaves it (in lace radii)
-      tension        its length over the contour path's: under 1 it is shorter than the surface it crosses, so it
-                     must cut into it; well over 1 it is slack
-      arch           how far its middle rises over its chord, over how far the contour path's does: 1 follows the
-                     curve, near 0 a straight taut lace across a curved shin
+    """How one lace object's runs lie on what they cross. nearest(p, across=None) -> (point on the surface, its
+    normal outward) or None, for the surfaces under the lace (the boot, the leg); with across (a direction) it
+    skips faces standing along it: the walls of an opening's edge, which face across the gap. Per run (one tube
+    between two eyelets), the contour path is a curve on the panels between its two seats (_hermite): what a lace
+    drawn over the shape lies on, bridging a gap at the panels' height. Along its centre line:
+      float   how far it stands off that path (less its radius), in lace radii
+      sink    how far it sinks into the surface itself (the tongue, the leg), in lace radii
+      dev     how far it leaves the contour path, in lace radii
+      tension its length over the contour path's: under 1 it is shorter than the shape it crosses, so it must cut
+              into it; well over 1 it is slack
+      arch    how far its middle rises over its chord, over how far the contour path's does: 1 follows the curve,
+              near 0 a straight taut lace across a curved shape (judged only where the path rises over 2 radii)
     and over the runs: where two cross, the one on top (it should be the same lace all the way up: flips counts the
-    crossings that disagree), and hits, two runs passing through each other at a crossing."""
+    crossings that disagree), and hits, two runs passing through each other at a crossing. The loose ends (runs
+    much longer than the rest) are left out, and counted."""
     lim = dict(LACE_LIMITS, **(lim or {}))
-    segs = lace_segments(X, T)
+    segs = [(np.asarray(C), rad) for C, rad in lace_segments(X, T)]
+    if not segs:
+        return {'runs': 0, 'crossings': 0, 'lace_flips': 0, 'lace_hits': 0, 'loose_ends': 0, 'spots': [], 'flags': [],
+                'verdict': 'ok'}, []
+    mids = np.array([C[len(C) // 2] for C, _ in segs])
+    up = np.linalg.svd(mids - mids.mean(0), full_matrices=False)[2][0]
+    up = up if up[2] >= 0 else -up
+    segs = [(C if (C[-1] - C[0]) @ up >= 0 else C[::-1], rad) for C, rad in segs]       # (every run climbs)
+    lens = np.array([_len(C) for C, _ in segs])
+    typical = float(np.median(lens))
+    loose = [n for n in range(len(segs)) if lens[n] > 1.7 * typical]
+    segs = [sg for n, sg in enumerate(segs) if n not in loose]
+    chords = np.array([C[-1] - C[0] for C, _ in segs])
+    flat = chords - np.outer(chords @ up, up)
+    across = np.linalg.svd(flat, full_matrices=False)[2][0] if len(segs) > 1 else np.array([1.0, 0, 0])
     runs = []
     for C, rad in segs:
         k = len(C)
-        s = np.linspace(0.0, 1.0, k)[:, None]
-        chord = (1 - s) * C[0] + s * C[-1]
-        gap, cont, nrm = np.zeros(k), np.zeros((k, 3)), np.zeros((k, 3))
-        ok = np.ones(k, bool)
-        for i in range(k):
-            a = nearest(C[i])
-            b = nearest(chord[i])
-            if a is None or b is None:
-                ok[i] = False
-                continue
-            loc, n_ = a
-            gap[i] = (float(np.dot(C[i] - loc, n_)) - rad) / max(rad, 1e-9)
-            cont[i] = b[0] + b[1] * rad
-            nrm[i] = b[1]
-        if ok.sum() < 3:
+        d_ = C[-1] - C[0]
+        dh = d_ / max(float(np.linalg.norm(d_)), 1e-12)
+        a, b = nearest(C[0], dh), nearest(C[-1], dh)
+        if a is None or b is None:
             continue
-        ends = [i for i in (0, k - 1) if ok[i]]
-        if ends and np.mean([gap[i] for i in ends]) < -1.0:     # (a surface wound inward: its ends sit outside)
-            gap = -gap - 2.0
-            cont = cont - 2 * nrm * rad
-            nrm = -nrm
+        (A, nA), (B, nB) = a, b
+        if (C[0] - A) @ nA < 0 and (C[-1] - B) @ nB < 0:       # (a surface wound inward: its normals point away)
+            nA, nB = -nA, -nB
             flip = -1.0
         else:
             flip = 1.0
-        inner = ok.copy()
-        inner[[0, -1]] = False            # (the ends sit in their eyelets)
-        dev = np.abs(((C - cont) * nrm).sum(1))[inner] / max(rad, 1e-9) if inner.any() else np.zeros(1)
-        Lc = _len(cont[ok])
+        arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))]
+        s = (arc / max(arc[-1], 1e-12))[:, None]
+        H, N = _hermite(A, B, nA, nB, s)
+        cont = H + N * rad
+        gap_env = (((C - H) * N).sum(1) - rad) / rad            # (off the contour path, along its normal)
+        dev = np.linalg.norm(C - cont, axis=1) / rad
+        sink = np.zeros(k)
+        for i in range(1, k - 1):
+            q = nearest(C[i], dh)
+            if q is not None:
+                sink[i] = -((float(np.dot(C[i] - q[0], q[1])) * flip - rad) / rad)
+        inner = slice(1, k - 1)                                  # (the ends sit in their eyelets)
+        Lc = _len(cont)
         mid = k // 2
-        sag_l = float(np.dot(C[mid] - chord[mid], nrm[mid]))
-        sag_c = float(np.dot(cont[mid] - chord[mid], nrm[mid]))
-        arch = sag_l / sag_c if abs(sag_c) > 0.5 * rad else 1.0
-        runs.append({'centre': C, 'radius': rad, 'float': float(max(gap[inner].max(), 0)) if inner.any() else 0.0,
-                     'sink': float(max(-gap[inner].min(), 0)) if inner.any() else 0.0, 'dev': float(dev.max()),
+        chord = (1 - s) * C[0] + s * C[-1]
+        sag_l = float(np.dot(C[mid] - chord[mid], N[mid]))
+        sag_c = float(np.dot(cont[mid] - chord[mid], N[mid]))
+        arch = sag_l / sag_c if sag_c > 2 * rad else 1.0
+        runs.append({'centre': C, 'radius': rad, 'float': float(max(gap_env[inner].max(), 0)),
+                     'sink': float(max(sink[inner].max(), 0)), 'dev': float(dev[inner].max()),
                      'tension': _len(C) / max(Lc, 1e-9), 'arch': float(arch), 'mid': C[mid], 'len': _len(C),
-                     'flip': flip, 'normals': nrm})
-    # crossings: runs whose centre lines pass near each other away from their ends
+                     'normals': N, 'cont': cont, 'sag': sag_c / rad})
+    # crossings: runs going opposite ways across the lacing whose centre lines pass near each other
     flips, hits, crossings = 0, 0, []
-    d0 = (runs[0]['centre'][-1] - runs[0]['centre'][0]) if runs else np.zeros(3)
-    dirs = [np.sign(np.dot(r['centre'][-1] - r['centre'][0], d0)) or 1.0 for r in runs]
+    dirs = [np.sign(float((r['centre'][-1] - r['centre'][0]) @ across)) or 1.0 for r in runs]
     for i in range(len(runs)):
         for j in range(i + 1, len(runs)):
-            A, B = runs[i]['centre'][3:-3], runs[j]['centre'][3:-3]
-            if not len(A) or not len(B):
+            A, B = runs[i]['centre'][4:-4], runs[j]['centre'][4:-4]     # (crossings are mid-run)
+            if not len(A) or not len(B) or dirs[i] == dirs[j]:
                 continue
             D = np.linalg.norm(A[:, None] - B[None], axis=2)
             a, b = np.unravel_index(np.argmin(D), D.shape)
             reach = 2 * (runs[i]['radius'] + runs[j]['radius'])
-            if D[a, b] > reach or dirs[i] == dirs[j]:
+            if D[a, b] > reach:
                 continue
-            p = 0.5 * (A[a] + B[b])
-            n_ = nearest(p)
-            if n_ is None:
-                continue
-            top = i if np.dot(A[a] - B[b], n_[1]) * runs[i]['flip'] > 0 else j
-            crossings.append((dirs[top], p))
-            if D[a, b] < 0.9 * (runs[i]['radius'] + runs[j]['radius']):     # (through each other, not touching)
+            n_ = runs[i]['normals'][a + 4] + runs[j]['normals'][b + 4]
+            n_ = n_ / max(float(np.linalg.norm(n_)), 1e-12)
+            top = i if np.dot(A[a] - B[b], n_) > 0 else j
+            crossings.append((dirs[top], 0.5 * (A[a] + B[b])))
+            if D[a, b] < 0.9 * (runs[i]['radius'] + runs[j]['radius']):        # (through each other, not touching)
                 hits += 1
     if crossings:
         main = np.sign(sum(d for d, _ in crossings)) or 1.0
         flips = sum(1 for d, _ in crossings if d != main)
-    S = {'runs': len(runs), 'crossings': len(crossings), 'lace_flips': int(flips), 'lace_hits': int(hits)}
+    S = {'runs': len(runs), 'loose_ends': len(loose), 'crossings': len(crossings), 'lace_flips': int(flips),
+         'lace_hits': int(hits)}
     if runs:
         S.update(lace_float_max=_r(max(r['float'] for r in runs)), lace_sink_max=_r(max(r['sink'] for r in runs)),
                  lace_dev_max=_r(max(r['dev'] for r in runs)), lace_tension_min=_r(min(r['tension'] for r in runs)),
@@ -681,9 +716,9 @@ def lace_check(name, X, T, nearest, place=None, lim=None):
     for n, r in enumerate(runs):
         why = []
         if r['float'] > lim['lace_float_max']:
-            why.append(f"floats {r['float']:.1f} lace radii off the surface")
+            why.append(f"floats {r['float']:.1f} lace radii off the contour")
         if r['sink'] > lim['lace_sink_max']:
-            why.append(f"sinks {r['sink']:.1f} lace radii into it")
+            why.append(f"sinks {r['sink']:.1f} lace radii into the surface")
         if r['tension'] < lim['lace_tension_min']:
             why.append(f"taut: {r['tension']:.3f} of the contour's length, so it cuts across the shape")
         if r['tension'] > lim['lace_slack_max']:
@@ -691,7 +726,7 @@ def lace_check(name, X, T, nearest, place=None, lim=None):
         if r['dev'] > lim['lace_dev_max']:
             why.append(f"leaves the contour by {r['dev']:.1f} lace radii")
         if r['arch'] < lim['lace_arch_min']:
-            why.append(f"straight across the curve (arch {r['arch']:.2f} of the surface's)")
+            why.append(f"straight across the curve (arch {r['arch']:.2f} of the contour's)")
         r['bad'] = max(r['float'] / max(lim['lace_float_max'], 1e-6), r['sink'] / max(lim['lace_sink_max'], 1e-6),
                        r['dev'] / max(lim['lace_dev_max'], 1e-6),
                        (1 - r['tension']) / max(1 - lim['lace_tension_min'], 1e-6),
@@ -798,17 +833,32 @@ def lace_heatmap(surf, laces, path, lim, panel=320):
 
 
 def _bvh_nearest(geoms, reach=1.5):
-    """nearest(p) over several surfaces (mathutils BVH trees): the closest point on any, and its normal."""
+    """nearest(p, across=None) over several surfaces (mathutils BVH trees): the closest point on any, and its
+    normal. With across (a direction), faces standing along it (the walls of an opening's edge, which face across
+    the gap) are passed over for the nearest face that does not."""
     from mathutils import Vector
     from mathutils.bvhtree import BVHTree
     trees = [BVHTree.FromPolygons([tuple(p) for p in X], [tuple(int(i) for i in t) for t in T]) for X, T in geoms]
 
-    def nearest(p):
+    def nearest(p, across=None):
         best = None
         for tr in trees:
             loc, nrm, _, dist = tr.find_nearest(Vector(p), reach)
-            if loc is not None and (best is None or dist < best[2]):
-                best = (np.array(loc), np.array(nrm), dist)
+            if loc is None:
+                continue
+            nrm = np.array(nrm)
+            if across is not None and abs(float(nrm @ across)) > 0.6:
+                for cush in (0.1, 0.3, 0.8):
+                    hits = [h for h in tr.find_nearest_range(Vector(p), min(dist + cush, reach))
+                            if abs(float(np.array(h[1]) @ across)) <= 0.6]
+                    if hits:
+                        h = min(hits, key=lambda h: h[3])
+                        loc, nrm, dist = h[0], np.array(h[1]), h[3]
+                        break
+                else:
+                    continue
+            if best is None or dist < best[2]:
+                best = (np.array(loc), nrm, dist)
         return None if best is None else (best[0], best[1])
     return nearest
 
@@ -1173,6 +1223,8 @@ def cached_analyse(name, g, place, lim):
     h = hashlib.sha1()
     for a in (np.round(g['X'], 4), np.round(np.asarray(g['ref']), 4), g['tris']):
         h.update(np.ascontiguousarray(a).tobytes())
+    if g.get('exempt') is not None:
+        h.update(np.ascontiguousarray(np.round(g['exempt'], 3)).tobytes())
     h.update(repr((VERSION, g['kind'], sorted(lim.items()))).encode())
     key = h.hexdigest()[:20]
     d = cache_dir()
@@ -1189,7 +1241,7 @@ def cached_analyse(name, g, place, lim):
         except (OSError, ValueError, KeyError):
             pass
     S, F = analyse(name, g['X'], g['tris'], np.asarray(g['ref'], float), g['kind'], place, g.get('mate'), lim=lim,
-                   uv_island=g.get('island'))
+                   uv_island=g.get('island'), exempt=g.get('exempt'))
     S['key'] = key
     if p:
         try:
@@ -1222,12 +1274,16 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     rep = {'version': VERSION, 'pose': pose, 'limits': lim, 'limits_from': os.path.basename(src) if src else 'defaults',
            'garments': {}, 'skipped': {}}
     items, geoms, lace_obs = [], [], []
+    lace_pts = [_mesh(o, dg)[0][::6] for o in objects if any(k in o.name.lower() for k in LACE_NAMES)]
+    exempt = np.concatenate(lace_pts) if lace_pts else None
     for o in objects:
         if any(k in o.name.lower() for k in LACE_NAMES):
             lace_obs.append(o)
             continue
         try:
             g = collect(o, dg)
+            if g is not None:
+                g['exempt'] = exempt
             if g is None:
                 rep['skipped'][o.name] = 'not cloth, or no reference to measure against'
                 continue
@@ -1440,12 +1496,14 @@ def _tube(C, rad, sides=6):
     return np.array(V), np.array(F)
 
 
-def _shin_lacing(kind, R=2.2, rad=0.06, levels=4, half=math.radians(35), dz=1.0, k=24):
+def _shin_lacing(kind, R=2.2, rad=0.06, levels=4, half=math.radians(35), dz=1.0, k=24, recess=0.0):
     """Criss-cross lacing on a cylinder 'shin' (axis z, front -y as the figure's), and the cylinder's nearest(). kind:
       good     every run on the curve, the runs going one way lifted over the others at the crossings
       taut     every run a straight chord between its eyelets, cutting across the curve
       flipped  as good, but which lace lies on top changes from one crossing to the next
-      sunk     as good, but sunk 0.7 radii into the shin"""
+      sunk     as good, but sunk 0.7 radii into the shin
+    recess dips the surface between the two eyelet rows (a tongue below the panels): a lace bridging the gap at the
+    panels' height must still pass."""
     V, F = [], []
     for lv in range(levels):
         z0 = lv * dz
@@ -1463,10 +1521,11 @@ def _shin_lacing(kind, R=2.2, rad=0.06, levels=4, half=math.radians(35), dz=1.0,
             F.append(f + sum(len(x) for x in V))
             V.append(v)
 
-    def nearest(p):
+    def nearest(p, across=None):
         q = np.array([p[0], p[1], 0.0])
         n = q / max(np.linalg.norm(q), 1e-12)
-        return np.array([R * n[0], R * n[1], p[2]]), n
+        r_ = R - (recess if abs(math.atan2(n[0], -n[1])) < 0.9 * half else 0.0)
+        return np.array([r_ * n[0], r_ * n[1], p[2]]), n
     return np.concatenate(V), np.concatenate(F), nearest
 
 
@@ -1507,8 +1566,8 @@ def selftest(out):
     assert res['slit']['holes'] == 1 and res['slit']['verdict'] != 'ok', res['slit']['openings']
     # the lacing on a shin: the good lacing must pass, the taut, flipped and sunk ones be flagged
     lres, laces = {}, []
-    for n, kind in enumerate(('good', 'taut', 'flipped', 'sunk')):
-        X, T, nearest = _shin_lacing(kind)
+    for n, kind in enumerate(('good', 'taut', 'flipped', 'sunk', 'bridge')):
+        X, T, nearest = _shin_lacing('good' if kind == 'bridge' else kind, recess=0.15 if kind == 'bridge' else 0.0)
         S, runs = lace_check(kind, X, T, nearest)
         lres[kind] = S
         print('lace', kind, S['verdict'], {k: S.get(k) for k in LACE_LIMITS}, flush=True)
@@ -1521,6 +1580,7 @@ def selftest(out):
     assert lres['taut']['verdict'] != 'ok', lres['taut']['flags']
     assert lres['flipped']['lace_flips'] == 2 and lres['flipped']['verdict'] != 'ok', lres['flipped']
     assert lres['sunk']['lace_sink_max'] > 0.5 and lres['sunk']['verdict'] != 'ok', lres['sunk']['flags']
+    assert lres['bridge']['verdict'] == 'ok', lres['bridge']        # (bridged over a recessed tongue: no fault)
     res['laces'] = lres
     json.dump({'limits': lim, 'results': res}, open(os.path.join(out, 'selftest.json'), 'w'), indent=1)
     print('self test passed', flush=True)

@@ -281,22 +281,32 @@ right after the build, beside the geometry checks:
 - **Measure without rendering:** `tools/render-queue/rq_views.py --figure F --mannequin --poses all --flow-only`
   builds, checks in every pose and renders nothing. `python3 rq_flow.py --selftest DIR` checks the metrics on
   four test sleeves (smooth, a stretched patch, a seam drawn 10% short, a slit) and four lacings on a shin
-  (good, taut, flipped, sunk) outside Blender.
+  (good, taut, flipped, sunk, bridging a recessed tongue) outside Blender.
 
 ### Lacework
 
 Any object whose name holds `lace` (the boot's `Boot lace.L/.R`) is checked as lacing instead of as cloth, against
-the cloth and the body under it. Each run of lace between two eyelets (one tube) is measured along its centre line:
+the cloth and the body under it. Each run of lace between two eyelets (one tube) is measured along its centre line.
+The reference is the **contour path**: a cubic Hermite curve between the run's two seats on the panels (the nearest
+surface at each end, skipping the walls of the opening's edge, which face across the gap), leaving each seat along
+the surface there. It follows the shape's curve and, across a gap between two eyelet rows, bridges it at the
+panels' height, as a real lace does, rather than dipping onto the recessed tongue. Measures, in lace radii:
 
-- **float / sink:** how far it stands off the surface it crosses, or sinks into it, in lace radii. A lace lifted
-  over another at a crossing stands 2 radii off, so the float limit is 3.
-- **contour:** the contour path is the chord between the run's eyelets laid on the surface (each point taken to
-  the surface and lifted by the lace's radius), the way a real lace lies over a shin. `dev` is how far the run
-  leaves it, `tension` its length over the contour's (under 0.97 it is shorter than the shape it crosses, so it
-  must cut through it; over 1.25 it is slack), and `arch` how far its middle rises over its chord against the
-  contour's (1 follows the curve, near 0 a straight taut lace across the shin).
-- **crossings:** where two runs cross, which one lies on top. It should be the same lace all the way up; `flips`
-  counts the crossings that disagree. `hits` counts crossings where the two runs pass through each other.
+- **float / dev:** how far the lace stands off the contour path, and how far it leaves it. A lace lifted over
+  another at a crossing stands 2 to 3 radii off, so the limits are 4.5.
+- **sink:** how far it sinks into the surface itself (the tongue, the leg): 0.5 radii.
+- **tension:** its length over the contour path's: under 0.97 it is shorter than the shape it crosses, so it must
+  cut through it; over 1.25 it is slack.
+- **arch:** how far its middle rises over its chord against the contour's (1 follows the curve, near 0 is a
+  straight taut lace across a curved shape). Judged only where the contour rises over 2 radii, so a narrow gap on
+  a gentle curve is not scored on noise.
+- **crossings:** where two runs going opposite ways cross mid-run, which one lies on top, by the mean of their
+  contour normals. It should be the same lace all the way up; `flips` counts the crossings that disagree. `hits`
+  counts crossings where the two runs pass through each other.
+
+The loose ends (runs 1.7x longer than the median) are not judged and are counted as `loose_ends`. The lacing's
+neighbourhood is also exempt from the open-seam check, so the two panels' edges across the lacing gap are not an
+open seam.
 
 The results are in `flow.json` under `laces`, with `<stem>-lace.png`: the lacing over clay in four views, each run
 dark when well inside its limits and on the strain ramp when near or past one, drawn thin where it runs under
