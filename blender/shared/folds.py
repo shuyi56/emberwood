@@ -24,10 +24,11 @@ src/world/fabric-core.js (crease, fold; PR #61):
     import folds as fo
     F = fo.Folds(fab, flat, T)                         flat: the pattern [n, 2] (or [n, 3] in its plane) as cut
     fo.soft_at(flat, T, [crease, ...])                 per-point compliance for fab.mesh(bend_at=...) (PR #59)
+    flat, T, vals, kept = fo.mark_line(flat, T, line, [start, ...])   a row of points on a fold line (pressed folds)
     c = F.add(line, angle, radius=0.0, side=+1)        line: points on the pattern [k, 2]; angle in radians
     report = F.bake(body=None, h=1/240, tol_deg=1.0, ...)
     report.ok, report.achieved_deg, report.target_deg, report.steps
-    pos, report = fo.bake_cached(key_parts, fab, flat, T, creases, ...)   the fold cache (see bake_cached)
+    pos, report, state = fo.bake_cached(name, fab, flat, T, creases, ...)   the fold cache (see bake_cached)
 
 A crease's angle is how far the far side turns from flat: 0 flat, about 175 degrees for a pressed lapel lying back on
 the front (180 would put the two layers through each other; the cloth's thickness keeps it short of that), 90 for a
@@ -257,12 +258,93 @@ def soften(fab, H, compliance=1e-2):
     return n
 
 
+def _barycentric(Q, flat, T, chunk=256):
+    """For points Q [m, 2]: the triangle of (flat, T) holding each (or the nearest by weights) and its weights."""
+    A, B, C = flat[T[:, 0]], flat[T[:, 1]], flat[T[:, 2]]
+    v0, v1 = B - A, C - A
+    den = v0[:, 0] * v1[:, 1] - v0[:, 1] * v1[:, 0]
+    den = np.where(np.abs(den) < 1e-15, 1e-15, den)
+    tri = np.zeros(len(Q), np.int64)
+    W = np.zeros((len(Q), 3))
+    for i in range(0, len(Q), chunk):
+        q = Q[i:i + chunk]
+        d = q[:, None, :] - A[None]
+        b1 = (d[..., 0] * v1[None, :, 1] - d[..., 1] * v1[None, :, 0]) / den[None]
+        b2 = (v0[None, :, 0] * d[..., 1] - v0[None, :, 1] * d[..., 0]) / den[None]
+        b0 = 1 - b1 - b2
+        worst = np.minimum(np.minimum(b0, b1), b2)
+        k = np.argmax(worst, axis=1)
+        r = np.arange(len(q))
+        tri[i:i + chunk] = k
+        W[i:i + chunk] = np.column_stack([b0[r, k], b1[r, k], b2[r, k]])
+    return tri, W
+
+
+def _inside_any(Q, flat, T):
+    _, W = _barycentric(Q, flat, T)
+    return W.min(1) > -1e-6
+
+
+def mark_line(flat, T, line, vals=(), h=None):
+    """The pattern cut again with a row of points along a straight fold line (as a tailor marks a roll line), so a
+    pressed fold has edges to turn on: points nearer the line than 0.45 h dropped, points every h along it added,
+    each side triangulated with them (so the line is an edge chain of both) inside the old outline, slivers left
+    out. flat [n, 2]; line [2, 2]; vals: per-point arrays (start positions, rest positions...) carried over by the
+    old triangles' barycentric weights. Needs scipy. Returns (flat, T, vals, the old indices of the points kept:
+    they come first, in order, the line's points after them)."""
+    from scipy.spatial import Delaunay
+    flat = np.asarray(flat, float)[:, :2]
+    roll = np.asarray(line, float)[:2, :2]
+    h = _spacing(_flat3(flat), T) if h is None else h
+    c = Crease(roll, 1.0)
+    _, t, s = c.frame(flat)
+    L = np.linalg.norm(roll[1] - roll[0])
+    keep = np.abs(s) > 0.45 * h
+    # the line's points, as far as the sheet reaches along it
+    tt = t[np.abs(s) < 1.5 * h]
+    a, b = max(tt.min(), 0.0), min(tt.max(), L)
+    u = (roll[1] - roll[0]) / L
+    q = np.arange(a, b + 1e-9, h)
+    line_pts = roll[0][None] + q[:, None] * u[None]
+    P = np.vstack([flat[keep], line_pts])
+    sP = np.concatenate([s[keep], np.zeros(len(line_pts))])
+    nl = len(line_pts)
+    # each side triangulated with the line's points: the line is then an edge chain of both (a tailor's mark)
+    T2 = []
+    for sg in (1, -1):
+        idx = np.nonzero((sg * sP > 0) | (np.arange(len(P)) >= len(P) - nl))[0]
+        tri = idx[Delaunay(P[idx]).simplices]
+        T2.append(tri)
+    T2 = np.vstack(T2)
+    # keep the triangles whose centroid lies in the old mesh (and not the slivers along the line itself)
+    cen = P[T2].mean(1)
+    ar = 0.5 * np.abs((P[T2[:, 1], 0] - P[T2[:, 0], 0]) * (P[T2[:, 2], 1] - P[T2[:, 0], 1])
+                      - (P[T2[:, 1], 1] - P[T2[:, 0], 1]) * (P[T2[:, 2], 0] - P[T2[:, 0], 0]))
+    ok = _inside_any(cen, flat, T) & (ar > 0.02 * h * h)
+    T2 = T2[ok]
+    # winding: counter-clockwise (+z) as the old mesh
+    a_, b_, c_ = P[T2[:, 0]], P[T2[:, 1]], P[T2[:, 2]]
+    cr = (b_[:, 0] - a_[:, 0]) * (c_[:, 1] - a_[:, 1]) - (b_[:, 1] - a_[:, 1]) * (c_[:, 0] - a_[:, 0])
+    f0 = T[0]
+    up = np.cross(np.append(flat[f0[1]] - flat[f0[0]], 0), np.append(flat[f0[2]] - flat[f0[0]], 0))[2]
+    flip = (cr < 0) if up > 0 else (cr > 0)
+    T2[flip] = T2[flip][:, [0, 2, 1]]
+    # carry values to the new points
+    tri, w = _barycentric(line_pts, flat, np.asarray(T, np.int64))
+    out = []
+    for v in vals:
+        nv = np.vstack([v[keep], (v[T[tri]] * w[..., None]).sum(1)])
+        out.append(nv)
+    return P, T2, out, np.nonzero(keep)[0]
+
+
 # ------------------------------------------------------------------ the bake
 
 class Report:
     def __init__(self):
         self.creases = []          # per crease: dict(name, target_deg, achieved_deg, worst_deg, band, hinges)
         self.steps = 0
+        self.corrections = 0
         self.ok = False
         self.why = ''
 
@@ -275,14 +357,15 @@ class Report:
         return [c['target_deg'] for c in self.creases]
 
     def __str__(self):
-        head = 'folds: %s in %d steps' % ('reached' if self.ok else 'STOPPED SHORT (%s)' % self.why, self.steps)
+        head = 'folds: %s in %d steps (%d corrections)' % ('reached' if self.ok else 'STOPPED SHORT (%s)' % self.why,
+                                                         self.steps, self.corrections)
         rows = ['  %s: %.1f of %.1f deg (worst along the line %.1f), %d hinges over a band %.3f wide'
                 % (c['name'], c['achieved_deg'], c['target_deg'], c['worst_deg'], c['hinges'], c['band'])
                 for c in self.creases]
         return '\n'.join([head] + rows)
 
     def as_dict(self):
-        return dict(ok=self.ok, why=self.why, steps=self.steps, creases=self.creases)
+        return dict(ok=self.ok, why=self.why, steps=self.steps, corrections=self.corrections, creases=self.creases)
 
 
 class Folds:
@@ -304,6 +387,14 @@ class Folds:
         c = Crease(line, angle, radius, side, compliance, name or 'fold %d' % (len(self.creases) + 1))
         r = rest_angles(self.flat, self.T, self.H_all, c)
         on = np.abs(r) > 1e-3
+        # (a hinge on a sliver triangle is left out: its angle is ill defined and its gradient huge)
+        P = self.flat
+        H = self.H_all
+
+        def area(i, j, k):
+            return 0.5 * np.linalg.norm(np.cross(P[j] - P[i], P[k] - P[i]), axis=1)
+        sliver = (area(H[:, 0], H[:, 2], H[:, 3]) < 0.05 * self.h ** 2) | (area(H[:, 1], H[:, 3], H[:, 2]) < 0.05 * self.h ** 2)
+        on &= ~sliver
         if not on.any():
             raise ValueError('%s: no edge of the mesh lies on its line' % c.name)
         if c.width(self.h) == 0:
@@ -375,6 +466,10 @@ class Folds:
             dl = (-C - al * lam[k]) / np.maximum(den + al, 1e-12)
             ok = den > 1e-12
             dl = np.where(ok, dl, 0.0)
+            # (no point moved more than a quarter of a row in one walk: a sliver triangle's huge gradient would
+            # otherwise throw the sheet apart)
+            gmax = np.sqrt(np.max([np.einsum('ij,ij->i', g[j], g[j]) * W[j] ** 2 for j in range(4)], axis=0))
+            dl = np.clip(dl, -0.25 * self.h / np.maximum(gmax, 1e-12), 0.25 * self.h / np.maximum(gmax, 1e-12))
             lam[k] += dl
             for j in range(4):
                 x[Hk[:, j]] += (W[j] * dl)[:, None] * g[j]
@@ -436,7 +531,7 @@ class Folds:
                 x[mv] = O + t[:, None] * ax + sa[:, None] * pa + F3[:, 2:3] * n
 
     def bake(self, body=None, h=1.0 / 240, ramp=None, speed=6.0, tol_deg=1.0, tol=2e-4, most=3000, passes=4,
-             damping=0.35, guide=True, log=print):
+             damping=0.35, guide=True, correct=True, log=print):
         """Fold the sheet:
 
           1. over ramp seconds (default: the largest angle over speed, radians a second) the creases' rest angles
@@ -447,8 +542,12 @@ class Folds:
              a tailor lays the flap over by hand as the iron goes down. The turn keeps every length on the moving
              side, so the cloth there is not strained by it;
           2. then held, the hinges keeping the crease and the cloth draping by its own softness under gravity and on
-             the body, until every crease is within tol_deg of its target (measured: see measure) and the fastest
-             point moves less than tol a step.
+             the body, until every crease is within tol_deg of its target (measured: see measure) and the sheet is
+             still (the fastest point moves less than tol a step, or the angles stop changing);
+
+          3. correct: if the sheet comes to rest with a crease off its target (the hinges at their rests, but the
+             cloth either side curved, so the angle across the fold is not the hinges' angle), its rests are scaled
+             by the shortfall and the hold goes on (report.corrections counts these; report.gain the scales).
 
         passes: hinge walks a step. Returns a Report; report.ok is False if `most` steps ran out first, and
         report.why says by how much and where."""
@@ -456,6 +555,8 @@ class Folds:
         H = np.concatenate(self._H)
         rest = np.concatenate(self._rest)
         comp = np.concatenate(self._comp)
+        owner = np.concatenate(self._owner)
+        gain = np.ones(len(self.creases))          # (each crease's rests scaled to make up what the measure lacks)
         batches = _colour(H, fab.w == 0)
         if ramp is None:
             ramp = max(abs(c.angle) for c in self.creases) / speed
@@ -467,6 +568,7 @@ class Folds:
         s['damping'] = damping
         rep = Report()
         k = 0
+        last = None
         try:
             for k in range(1, most + 1):
                 f = min(k / nramp, 1.0)
@@ -477,7 +579,7 @@ class Folds:
                 fab.step(h, body, neutral=True)
                 lam = np.zeros(len(H))
                 for _ in range(passes):
-                    self._walk(H, rest * f, comp, h, batches, lam)
+                    self._walk(H, rest * f * gain[owner], comp, h, batches, lam)
                 if body is not None:
                     p, touched = body(fab.pos.copy())
                     live = touched & (fab.w > 0)
@@ -489,9 +591,24 @@ class Folds:
                     if log and k % 200 == 0:
                         log('folds: step %d, %s, fastest point %.5f' % (
                             k, ', '.join('%.1f/%.1f' % (a, math.degrees(t)) for (a, _), t in zip(m, tgts)), far))
-                    if close and far < tol:
+                    # (still: the points at rest, or the angles no longer changing while the body and the hinges
+                    # trade a hair's breadth each step)
+                    still = far < tol or (last is not None and all(abs(a - b) < 0.02 for (a, _), b in zip(m, last)))
+                    last = [a for a, _ in m]
+                    if close and still:
                         rep.ok = True
                         break
+                    if still and correct:
+                        # At rest but off: the hinges hold their rests, yet the angle measured across the fold (the
+                        # sheet's normals either side) differs, because the cloth either side is not flat (a front
+                        # curved over the chest, a lapel lying on it). So the rests are corrected by the shortfall,
+                        # as a presser turns a fold a little further than it should sit, up to 178 degrees.
+                        for i, ((a, _), t) in enumerate(zip(m, tgts)):
+                            if np.isfinite(a) and abs(a - math.degrees(t)) > tol_deg:
+                                want = gain[i] * (1 + (math.degrees(t) - a) / max(a, 1.0))
+                                cap = math.radians(178.0) / max(np.abs(self._rest[i]).max(), 1e-9)
+                                gain[i] = float(np.clip(want, 0.5, cap))
+                        rep.corrections += 1
         finally:
             s['damping'] = was
             fab.prev[:] = fab.pos
