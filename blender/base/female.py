@@ -3783,16 +3783,9 @@ LIP_TEX = {}
 LIP_X0, LIP_X1, LIP_Z0, LIP_Z1 = -0.12, 0.12, 0.165, 0.305     # the lip patch's extent, in head heights (real z)
 
 
-def lip_painting(W=576, H=336):
-    """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
-    (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
-    lip: a dusty rose a few shades deeper and redder than the skin, never a pink. The upper lip, turned down away
-    from the light, a shade deeper than the lower; the lower lip fuller and a little lighter across its middle,
-    where it catches the light; both darkening into the line between them and the corners, where they tuck in.
-    The upper lip's edge (the vermilion border) is crisp, with the faint pale rim of skin just above it that gives
-    the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
-    across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
-    a hard point."""
+def _lip_forms(W, H):
+    """The lips' forms on the lip patch's grid (H x W), from mouth_relief: across (x, in the sculpt's own across),
+    the warped height w, the line between the lips zl, each lip's edge, and how far across each lip a point lies."""
     xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
     zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
     zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
@@ -3819,6 +3812,22 @@ def lip_painting(W=576, H=336):
     # how far down each lip lies, 0 at the line between them, 1 at its outer edge
     tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
     tl = np.clip((zl - w) / np.maximum(zl - bot, 1e-4), 0, 1)
+    return dict(x=x, w=w, ax=ax, sm=sm, zl=zl, top=top, bot=bot, upper=upper, lower=lower, lip=lip, tu=tu, tl=tl)
+
+
+def lip_painting(W=576, H=336):
+    """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
+    (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
+    lip: a dusty rose a few shades deeper and redder than the skin, never a pink. The upper lip, turned down away
+    from the light, a shade deeper than the lower; the lower lip fuller and a little lighter across its middle,
+    where it catches the light; both darkening into the line between them and the corners, where they tuck in.
+    The upper lip's edge (the vermilion border) is crisp, with the faint pale rim of skin just above it that gives
+    the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
+    across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
+    a hard point."""
+    F = _lip_forms(W, H)
+    x, w, ax, sm, zl, top, bot = F['x'], F['w'], F['ax'], F['sm'], F['zl'], F['top'], F['bot']
+    upper, lower, lip, tu, tl = F['upper'], F['lower'], F['lip'], F['tu'], F['tl']
     L = LIP_COLOURS
     MID = np.array(L.get('MID', [178, 104, 96]), dtype=np.float32)      # the lip's own tone: a dusty rose on her warm skin
     UP = np.array(L.get('UP', [162, 90, 84]), dtype=np.float32)         # the upper lip, a shade deeper
@@ -3853,6 +3862,51 @@ def lip_painting(W=576, H=336):
     return np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
 
 
+def lip_layer_maps(W=576, H=336):
+    """The lips' two layers' map on the lip patch (H x W x 4, 0-1, first row at LIP_Z1): red, how wet the surface is
+    (most along the parting and on the lower lip's middle, drying toward the border and the corners); green, the
+    grooves of the lip print (mostly vertical, fanning wider toward the border, each with its own depth and length,
+    LIP_PITCH_MM apart at the parting, measured from the head); blue, the dry flakes toward the border. The same
+    pattern as the Face Creator's lipFurrow and lipAt (tools/face-creator/apply-lip-layers.py)."""
+    import skin_layers as SLm
+    F = _lip_forms(W, H)
+    x, w, ax, sm, upper, lower, lip, tu, tl = F['x'], F['w'], F['ax'], F['sm'], F['upper'], F['lower'], F['lip'], F['tu'], F['tl']
+    up = (upper > lower).astype(np.float64)
+    t = np.where(up > 0, tu, tl)
+    head_mm = HEAD_H * SLm.MM_PER_UNIT
+    SP = SLm.LIP_PITCH_MM / head_mm / FACE['mouthWidth']       # (x is across in head heights over the mouth's width)
+    moist = np.where(up > 0, 0.6 * sm(0.45, 0.1, tu), sm(0.85, 0.35, tl)) * sm(0.075, 0.03, ax) * lip
+
+    def h(k, s_):
+        v = np.sin(k * 12.9898 + s_ * 78.233) * 43758.5453
+        return v - np.floor(v)
+    s = x / (1 + 0.45 * t)
+    ph = s / SP + 0.35 * _fbm2(x * 40 + 3 * up, t * 1.6, 61, 2)
+    k = np.floor(ph) + 1000 * up
+    f = ph - np.floor(ph)
+    r1, r2, r3 = h(k, 71), h(k, 73), h(k, 75)
+    t0, t1 = 0.06 + 0.35 * r2 * r2, 0.72 + 0.28 * r3
+    g = np.exp(-((f - 0.5 - 0.28 * (r3 - 0.5)) / (0.15 + 0.07 * r1)) ** 2) * (0.2 + 0.8 * r1 * r1) * sm(t0, t0 + 0.12, t) * sm(t1, t1 - 0.15, t)
+    groove = np.clip(g, 0, 1) * (lip > 0.01)
+    fm = SLm.LIP_FLAKE_MM / head_mm
+    fn = 0.6 * _fbm2(x * FACE['mouthWidth'] / fm, w / (0.7 * fm), 91, 2) + 0.4 * _fbm2(x * FACE['mouthWidth'] / (0.5 * fm), w / (0.4 * fm), 93, 2)
+    flake = sm(0.15, 0.55, fn) * sm(0.45, 0.95, t) * (1 - moist) * (lip > 0.01)
+    return np.stack([np.clip(moist, 0, 1), groove, np.clip(flake, 0, 1), np.ones_like(moist)], axis=2).astype(np.float32)
+
+
+def lip_layers_image():
+    if 'layers' in LIP_TEX:
+        return LIP_TEX['layers']
+    px = lip_layer_maps()
+    H, W = px.shape[:2]
+    img = bpy.data.images.new('lip layers', W, H, alpha=False)
+    img.colorspace_settings.name = 'Non-Color'
+    img.pixels.foreach_set(px[::-1].ravel())
+    img.pack()
+    LIP_TEX['layers'] = img
+    return img
+
+
 def lip_image():
     if 'img' in LIP_TEX:
         return LIP_TEX['img']
@@ -3867,24 +3921,35 @@ def lip_image():
 
 def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     """The lips' colour (lip_painting) on a thin skin of the face over the mouth: a grid of the patch, each point
-    cast straight back onto the finished head and lifted a hair off it, like the eyeshadow. A touch glossier than
-    the skin round it, as lips are, but not wet."""
+    cast straight back onto the finished head and lifted a hair off it, like the eyeshadow. Its material is the lips'
+    two layers (skin_layers.lip_material)."""
     m = bpy.data.materials.new('lip paint')
     m.use_nodes = True
     nt = m.node_tree
     for n in list(nt.nodes):
         nt.nodes.remove(n)
     out = nt.nodes.new('ShaderNodeOutputMaterial')
-    p = nt.nodes.new('ShaderNodeBsdfPrincipled')
     tex = nt.nodes.new('ShaderNodeTexImage')
     tex.image = lip_image()
     tex.interpolation = 'Cubic'
     tex.extension = 'EXTEND'
-    nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
-    nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
-    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
-    p.inputs['Specular IOR Level'].default_value = 0.3
-    nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    lay = nt.nodes.new('ShaderNodeTexImage')
+    lay.image = lip_layers_image()
+    lay.interpolation = 'Cubic'
+    lay.extension = 'EXTEND'
+    # (two layers, skin_layers.lip_material: a smooth pink under layer with a short red scatter, and a rougher coat
+    # on top with the grooves and flakes in its own normal, wet at the parting and dry at the border. It was one
+    # flat Principled at roughness 0.55.)
+    import skin_layers
+    if os.environ.get('LIP_LAYERS', '1') == '0':      # (the flat lips, for a before/after: face_views.py --lips flat)
+        p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+        nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
+        p.inputs['Roughness'].default_value = 0.55
+        p.inputs['Specular IOR Level'].default_value = 0.3
+        nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    else:
+        skin_layers.lip_material(nt, out, tex, lay)
     m.surface_render_method = 'BLENDED'
     bm = bmesh.new()
     uvl = bm.loops.layers.uv.new('UVMap')
