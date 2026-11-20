@@ -42,7 +42,8 @@ LEATHER = dict(
     gap=0.03,                # how far the leather is kept off the hose
     steps=120,
 )
-HOLD = {'sole': 0.30, 'collar': 0.25}   # how far up from the upper's lower edge, and down from its top, it is held
+HOLD = {'sole': 0.30, 'collar': 0.25}
+FLAT = ('inner shaft', 'outer shaft', 'tongue')      # the pieces cut and kept as flat sheets (sew)   # how far up from the upper's lower edge, and down from its top, it is held
 # The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge. The foot's seams,
 # then each shaft's (last.SHAFTS); a seam whose pieces a boot does not have is passed over.
 SEAMS = (
@@ -177,9 +178,24 @@ def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
     body = fabric.bvh_body(BVHTree.FromPolygons(pts, tris), P['gap'])
     import time
     t0 = time.time()
-    fab = fabric.Fabric(base, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
+    # the leg's pieces (FLAT) are flat sheets: the solver is given each one's lengths as it lies flat on the pattern
+    # (pattern.flatten: the piece peeled off the last and pressed flat, at its true size), so on the leg it can only
+    # bend, as a sheet of leather does, and what roundness it has comes from being wrapped; the foot's pieces (the
+    # vamp, the toe cap) keep the last's lengths, as leather stretched over the last does
+    import pattern
+    flat = base.copy()
+    for p in uppers:
+        if p['name'] in FLAT:
+            uv, give = pattern.flatten(p)
+            sl = slice(p['start'], p['start'] + len(p['V']))
+            flat[sl] = np.column_stack([uv, np.zeros(len(uv))])
+            log('boot sewing: %s cut flat (flat lengths %.0f%%..%.0f%% of its lengths on the last)'
+                % (p['name'], 100 * give[0], 100 * give[2]))
+    fab = fabric.Fabric(flat, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
     fab.pin(np.arange(n), pin)
     ties = fab.mesh([tuple(p.vertices) for p in o.data.polygons])
+    fab.pos[:] = base                                           # (then set on the last, to be drawn to those lengths)
+    fab.prev[:] = base
     # (each pair held at the distance it was cut at: the two pieces' points along a seam are not spaced alike, so
     # drawing each to the other's nearest point gathers the seam into scallops)
     fab.tie(sew_ij[:, 0], sew_ij[:, 1], 0.0)
