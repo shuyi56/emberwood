@@ -678,6 +678,7 @@ def front_cut(V, faces, M):
     cuts = [shapely.Polygon(_mirror(poly, Bk, Nk)).buffer(0) for Bk, Nk, poly in outlines]
     opening = vee                                    # (the fronts end at their roll lines; the lapels are drafted on from there)
     edge = opening.boundary
+    _bodice.LAP_TOP = float(B[1]) - 0.1               # (the left front's underlap ends under the break)
     DRAFTED.update(E=E, D=D, pos=pos, outlines=outlines, bodyP=bodyP, bodyN=bodyN, cuts=cuts, vee=vee)
     yc = M['yc']
     lo, hi = np.array(vee.bounds[:2]) - 0.5, np.array(vee.bounds[2:]) + 0.5
