@@ -137,6 +137,10 @@ class Draft:
         # armpit (the shoulder's end is the sleeve's to hang from, not the body's)
         cap = (x_pit + 0.1 * w) / np.maximum(np.abs(sn), 1e-6)
         plumb = _hang(np.minimum(rest, cap[None, :]))
+        # (worn under a close garment the shirt is cut to the body, not hung plumb from the bust: the width a plumb
+        # shift has at the waist was pressed into the garment's room there and crushed flat)
+        k_ = ratios.get('plumb', 1.0)
+        plumb = np.minimum(rest, cap[None, :]) + k_ * (plumb - np.minimum(rest, cap[None, :]))
         # (and wide enough all the way up to pass over the widest place below it, down to the hem: the hips. A shift
         # is a straight tube; cut narrower than the hip its hem would sit on the hip and the cloth pouch over it)
         i_hem = int(np.argmin(np.abs(zs - self.z_hem)))
@@ -205,7 +209,7 @@ class Draft:
         for seed in (3, 4):                       # (each sleeve its own creases)
             cr = _creases(_folds(np.random.default_rng(seed), ratios['sleeve_folds'], 0.55, wander=0.5), al[None, :], t_a)
             sw = ratios['swell'] * w * t_a * np.sin(2 * al[None, :] + seed + 1.5 * t_a)
-            self.Ra.append(np.maximum(_hang(rest_a) + out_a + sw - a_fa * cr, rest_a))
+            self.Ra.append(np.maximum(rest_a + ratios.get('plumb', 1.0) * (_hang(rest_a) - rest_a) + out_a + sw - a_fa * cr, rest_a))
         self.Ra0 = float(self.Ra[0][int(np.argmin(np.abs(zs - self.z_cuff)))].mean())
         # --- the gap between arm and side, below the armpit: midway between the body's side and the arm's inner face
         side = (Rb * np.abs(sn)[None, :]).max(1)
@@ -681,7 +685,7 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
                 at_neck = near((share[edge] < 0.5) & (V[edge, 2] > M['z_bust']), 0.4 * band, 2.5 * band)
                 at_cuff = near((share[edge] >= 0.5) & (V[edge, 2] < D.z_cuff + 1.5 * VOXEL), 0.7 * band, 2.5 * band)
                 full = ratios['full'] * (1.0 - at_neck) * (1.0 - at_cuff) - ratios['cuff_in'] * at_cuff
-                solver.settle(o, rig, [body, *colliders], full=full, log=log)
+                solver.settle(o, rig, [body, *colliders], full=full, P=dict(solver.LINEN, **ratios.get('hand', {})), log=log)
                 if under is not None:
                     # tucked: where the outer garment covers the body's cloth, the cloth is pressed into the room under
                     # it (its folds flattened against the skin, as a shirt's are under a laced doublet), held there, and
@@ -716,7 +720,7 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
                     log('chemise: %d points held under the %s, %d of them pressed in' % (int((held > 0).sum()), under['garment'].name, moved))
                     # (the garment's sleeves are no collider: the shirt's sleeve inside them is held, and their inner side, which
                     # lies against the trunk under the arm, crossed the body's cloth there and threw it)
-                    solver.settle(o, rig, [body, *colliders, under['garment']], pinned=held, P=dict(solver.LINEN, frames=60), log=log)
+                    solver.settle(o, rig, [body, *colliders, under['garment']], pinned=held, P=dict(solver.LINEN, **dict(ratios.get('hand', {}), frames=60)), log=log)
                     # (a few free points can still be flung, alone or in small flaps: brought back to their neighbours,
                     # which the threads around them hold)
                     after = np.array([v.co[:] for v in me.vertices])

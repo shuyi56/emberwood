@@ -66,6 +66,10 @@ SHIRT = dict(
     hem=cut.RATIOS['hem_drop'] + 0.45,     # a band of it below the gambeson's skirt
     cuff=0.08,                             # and below its cuffs (the gambeson's ends 0.25 w above the wrist)
     cuff_in=0.30,
+    plumb=0.0,               # cut to the body, not hung from the bust (see drape.Draft)
+    thick=0.024,             # a heavier linen, three times the shift's: it lies in round folds where the thin one
+                             # folded flat on itself, as paper does
+    hand=dict(bending=0.6, self_gap=0.045),
 )
 
 
