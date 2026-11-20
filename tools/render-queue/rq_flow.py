@@ -1271,6 +1271,18 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
                 rep['laces'][o.name] = S
                 rep['skipped'].pop(o.name, None)
                 laces.append((o.name, S, runs))
+            try:        # (the lacing and the surfaces round it, kept for working on the check without Blender)
+                allC = np.concatenate([r['centre'] for _, _, runs in laces for r in runs])
+                keep = {}
+                for n_, (Xs, Ts) in enumerate(surf):
+                    c = Xs[Ts].mean(1)
+                    m = (np.linalg.norm(c[:, None] - allC[None, ::3], axis=2).min(1) < 2.5)
+                    keep['sX%d' % n_], keep['sT%d' % n_] = Xs, Ts[m]
+                for o in lace_obs:
+                    keep['lX_' + o.name], keep['lT_' + o.name] = _mesh(o, dg)
+                np.savez_compressed(os.path.join(out, stem + '-lace-dump.npz'), **keep)
+            except Exception:
+                pass
             if laces and (heat == 'always' or any(S['verdict'] != 'ok' for _, S, _ in laces)):
                 lb = [sf for g, sf in zip(geoms, surf) if not g[0].lower().startswith(('hose',))]
                 rep['lace_heatmap'] = os.path.basename(lace_heatmap(lb or surf, laces,
