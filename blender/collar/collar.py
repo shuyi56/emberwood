@@ -29,6 +29,8 @@ RATIOS = dict(
     gap=0.80,              # the open gap between the two front ends at the neck edge, in w
     lean=0.18,             # how far the stand leans in toward the neck, as a share of its height
     spacing=0.075,         # the grid's point spacing, in w
+    stand_front=None,      # the stand at the front ends (None: as at the back). A notch collar's stand dies away toward
+                           # the gorge, so its roll line runs on into the lapel's
 )
 
 
@@ -74,13 +76,18 @@ def draft(E, M, R=RATIOS):
     arc = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(E[idx], axis=0), axis=1))])
     L = arc[-1]
     st, fb, ff = R['stand'] * w, R['fall_back'] * w, R['fall_front'] * w
+    stf = st if R.get('stand_front') is None else R['stand_front'] * w
+
+    def st_of(s):                                     # the stand's height along the collar
+        u = np.clip(np.abs(s) / (0.5 * L), 0, 1)
+        return st + (stf - st) * u ** 2
     h = R['spacing'] * w
 
     nd = R['notch'] * w                               # the front end is cut on the slant: the point stands this far past its foot
 
     def top(s):                                       # the cut edge's height above the neck edge, rising to the points
         u = np.clip(np.abs(s) / (0.5 * L), 0, 1)
-        return st + fb + (ff - fb) * (u ** 2.0)
+        return st_of(s) + fb + (ff - fb) * (u ** 2.0)
     t_end = float(top(0.5 * L))
 
     def smax(t):                                      # how far out the piece reaches at height t (the slanted end)
@@ -106,7 +113,7 @@ def draft(E, M, R=RATIOS):
     remap = -np.ones(len(pts), int)
     remap[used] = np.arange(len(used))
     pts, T = pts[used], remap[T]
-    return dict(UV=pts, T=T, L=L, stand=st, idx=idx, arc=arc, s0=-0.5 * L, smax=smax)
+    return dict(UV=pts, T=T, L=L, stand=st, st_pt=st_of(pts[:, 0]), idx=idx, arc=arc, s0=-0.5 * L, smax=smax)
 
 
 SETTINGS = dict(
@@ -145,7 +152,7 @@ def design(D, E, M, S=SETTINGS):
     u = np.array([0, 0, 1.0])
     g, b = S['flare'], S['fold']
     d1 = u[None] * math.cos(g) - n * math.sin(g)                       # up the stand, spreading
-    st = D['stand']
+    st = D['st_pt']
     tt = np.minimum(t, st)[:, None]
     dd = np.maximum(t - st, 0)[:, None]
     R = Eo + tt * d1
@@ -166,7 +173,7 @@ def solve(D, E, M, bodyP, bodyN, S=SETTINGS, R_=RATIOS, log=print):
     fab.pin(neck)
     fab.pos[neck] = folded[neck]
     fab.prev[:] = fab.pos
-    soft = np.where(np.abs(UV[:, 1] - D['stand']) < 0.09 * M['w'], S['crease'], 0.0)
+    soft = np.where(np.abs(UV[:, 1] - D['st_pt']) < 0.09 * M['w'], S['crease'], 0.0)
     fab.mesh(T, stretch=S['stretch'], rest_pos=folded, bend=S['bend'], bend_at=soft, flat=S['flat'])
     body = xf.MeshBody(bodyP, bodyN, gap=S['gap'], reach=1.0)
     k = fab.settle(body, h=1 / 240, max_steps=S['steps'], tol=2e-4, log=log)
@@ -181,7 +188,24 @@ LAPEL = dict(
     point_len=0.70,        # the lapel's point as long as this share of the collar's (notch to point)
     belly=0.10,            # the outer edge's curve out past its straight line, in w
     spacing=0.07,
+    tilt=25,               # the lapel starts this far turned off the chest (degrees), unfolded; the solver folds the rest
+    steps=1600,
 )
+
+
+# The styles. 'turned': the first one (kept as it was approved): a turned-down collar all round, its short points over
+# small lapels. 'notch': a tailored notch collar, as in the reference: the collar is sewn on only round the back and
+# sides, its stand dying away toward the front so that its roll runs on into the lapels' roll, the fronts open in a
+# wide V from the neck's sides down to the top button and turned back as the lapels, the collar's ends lying along the
+# gorge, and the notch between the collar's point and the lapel's.
+STYLES = dict(
+    turned=(dict(RATIOS), dict(LAPEL)),
+    notch=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=1.00, notch=0.30, gap=1.8),
+           dict(LAPEL, drop=1.35, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, belly=0.10)),
+)
+STYLE = os.environ.get('COLLAR_STYLE', 'notch')
+RATIOS.update(STYLES[STYLE][0])
+LAPEL.update(STYLES[STYLE][1])
 
 
 def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
@@ -216,12 +240,14 @@ def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
         # down by the notch's angle
         UVc = D['UV']
         side = np.sign(cpos[:, 0]) == sg
-        endpts = np.nonzero(side & (np.abs(UVc[:, 0]) > D['smax'](UVc[:, 1]) - 0.6 * L_['spacing'] * w) & (UVc[:, 1] >= D['stand']))[0]
+        endpts = np.nonzero(side & (np.abs(UVc[:, 0]) > D['smax'](UVc[:, 1]) - 0.6 * L_['spacing'] * w) & (UVc[:, 1] >= D['st_pt']))[0]
         C3 = cpos[endpts[np.argmax(UVc[endpts, 1])]]
         R3 = cpos[endpts[np.argmin(UVc[endpts, 1])]]
         C = C3[[0, 2]]
         G = R3[[0, 2]] + L_['notch_at'] * (C - R3[[0, 2]])
         v = (C - G) * L_['point_len']
+        if L_.get('point_w'):                                           # (or a set length, in w, the direction kept)
+            v = v / max(np.linalg.norm(v), 1e-9) * L_['point_w'] * w
         a = math.radians(L_['notch_angle'])
         cands = [np.array([v[0] * math.cos(t) - v[1] * math.sin(t), v[0] * math.sin(t) + v[1] * math.cos(t)]) for t in (a, -a)]
         Pp = G + max(cands, key=lambda u: sg * u[0])                       # (the turn that takes it outward, the notch opening sideways)
@@ -246,21 +272,61 @@ def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
         Gr = Gr[path.contains_points(Gr)]
         dmin = np.min(np.linalg.norm(Gr[:, None] - bnd[None], axis=2), 1)
         Gr = Gr[dmin > 0.45 * h]
-        UV = np.vstack([bnd, Gr])
-        T = Delaunay(UV).simplices
-        T = T[path.contains_points(UV[T].mean(1))]
-        # lay it on the chest, the roll line (B to N) held, the rest let go onto the bodice
-        X = on_chest(UV, 0.04)
+        UV = np.vstack([bnd, Gr])                      # the lapel as it lies when turned back (x, z)
+        # The lapel is the bodice's own front, cut as one with it and turned back along the roll line (B to N). So it
+        # is cut where it grows: the outline mirrored across the roll line, into the V the front opens (it crosses the
+        # middle, as a lapped front does). A strip of the bodice beyond the roll line goes in the same sheet, held
+        # where it lies, so the fold has cloth on both sides of it; the solver turns the lapel back over it.
         BN_ = N - B
-        t_ = np.clip(((UV - B) @ BN_) / (BN_ @ BN_), 0, 1)
-        dist = np.linalg.norm(UV - (B + t_[:, None] * BN_), axis=1)
-        fab = xf.Fabric(X, dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4))
-        fab.pin(np.nonzero(dist < 0.3 * h)[0])
-        fab.mesh(T, stretch=1e-6, rest_pos=np.column_stack([UV, np.zeros(len(UV))]), bend=1e-6, flat=1e-6)
+        e = BN_ / np.linalg.norm(BN_)
+
+        def mirror(X):
+            d = X - B
+            return B + 2 * (d @ e)[:, None] * e[None] - d
+
+        def dist_line(X):
+            t_ = np.clip(((X - B) @ BN_) / (BN_ @ BN_), 0, 1)
+            return np.linalg.norm(X - (B + t_[:, None] * BN_), axis=1)
+        on_roll = dist_line(UV) < 0.3 * h
+        band = UV[(~on_roll) & (dist_line(UV) < 2.3 * h)]              # (the strip: the bodice beyond the roll)
+        cutUV = mirror(UV)                                              # the lapel where it is cut
+        P2 = np.vstack([cutUV, band])
+        nl = len(UV)
+        T = Delaunay(P2).simplices
+        cpath = Path(mirror(poly))
+        mid = P2[T].mean(1)
+        keep = cpath.contains_points(mid) | ((dist_line(mid) < 2.0 * h) & path.contains_points(mid))
+        T = T[keep]
+        # rest: the fold made (the lapel back on the chest over the strip); start: the front as cut, unfolded, tilted
+        # a little off the chest at the roll so the solver turns it the right way
+        rest = np.vstack([on_chest(UV, 0.10), on_chest(band, 0.02)])
+        flat = np.vstack([on_chest(cutUV, 0.02), on_chest(band, 0.02)])
+        a0, a1 = on_chest(B[None], 0.02)[0], on_chest(N[None], 0.02)[0]
+        ax = (a1 - a0) / np.linalg.norm(a1 - a0)
+        th = math.radians(L_['tilt'])
+        d = flat - a0
+        par = (d @ ax)[:, None] * ax[None]
+        perp = d - par
+        start = a0 + par + perp * math.cos(th) + np.cross(ax[None], perp) * math.sin(th)
+        fwd = np.array([0, -1.0, 0])                                    # (tilt it toward the front, off the body)
+        if ((start[:nl] - flat[:nl]) @ fwd).mean() < 0:
+            start = a0 + par + perp * math.cos(th) - np.cross(ax[None], perp) * math.sin(th)
+        start[nl:] = flat[nl:]
+        fab = xf.Fabric(start, dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4))
+        fab.pin(np.concatenate([np.nonzero(on_roll)[0], np.arange(nl, len(P2))]))
+        fab.pos[:nl][on_roll] = rest[:nl][on_roll]
+        fab.prev[:] = fab.pos
+        crease = np.zeros(len(P2))
+        fab.mesh(T, stretch=1e-6, rest_pos=rest, bend=1e-6, flat=1e-6, bend_at=crease)
         body = xf.MeshBody(bodyP, bodyN, gap=0.07, reach=1.0)
-        k = fab.settle(body, h=1 / 240, max_steps=600, tol=2e-4)
-        log('collar: lapel settled in %d steps, %d points' % (k, len(UV)))
-        out.append((fab.pos.copy(), T))
+        for _ in range(240):                                            # (the turn itself: no early stop while it starts)
+            fab.step(1 / 240, body, neutral=True)
+        k = 240 + fab.settle(body, h=1 / 240, max_steps=L_['steps'], tol=1e-4)
+        fold = float(np.degrees(np.arccos(np.clip(((fab.pos[:nl] - a0) @ (rest[:nl] - a0).T).diagonal().sum()
+                                               / max(np.linalg.norm(fab.pos[:nl] - a0) * np.linalg.norm(rest[:nl] - a0), 1e-9), -1, 1))))
+        log('collar: lapel turned back in %d steps (%d points), %.0f degrees off the pressed fold' % (k, nl, fold))
+        TL = T[(T < nl).all(1)]                                         # (the lapel's own faces: the strip is the bodice's)
+        out.append((fab.pos[:nl].copy(), TL))
     return out
 
 
@@ -312,7 +378,7 @@ def over_lapels(pos, D, laps, M, gap=0.09):
     Nn = np.vstack([xf.vertex_normals(lp, lt) for lp, lt in laps])
     Nn[Nn[:, 1] > 0] *= -1                             # (toward the front: -y)
     body = xf.MeshBody(P, Nn, gap=gap, reach=0.6)
-    fall = D['UV'][:, 1] > D['stand']
+    fall = D['UV'][:, 1] > D['st_pt']
     Q, hit = body(pos.copy())
     move = np.where((fall & hit)[:, None], Q - pos, 0.0)
     # ease the move out over the neighbouring points (a few rounds of averaging along the mesh's edges)
