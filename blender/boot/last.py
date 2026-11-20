@@ -88,6 +88,9 @@ RATIOS = {
     'welt': 0.022,           # how far the sole stands out past the upper
     'stitch_in': 0.012,      # the stitches' row, this far in from the edge
     'lace_gap': 0.035,       # the lacing's opening down the front, drawn tight (about 9 mm between the edges)
+    'binding_ring': 0.0,     # 1 sews a binding band round the top (0: none, the panels' top edges bare)
+    'tongue_rise': 0.075,    # the tongue's top stands this far above the boot's rim
+    'tongue_dome': 0.060,    # the tongue's top cut back this far at its sides (a round top)
     'tongue': 0.050,         # how far the tongue reaches under each panel past its front edge
     'eyelet_in': 0.028,      # the eyelets' row, this far in from the front edge
     'eyelet_pitch': 0.085,   # and this far apart up it (about 2.2 cm)
@@ -341,17 +344,25 @@ def cut_lace(D, faces, f, r, weights, lift_on):
         pieces.append(dict(name=q + ' shaft', V=add_p, F=fp, up=(0, 0, 1), lift=lift, edges=e, sd=sd,
                            su=np.where(d_back < d_a, Dp[:, 5], Dp[:, 4]), W=Dp[:, 9:],
                            eyelets=_eyelet_line(Dp, np.abs(side(Dp)), ~back, half + r['eyelet_in'], r)))
-        # its binding: the panel's top, over it
+        # its binding (BINDING: 0 leaves it off, the panel's top edge bare): the panel's top, over it
+        if not r['binding_ring']:
+            continue
         Db, fb = _compact(*fit.trim(*fit.trim(D, faces, mine), lambda A: A[:, 5] - zb))
         bl = 1.1 * tl * (1.0 + (_ss(4.0 * lap, 0.0, np.where(front(Db) <= 0, side(Db) + lap, FAR)) * 2.0 if k > 0 else 0.0)) + 1.15 * tl
         pieces.append(dict(name=q + ' binding', V=lift_on(Db, bl), F=fb, up=(0, 0, 1), lift=bl,
                            edges={'F': np.abs(Db[:, 5] - zb) < NEAR, 'top': Db[:, 5] > f['z_top'] - NEAR},
                            sd=Db[:, 5] - zb, su=Db[:, 3], W=Db[:, 9:]))
     # the tongue: under the opening, from the vamp's throat to the top
-    Dt, ft = _compact(*fit.trim(*fit.trim(*fit.trim(D, faces, lambda A: tongue_w - np.abs(side(A))),
-                                          lambda A: front(A)), lambda A: -vs(A)))
-    lt = np.zeros(len(Dt))
-    pieces.append(dict(name='tongue', V=lift_on(Dt, lt), F=ft, up=(0, 0, 1), lift=lt,
+    # (it ends in a round top, high in the middle and cut back at its sides, standing up between the panels' bindings
+    # and as proud as they are, as a tongue's top does, and not in a square end that sinks below them)
+    dome = r['tongue_dome']
+    Dt, ft = _compact(*fit.trim(*fit.trim(*fit.trim(*fit.trim(D, faces, lambda A: tongue_w - np.abs(side(A))),
+                                                    lambda A: front(A)), lambda A: -vs(A)),
+                                lambda A: f['z_top'] - A[:, 5] - dome * (np.abs(side(A)) / tongue_w) ** 2))
+    lt = 3.0 * tl * _ss(f['z_top'] - 10.0 * lap, f['z_top'] + 0.5 * lap, Dt[:, 5])
+    Vt = lift_on(Dt, lt)
+    Vt[:, 2] += r['tongue_rise'] * _ss(f['z_top'] - 14.0 * lap, f['z_top'], Dt[:, 5])     # (its top stands above the rim)
+    pieces.append(dict(name='tongue', V=Vt, F=ft, up=(0, 0, 1), lift=lt,
                        edges={'C': np.abs(vs(Dt)) < NEAR, 'H': np.abs(np.abs(side(Dt)) - tongue_w) < NEAR},
                        sd=np.full(len(Dt), FAR), su=np.zeros(len(Dt)), W=Dt[:, 9:]))
     return pieces
