@@ -529,8 +529,24 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             Ns = (1 - s) * NA + s * NB
             Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
             w = np.minimum(1.0, 6 * np.minimum(s[:, 0], 1 - s[:, 0]))[:, None]        # (down into the hole at each end)
-            bump = np.sin(np.pi * s) ** 0.7            # (broad: the strands clear each other wherever they cross)
-            lift = rl * (1.1 + 0.05 * w) + slack * np.sin(np.pi * s) + (3.1 * rl * bump if j == 0 else 0.0)
+            # drawn tight, the cord lies on whatever is under it: the panels near the holes, the tongue down in the
+            # opening (a leather's thickness and the panels' lap lower), so each point is laid on the face found
+            # straight under it, a cord's radius off it; the strand on top rides over the other only where they
+            # cross, in the middle. The heights are eased along the cord (a taut cord does not follow every step)
+            # but never below the face
+            over = 2.0 * rl * np.exp(-((s[:, 0] - 0.5) / 0.2) ** 2) if j == 0 else 0.0
+            face = np.empty(len(path))
+            for i in range(len(path)):
+                q = path[i] + Ns[i] * 8.0 * rl
+                hit = tree.ray_cast(tuple(q), tuple(-Ns[i]), 30.0 * rl)
+                face[i] = (np.array(hit[0]) - path[i]) @ Ns[i] + tl if hit[0] is not None else rl
+            seat = face + rl
+            eased = seat.copy()
+            for _ in range(3):
+                eased[1:-1] = 0.25 * eased[:-2] + 0.5 * eased[1:-1] + 0.25 * eased[2:]
+            seat = np.maximum(eased, face + 0.9 * rl) + over
+            hole = rl * (1.1 + 0.05 * w[:, 0])
+            lift = (w[:, 0] * seat + (1.0 - w[:, 0]) * hole + 0.15 * slack * np.sin(np.pi * s[:, 0]))[:, None]
             path = path + Ns * lift
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
             ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
