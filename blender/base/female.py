@@ -3941,7 +3941,15 @@ def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     # on top with the grooves and flakes in its own normal, wet at the parting and dry at the border. It was one
     # flat Principled at roughness 0.55.)
     import skin_layers
-    skin_layers.lip_material(nt, out, tex, lay)
+    if os.environ.get('LIP_LAYERS', '1') == '0':      # (the flat lips, for a before/after: face_views.py --lips flat)
+        p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+        nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
+        p.inputs['Roughness'].default_value = 0.55
+        p.inputs['Specular IOR Level'].default_value = 0.3
+        nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    else:
+        skin_layers.lip_material(nt, out, tex, lay)
     m.surface_render_method = 'BLENDED'
     bm = bmesh.new()
     uvl = bm.loops.layers.uv.new('UVMap')
