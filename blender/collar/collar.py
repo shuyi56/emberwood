@@ -191,8 +191,8 @@ LAPEL = dict(
     edge_rounds=8,         # rounds of evening out the cut edges
     whole_steps=1500,      # steps of the solve with the front let go (see _with_front)
     fold_deg=176,          # the lapel's fold: a full turn back over the roll line, pressed (degrees)
-    fold_gap=0.12,         # the least the lapel may lie off the bodice under it: less than the fold's own stand-off (twice its radius), so the body is a floor under the lapel and does not push the turn open
-    fold_radius=0.10,      # the fold's inside radius: the cloth's thickness turned round, not a knife edge
+    fold_gap=0.28,         # how far the lapel's cloth past the turn rests off the bodice under it: it sits proud of the front (about 5 mm over its face), not pressed to it; less than the fold's own stand-off (twice its radius)
+    fold_radius=0.16,      # the fold's inside radius: a rounded roll that carries the lapel up to where it rests
     fold_row=0.05,         # rows of points marked parallel to the roll through the turn, this far apart
     # The fold's solve. The lapel hangs from the turn's fine rows: at the cloth's usual step (1/240 s) and give (1e-6)
     # its own weight stretched those rows by a fifth to double (the contour sheet's strain map), and the lapel came out
