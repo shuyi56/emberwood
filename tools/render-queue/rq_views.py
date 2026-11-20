@@ -412,6 +412,17 @@ def main():
                 print(f'rq geometry: skipped ({type(e).__name__}: {e})', flush=True)
             if FLOW:
                 flow(out)
+            if os.environ.get('RQ_TEST_GAPS'):       # (TEST ONLY: PR #63's layer gap check on the same build)
+                try:
+                    sys.path.insert(0, os.path.join(os.path.dirname(VIEWS_PY), '..', 'shared'))
+                    import ease
+                    import layer_gaps as LG
+                    LG.check(ease.load(), poses=['rest', 'step'], apply=apply, out=out)
+                    print('rq layer gaps: done', flush=True)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    print(f'rq layer gaps: skipped ({type(e).__name__}: {e})', flush=True)
             checked['s'] = round(time.time() - t, 1)
         return r
     V['F'].build = build_then_check
