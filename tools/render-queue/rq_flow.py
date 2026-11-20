@@ -770,8 +770,10 @@ def lace_heatmap(surf, laces, path, lim, panel=320):
                 pts, under = [], []
                 for (u, v), z, aw in zip(q, dq, away):
                     iu, iv = int(u), int(v)
-                    under.append(0 <= iu < panel and 0 <= iv < panel and zbuf[iv, iu] < z - 0.25)
-                    pts.append(None if aw else (float(u), float(v)))
+                    behind = zbuf[iv, iu] if 0 <= iu < panel and 0 <= iv < panel else np.inf
+                    under.append(behind < z - 0.5 * r['radius'])
+                    # (hidden: facing away, or well behind another surface, as the far wall of the boot)
+                    pts.append(None if aw or behind < z - 12 * r['radius'] else (float(u), float(v)))
                 for i, (p0, p1) in enumerate(zip(pts, pts[1:])):
                     if p0 and p1:       # (a lace sunk under the surface it crosses: drawn thin through it)
                         td.line((p0, p1), fill=c, width=1 if under[i] and under[i + 1] else 3)
