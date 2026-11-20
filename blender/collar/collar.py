@@ -235,7 +235,7 @@ def lapel_outlines(E, M, D, cpos, L_=None):
         # the lapel as a tailor cuts it: the roll line (break B up to the neck at N), the gorge (N out along the collar's
         # seam to the notch G), the notch's other side up to the lapel's point P, and the outer edge from P back to B
         # in a soft convex curve
-        B = np.array([0.0, foot[2] - L_['drop'] * w])
+        B = np.array([-sg * L_.get('break_x', 0.0), foot[2] - L_['drop'] * w])       # (its front's own edge: past the middle, on the other side)
         N = np.array([foot[0], foot[2]])
         # in harmony with the collar: the notch G sits on the collar's own front edge (as solved), part way from the
         # roll down to the collar's point C, and the lapel's point mirrors C across the notch: the same length, turned
@@ -445,6 +445,8 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     bm.verts.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     edge = np.array([v.is_boundary for v in bm.verts])
+    ly = bm.verts.layers.int.get('front_layer')
+    layer = np.array([v[ly] for v in bm.verts]) if ly is not None else np.zeros(len(W), int)
     fv = [[v.index for v in f.verts] for f in bm.faces]
     C = np.array([W[f].mean(0) for f in fv])
     P = W[:, [0, 2]]
@@ -460,10 +462,13 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
         def ts(X):
             return (X - B) @ u, (X - B) @ nperp
         t, sd = ts(P)
-        line = np.nonzero(edge & (W[:, 1] < yc) & (np.abs(sd) < 0.015) & (t > -0.015) & (t < L + 0.015))[0]
+        want = (1 if N[0] < 0 else 2) if layer.any() else 0          # (this lapel's own front: see front_layers)
+        mine = (layer == want) | (layer == 0) if want else np.ones(len(W), bool)
+        line = np.nonzero(edge & mine & (W[:, 1] < yc) & (np.abs(sd) < 0.015) & (t > -0.015) & (t < L + 0.015))[0]
         line = line[np.argsort(t[line])]
         tc, sc = ts(C[:, [0, 2]])
         strip = np.nonzero((C[:, 1] < yc) & (sc < 0) & (sc > -2.5 * h) & (tc > -h) & (tc < L + h))[0]
+        strip = np.array([f for f in strip if mine[fv[f]].all()], int)
         st_v = np.array(sorted({i for f in strip for i in fv[f]} | set(line.tolist())))
         loc = {g: j for j, g in enumerate(st_v)}
         ns = len(st_v)
@@ -820,27 +825,101 @@ def front_cut(V, faces, M):
     sel = BV[:, 2] > 44
     bodyP, bodyN = np.vstack([Vu, BV[sel]]), np.vstack([Nn, BN[sel]])
     pos, _ = solve(D, E, M, bodyP, bodyN)
-    outlines = lapel_outlines(E, M, D, pos)
-    B = outlines[0][0]
-    N0, N1 = outlines[0][1], outlines[1][1]
-    vee = shapely.Polygon([B, B + 1.05 * (N0 - B), B + 1.05 * (N1 - B)])
-    cuts = [shapely.Polygon(_mirror(poly, Bk, Nk)).buffer(0) for Bk, Nk, poly in outlines]
-    opening = vee                                    # (the fronts end at their roll lines; the lapels are drafted on from there)
-    edge = opening.boundary
-    _bodice.LAP_TOP = float(B[1]) - 0.1               # (the left front's underlap ends under the break)
-    DRAFTED.update(E=E, D=D, pos=pos, outlines=outlines, bodyP=bodyP, bodyN=bodyN, cuts=cuts, vee=vee)
-    yc = M['yc']
-    lo, hi = np.array(vee.bounds[:2]) - 0.5, np.array(vee.bounds[2:]) + 0.5
+    # each front's lapel starts at its own edge at the top button: the right front's edge lies lap past the middle
+    # on her left, the left front's (under it) lap past it on her right, so the two roll lines cross above the top
+    # button (the V's point) and below it the fronts lie one on the other
+    lapw = _bodice.RATIOS['lap'] * M['w']
+    outs = lapel_outlines(E, M, D, pos, dict(LAPEL, break_x=lapw))
+    r_ = [o for o in outs if o[1][0] < 0][0]         # (the right front's: its neck point on her right)
+    l_ = [o for o in outs if o[1][0] >= 0][0]
 
-    def f(p):
-        out = np.ones(len(p))
-        near = (p[:, 1] < yc) & (p[:, 0] > lo[0]) & (p[:, 0] < hi[0]) & (p[:, 2] > lo[1]) & (p[:, 2] < hi[1])
-        if near.any():
-            x, z = p[near, 0], p[near, 2]
-            dist = shapely.distance(edge, shapely.points(x, z))
-            out[near] = np.where(shapely.contains_xy(opening, x, z), -dist, dist)
-        return out
-    return [('front opening (the V between the lapels)', f)]
+    def side(P, Bq, Nq):
+        return (Nq - Bq)[0] * (P[:, 1] - Bq[1]) - (Nq - Bq)[1] * (P[:, 0] - Bq[0])
+    # where the rolls cross
+    d1, d2 = r_[1] - r_[0], l_[1] - l_[0]
+    tt = np.linalg.solve(np.array([d1, -d2]).T, l_[0] - r_[0])
+    A = r_[0] + tt[0] * d1
+    # the left lapel is under the right front below the right front's roll: what shows, and what is turned back, is
+    # its part past that roll (from the crossing up); under the right front the left front's cloth lies flat
+    far = r_[0] + 30.0 * d1 / np.linalg.norm(d1)
+    near = r_[0] - 30.0 * d1 / np.linalg.norm(d1)
+    sgn = np.sign(side(l_[1][None], r_[0], r_[1])[0])
+    nrm = np.array([-d1[1], d1[0]]) / np.linalg.norm(d1) * sgn * 60.0
+    half = shapely.Polygon([near, far, far + nrm, near + nrm])
+    shown = shapely.Polygon(l_[2]).buffer(0).intersection(half)
+    if shown.geom_type != 'Polygon':
+        shown = max(shown.geoms, key=lambda g: g.area)
+    pl = np.array(shown.exterior.coords[:-1])
+    outlines = [(r_[0], r_[1], r_[2]), (A, l_[1], pl)]
+    cuts = [shapely.Polygon(_mirror(poly, Bk, Nk)).buffer(0) for Bk, Nk, poly in outlines]
+    DRAFTED.update(E=E, D=D, pos=pos, outlines=outlines, bodyP=bodyP, bodyN=bodyN, cuts=cuts, lap=lapw,
+                   layers=[1, 2], breaks=(r_[0], l_[0]))
+    yc = M['yc']
+
+    def opening(Bq, Nq, xe):
+        top = Bq + 1.05 * (Nq - Bq)
+        poly = shapely.Polygon([Bq, top, np.array([xe, top[1]]), np.array([xe, Bq[1]])]).buffer(0)
+        lo, hi = np.array(poly.bounds[:2]) - 0.5, np.array(poly.bounds[2:]) + 0.5
+
+        def f(p):
+            out = np.ones(len(p))
+            nr = (p[:, 1] < yc) & (p[:, 0] > lo[0]) & (p[:, 0] < hi[0]) & (p[:, 2] > lo[1]) & (p[:, 2] < hi[1])
+            if nr.any():
+                x, z = p[nr, 0], p[nr, 2]
+                dist = shapely.distance(poly.boundary, shapely.points(x, z))
+                out[nr] = np.where(shapely.contains_xy(poly, x, z), -dist, dist)
+            return out
+        return f
+    # (each front is cut open from its own edge at the top button, along its roll line, up to the neck)
+    return dict(right=opening(r_[0], r_[1], r_[0][0] + 0.03), left=opening(l_[0], l_[1], l_[0][0] - 0.03))
+
+
+def front_layers(o, M, lap):
+    """Which front each point of the bodice's front belongs to, kept on the mesh as 'front_layer' (1: the right
+    front, on top; 2: the left front with its underlap; 0: elsewhere), and the left front made one cloth: its
+    underlap comes from the draft as a piece of its own, lying edge to edge with it, and is joined to it here."""
+    import bmesh
+    w, yc = M['w'], M['yc']
+    mw = np.array(o.matrix_world)
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bm.verts.ensure_lookup_table()
+    W = np.array([v.co[:] for v in bm.verts]) @ mw[:3, :3].T + mw[:3, 3]
+    lay = bm.verts.layers.int.get('front_layer') or bm.verts.layers.int.new('front_layer')
+    bm.verts.ensure_lookup_table()
+    zone = (W[:, 1] < yc - 0.5 * w) & (np.abs(W[:, 0]) < 2.5 * w)
+    comp = -np.ones(len(W), int)
+    n = 0
+    for v in bm.verts:                                # (the fronts as islands of the cloth in front: the cut parts them)
+        if not zone[v.index] or comp[v.index] >= 0:
+            continue
+        stack = [v]
+        comp[v.index] = n
+        while stack:
+            q = stack.pop()
+            for e in q.link_edges:
+                u = e.other_vert(q)
+                if zone[u.index] and comp[u.index] < 0:
+                    comp[u.index] = n
+                    stack.append(u)
+        n += 1
+    for c in range(n):
+        m = comp == c
+        if m.sum() < 20:
+            continue
+        x = W[m, 0]
+        inner = np.abs(x).max() < lap + 0.1          # (lies wholly between the lap lines: the underlap)
+        val = 2 if inner or np.median(x) > 0 else 1
+        for i in np.nonzero(m)[0]:
+            bm.verts[int(i)][lay] = val
+    joined = [v for v in bm.verts if v.is_boundary and v[lay] == 2 and abs(W[v.index, 0] - lap) < 0.05]
+    k0 = len(bm.verts)
+    bmesh.ops.remove_doubles(bm, verts=joined, dist=0.03)
+    bm.to_mesh(o.data)
+    counts = [int(sum(1 for v in bm.verts if v[lay] == c)) for c in (1, 2)]
+    bm.free()
+    o.data.update()
+    return n, counts, k0 - len(o.data.vertices)
 
 
 def build():
@@ -858,6 +937,9 @@ def build():
     _bodice.FRONT = None if pieces else front_cut
     res = RB.build()
     b = bpy.data.objects['Redingote bodice']
+    if DRAFTED:
+        print('collar: the fronts told apart (%d islands; right front %d points, left front %d), the underlap joined to the left front at %d points'
+              % ((lambda r: (r[0], r[1][0], r[1][1], r[2]))(front_layers(b, RB.MEASURES, DRAFTED['lap']))), flush=True)
     mw = np.array(b.matrix_world)
     V = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
     Fq = [list(p.vertices) for p in b.data.polygons]
