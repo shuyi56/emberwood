@@ -17,6 +17,7 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_gc.py` | nightly garbage collection of old results and unused project files, with a manifest (see "Garbage collection") |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -416,6 +417,43 @@ Every request is merged with the current `main` first (generated files never cou
 * The queue also catches what git does not: a function defined twice with different bodies after a clean merge
   (the later one silently replaces the earlier for every caller), and two branches editing the same function
   (they are rendered in separate batches, never combined).
+
+## Garbage collection
+
+John's rule (2026-11-20): the nightly job deletes files nobody uses any more, from the queue's `results/` and from
+the whole shared project folder, and reports the space it freed in the morning summary. It runs
+
+```
+cd /mnt/project-files/render-queue && python3 rq_gc.py --repo /home/user/emberwood --refs <open PR bodies> --apply
+```
+
+Without `--apply` it is a dry run that prints the same report and deletes nothing. Every run with `--apply` writes
+its manifest to `stats/gc-<date>.md` (and `.json`): each deleted path with its size and the rule that removed it,
+the total, and every item it kept or left as borderline.
+
+**What goes:**
+- draft and check results older than 3 days, and `-failed` results older than 3 days
+- results superseded by a newer render of the same view command for the same thread, once a day old
+- daily sheets older than 3 days, past the newest two
+- superseded versions: `NAME-vN-REST.png|gif|jpg|webp|glb|blend|mp4|exr` under a higher version of the same series in
+  the same folder. The newest version stays, and the newest two while the series was written in the last day.
+- temp files: Blender backups (`.blend1`), `__pycache__`, `.pyc`, `.tmp`, editor `~` and lock files
+- byte-identical duplicates of media files (the referenced or the older copy stays); fold cache entries are never
+  treated as duplicates, because two keys may hold the same folds
+- orphaned fold cache entries (`NAME-<hex key>.npy|npz`): a key the render logs show replaced by a newer key of the
+  same piece on every branch that used it
+
+**What always stays:**
+- anything named in `rejections.jsonl`, in a pending, rendering or conflict request, in a text file of the project
+  folder outside `render-queue/`, in any pushed branch of the repo, or in an open PR's body
+- the newest result of each thread's view command, main's current finals and the newest two sheets
+- `uploads/` (John's own files), code and text files, the newest version of every series, and anything written in
+  the last 24 hours (12 for a superseded version)
+- the fold cache entry each branch last used
+
+**Borderline, listed and never deleted:** fold cache entries no queue render names (the solver ran outside the queue,
+so the key may be current work), and superseded versions written in the last 12 hours. `--hold PATH` keeps a
+path whatever the rules say, for a thread's current work.
 
 ## Rendered files in pull requests
 
