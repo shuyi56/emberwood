@@ -47,6 +47,7 @@ RATIOS = dict(
     # the armhole (the sleeves thread's numbers: redingote/armhole.py)
     shoulder=0.97,           # the shoulder seam ends at this share of the way out to the shoulder point
     scye_drop=0.35,          # the armhole's bottom below the armpit, in w
+    scye_in=0.30,            # cloth inside the armhole's loop (seen from the side) stays only if it is this far inside the seam surface, in w
     scoop_front=0.30,
     scoop_back=0.18,
     # the basque: the hem's depth below the waist, in w
@@ -126,11 +127,16 @@ def _ang(p, yc):
     return np.arctan2(-p[:, 0], -(p[:, 1] - yc))
 
 
-def _along_loop(f_seam, loops):
-    """The shared armhole's cut, made to follow the loop itself. The seam surface's own field (armhole.armhole_cut)
-    is smooth where the loop is the hull of where the skin crosses that surface, and the two part at the front of the
-    underarm's U: the field left a pointed lobe of cloth running 0.3 past the loop. Here the cloth goes where the loop
-    says: it stays if it lies outside the loop seen from the side (y, z), or inside the seam surface."""
+def _along_loop(f_seam, loops, margin):
+    """The shared armhole's cut, made to follow the loop itself: one curve, the seam loop seen from the side (y, z).
+    The cloth stays if it lies outside the loop, or well inside the seam surface (by margin: the neck and the far
+    side of the body, which the loop's side view also covers).
+
+    The seam surface is not the cut. It stands plumb at the underarm, where the cloth's own wall up the side of the
+    body is plumb too and within a hair of it, and just above, the cloth turns out along the underside of the arm in
+    a crease. A cut by that surface ran along the wall and through the crease: a toothed edge under the arm, and a
+    tongue of cloth pointing forward at the front of the armpit (the tear that showed in every render). By the loop,
+    every bit of cloth near the armhole is cut on the one line, below the crease, on the smooth wall."""
     loop = np.asarray(loops['L']['loop'], dtype=float)[:, 1:3]
     a, b = loop, np.roll(loop, -1, 0)
     e = b - a
@@ -147,7 +153,7 @@ def _along_loop(f_seam, loops):
         cross = ((y1 > q[:, None, 1]) != (y2 > q[:, None, 1])) & \
             (q[:, None, 0] < (x2 - x1) * (q[:, None, 1] - y1) / np.where(y2 == y1, 1e-12, y2 - y1) + x1)
         inside = (cross.sum(1) % 2) == 1
-        return np.maximum(np.where(inside, -d, d), f_seam(p))
+        return np.maximum(np.where(inside, -d, d), f_seam.seam_x(p) - np.abs(p[:, 0]) - margin)
     return f
 
 
@@ -158,7 +164,7 @@ def armhole_cut(P, T, aw, M, ratios=RATIOS):
         import armhole  # noqa: F401  (the sleeves thread's module)
         if hasattr(armhole, 'armhole_cut'):   # (it has its own ratios: change them there, so the sleeve follows)
             loops = armhole.armhole(P, aw, M, T)
-            return _along_loop(armhole.armhole_cut(M, loops), loops), 'shared loop'
+            return _along_loop(armhole.armhole_cut(M, loops), loops, ratios.get('scye_in', 0.30) * M['w']), 'shared loop'
     except ImportError:
         pass
     x_scye = fit.scye(P, aw, M, ratios)[0]
