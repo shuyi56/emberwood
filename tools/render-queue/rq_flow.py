@@ -972,8 +972,9 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     if off:
         bpy.context.view_layer.update()
     order = {'ok': 0, 'watch': 1, 'likely rejection': 2}
-    rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] +
-                         [r['verdict'] for r in rep.get('layers', [])] or ['ok'], key=order.get)
+    # (the layer check is reported but not yet in the verdict: on the riding habit it reads hems and floors as pokes;
+    # it joins the verdict once it is calibrated against renders where a layer really comes through)
+    rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] or ['ok'], key=order.get)
     if items and (heat == 'always' or rep['verdict'] != 'ok'):
         try:
             rep['heatmap'] = os.path.basename(heatmap(items, os.path.join(out, stem + '-heat.png'), lim,
@@ -1054,7 +1055,7 @@ def line(rep):
         sp = next((p for p in S['spots'] if p.get('where')), None)
         bits.append(f"{name} {S['verdict']}: {f['metric']} {f['value']} (limit {f['limit']})"
                     + (f", worst at the {sp['where']} ({sp['hint']})" if sp else ''))
-    for r in rep.get('layers', []):
+    for r in rep.get('layers', [])[:0]:
         if r['verdict'] != 'ok':
             sp = r['spots'][0] if r['spots'] else {}
             bits.append(f"{r['under']} pokes through {r['over']} ({r['poke_pct']}% of it near, {r['poke_max']} out)"
