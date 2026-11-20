@@ -48,6 +48,10 @@ eyeshadow, lashes, brows, lips) and the request asks only for face views (`face_
 `views.py --head` without `--cells` or `--turn`). It then runs the API on the commit merged with main, keeps the
 result under `render-queue/facechecks/<figure>-<commit>/` and answers with that; nothing goes to the queue.
 
+Before any face render, also run the facial proportion line check on the Face Creator's heads
+(`tools/face-check/README.md`): it finds the landmarks on the mesh, draws the profile and nose lines on clay front,
+profile and base views and flags every measure outside its published range. Attach its sheet to the draft.
+
 When the change needs what the API cannot show (hair, cloth, final lighting, subsurface scattering, the sprite
 palette), add `"needs_render": "<what you need to see>"` to the request and it is forwarded as usual.
 
