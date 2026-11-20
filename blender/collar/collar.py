@@ -18,10 +18,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 
 RATIOS = dict(
-    stand=0.45,            # the stand's height (neck edge to the roll line), in w
+    stand=0.55,            # the stand's height (neck edge to the roll line), in w
     fall_back=0.60,        # the fall's depth at the back, in w
     fall_front=1.20,       # the fall's depth at the points
-    point=0.80,            # how far the front corner is cut away to a point, along the edge, in w
+    notch=0.70,            # the slant of the front end: the point stands this far past its foot at the neck edge, in w
     gap=0.45,              # the open gap between the two front ends at the neck edge, in w
     lean=0.18,             # how far the stand leans in toward the neck, as a share of its height
     spacing=0.075,         # the grid's point spacing, in w
@@ -70,28 +70,30 @@ def draft(E, M, R=RATIOS):
     idx = np.nonzero(inside)[0]
     arc = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(E[idx], axis=0), axis=1))])
     L = arc[-1]
-    s_of = lambda a: a - 0.5 * L                      # (s = 0 at the back, the middle of the arc)
-    st, fb, ff, pt = R['stand'] * w, R['fall_back'] * w, R['fall_front'] * w, R['point'] * w
+    st, fb, ff = R['stand'] * w, R['fall_back'] * w, R['fall_front'] * w
     h = R['spacing'] * w
 
-    def top(s):                                       # the cut edge's height above the neck edge, with the points
+    nd = R['notch'] * w                               # the front end is cut on the slant: the point stands this far past its foot
+
+    def top(s):                                       # the cut edge's height above the neck edge, rising to the points
         u = np.clip(np.abs(s) / (0.5 * L), 0, 1)
-        fall = fb + (ff - fb) * (u ** 2.0)
-        cut = np.clip((np.abs(s) - (0.5 * L - pt)) / pt, 0, 1)    # 0 .. 1 over the last pt: the corner cut away
-        return st + fall * (1 - 0.97 * cut ** 1.0)
-    # boundary points (denser than the grid) and an interior grid
-    ss = np.arange(-0.5 * L, 0.5 * L + 1e-9, h * 0.7)
-    bnd = [(s, 0.0) for s in ss] + [(s, float(top(s))) for s in ss]
+        return st + fb + (ff - fb) * (u ** 2.0)
+    t_end = float(top(0.5 * L))
+
+    def smax(t):                                      # how far out the piece reaches at height t (the slanted end)
+        return 0.5 * L - nd * (1 - np.clip(t / t_end, 0, 1))
+    ss = np.arange(-0.5 * L + nd, 0.5 * L - nd + 1e-9, h * 0.7)
+    bnd = [(s, 0.0) for s in ss] + [(s, float(top(s))) for s in ss if abs(s) < smax(float(top(s)))]
     for sgn in (-1, 1):
-        for t in np.arange(0, float(top(sgn * 0.5 * L)), h * 0.7):
-            bnd.append((sgn * 0.5 * L, t))
+        for t in np.arange(0, t_end + 1e-9, h * 0.7):
+            bnd.append((sgn * smax(t), t))
     gs = np.arange(-0.5 * L + h, 0.5 * L - h * 0.5, h)
-    gt = np.arange(h, st + R['fall_front'] * w, h)
-    grid = [(s, t) for s in gs for t in gt if 0.4 * h < t < top(s) - 0.4 * h]
+    gt = np.arange(h, t_end, h)
+    grid = [(s, t) for s in gs for t in gt if 0.4 * h < t < top(s) - 0.4 * h and abs(s) < smax(t) - 0.5 * h]
     pts = np.unique(np.round(np.array(bnd + grid), 6), axis=0)
     tri = Delaunay(pts)
     mid = pts[tri.simplices].mean(1)
-    ok = (mid[:, 1] > 0) & (mid[:, 1] < top(mid[:, 0])) & (np.abs(mid[:, 0]) < 0.5 * L)
+    ok = (mid[:, 1] > 0) & (mid[:, 1] < top(mid[:, 0])) & (np.abs(mid[:, 0]) < smax(mid[:, 1]))
     T = tri.simplices[ok]
     # drop sliver triangles from the boundary
     A = pts[T]
@@ -107,7 +109,7 @@ def draft(E, M, R=RATIOS):
 
 SETTINGS = dict(
     flare=0.30,            # the stand's flare outward from the neck, in radians off the vertical (a turned-down collar spreads)
-    fold=0.55,             # the fall folded over, below the horizontal, in radians
+    fold=1.10,             # the fall folded over, below the horizontal, in radians
     lift=0.06,             # the fall's cloth stands this far off the stand where it is turned over
     stretch=1e-6, bend=1e-6, flat=1e-6, crease=1e-6,
     gap=0.05,              # the cloth's stand-off from the bodice and the body
@@ -201,10 +203,17 @@ def build():
     me.update()
     o = bpy.data.objects.new('Collar', me)
     bpy.context.scene.collection.objects.link(o)
+    root = female.FIG.get('root') if hasattr(female, 'FIG') else None      # (the views turn the figure by its root)
+    par = b.parent or root
+    if par is not None:
+        o.parent = par
+        o.matrix_parent_inverse = par.matrix_world.inverted()
     cloth = female.mat(female.mat_def(97, 'collar wool', female.ramp(RB.DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True))
     me.materials.append(cloth)
     for p in me.polygons:
         p.use_smooth = True
+    sub = o.modifiers.new('smooth', 'SUBSURF')
+    sub.levels = sub.render_levels = 1
     sol = o.modifiers.new('thickness', 'SOLIDIFY')
     sol.thickness = 0.045 * M['w']
     sol.offset = 0
