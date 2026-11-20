@@ -467,15 +467,15 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             # hole along the surface there (so it arches over the shin as the contour does, not across the chord),
             # a cord's width over it; at every crossing the same strand lies on top, a full cord over the other
             d = B - A
-            tA = d - NA * (d @ NA)
-            tB = d - NB * (d @ NB)
+            tA = 0.7 * (d - NA * (d @ NA))
+            tB = 0.7 * (d - NB * (d @ NB))
             h00, h10, h01, h11 = 2 * s ** 3 - 3 * s ** 2 + 1, s ** 3 - 2 * s ** 2 + s, -2 * s ** 3 + 3 * s ** 2, s ** 3 - s ** 2
             path = h00 * A + h10 * tA + h01 * B + h11 * tB
             Ns = (1 - s) * NA + s * NB
             Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
             w = np.minimum(1.0, 6 * np.minimum(s[:, 0], 1 - s[:, 0]))[:, None]        # (down into the hole at each end)
             bump = np.sin(np.pi * s) ** 0.7            # (broad: the strands clear each other wherever they cross)
-            lift = rl * (0.95 + 0.1 * w) + slack * np.sin(np.pi * s) + (3.1 * rl * bump if j == 0 else 0.0)
+            lift = rl * (1.1 + 0.05 * w) + slack * np.sin(np.pi * s) + (3.1 * rl * bump if j == 0 else 0.0)
             path = path + Ns * lift
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
             ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
