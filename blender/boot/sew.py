@@ -517,7 +517,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     for k in range(n - 1):
         for j, ((A, NA), (B, NB)) in enumerate((((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])),
                                                  ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1])))):
-            slack = rng.uniform(0.0, 0.6) * rl
+            slack = rng.uniform(0.3, 1.3) * rl
             # the cord is drawn from hole to hole along the leather's own curve: a Hermite curve that leaves each
             # hole along the surface there (so it arches over the shin as the contour does, not across the chord),
             # a cord's width over it; at every crossing the same strand lies on top, a full cord over the other

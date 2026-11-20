@@ -87,7 +87,7 @@ RATIOS = {
     'sole': 0.035,           # the sole's thickness (two layers of sole leather, about 9 mm)
     'welt': 0.022,           # how far the sole stands out past the upper
     'stitch_in': 0.012,      # the stitches' row, this far in from the edge
-    'lace_gap': 0.035,       # the lacing's opening down the front, drawn tight (about 9 mm between the edges)
+    'lace_gap': 0.062,       # the lacing's opening down the front, drawn tight (about 9 mm between the edges)
     'binding_ring': 0.0,     # 1 sews a binding band round the top (0: none, the panels' top edges bare)
     'top_fit': 0.85,         # how far the top is drawn in from the calf's width to the leg's own (1: all the way)
     'top_snug': 0.65,        # how much of the ease is taken out at the top (laced close to the leg)
