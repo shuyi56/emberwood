@@ -55,7 +55,8 @@ The API (kept stable: the boot, and the skirt, sleeves and petticoat scripts use
     f.sew(i, j, loose, firm, seconds)      seam ties of no length, eased from loose to firm compliance
     f.flatten(a, b, c, d, rest, comp)      fold-resisting stencils (an angle bend; mesh(flat=) makes them)
     f.hold_chain(points)                   a chain kept at its exact segment lengths (fabric-core.js's hold)
-    MeshBody(points, normals, gap, floor)  a body from a surface's points and normals (needs scipy; nothing else does)
+    MeshBody(points, normals, gap, floor)  a body from a surface's points and normals (needs scipy; nothing else does);
+                                           planes=8 keeps each point off both walls of a crease at once (armpits)
 
 It follows src/world/fabric-core.js: what is added there (per-point mass, angle bends, creases that set) is to be
 added here under the same names.
@@ -311,8 +312,10 @@ class Fabric:
                     C = np.where(kd == 1, np.maximum(C, 0.0), C)
                 wi, wj = w[i], w[j]
                 al = alpha[k]
-                dl = (-C - al * lam[k]) / (wi + wj + al)
-                dl = np.where(L > 1e-9, dl, 0.0)
+                den = wi + wj + al
+                # (a tie between two held points: none is made by ties(), but a pin() after mesh() leaves them, and
+                # 0 / 0 here turned the whole sheet to NaN)
+                dl = np.where((L > 1e-9) & (den > 0), (-C - al * lam[k]) / np.where(den > 0, den, 1.0), 0.0)
                 lam[k] += dl
                 qv = (dl / np.maximum(L, 1e-9))[:, None] * d
                 x[i] -= wi[:, None] * qv
@@ -444,17 +447,32 @@ class Fabric:
 
 class MeshBody:
     """A body for Fabric.step: the points must stay gap off a surface (given as its points and outward normals,
-    dense enough that the nearest point stands for the nearest surface) and above a floor."""
+    dense enough that the nearest point stands for the nearest surface) and above a floor.
 
-    def __init__(self, pts, normals, gap=0.06, floor=None, floor_gap=0.03, reach=4.0):
+    planes: how many nearby surface points are searched for a crease's second wall (1: the nearest only, as
+    before; 8 is enough). In a crease, where two surfaces meet (the armpit: the torso's side and the arm's inner face, or the arm
+    sunk a little into the side), the nearest point flips from one surface to the other between neighbouring cloth
+    points, so neighbours are pushed in opposite directions, across the crease, and the cloth between them tears
+    (solver-issues.md, S3). With planes > 1 each point is pushed out of all the nearby planes at once (cyclic
+    projection onto both walls' planes, Dykstra's corrections), which in a crease is out along the crease's
+    bisector: neighbours get nearly the same push. The second wall is the nearest sample facing more than 60
+    degrees away from the nearest one's (turn) within `band` of its distance."""
+
+    def __init__(self, pts, normals, gap=0.06, floor=None, floor_gap=0.03, reach=4.0, planes=1, band=None,
+                 sweeps=6, turn=0.5):
         from scipy.spatial import cKDTree
         self.p = np.asarray(pts, float)
         n = np.asarray(normals, float)
         self.n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
         self.tree = cKDTree(self.p)
         self.gap, self.floor, self.floor_gap, self.reach = gap, floor, floor_gap, reach
+        self.planes, self.sweeps = int(planes), int(sweeps)
+        self.band = 2.0 * gap + 0.05 if band is None else band
+        self.turn = float(turn)                  # (cos of the angle past which a sample is another wall: 0.5, 60 deg)
 
     def __call__(self, P):
+        if self.planes > 1:
+            return self._many(P)
         d, j = self.tree.query(P, k=1, distance_upper_bound=self.reach)
         near = np.isfinite(d)
         j = np.where(near, j, 0)
@@ -462,12 +480,49 @@ class MeshBody:
         depth = np.einsum('ij,ij->i', P - self.p[j], nrm)
         hit = near & (depth < self.gap)
         P[hit] += (self.gap - depth[hit])[:, None] * nrm[hit]
+        return self._floor(P, hit)
+
+    def _floor(self, P, hit):
         if self.floor is not None:
             fl = self.floor + self.floor_gap
             low = P[:, 2] < fl
             P[low, 2] = fl
             hit |= low
         return P, hit
+
+    def _many(self, P):
+        # Each point is kept off the nearest surface point's plane and, if there is one within band, off the nearest
+        # point of a surface facing another way (normals more than `turn` apart: the other wall of a crease). Not off
+        # every nearby plane: on a convex part (a limb's round) the point is outside if it is in front of ONE plane,
+        # and in front of all of them puts it on a polygon's corner, further out. In a crease it must be outside
+        # BOTH walls. The two are solved together (cyclic projection with Dykstra's corrections).
+        k = self.planes
+        d, j = self.tree.query(P, k=k, distance_upper_bound=self.reach)
+        ok = np.isfinite(d)
+        near = ok[:, 0]
+        j = np.where(ok, j, 0)
+        Nn = self.n[j]                                                   # [m, k, 3]
+        other = ok & (np.einsum('mj,mkj->mk', Nn[:, 0], Nn) < self.turn) & (d <= d[:, :1] + self.band)
+        has = other.any(1)
+        j2 = j[np.arange(len(P)), np.argmax(other, 1)]
+        Q = np.stack([self.p[j[:, 0]], self.p[j2]], 1)
+        Nq = np.stack([Nn[:, 0], self.n[j2]], 1)
+        use = np.column_stack([near, near & has])
+        off = np.einsum('mkj,mkj->mk', Q, Nq) + self.gap                 # (plane c: n . x >= off)
+        X = P.copy()
+        corr = np.zeros(Q.shape)
+        hit = np.zeros(len(P), bool)
+        for _ in range(self.sweeps if has.any() else 1):
+            for c in range(2):
+                y = X + corr[:, c]
+                viol = off[:, c] - np.einsum('mj,mj->m', y, Nq[:, c])
+                viol = np.where(use[:, c], np.maximum(viol, 0.0), 0.0)
+                xn = y + viol[:, None] * Nq[:, c]
+                corr[:, c] = y - xn
+                X = xn
+                hit |= viol > 0
+        P[hit] = X[hit]
+        return self._floor(P, hit)
 
 
 def vertex_normals(V, F):
