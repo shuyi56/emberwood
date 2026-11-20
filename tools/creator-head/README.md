@@ -24,7 +24,22 @@ clothes, skinning and the walk and idle animations are the Blender export (`blen
    (HAIR_EVEN 0.85, HAIR_LIFT 0.45: a little of its own colour as emission), which went dark and streaky in the sun. Also needs `sharp` (0.33.5). Needs `@gltf-transform/core`,
    `@gltf-transform/extensions`, `@gltf-transform/functions` (4.1.1) and `meshoptimizer` (0.22.0).
 
-Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator.
+Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator. After a
+change to a face, check its topology on what they wrote before the render (report-only; `--label` an approved head's
+name, as in `tools/render-queue/topo_baseline.json`, to judge it on its own approved band):
+
+    python3 tools/render-queue/rq_topo.py --glb creator-head.glb --out DIR --label "creator head (Ranger), raw export"
+
+The simplify is `head-lock.mjs`: the head goes to 0.2 of the creator grid's triangles (it was 0.25; the hair is 0.2 of its
+joined strands, it was 0.4), with every vertex the creator marks held (`_EYEPATCH`: the lids' margins and the skin ring round them; `_MOUTHPATCH`: the
+parting line and the lips; `_NOSEPATCH`; the glb spells them with two underscores), so the carved lid loops and the lips
+keep every vertex, and the rest of each patch is thinned. The Warden: head 131k -> 104k triangles, hair 258k -> 129k, file 40.6 -> 34.2 MB, same look
+in front, 3/4, back and top. A tighter head ratio (0.1) blurs the lower-lip crease; the cut stops where the lips are
+still crisp.
+
+`merge-head.mjs` runs `clean-head.mjs` on the head after the simplify, so a game head comes out without holes, folds,
+duplicate or unused vertices (the simplify leaves those at the poles and on thin slivers). It also runs on its own:
+`node clean-head.mjs in.glb out.glb`.
 
 ## The Warden
 

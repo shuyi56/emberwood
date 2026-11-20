@@ -417,6 +417,16 @@ def telemetry(lo, jl, state):
              if (v.get("stretch_p99") or 0) > 1.3] + \
             [f"{n}: edges squashed to {v['squash_p1']}x (1st percentile)" for n, v in geo.items()
              if v.get("squash_p1") is not None and v["squash_p1"] < 0.7]
+    # the face topology check (rq_topo.py): the latest verdict per head, and every head it flagged or found not
+    # clean, with its job
+    topo = {}
+    for m in sorted(ms, key=lambda m: m.get("finished", "")):
+        for name, v in ((m.get("topo") or {}).get("heads") or {}).items():
+            topo[name] = dict(v, key=m["key"])
+    topo_flags = [f"{n}: {v['verdict']} ({'; '.join(v.get('flags') or []) or 'inside the band'}"
+                  f"{', not clean: ' + '; '.join(v['not_clean']) if v.get('not_clean') else ''}"
+                  f"{', worst at the ' + v['worst'] if v.get('worst') else ''}), job {v['key']}"
+                  for n, v in topo.items() if v.get("verdict") not in (None, "ok") or v.get("not_clean")]
     drift = []
     for k in ("height", "shoulder_width", "hip_width", "hip_depth"):
         vals = [b[k] for _, _, b in body if b.get(k)]
@@ -435,7 +445,7 @@ def telemetry(lo, jl, state):
                 rounds.setdefault(f, set()).add(r["id"])
     return {"phases": phases, "failures": {k: len(v) for k, v in causes.items()},
             "cache_hit_rate": (hits / total_jobs) if total_jobs else None, "cache_hits": hits, "jobs_planned": total_jobs,
-            "quality": quality, "thread_cost": cost, "geometry": geo, "geometry_flags": flags, "body_drift": drift,
+            "quality": quality, "thread_cost": cost, "geometry": geo, "geometry_flags": flags, "topo_flags": topo_flags, "body_drift": drift,
             "rejections": {"by_tag": by(lambda r: (r.get("tags") or ["-"])[0]), "by_garment": by(piece),
                            "by_who": by(lambda r: r.get("by") or "-"),
                            "rounds_per_piece": {f: len(v) for f, v in sorted(rounds.items(), key=lambda kv: -len(kv[1]))},
@@ -496,6 +506,7 @@ def report(st):
             f"{k[-6:]} {v['requests']}, {v.get('check', 0)}/{v.get('final', 0)}, {fmt(v['render'])}"
             for k, v in sorted(t["thread_cost"].items(), key=lambda kv: -kv[1]["render"])[:8]))
         out += ["  geometry: " + f for f in t["geometry_flags"]] or ["  geometry: every garment inside the bands"]
+        out += ["  face topology: " + f for f in t.get("topo_flags") or []] or ["  face topology: nothing flagged"]
         out += ["  body drift: " + d for d in t["body_drift"][:6]] or ["  body drift: none past 1%"]
         r = t["rejections"]
         out.append(f"  rejections by tag {r['by_tag']}, by garment {r['by_garment']}, by who {r['by_who']}")
