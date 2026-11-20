@@ -566,7 +566,17 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             bt, bs = dq @ uq, dq[:, 0] * uq[1] - dq[:, 1] * uq[0]
             beside |= own & (np.abs(bs) < math.pi * L_['fold_radius'] + 0.1) & (bt > -0.3) & (bt < np.linalg.norm(Nq - Bq) + 0.3)
         use = ~beside & (own if L_.get('cloth_only', False) else True)
-        body = xf.MeshBody(bodyP[use], bodyN[use], gap=L_['fold_gap'], reach=1.0) if L_.get('body', True) else None
+        # (the floor under the lapel is for the cloth past the turn: the turn's own rows rise from the roll through
+        # the floor's height, and a floor under them pushes the turn open and strains it. They are held by the hinges.)
+        past = np.concatenate([np.zeros(ns, bool), se > turn + row])
+        floor = xf.MeshBody(bodyP[use], bodyN[use], gap=L_['fold_gap'], reach=1.0)
+
+        def body(x, past=past, floor=floor):
+            p_, t_ = x.copy(), np.zeros(len(x), bool)
+            p_[past], t_[past] = floor(x[past])
+            return p_, t_
+        if not L_.get('body', True):
+            body = None
         F = fo.Folds(fab, P2, T2)
         F.add(roll, ang, radius=L_['fold_radius'])
         # (a fold solved before with the same cloth, body and settings is read back: the standing rule for solved folds)
@@ -575,6 +585,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
         hh = hashlib.sha1()
         for arr in (P2, T2, start, bodyP[use], bodyN[use]):
             hh.update(np.ascontiguousarray(np.round(np.asarray(arr, float), 5)).tobytes())
+        hh.update(b'floor past the band')
         hh.update(_json.dumps([{k_: v_ for k_, v_ in L_.items() if k_.startswith('fold_') or k_ in ('bake', 'tilt')},
                               FOLD_FABRIC], sort_keys=True, default=str).encode())
         cfile = os.path.join(fo.cache_dir(), 'lapel-%s.npz' % hh.hexdigest()[:20])
@@ -590,7 +601,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             % (k, len(ext), nl, arc[-1], t[line[-1]] - t0, str(rep).replace(chr(10), '; ')))
         X = fab.pos.copy()
         made.append((line, X[ns:], tri))
-        parts.append(dict(st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use))
+        parts.append(dict(st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use, past=past[ns:]))
         FOLDED.append(dict(flat=P2, pos=X, T=T2.copy(), lap=lap, roll=roll, report=str(rep), body=(bodyP[use], bodyN[use])))
         moved += len(ext)
     if L_.get('whole', True):
@@ -691,11 +702,13 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
         use = use & pt['use']
     cloth = xf.MeshBody(bodyP[use], bodyN[use], gap=L_['fold_gap'], reach=1.0)
 
+    lp = nR + np.nonzero(np.concatenate([pt['past'] for pt in parts]))[0]     # (the lapels' cloth past their turns)
+
     def body(x):
         p = x.copy()
         t = np.zeros(len(x), bool)
         p[:nR], t[:nR] = skin(x[:nR])
-        p[nR:], t[nR:] = cloth(x[nR:])
+        p[lp], t[lp] = cloth(x[lp])
         return p, t
     h = L_['bake']['h']
     was = fab.settings['damping']
