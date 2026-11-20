@@ -43,6 +43,9 @@ LEATHER = dict(
     steps=120,
 )
 HOLD = {'sole': 0.30, 'collar': 0.25}
+# sewing bends flat sheets round the leg: a stiffer bend than the creases', walked longer, so a sheet wraps in one
+# smooth curve and does not ripple
+SEWN = dict(LEATHER, bend=2e-7, stretch=5e-4, shear=5e-4, iterations=16, steps=200)   # (the hide gives a few per cent, as leather pulled over a last does, where a flat sheet cannot follow it)
 FLAT = ('inner shaft', 'outer shaft', 'tongue')      # the pieces cut and kept as flat sheets (sew)   # how far up from the upper's lower edge, and down from its top, it is held
 # The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge. The foot's seams,
 # then each shaft's (last.SHAFTS); a seam whose pieces a boot does not have is passed over.
@@ -143,8 +146,9 @@ def _co(o):
     return x.reshape(-1, 3)
 
 
-def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
+def sew(o, pieces, rig, colliders, P=None, log=print):
     """Sew the boot o (the upper's pieces, as last.build_boots made them) from its flat pieces on the colliders."""
+    P = SEWN if P is None else P
     uppers = [p for p in pieces if p['name'] != 'sole']
     X, Nv = _co(o), _normals(o)
     n = len(X)
@@ -201,6 +205,20 @@ def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
     fab.tie(sew_ij[:, 0], sew_ij[:, 1], 0.0)
     steps = fab.settle(body, most=P['steps'])
     Y = fab.pos.copy()
+    # (the solver's walk leaves a fine jitter, a millimetre or so from point to point, that a hide does not have:
+    # what each point moved by is evened with its neighbours', which keeps the wrap's shape and takes the jitter)
+    ee = np.empty(len(o.data.edges) * 2, dtype=np.int64)
+    o.data.edges.foreach_get('vertices', ee)
+    ee = ee.reshape(-1, 2)
+    dsp = Y - base
+    for _ in range(8):
+        acc, cnt = np.zeros_like(dsp), np.zeros(n)
+        np.add.at(acc, ee[:, 0], dsp[ee[:, 1]])
+        np.add.at(acc, ee[:, 1], dsp[ee[:, 0]])
+        np.add.at(cnt, ee[:, 0], 1.0)
+        np.add.at(cnt, ee[:, 1], 1.0)
+        dsp = 0.4 * dsp + 0.6 * acc / np.maximum(cnt, 1.0)[:, None]
+    Y = base + dsp
     log('boot sewing %s: settled by the fabric solver in %d steps (%.0f s): %d threads, %d diagonals, %d bend ties, '
         '%d seam ties' % (o.name, steps, time.time() - t0, ties[0], ties[1], ties[2], len(sew_ij)))
     gap = np.linalg.norm(Y[sew_ij[:, 0]] - Y[sew_ij[:, 1]], axis=1)
