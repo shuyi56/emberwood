@@ -188,11 +188,17 @@ LAPEL = dict(
     point_len=0.70,        # the lapel's point as long as this share of the collar's (notch to point)
     belly=0.10,            # the outer edge's curve out past its straight line, in w
     spacing=0.07,
-    edge_rounds=8,
-    fold_deg=172,          # the lapel's pressed fold: how far it turns back over the roll line, in degrees
-    fold_gap=0.17,         # its stand-off from the bodice under it (over the bodice's own thickness, 0.045 w)
-    fold_radius=0.06,      # the fold's inside radius: the cloth's thickness turned round, not a knife edge
-         # rounds of evening out the cut edges
+    edge_rounds=8,         # rounds of evening out the cut edges
+    fold_deg=176,          # the lapel's pressed fold: how far it turns back over the roll line, in degrees
+    fold_gap=0.12,         # the least the lapel may lie off the bodice under it: less than the fold's own stand-off (twice its radius), so the body is a floor under the lapel and does not push the turn open
+    fold_radius=0.10,      # the fold's inside radius: the cloth's thickness turned round, not a knife edge
+    fold_row=0.05,         # rows of points marked parallel to the roll through the turn, this far apart
+    # The fold's solve. The lapel hangs from the turn's fine rows: at the cloth's usual step (1/240 s) and give (1e-6)
+    # its own weight stretched those rows by a fifth to double (the contour sheet's strain map), and the lapel came out
+    # a different shape from its draft. At 1/1920 s and 1e-8 the strain is 2 to 4 %. correct=False: folds.py's
+    # correction scales the turn's hinges up when the lapel rests a few degrees open on the chest, and crumples the rows.
+    fold_stretch=1e-8,
+    bake=dict(h=1.0 / 1920, most=3000, correct=False),
     tilt=25,               # the lapel starts this far turned off the chest (degrees), unfolded; the solver folds the rest
     steps=1600,
 )
@@ -211,27 +217,16 @@ STYLES = dict(
 STYLE = os.environ.get('COLLAR_STYLE', 'notch')
 RATIOS.update(STYLES[STYLE][0])
 LAPEL.update(STYLES[STYLE][1])
+if os.environ.get('COLLAR_LAPEL'):                  # (a trial's own values, as JSON)
+    import json
+    LAPEL.update(json.loads(os.environ['COLLAR_LAPEL']))
 
 
-def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
-    """The two lapels: the bodice's fronts turned back below the collar. Each is cut flat as the triangle the roll
-    line (from the collar's end at the neck edge down to the break point) leaves outside it, out to the lapel's point,
-    and laid back on the chest in the solver, its roll line held. Returns [(points, triangles)] for the two sides."""
-    from scipy.spatial import Delaunay, cKDTree
-    import fabric as xf
+def lapel_outlines(E, M, D, cpos, L_=None):
+    """Each lapel's outline as it lies turned back, in (x, z): (break point B, neck point N, polygon)."""
+    L_ = LAPEL if L_ is None else L_
     w = M['w']
     seg = E[D['idx']]
-    out = []
-    front = bodyP[:, 1] < M['yc']
-    tree = cKDTree(bodyP[front][:, [0, 2]])
-    FP, FN = bodyP[front], bodyN[front]
-
-    def on_chest(xz, lift):
-        _, j = tree.query(xz, k=6)
-        y = FP[j, 1].min(1)                            # the frontmost cloth under each point
-        n = FN[j].mean(1)
-        n /= np.linalg.norm(n, axis=1, keepdims=True)
-        return np.column_stack([xz[:, 0], y, xz[:, 1]]) + lift * n
     outlines = []
     for end in (0, -1):
         foot = seg[end]
@@ -264,6 +259,32 @@ def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
         outer = Pp[None] + q[:, None] * chord[None] + (4 * q * (1 - q))[:, None] * bulge[None]
         poly = np.vstack([B, N, G, Pp, outer])
         outlines.append((B, N, poly))
+    return outlines
+
+
+def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
+    """The two lapels: the bodice's fronts turned back below the collar. Each is cut flat as the triangle the roll
+    line (from the collar's end at the neck edge down to the break point) leaves outside it, out to the lapel's point,
+    and laid back on the chest in the solver, its roll line held. Returns [(points, triangles)] for the two sides."""
+    from scipy.spatial import Delaunay, cKDTree
+    import fabric as xf
+    w = M['w']
+    seg = E[D['idx']]
+    out = []
+    front = bodyP[:, 1] < M['yc']
+    tree = cKDTree(bodyP[front][:, [0, 2]])
+    FP, FN = bodyP[front], bodyN[front]
+
+    def on_chest(xz, lift):
+        _, j = tree.query(xz, k=6)
+        y = FP[j, 1].min(1)                            # the frontmost cloth under each point
+        n = FN[j].mean(1)
+        n /= np.linalg.norm(n, axis=1, keepdims=True)
+        return np.column_stack([xz[:, 0], y, xz[:, 1]]) + lift * n
+    outlines = lapel_outlines(E, M, D, cpos, L_)
+    for (B, N, poly), end in zip(outlines, (0, -1)):
+        foot = seg[end]
+        sg = 1.0 if foot[0] > 0 else -1.0
         h = L_['spacing'] * w
         bnd = []
         for k in range(len(poly)):
@@ -378,155 +399,189 @@ def open_front(objs, M, E, D, L_=LAPEL):
     return cut
 
 
+FOLDED = []          # what fold_front last folded, per lapel: flat pattern, folded points, triangles (for the contour check)
 FOLD_FABRIC = dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4)
 
 
 def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
-    """Turn the bodice's own front back as the lapels: the bodice cloth inside each lapel's outline as cut (the outline
-    mirrored across its roll line, in the V above the break) is the flap; it stays joined to the bodice along the roll
-    line and the fabric solver turns it back over the roll onto the chest (start: as it lies, tilted a little off the
-    body; rest: mirrored across the roll and laid on the chest). The rest of the V is cut away (the opening). The
-    bodice's mesh is changed in place. Returns the flaps' faces cut, folded."""
+    """Turn the fronts back as the lapels. The bodice comes with its front open along the two roll lines (front_cut).
+    Each front is drafted on past its roll line by its lapel: the lapel's outline mirrored across the roll, which is
+    where that cloth lies before it is turned (it runs past the centre front, as a front that laps over the other
+    does). That extension is meshed flat in the pattern with rows of points parallel to the roll, joined to the
+    bodice's own points on the roll line, and the fabric solver turns it back over the roll onto the chest with
+    folds.py's hinges (the bodice's cloth next to the roll held, as the strip the fold turns against). The bodice's
+    mesh gains the folded lapels in place. Returns (points folded, [(points, triangles)] per lapel); what was folded
+    is kept in FOLDED for the contour sheet."""
     import bmesh
+    import shapely
+    import shapely.affinity
     import fabric as xf
     import folds as fo
-    from matplotlib.path import Path
-    from scipy.spatial import cKDTree
-    w = M['w']
-    h = L_['spacing'] * w
+    from scipy.spatial import Delaunay
+    w, yc = M['w'], M['yc']
+    h, row = L_['spacing'] * w, L_['fold_row']
     mw = np.array(o.matrix_world)
     W = np.array([v.co[:] for v in o.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
+    xs = np.concatenate([q[:, 0] for _, _, q in outlines])
+    zs = np.concatenate([q[:, 1] for _, _, q in outlines])
+    box = ((np.abs(bodyP[:, 0]) < np.abs(xs).max() + 1.5) & (bodyP[:, 2] > zs.min() - 1.5) & (bodyP[:, 2] < zs.max() + 1.5)
+           & (bodyP[:, 1] < yc))
+    own = (np.arange(len(bodyP)) < len(W))[box]       # (bodyP's first rows are the bodice's own points, then the body's)
+    bodyP, bodyN = bodyP[box], bodyN[box]             # (only the chest under the lapels: the fold meets nothing else)
+    # (the lapel is kept a cloth's thickness off the bodice's cloth, but only a hair off the body itself: the bodice
+    # lies nearer the body than that in places, and a body that reaches through it pushes the turn's first rows apart)
+    # (and the body's normals are evened over 0.4: the fronts' lap down the centre is a ridge whose side faces
+    # sideways, and it pushed the lapel that lies over it along the cloth instead of off it)
+    from scipy.spatial import cKDTree
+    bodyN = np.array([bodyN[j].mean(0) for j in cKDTree(bodyP).query_ball_point(bodyP, 0.4)])
+    bodyN /= np.maximum(np.linalg.norm(bodyN, axis=1, keepdims=True), 1e-9)
+    under = ~own & (cKDTree(bodyP[own][:, [0, 2]]).query(bodyP[:, [0, 2]])[0] < 0.25)      # (the body under the bodice; the bare neck keeps the whole gap)
+    bodyP = bodyP - np.where(under, L_['fold_gap'] - 0.04, 0.0)[:, None] * bodyN
+    del FOLDED[:]
     bm = bmesh.new()
     bm.from_mesh(o.data)
-    bm.faces.ensure_lookup_table()
     bm.verts.ensure_lookup_table()
-    front = bodyP[:, 1] < M['yc']
-    FP, FN = bodyP[front], bodyN[front]
-    tree = cKDTree(FP[:, [0, 2]])
-
-    def on_chest(xz, lift):
-        _, j = tree.query(xz, k=6)
-        y = FP[j, 1].min(1)
-        n = FN[j].mean(1)
-        n /= np.linalg.norm(n, axis=1, keepdims=True)
-        return np.column_stack([xz[:, 0], y, xz[:, 1]]) + lift[:, None] * n
-    C = np.array([f.calc_center_median()[:] for f in bm.faces]) @ mw[:3, :3].T + mw[:3, 3]
+    bm.faces.ensure_lookup_table()
+    edge = np.array([v.is_boundary for v in bm.verts])
     fv = [[v.index for v in f.verts] for f in bm.faces]
-    zb = min(B[1] for B, _, _ in outlines)
-    zn = max(N[1] for _, N, _ in outlines)
-    xn = max(abs(N[0]) for _, N, _ in outlines)
-    inV = (C[:, 1] < M['yc']) & (C[:, 2] > zb) & (np.abs(C[:, 0]) < xn * np.clip((C[:, 2] - zb) / (zn - zb), 0, 1.25))
-    owner = -np.ones(len(C), int)
-    dead = inV.copy()
-    moved = 0
-    replace = []
+    C = np.array([W[f].mean(0) for f in fv])
+    P = W[:, [0, 2]]
+    inv = np.linalg.inv(mw)
+    made, moved = [], 0
     for k, (B, N, poly) in enumerate(outlines):
-        e = (N - B) / np.linalg.norm(N - B)
+        L = np.linalg.norm(N - B)
+        u = (N - B) / L
+        nperp = np.array([-u[1], u[0]])
+        if nperp @ (np.array([0.0, N[1]]) - B) < 0:                      # (across the roll, into the V)
+            nperp = -nperp
 
-        def mirror(X):
-            d = X - B
-            return B + 2 * (d @ e)[:, None] * e[None] - d
-
-        def dist_line(X):
-            t_ = np.clip(((X - B) @ (N - B)) / ((N - B) @ (N - B)), 0, 1)
-            return np.linalg.norm(X - (B + t_[:, None] * (N - B)), axis=1)
-        cut = Path(mirror(poly))
-        xz = C[:, [0, 2]]
-        flap = inV & cut.contains_points(xz) & (owner < 0)
-        owner[flap] = k
-        dead &= ~flap
-        strip = (~inV) & (C[:, 1] < M['yc']) & (dist_line(xz) < 2.5 * h) & Path(poly).contains_points(xz)
-        fl_v = sorted({i for f in np.nonzero(flap)[0] for i in fv[f]})
-        st_v = sorted({i for f in np.nonzero(strip)[0] for i in fv[f]} - set(fl_v))
-        idx = np.array(fl_v + st_v)
-        loc = {g: j for j, g in enumerate(idx)}
-        nf = len(fl_v)
-        faces = [[loc[i] for i in fv[f]] for f in np.nonzero(flap | strip)[0] if all(i in loc for i in fv[f])]
-        tris = [(f[0], f[j], f[j + 1]) for f in faces for j in range(1, len(f) - 1)]
-        X0 = W[idx]
-        # the depth of each point behind the bodice's outer face (none on a sheet; kept for a bodice built thick)
-        rest = X0.copy()
-        rest[:nf] = on_chest(mirror(X0[:nf][:, [0, 2]]), np.full(nf, 0.16))
-        hinge = dist_line(X0[:, [0, 2]]) < 0.6 * h
-        a0, a1 = on_chest(B[None], np.zeros(1))[0], on_chest(N[None], np.zeros(1))[0]
-        ax = (a1 - a0) / np.linalg.norm(a1 - a0)
+        def ts(X):
+            return (X - B) @ u, (X - B) @ nperp
+        t, sd = ts(P)
+        line = np.nonzero(edge & (W[:, 1] < yc) & (np.abs(sd) < 0.015) & (t > -0.015) & (t < L + 0.015))[0]
+        line = line[np.argsort(t[line])]
+        tc, sc = ts(C[:, [0, 2]])
+        strip = np.nonzero((C[:, 1] < yc) & (sc < 0) & (sc > -2.5 * h) & (tc > -h) & (tc < L + h))[0]
+        st_v = np.array(sorted({i for f in strip for i in fv[f]} | set(line.tolist())))
+        loc = {g: j for j, g in enumerate(st_v)}
+        ns = len(st_v)
+        # the extension's pattern: rows parallel to the roll (close through the turn, then at the cloth's own spacing),
+        # staggered, inside the outline; the outline itself set with points, so the cut edges are the drafted ones
+        # (lengths along the roll are the cloth's own: the roll runs over the chest, longer than its front view, so the
+        # roll's points are set out by their distance along it, and the lapel's outline is drawn to that length)
+        arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(W[line], axis=0), axis=1))])
+        t0 = t[line[0]]
+        grow = arc[-1] / (t[line[-1]] - t0)
+        line_flat = B[None] + (t0 + arc)[:, None] * u[None]
+        mt, ms = ts(_mirror(poly, B, N))
+        cut = shapely.Polygon(B[None] + (t0 + (mt - t0) * grow)[:, None] * u[None] + ms[:, None] * nperp[None]).buffer(0)
+        # (the turn itself takes cloth: the arc of the fold's radius. The outline is set that much further from the
+        # roll, the turn's band between, so the lapel lands on its draft and not an arc short of it.)
+        turn = math.radians(L_['fold_deg']) * L_['fold_radius']
+        e0, e1 = B + t0 * u, B + (t0 + arc[-1]) * u
+        cut = shapely.unary_union([shapely.affinity.translate(cut, *(turn * nperp)),
+                                   shapely.Polygon([e0, e1, e1 + turn * nperp, e0 + turn * nperp])]).buffer(1e-6).buffer(-1e-6)
+        ct, cs = ts(np.array(cut.exterior.coords))
+        nb = int(math.ceil((math.pi * L_['fold_radius'] + 2 * row) / row))
+        rows = [row * j for j in range(1, nb + 1)]
+        while rows[-1] < cs.max():
+            rows.append(rows[-1] + h * 0.87)
+        pts = []
+        for j, sv in enumerate(rows):
+            step = row * 1.4 if j < nb else h
+            tt = np.arange(ct.min() + (0.5 * step if j % 2 else 0.0), ct.max(), step)
+            pts.append(B[None] + tt[:, None] * u[None] + sv * nperp[None])
+        pts = np.vstack(pts)
+        # (inside the outline a second line of points follows it, so the cut edge has even triangles all along: rows
+        # clipped at the edge leave fans of uneven triangles, and the cloth's thickness shows them as a toothed edge)
+        band = turn + 2 * row
+        ps = ts(pts)[1]
+        pts = pts[shapely.contains_xy(cut.buffer(-1.15 * h), pts[:, 0], pts[:, 1])
+                  | ((ps < band) & shapely.contains_xy(cut.buffer(-0.45 * row), pts[:, 0], pts[:, 1]))]
+        inner = cut.buffer(-0.6 * h).exterior
+        ins = np.array([inner.interpolate(d).coords[0] for d in np.arange(0, inner.length, 0.7 * h)])
+        pts = np.vstack([pts, ins[ts(ins)[1] > band]])
+        ring = cut.exterior
+        rim = np.array([ring.interpolate(d).coords[0] for d in np.arange(0, ring.length, 0.7 * h)] + list(ring.coords[:-1]))
+        rim = rim[ts(rim)[1] > 0.5 * row]
+        keep = np.ones(len(rim), bool)                                   # (no two of the outline's points nearer than a third of the spacing)
+        for i in range(len(rim)):
+            if keep[i]:
+                keep[i + 1:] &= np.linalg.norm(rim[i + 1:] - rim[i], axis=1) > 0.3 * h
+        rim = rim[keep]
+        ext = np.vstack([pts, rim])
+        allp = np.vstack([line_flat, ext])
+        tri = Delaunay(allp).simplices
+        cen = allp[tri].mean(1)
+        ar = 0.5 * np.abs((allp[tri[:, 1], 0] - allp[tri[:, 0], 0]) * (allp[tri[:, 2], 1] - allp[tri[:, 0], 1])
+                          - (allp[tri[:, 1], 1] - allp[tri[:, 0], 1]) * (allp[tri[:, 2], 0] - allp[tri[:, 0], 0]))
+        tri = tri[shapely.contains_xy(cut.buffer(1e-4), cen[:, 0], cen[:, 1]) & (ts(cen)[1] > 0) & (ar > 1e-5)]
+        nl = len(line)
+        to_fab = np.concatenate([[loc[g] for g in line], ns + np.arange(len(ext))]).astype(int)
+        T_ext = to_fab[tri]
+        T_strip = np.array([(loc[fv[f][0]], loc[fv[f][j]], loc[fv[f][j + 1]]) for f in strip for j in range(1, len(fv[f]) - 1)])
+        P2 = np.vstack([P[st_v], ext])
+        P2[[loc[g] for g in line]] = line_flat
+        T2 = np.vstack([T_strip, T_ext])
+        a_, b_, c_ = P2[T2[:, 0]], P2[T2[:, 1]], P2[T2[:, 2]]
+        cr = (b_[:, 0] - a_[:, 0]) * (c_[:, 1] - a_[:, 1]) - (b_[:, 1] - a_[:, 1]) * (c_[:, 0] - a_[:, 0])
+        T2[cr < 0] = T2[cr < 0][:, [0, 2, 1]]
+        # the start: the extension standing off the chest from the roll (tilt), unfolded; the solver makes the fold
+        lt = t0 + arc
+        te, se = ts(ext)
+        base = np.column_stack([np.interp(te, lt, W[line, c]) for c in range(3)])
+        ax = W[line[-1]] - W[line[0]]
+        ax /= np.linalg.norm(ax)
+        dv = np.array([nperp[0], 0.0, nperp[1]])
+        dv -= (dv @ ax) * ax
+        dv /= np.linalg.norm(dv)
+        nrm = np.cross(ax, dv)
+        if nrm[1] > 0:
+            nrm = -nrm                                                   # (off the body: toward the front)
         th = math.radians(L_['tilt'])
-        d = X0 - a0
-        par = (d @ ax)[:, None] * ax[None]
-        perp = d - par
-        start = X0.copy()
-        for sgn in (1, -1):
-            cand = a0 + par + perp * math.cos(th) + sgn * np.cross(ax[None], perp) * math.sin(th)
-            if (cand[:nf, 1] - X0[:nf, 1]).mean() < 0:                    # (toward the front: off the body)
-                start[:nf] = cand[:nf]
-                break
-        start[hinge] = X0[hinge]
-        if os.environ.get('COLLAR_DUMP') and k == 0:                    # (the fold's inputs, for the fold helper's test)
-            import json
-            os.makedirs(os.path.dirname(os.environ['COLLAR_DUMP']), exist_ok=True)
-            np.savez(os.environ['COLLAR_DUMP'], flat=X0[:, [0, 2]], flat3=X0, rest=rest, T=np.array(tris), start=start,
-                     pins=np.arange(nf, len(idx)), roll=np.array([B, N]), B=B, N=N, nf=nf, bodyP=bodyP, bodyN=bodyN,
-                     gap=L_['fold_gap'], settings=json.dumps(dict(FOLD_FABRIC, mesh=dict(stretch=1e-6, bend=1e-6, flat=1e-6))))
-        # the roll line marked on the cloth (a row of points along it, so the fold has edges to turn on), then the
-        # pressed fold made by folds.py's hinges: the target eased in, the flap laid over with it, held until the
-        # measured angle across the roll is within a degree of the target
-        flat2 = X0[:, [0, 2]]
-        P2, T2, (st2, x02), kept = fo.mark_line(flat2, np.array(tris), np.array([B, N]), [start, X0])
-        lap = np.concatenate([kept < nf, np.zeros(len(P2) - len(kept), bool)])
-        line_pts = np.arange(len(kept), len(P2))
+        start = np.vstack([W[st_v], base + se[:, None] * (math.cos(th) * dv + math.sin(th) * nrm)[None]])
+        lap = np.arange(len(P2)) >= ns
         roll = np.array([B, N])
         if np.median(fo.Crease(roll, 1.0).frame(P2[lap])[2]) < 0:
             roll = roll[::-1]
         ang = math.radians(L_['fold_deg'])
-        st2[line_pts] = x02[line_pts]
-        fab = xf.Fabric(st2, dict(FOLD_FABRIC))
-        fab.pin(np.concatenate([np.nonzero(~lap)[0]]))                   # (the strip and the roll's own points)
+        fab = xf.Fabric(start, dict(FOLD_FABRIC))
+        fab.pin(np.arange(ns))                                           # (the bodice's own cloth: the strip and the roll's points)
         crease = fo.Crease(roll, ang, L_['fold_radius'])
-        fab.mesh([tuple(t) for t in T2], stretch=1e-6, rest_pos=np.column_stack([P2, np.zeros(len(P2))]), bend=1e-6,
-                 flat=1e-6, bend_at=fo.soft_at(P2, T2, [crease]))
-        body = xf.MeshBody(bodyP, bodyN, gap=L_['fold_gap'], reach=1.0)
+        fab.mesh([tuple(int(i) for i in t_) for t_ in T2], stretch=L_['fold_stretch'], rest_pos=np.column_stack([P2, np.zeros(len(P2))]),
+                 bend=1e-6, flat=1e-6, bend_at=fo.soft_at(P2, T2, [crease]))
+        # (the cloth right beside the roll is what the lapel turns round: it is not in the lapel's way. Left in, it
+        # pushes the turn's own rows a full gap off and the fold is strained apart.)
+        beside = np.zeros(len(bodyP), bool)             # (beside either roll: at the break the two turns meet)
+        for Bq, Nq, _ in outlines:
+            uq = (Nq - Bq) / np.linalg.norm(Nq - Bq)
+            dq = bodyP[:, [0, 2]] - Bq
+            bt, bs = dq @ uq, dq[:, 0] * uq[1] - dq[:, 1] * uq[0]
+            beside |= own & (np.abs(bs) < math.pi * L_['fold_radius'] + 0.1) & (bt > -0.3) & (bt < np.linalg.norm(Nq - Bq) + 0.3)
+        use = ~beside & (own if L_.get('cloth_only', False) else True)
+        body = xf.MeshBody(bodyP[use], bodyN[use], gap=L_['fold_gap'], reach=1.0) if L_.get('body', True) else None
         F = fo.Folds(fab, P2, T2)
         F.add(roll, ang, radius=L_['fold_radius'])
-        rep = F.bake(body=body, log=lambda *a_: None)
-        log('collar: bodice front %d turned back as the lapel by the fold hinges: %s' % (k, str(rep).replace(chr(10), '; ')))
-        replace.append((np.nonzero(flap | strip)[0], fab.pos.copy(), T2))
-        moved += int(lap.sum())
-    inv = np.linalg.inv(mw)
-    gone = set(np.nonzero(dead)[0].tolist())
-    for fi, _, _ in replace:
-        gone |= set(fi.tolist())
-    bmesh.ops.delete(bm, geom=[bm.faces[i] for i in sorted(gone)], context='FACES')
-    new_v = []
-    for _, X, T2 in replace:                          # (the folded sheet in place of the faces it was cut from)
+        rep = F.bake(body=body, log=lambda *a_: None, **L_.get('bake', {}))
+        log('collar: front %d: lapel extension of %d points on %d roll points (roll %.2f long on the cloth, %.2f in front view), turned back by the fold hinges: %s'
+            % (k, len(ext), nl, arc[-1], t[line[-1]] - t0, str(rep).replace(chr(10), '; ')))
+        X = fab.pos.copy()
+        made.append(([bm.verts[int(i)] for i in line], X[ns:], tri))
+        FOLDED.append(dict(flat=P2, pos=X, T=T2.copy(), lap=lap, roll=roll, report=str(rep), body=(bodyP[use], bodyN[use])))
+        moved += len(ext)
+    for line, X, tri in made:                         # (the folded extensions joined to the bodice on its own roll points)
         Xl = X @ inv[:3, :3].T + inv[:3, 3]
-        vs = [bm.verts.new(tuple(c)) for c in Xl]
-        for t in T2:
+        vs = list(line) + [bm.verts.new(tuple(c)) for c in Xl]
+        for t_ in tri:
             try:
-                bm.faces.new([vs[i] for i in t])
+                bm.faces.new([vs[int(i)] for i in t_]).smooth = True
             except ValueError:
                 pass
-        new_v += vs
-    bm.verts.ensure_lookup_table()
-    # (welded to the bodice where the sheet's held edge meets it: the same points, held where they lay)
-    bmesh.ops.remove_doubles(bm, verts=list(set(new_v) | {v for v in bm.verts if v.is_boundary}), dist=1e-3)
-    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    # the cut edges round the opening and the lapels evened out: a cut along the mesh's faces leaves a staircase
-    bm.verts.ensure_lookup_table()
-    edge_v = [v for v in bm.verts if v.is_boundary and (mw[:3, :3] @ np.array(v.co[:]) + mw[:3, 3])[1] < M['yc']
-              and (mw[:3, :3] @ np.array(v.co[:]) + mw[:3, 3])[2] > zb - 0.4 * w]
-    for _ in range(L_['edge_rounds']):
-        new = {}
-        for v in edge_v:
-            nb = [e.other_vert(v) for e in v.link_edges if e.is_boundary]
-            if len(nb) == 2:
-                new[v] = v.co + 0.5 * ((nb[0].co + nb[1].co) * 0.5 - v.co)
-        for v, c in new.items():
-            v.co = c
     bm.to_mesh(o.data)
     bm.free()
     o.data.update()
-    return int((owner >= 0).sum()), moved
+    return moved, [(L_['pos'], L_['T']) for L_ in FOLDED]
 
 
 def over_lapels(pos, D, laps, M, gap=0.09):
@@ -574,6 +629,63 @@ def smooth_edges(pos, T, rounds=4, k=0.5):
     return P
 
 
+DRAFTED = {}
+
+
+def _mirror(X, B, N):
+    e = (N - B) / np.linalg.norm(N - B)
+    d = X - B
+    return B + 2 * (d @ e)[:, None] * e[None] - d
+
+
+def front_cut(V, faces, M):
+    """bodice.FRONT: the bodice front's own cut for the lapels. The collar is drafted on the bodice's neck edge and
+    folded, and the lapels are drafted from it (lapel_outlines). The fronts are cut open along the two roll lines,
+    from the break up to the neck (fit.trim cuts the faces the line crosses, so the edge is the roll line itself);
+    fold_front drafts each lapel on from that edge and turns it back. What was drafted is kept in DRAFTED for build()."""
+    import bpy
+    import shapely
+    import fabric as xf
+    import bodice as _bodice
+    used = np.array(sorted({i for f in faces for i in f}))
+    Vu = V[used]
+    M = dict(M)
+    nk = _bodice.neckline(M)
+    M['z_neck_front'], M['z_neck_side'], M['z_neck_back'] = (float(nk(np.array([t]))[0]) for t in (0.0, np.pi / 2, np.pi))
+    E = neck_edge(Vu, M)
+    D = draft(E, M)
+    Nn = xf.vertex_normals(V, faces)[used]
+    rad = np.array([Vu[:, 0], Vu[:, 1] - M['yc']]).T
+    Nn = Nn * np.where(((Nn[:, :2] * rad).sum(1) < 0)[:, None], -1, 1)
+    body = bpy.data.objects['Skin body']
+    bm = np.array(body.matrix_world)
+    BV = np.array([v.co[:] for v in body.data.vertices]) @ bm[:3, :3].T + bm[:3, 3]
+    BN = np.array([v.normal[:] for v in body.data.vertices]) @ bm[:3, :3].T
+    sel = BV[:, 2] > 44
+    bodyP, bodyN = np.vstack([Vu, BV[sel]]), np.vstack([Nn, BN[sel]])
+    pos, _ = solve(D, E, M, bodyP, bodyN)
+    outlines = lapel_outlines(E, M, D, pos)
+    B = outlines[0][0]
+    N0, N1 = outlines[0][1], outlines[1][1]
+    vee = shapely.Polygon([B, B + 1.05 * (N0 - B), B + 1.05 * (N1 - B)])
+    cuts = [shapely.Polygon(_mirror(poly, Bk, Nk)).buffer(0) for Bk, Nk, poly in outlines]
+    opening = vee                                    # (the fronts end at their roll lines; the lapels are drafted on from there)
+    edge = opening.boundary
+    DRAFTED.update(E=E, D=D, pos=pos, outlines=outlines, bodyP=bodyP, bodyN=bodyN, cuts=cuts, vee=vee)
+    yc = M['yc']
+    lo, hi = np.array(vee.bounds[:2]) - 0.5, np.array(vee.bounds[2:]) + 0.5
+
+    def f(p):
+        out = np.ones(len(p))
+        near = (p[:, 1] < yc) & (p[:, 0] > lo[0]) & (p[:, 0] < hi[0]) & (p[:, 2] > lo[1]) & (p[:, 2] < hi[1])
+        if near.any():
+            x, z = p[near, 0], p[near, 2]
+            dist = shapely.distance(edge, shapely.points(x, z))
+            out[near] = np.where(shapely.contains_xy(opening, x, z), -dist, dist)
+        return out
+    return [('front opening (the V between the lapels)', f)]
+
+
 def build():
     """The figure for views.py: the mannequin, the redingote bodice drafted on it (hidden unless SHOW_BODICE), and the
     collar sewn to its neckline and folded in the solver."""
@@ -584,6 +696,9 @@ def build():
     import redingote_bodice as RB
     import female
     RB.SETTLE = False
+    import bodice as _bodice
+    pieces = bool(os.environ.get('COLLAR_LAPEL_PIECES')) or STYLE == 'turned'
+    _bodice.FRONT = None if pieces else front_cut
     res = RB.build()
     b = bpy.data.objects['Redingote bodice']
     mw = np.array(b.matrix_world)
@@ -594,15 +709,30 @@ def build():
     BV = np.array([v.co[:] for v in body.data.vertices]) @ bm[:3, :3].T + bm[:3, 3]
     BN = np.array([v.normal[:] for v in body.data.vertices]) @ bm[:3, :3].T
     M = dict(RB.MEASURES)
-    E = neck_edge(V, M)
-    D = draft(E, M)
+    if DRAFTED:
+        E, D = DRAFTED['E'], DRAFTED['D']
+    else:
+        E = neck_edge(V, M)
+        D = draft(E, M)
     N = xf.vertex_normals(V, Fq)
     rad = np.array([V[:, 0], V[:, 1] - M['yc']]).T
     N = N * np.where(((N[:, :2] * rad).sum(1) < 0)[:, None], -1, 1)
     sel = BV[:, 2] > 44
-    pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
-    laps = lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D, pos)
-    pos = over_lapels(pos, D, laps, M)
+    if DRAFTED:
+        pos = DRAFTED['pos']
+        if os.environ.get('COLLAR_FOLD_DUMP'):         # (the fold's inputs, to work on the fold without the build)
+            import pickle
+            with open(os.environ['COLLAR_FOLD_DUMP'], 'wb') as fh:
+                pickle.dump(dict(V=V, F=Fq, outlines=DRAFTED['outlines'], M=M, bodyP=np.vstack([V, BV[sel]]),
+                                 bodyN=np.vstack([N, BN[sel]]), skinP=BV, skinF=[list(p.vertices) for p in body.data.polygons],
+                                 mods=[(m.type, getattr(m, 'thickness', None), getattr(m, 'offset', None)) for m in b.modifiers]), fh)
+        nfl, folded = fold_front(b, DRAFTED['outlines'], M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
+        print('collar: the bodice front turned back as the lapels (%d faces)' % nfl, flush=True)
+        pos = over_lapels(pos, D, folded, M)
+    else:
+        pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
+        laps = lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D, pos)
+        pos = over_lapels(pos, D, laps, M)
     pos = smooth_edges(pos, D['T'])
     me = bpy.data.meshes.new('Collar')
     me.from_pydata([tuple(p) for p in pos], [], [tuple(int(i) for i in t) for t in D['T']])
@@ -626,7 +756,7 @@ def build():
     for c in bpy.data.objects:                       # (the buttons above the break: the front is open there)
         if c.name.startswith('Redingote bodice') and c.name.endswith('buttons'):
             open_front([c], M, E, D)
-    if os.environ.get('COLLAR_LAPEL_PIECES'):        # (the earlier way, a lapel laid on as its own piece)
+    if not DRAFTED:                                  # (the earlier way, a lapel laid on as its own piece)
         for i, (lp, lt) in enumerate(laps):
             lme = bpy.data.meshes.new('Lapel %d' % i)
             lme.from_pydata([tuple(p) for p in smooth_edges(lp, lt)], [], [tuple(int(j) for j in t) for t in lt])
@@ -639,9 +769,6 @@ def build():
             if par is not None:
                 lo.parent = par
                 lo.matrix_parent_inverse = par.matrix_world.inverted()
-    else:
-        nfl, nv = fold_front(b, lapels.outlines, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
-        print('collar: %d faces of the bodice front turned back (%d points)' % (nfl, nv), flush=True)
     if os.environ.get('HIDE_COLLAR'):               # (the bodice alone, its front turned back: the collar out of sight)
         o.hide_render = True
         o.visible_camera = o.visible_shadow = o.visible_diffuse = o.visible_glossy = False
