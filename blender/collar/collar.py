@@ -980,6 +980,11 @@ def build():
         laps = lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D, pos)
         pos = over_lapels(pos, D, laps, M)
     pos = smooth_edges(pos, D['T'])
+    if os.environ.get('COLLAR_OUT'):                   # (the collar as solved and as shown, for its contour check)
+        import pickle
+        with open(os.environ['COLLAR_OUT'], 'wb') as fh:
+            pickle.dump(dict(pos=pos, solved=DRAFTED.get('pos'), UV=D['UV'], T=D['T'], st_pt=D['st_pt'], E=E, M=M,
+                             design=design(D, E, M)[0], V=V, F=Fq, skinP=BV), fh)
     me = bpy.data.meshes.new('Collar')
     me.from_pydata([tuple(p) for p in pos], [], [tuple(int(i) for i in t) for t in D['T']])
     me.update()
