@@ -457,6 +457,17 @@ def openings(X, tris, E, t1, closed=0.06, reach=0.8, exempt=None, exempt_r=1.2):
         e_open = op[be[:, 0]] & op[be[:, 1]]
         out['open_len'] = float(np.linalg.norm(X[be[e_open, 0]] - X[be[e_open, 1]], axis=1).sum())
         out['open_gap_max'] = round(float(gap[op].max()) if op.any() else 0.0, 3)
+        if e_open.any():            # (where: the open stretches by 2-unit cells, the longest first)
+            mid_ = 0.5 * (X[be[e_open, 0]] + X[be[e_open, 1]])
+            ln_ = np.linalg.norm(X[be[e_open, 0]] - X[be[e_open, 1]], axis=1)
+            cells = {}
+            for c_, l_, m_ in zip(map(tuple, np.floor(mid_ / 2.0).astype(int)), ln_, mid_):
+                e_ = cells.setdefault(c_, [0.0, np.zeros(3)])
+                e_[0] += l_
+                e_[1] += l_ * m_
+            top = sorted(cells.values(), key=lambda e_: -e_[0])[:4]
+            out['open_at'] = [{'length': round(float(l_), 2), 'at': [round(float(x), 2) for x in m_ / max(l_, 1e-9)]}
+                              for l_, m_ in top]
     return out
 
 
