@@ -146,6 +146,23 @@ def _co(o):
     return x.reshape(-1, 3)
 
 
+
+def _even(Y, base, o, n):
+    """What each point moved by in the solve, evened with its neighbours' (the solver's walk leaves a fine jitter, a
+    millimetre or so from point to point, that a hide does not have): the wrap's shape kept, the jitter taken."""
+    ee = np.empty(len(o.data.edges) * 2, dtype=np.int64)
+    o.data.edges.foreach_get('vertices', ee)
+    ee = ee.reshape(-1, 2)
+    dsp = Y - base
+    for _ in range(8):
+        acc, cnt = np.zeros_like(dsp), np.zeros(n)
+        np.add.at(acc, ee[:, 0], dsp[ee[:, 1]])
+        np.add.at(acc, ee[:, 1], dsp[ee[:, 0]])
+        np.add.at(cnt, ee[:, 0], 1.0)
+        np.add.at(cnt, ee[:, 1], 1.0)
+        dsp = 0.4 * dsp + 0.6 * acc / np.maximum(cnt, 1.0)[:, None]
+    return base + dsp
+
 def sew(o, pieces, rig, colliders, P=None, log=print):
     """Sew the boot o (the upper's pieces, as last.build_boots made them) from its flat pieces on the colliders."""
     P = SEWN if P is None else P
@@ -195,6 +212,14 @@ def sew(o, pieces, rig, colliders, P=None, log=print):
             flat[sl] = np.column_stack([uv, np.zeros(len(uv))])
             log('boot sewing: %s cut flat (flat lengths %.0f%%..%.0f%% of its lengths on the last)'
                 % (p['name'], 100 * give[0], 100 * give[2]))
+    # the sewn shell is baked: the pieces as cut (on the last and flat), the leather's numbers and the hose make the
+    # key, so a later run (a new tongue's bend, a texture, the lights) takes the panels' folds as they are
+    import hashlib
+    side = o.name.rsplit('.', 1)[-1]
+    key = hashlib.sha1(np.round(base, 4).tobytes() + np.round(flat, 4).tobytes() + np.round(np.array(pts), 3).tobytes()
+                       + repr(sorted((k, P[k]) for k in P)).encode() + repr(sorted(HOLD.items())).encode()
+                       + b'smooth8').hexdigest()[:16]
+    cache = os.path.join(os.environ.get('BOOT_CACHE', '/mnt/project-files/hose/boot-cache'), 'sew-%s-%s.npy' % (side, key))
     fab = fabric.Fabric(flat, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
     fab.pin(np.arange(n), pin)
     ties = fab.mesh([tuple(p.vertices) for p in o.data.polygons])
@@ -203,22 +228,18 @@ def sew(o, pieces, rig, colliders, P=None, log=print):
     # (each pair held at the distance it was cut at: the two pieces' points along a seam are not spaced alike, so
     # drawing each to the other's nearest point gathers the seam into scallops)
     fab.tie(sew_ij[:, 0], sew_ij[:, 1], 0.0)
-    steps = fab.settle(body, most=P['steps'])
-    Y = fab.pos.copy()
-    # (the solver's walk leaves a fine jitter, a millimetre or so from point to point, that a hide does not have:
-    # what each point moved by is evened with its neighbours', which keeps the wrap's shape and takes the jitter)
-    ee = np.empty(len(o.data.edges) * 2, dtype=np.int64)
-    o.data.edges.foreach_get('vertices', ee)
-    ee = ee.reshape(-1, 2)
-    dsp = Y - base
-    for _ in range(8):
-        acc, cnt = np.zeros_like(dsp), np.zeros(n)
-        np.add.at(acc, ee[:, 0], dsp[ee[:, 1]])
-        np.add.at(acc, ee[:, 1], dsp[ee[:, 0]])
-        np.add.at(cnt, ee[:, 0], 1.0)
-        np.add.at(cnt, ee[:, 1], 1.0)
-        dsp = 0.4 * dsp + 0.6 * acc / np.maximum(cnt, 1.0)[:, None]
-    Y = base + dsp
+    if os.path.exists(cache) and not os.environ.get('BOOT_NOCACHE'):
+        Y = np.load(cache)
+        log('boot sewing %s: the sewn shell taken from the cache (%s), no solve' % (o.name, os.path.basename(cache)))
+        steps = 0
+    else:
+        steps = fab.settle(body, most=P['steps'])
+        Y = _even(fab.pos.copy(), base, o, n)
+        try:
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            np.save(cache, Y)
+        except OSError:
+            pass
     log('boot sewing %s: settled by the fabric solver in %d steps (%.0f s): %d threads, %d diagonals, %d bend ties, '
         '%d seam ties' % (o.name, steps, time.time() - t0, ties[0], ties[1], ties[2], len(sew_ij)))
     gap = np.linalg.norm(Y[sew_ij[:, 0]] - Y[sew_ij[:, 1]], axis=1)
@@ -518,6 +539,79 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
+
+
+# the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
+# worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
+# panels' top edge (shares of the tongue's height above it)
+TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
+
+
+def bend_tongue(o, pieces, B=TONGUE_BEND, log=print):
+    """Bend the sewn boot o's tongue forward above the panels' top edge, with an authored fold (folds.py) on the
+    tongue alone: below the fold line it is held as sewn, above it turns over a rolled crease to B's angle. The fold
+    is cached (folds.bake_cached) and a contour sheet of it written. Returns the report."""
+    import folds
+    by = {p['name']: p for p in pieces}
+    if 'tongue' not in by:
+        return None
+    t = by['tongue']
+    sl = slice(t['start'], t['start'] + len(t['V']))
+    X = _co(o)
+    P = X[sl].copy()
+    uv, _ = pattern.flatten(t)
+    T = []
+    for f in t['F']:
+        T += [(f[0], f[i], f[i + 1]) for i in range(1, len(f) - 1)]
+    T = np.array(T, np.int64)
+    # (wound alike on the pattern, its right side up)
+    a, b, c = uv[T[:, 0]], uv[T[:, 1]], uv[T[:, 2]]
+    neg = ((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])) < 0
+    T[neg] = T[neg][:, [0, 2, 1]]
+    panels = np.concatenate([X[p['start']:p['start'] + len(p['V'])] for p in pieces if p['name'].endswith('shaft')])
+    z_edge = float(np.percentile(panels[:, 2], 99.5))
+    free = P[:, 2] > z_edge
+    if free.sum() < 12:
+        log('boot tongue %s: nothing stands above the panels to bend' % o.name)
+        return None
+    # the line on the pattern: across the tongue at the height (on the boot) a share B['at'] above the panels' edge
+    z_line = z_edge + B['at'] * (P[:, 2].max() - z_edge)
+    near = np.abs(P[:, 2] - z_line) < 0.12
+    v_line = float(np.median(uv[near, 1])) if near.any() else float(np.median(uv[free, 1]))
+    up = 1.0 if np.corrcoef(uv[:, 1], P[:, 2])[0, 1] > 0 else -1.0
+    x0, x1 = uv[:, 0].min() - 1.0, uv[:, 0].max() + 1.0
+    line = np.array([[x0, v_line], [x1, v_line]]) if up > 0 else np.array([[x1, v_line], [x0, v_line]])
+    hold = P[:, 2] < z_line - 2.0 * B['radius']
+
+    def sheet():
+        # (its ties at the lengths it was sewn at: the fold turns it, the folds' hinges hold the turn)
+        f = fabric.Fabric(P, dict(stretch=0.0, shear=1e-7, bend=2e-7, friction=0.0, iterations=12, gravity=(0.0, 0.0, 0.0)))
+        f.pin(np.nonzero(hold)[0])
+        f.mesh([tuple(x) for x in T])
+        return f
+    fab = sheet()
+    # (forward: away from the leg; which way that is on the pattern is read off the tongue's normal on the boot)
+    nrm = _normals(o)[sl][free].mean(0)
+    # (which way the pattern's right side faces on the boot: a triangle wound up on the pattern has its normal on
+    # the boot to that side; forward is out, along the leather's outer normal)
+    tn = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]])
+    side_ = 1.0 if float((tn.sum(0)) @ nrm) > 0 else -1.0
+    log('boot tongue %s: the pattern faces %s on the boot; folding to side %+d' % (o.name, 'out' if side_ > 0 else 'in', side_))
+    crease = dict(line=line, angle=np.radians(B['angle']), radius=B['radius'], side=side_, name='tongue top')
+    side = o.name.rsplit('.', 1)[-1]
+    pos, rep, how = folds.bake_cached('boot-tongue-%s' % side, fab, uv, T, [crease],
+                                      extra=([B['angle'], B['radius'], B['at'], side_], nrm),
+                                      log=log, tol_deg=2.0, most=4000)
+    out = float(((pos - P)[free].mean(0)) @ nrm)
+    log('boot tongue %s: its free top moved %.3f along the outer normal (%s)' % (o.name, out, 'forward' if out > 0 else 'BACK, toward the leg'))
+    X[sl] = pos
+    o.data.vertices.foreach_set('co', X.ravel())
+    o.data.update()
+    cr = (rep.get('creases') or [{}])[0]
+    log('boot tongue %s: its top turned forward over a %.2f roll: %.1f of %.1f deg (%s, %s); contour sheet %s'
+        % (o.name, B['radius'], cr.get('achieved_deg', float('nan')), cr.get('target_deg', B['angle']), how,
+           'reached' if rep.get('ok') else 'stopped short: %s' % rep.get('why'), rep.get('sheet')))
+    return rep
 
 
 CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=0.5, gain=0.4)  # (the ankle's bend in degrees, and the holds)

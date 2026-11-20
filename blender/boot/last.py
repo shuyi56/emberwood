@@ -92,7 +92,7 @@ RATIOS = {
     'top_fit': 0.85,         # how far the top is drawn in from the calf's width to the leg's own (1: all the way)
     'top_snug': 0.65,        # how much of the ease is taken out at the top (laced close to the leg)
     'top_back': 0.045,       # the panels' top edge stands this much higher at the back than at the front
-    'tongue_rise': 0.090,    # the last carried on this far above the boot's top, for the tongue (the most it can stand)
+    'tongue_rise': 0.140,    # the last carried on this far above the boot's top, for the tongue (the most it can stand)
     'tongue': 0.050,         # (the vamp's throat: how far it is cut under each panel past its front edge)
     'eyelet_in': 0.028,      # the eyelets' row, this far in from the front edge
     'eyelet_pitch': 0.085,   # and this far apart up it (about 2.2 cm)
@@ -318,7 +318,7 @@ def _sole(edge, z_welt, r):
     return V, F, sd, su, path
 
 
-TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.14, 0.16, 0.45     # (shares of the shin's width: see cut_lace)
+TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.21, 0.27, 0.40     # (shares of the shin's width: see cut_lace)
 
 
 def cut_lace(D, faces, f, r, weights, lift_on):
