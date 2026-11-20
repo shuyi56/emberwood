@@ -23,3 +23,9 @@ points. The cause so far has been a hold or collider setup, not the stiffness nu
 1. Use the lower layer's kept shape (`CHEMISE_CACHE`, `blender/chemise/kept/`).
 2. Build only the new layer, no solver, and look at it.
 3. Run `CHEMISE_SETTLE=1` on both layers only if needed.
+
+## Escalating to the solver owner
+
+There is a solver-owner thread, "Own the cloth solver for tuners". When a diagnosis points at the solver, or the
+stopping rule is hit on something that looks like the solver, message that thread with the numbers and what was
+tried. It says whether the cause is a setting, a missing feature or a bug. Keep tuning the garment meanwhile.
