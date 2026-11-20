@@ -474,7 +474,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             Ns = (1 - s) * NA + s * NB
             Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
             w = np.minimum(1.0, 6 * np.minimum(s[:, 0], 1 - s[:, 0]))[:, None]        # (down into the hole at each end)
-            bump = np.sin(np.pi * s) ** 2
+            bump = np.sin(np.pi * s) ** 0.7            # (broad: the strands clear each other wherever they cross)
             lift = rl * (0.95 + 0.1 * w) + slack * np.sin(np.pi * s) + (2.7 * rl * bump if j == 0 else 0.0)
             path = path + Ns * lift
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
@@ -493,7 +493,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         Lc = Lk * pitch
         pts = []
         for x in tt:
-            q = P_ + sd * es * (0.7 * Lc * x * (1 - 0.4 * x) + 0.08 * Lc * np.sin(3.1 * x)) - et * (Lc * x ** 1.1) \
+            q = P_ + sd * es * (0.45 * Lc * (1 - np.exp(-7 * x)) + 0.08 * Lc * np.sin(3.1 * x)) - et * (Lc * x ** 1.1) \
                 + 0.5 * rl * np.sin(9 * x) * es
             pts.append(onto(q, rl * 1.3 + 0.6 * rl * np.sin(np.pi * x)) if x > 0.04 else P_ - N_ * 0.8 * rl)
         pts = np.array(pts)
