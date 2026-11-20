@@ -303,6 +303,34 @@ dark when well inside its limits and on the strain ramp when near or past one, d
 the surface, flagged runs ringed and numbered. The defaults are set from the self test's geometry; `--calibrate`
 widens them from approved laces (it reads `laces` from the flow files like the garments).
 
+## Layer gaps and garment ease
+
+John's rule (2026-11-19): ease is set from the measured body before a garment is fitted, not let out by feel.
+
+**The spec.** `blender/shared/riding_habit.json` is the riding habit's whole stack, under to over (chemise, hose,
+boots, corset, petticoat, skirt, bodice, sleeves, and the cloak when it joins), each layer with its fabric (thickness
+as its code builds it, stretch, turn of cloth, the span it bridges), how it is cut, the regions it covers and the
+ease it needs there. The `derived` block is computed, never typed: `blender/shared/ease.py` measures the body at
+rest and in the pose strip's poses (a tape round each region: bust, under-bust, waist, hips, across the back,
+armhole, arm, leg, and both legs together for a hem) and gives each layer its ease over the layer beneath and over
+the body (standing ease for the cut, plus what the body grows in the worst pose less the cloth's stretch, plus turn of
+cloth, plus the thickness of everything beneath). `radial_w` is the same ease as a stand-off over the layer beneath
+in w, the unit a shell-offset draft (vest/fit.py, redingote/bodice.py) uses. Refresh it with `--derive-ease`.
+
+**The check.** Whenever two or more of the spec's layers are in a `views.py` job's scene, `rq_views.py` runs
+`blender/shared/layer_gaps.py` after the build, before the first render, in every pose the request's `--poses` names
+(or rest, arms-up, arms-fwd, elbows, step, crouch and twist). A ray from the skin along its normal meets each layer
+in turn; each layer's gap is its inner face less the outer face of the outermost layer under it. It writes
+`layer_gaps.json` and a summary in `geometry.json`:
+- `show_through`: regions (and front, side, back on the trunk) where a lower layer comes through (a negative gap
+  past 0.3 mm), worst first, with the share of points and the deepest;
+- `print_through`: regions where the relief of the layer beneath (bone channels, an edge's step, seams) is copied
+  into the inner face of a cloth stiff enough to bridge it (`relief_mm`, and the share copied, 0 to 1);
+- per pair and region: the smallest gap, the 5th percentile and the median in mm, and the share under the spec.
+
+It is report-only and never stops a job (`RQ_LAYER_GAPS=0` turns it off). For the numbers alone, without a render,
+add `--gaps-only`: the job stops after the checks (a mannequin outfit build is about 2.5 minutes, the checks about
+40 s for seven poses).
 
 ## Review before the queue
 
