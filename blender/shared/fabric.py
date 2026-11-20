@@ -1,231 +1,74 @@
-"""Fabric: the game's particle solver for cloth (src/world/fabric-core.js), for the Blender scripts. It folds, sews
-and settles sheets here as it does in the game (John's rule, 2026-11-19: fold with the local solver; Blender's own
-cloth solver is kept for final renders and for structured pieces such as the chemise). One module for every garment:
-the hose thread's port (Jacobi walk, bvh_body) and the petticoat's (Gauss-Seidel walk, sewing, tethers, flattening)
-joined.
+"""Fabric: the game's particle solver for cloth (src/world/fabric-core.js), for the Blender scripts. It folds and
+settles sheets here as it does in the game; Blender's own cloth solver is kept for final renders and for structured
+pieces such as the chemise.
 
-From fabric-core.js, the same model:
+The sheet is points held together by ties, each keeping its length: the threads (`stretch`), the diagonals
+(`shear`), and ties two points apart (`bend`), so a sheet rolls over an edge in a curve instead of creasing at
+every row. Seams are ties of no length between the two pieces' points. A tie's compliance (how soft it is) is
+divided by the step squared, so the sheet is as stiff in small steps as in large ones (XPBD: Macklin, Mueller and
+Chentanez 2016). After the ties each point is pushed out of the body, and the body's hold on it takes away part of
+its slide along it (`friction`).
 
-  - every tie keeps its rest length, as stiff as its `compliance` lets it (0: rigid), within its `slack` (a share of
-    the rest it may change freely before it resists);
-  - XPBD (Macklin, Mueller and Chentanez 2016) in small fixed steps (Macklin et al. 2019): each step moves every
-    point by its speed (Verlet: from the last step's place, kept by `damping` per 1/60 s) and by gravity, then walks
-    the ties `iterations` times; a tie's compliance is divided by the step squared, so the stiffness belongs to the
-    fabric, not to the step;
-  - after the ties each point is pushed out of the body, and the body takes away its slide along it by Coulomb
-    friction (a slide smaller than friction times the push is stopped outright);
-  - held chains keep their segments' exact lengths, follow the leader with the point above taking `lead` of the
-    move the other way (Mueller et al. 2012);
-  - settle(): run to rest, damped hard, the body's pushes not kept as speed.
-
-The walk (`walk`):
-
-  - 'jacobi' (the default, the hose's): all ties at once, each point taking the mean of the moves its ties ask of it,
-    over-relaxed by `relax`; the same answer as the game's at the cost of more walks a step;
-  - 'gauss-seidel': as fabric-core.js walks them, one after another, forward one walk and backward the next, here in
-    colour batches (no two ties of a batch share a moving point, so a batch moves at once in numpy). Fewer walks
-    for the same stiffness; what the petticoat uses.
-
-Additions to fabric-core.js's model, each documented where it is defined:
-
-  - mesh(): a triangle or quad mesh's sheet (edges the threads, quads' diagonals the shear, the far corners across
-    each edge the bend ties), its rest lengths optionally from the flat pattern (rest_pos), so the cloth comes back
-    to the cloth as cut whatever it was laid in;
-  - flatten(): stencils that resist a fold in proportion to its angle (bend ties two along resist only as its
-    square, and cannot make a starched cloth: the swatch strip reached 1.7 cm of bending length at any compliance);
-  - tether(): ties that only stop a point going further than its rest from another (a long-range attachment, Kim,
-    Chentanez and Mueller 2012), so a long skirt hung from its band does not sag through a hundred threads;
-  - sew(): ties drawn to nothing between a seam's paired points, their compliance eased from loose to firm;
-  - bodies: a callable on all points at once, body(P) -> (pushed P, touched mask). MeshBody (scipy, the nearest
-    surface point and its normal, with a floor) and bvh_body (a mathutils BVHTree) are two.
+The game's solver walks the ties one by one (Gauss-Seidel). Here they are solved all at once and each point takes the
+mean of the moves its ties ask of it (Jacobi, with over-relaxation `relax`): the same answer, walked in numpy, at the
+cost of more walks a step (`iterations`). Units are the caller's; positions are an array [n, 3], z up.
 
 The API (kept stable: the boot, and the skirt, sleeves and petticoat scripts use it):
 
     f = Fabric(points [n, 3], settings)    settings: FABRIC_DEFAULTS' names, the game's where it has them
     f.pin(indices, weight=None)            hold points (weight 1, or partly: an inverse mass of 1 - weight)
-    f.tie(i, j, compliance, rest=None)     ties between point arrays, at their present lengths or rest (slack=)
+    f.tie(i, j, compliance, rest=None)     ties between point arrays, at their present lengths or rest
     f.mesh(faces)                          a mesh's threads, quad diagonals and bend ties; returns their counts
-                                           (rest_pos=, bend_at=, flat=: see mesh)
     f.step(h, body, neutral=False)         one step; body(points) -> (points pushed out, touched mask)
     f.settle(body, h, most, tol, damping)  run to rest; returns the steps taken
     f.pos                                  the points as they are now
     bvh_body(tree, gap)                    a body from a mathutils BVHTree (normals outward)
-  added with the petticoat:
-    f.tether(i, j, rest)                   ties that only stop i going further than rest from j
-    f.sew(i, j, loose, firm, seconds)      seam ties of no length, eased from loose to firm compliance
-    f.flatten(a, b, c, d, rest, comp)      fold-resisting stencils (an angle bend; mesh(flat=) makes them)
-    f.hold_chain(points)                   a chain kept at its exact segment lengths (fabric-core.js's hold)
-    MeshBody(points, normals, gap, floor)  a body from a surface's points and normals (needs scipy; nothing else does)
 
 It follows src/world/fabric-core.js: what is added there (per-point mass, angle bends, creases that set) is to be
-added here under the same names.
-
-Units are the caller's; positions are an array [n, 3], z up (fabric-core.js's y), so GRAVITY is along -z: 9.81 m/s^2
-in the figure's units (63 units to 1.65 m)."""
-import time
-
+added here under the same names."""
 import numpy as np
 
-UNIT = 1.65 / 63
-GRAVITY = (0.0, 0.0, -375.0)     # 9.8 m/s^2 on a figure 63 units to 1.65 m (UNIT), as the hose's port has it
-
 FABRIC_DEFAULTS = dict(
-    gravity=GRAVITY,         # units / s^2
-    damping=0.02,            # share of each point's speed lost per 1/60 s
-    walk='jacobi',           # or 'gauss-seidel' (see above)
-    iterations=12,           # walks over the ties per step (Jacobi needs more than the game's 2)
-    relax=1.6,               # Jacobi's over-relaxation of the mean move
-    stretch=0.0,             # compliance of the threads (0: they keep their length)
-    shear=2e-5,              # compliance of the diagonals
-    bend=2e-4,               # compliance of the bend ties
-    friction=0.5,            # how well the body holds what lies on it: the slide it stops, as a share of its push
-    lead=0.9,                # held chains: the share of a point's correction the point above takes the other way
+    gravity=(0.0, 0.0, -375.0),   # units / s^2 (9.8 m/s^2 on a figure 63 units to 1.65 m)
+    damping=0.02,                 # share of each point's speed lost per 1/60 s
+    iterations=12,                # walks over the ties a step
+    relax=1.6,                    # over-relaxation of the mean move
+    stretch=0.0,                  # compliance of the threads (0: they keep their length)
+    shear=2e-5,                   # of the diagonals
+    bend=2e-4,                    # of the ties two points along
+    friction=0.5,                 # how well the body holds what lies on it: the slide it stops, as a share of its push
 )
-
-
-def _colour(I, J, n, fixed=None, more=()):
-    """Batches of ties (or of stencils: I, J and the more columns), no two in a batch sharing a moving point
-    (greedy, in their order; a pinned point never moves, so any number of a batch's ties may share it)."""
-    cols = [np.asarray(I), np.asarray(J)] + [np.asarray(c) for c in more]
-    m = len(cols[0])
-    col = np.full(m, -1)
-    used = [set() for _ in range(n)]
-    for k in range(m):
-        pts = [int(c[k]) for c in cols]
-        sets = [used[p] for p in pts if fixed is None or not fixed[p]]
-        c = 0
-        while any(c in u for u in sets):
-            c += 1
-        col[k] = c
-        for u in sets:
-            u.add(c)
-    return [np.nonzero(col == c)[0] for c in range(col.max() + 1)] if m else []
 
 
 class Fabric:
     def __init__(self, pos, settings=None):
-        """pos: [n, 3] (copied)."""
         self.pos = np.array(pos, dtype=float)
         self.n = len(self.pos)
         self.prev = self.pos.copy()
-        self.w = np.ones(self.n)                 # inverse mass: 0 pins a point
-        self.settings = dict(FABRIC_DEFAULTS, **(settings or {}))
-        self.s = self.settings
-        self._I, self._J, self._rest, self._comp, self._slack, self._kind = [], [], [], [], [], []
-        self.chains = []
-        self.touch = np.zeros(self.n, bool)
-        self._quads = []                         # (a, b, c, d, rest, compliance): flattening stencils (see flatten)
-        self._built = None
-        self._sew = None                         # (first tie, last tie, compliance from, to, seconds)
-        self.t = 0.0
-
-    # ------------------------------------------------------------------ ties
+        self.w = np.ones(self.n)                     # inverse mass: 0 pins a point
+        self.s = dict(FABRIC_DEFAULTS, **(settings or {}))
+        self.ci, self.cj, self.rest, self.comp = (np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64),
+                                                  np.zeros(0), np.zeros(0))
 
     def pin(self, idx, weight=None):
         """Hold the points idx where they are (weight 1), or partly (an inverse mass of 1 - weight)."""
         idx = np.asarray(idx, dtype=np.int64)
         self.w[idx] = 0.0 if weight is None else np.clip(1.0 - np.asarray(weight, dtype=float), 0.0, 1.0)
-        self._built = None
 
-    def ties(self, I, J, compliance=0.0, slack=0.0, rest=None, kind=0):
-        """Tie points I[k] and J[k] (arrays) at their present distance or rest; kind 1: a tether (only resists going
-        further than rest). Returns the ties' index range."""
-        I, J = np.asarray(I, np.int64).ravel(), np.asarray(J, np.int64).ravel()
-        keep = ~((self.w[I] == 0) & (self.w[J] == 0))
-        if rest is None:
-            rest = np.linalg.norm(self.pos[I] - self.pos[J], axis=1)
-        rest = np.broadcast_to(np.asarray(rest, float), I.shape)[keep]
-        I, J = I[keep], J[keep]
-        k0 = sum(len(a) for a in self._I)
-        self._I.append(I)
-        self._J.append(J)
-        self._rest.append(rest)
-        self._comp.append(np.full(len(I), float(compliance)))
-        self._slack.append(np.full(len(I), float(slack)))
-        self._kind.append(np.full(len(I), kind, np.int8))
-        self._built = None
-        return k0, k0 + len(I)
+    def tie(self, i, j, compliance=0.0, rest=None):
+        """Tie points i to points j (arrays) at the distance they are at now (or rest)."""
+        i, j = np.asarray(i, dtype=np.int64).ravel(), np.asarray(j, dtype=np.int64).ravel()
+        r = np.linalg.norm(self.pos[i] - self.pos[j], axis=1) if rest is None else np.broadcast_to(rest, i.shape)
+        keep = ~((self.w[i] == 0) & (self.w[j] == 0)) & (i != j)
+        self.ci = np.concatenate([self.ci, i[keep]])
+        self.cj = np.concatenate([self.cj, j[keep]])
+        self.rest = np.concatenate([self.rest, np.asarray(r, dtype=float)[keep]])
+        self.comp = np.concatenate([self.comp, np.broadcast_to(np.asarray(compliance, dtype=float), i.shape)[keep]])
 
-    def tie(self, i, j, compliance=0.0, rest=None, slack=0.0):
-        """Tie points i to points j (single points or arrays) at the distance they are at now (or rest)."""
-        i, j = np.atleast_1d(i), np.atleast_1d(j)
-        keep = i != j
-        if rest is not None:
-            rest = np.broadcast_to(np.asarray(rest, float), i.shape)[keep]
-        return self.ties(i[keep], j[keep], compliance, slack, rest)
-
-    def tether(self, I, J, rest, compliance=0.0):
-        return self.ties(I, J, compliance, 0.0, rest, kind=1)
-
-    def sew(self, I, J, loose=1e-2, firm=0.0, seconds=0.3):
-        """Draw the paired points together: ties to nothing, their compliance eased from loose to firm over
-        seconds (a seam pulled up at once throws the cloth)."""
-        a, b = self.ties(I, J, loose, 0.0, 0.0)
-        self._sew = (a, b, float(loose), float(firm), float(seconds))
-        return a, b
-
-    def flatten(self, A, B, C, D, rest, compliance):
-        """Flattening stencils over each inner edge (A, B) with its two far corners (C, D): the edge's midpoint is
-        kept at its rest distance from the corners' midpoint (on a flat pattern, about none). This resists a fold
-        in proportion to its angle, where a tie between the far corners resists only as the angle squared and so
-        lets a starched cloth hang like a soft one (the swatch strip: a bending length of 1.7 cm at any bend
-        compliance, against 3.7 for starched longcloth). An addition to fabric-core.js's model."""
-        keep = ~((self.w[A] == 0) & (self.w[B] == 0) & (self.w[C] == 0) & (self.w[D] == 0))
-        rest = np.broadcast_to(np.asarray(rest, float), np.shape(A))
-        comp = np.broadcast_to(np.asarray(compliance, float), np.shape(A))
-        self._quads.append(tuple(np.asarray(v)[keep] for v in (A, B, C, D, rest, comp)))
-        self._built = None
-
-    def mesh(self, faces, stretch=None, shear=None, bend=None, rest_pos=None, bend_at=None, flat=None):
-        """Tie a mesh's points as a sheet: its edges (the threads), its quads' diagonals (the shear), and across each
-        edge the two points on either side of it (the bend ties). rest_pos: where the rest lengths are measured
-        (the flat pattern, [n, 2] or [n, 3]); else the points as they are now. Of a triangle mesh also: bend_at, a
-        compliance per point, the softer of a tie's two kept (a pressed fold); flat, a compliance for flattening
-        stencils over the same edges (see flatten), with bend_at likewise. Returns (threads, diagonals, bend ties)."""
-        s = self.settings
-        if any(len(f) != 3 for f in faces):
-            return self._mesh_any(faces, stretch, shear, bend, rest_pos)
-        T = np.asarray(faces, np.int64)
-        E = np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1)
-        E, inv = np.unique(E, axis=0, return_inverse=True)
-        te = inv.reshape(3, -1).T
-        R = self.pos if rest_pos is None else np.asarray(rest_pos, float)
-        self.ties(E[:, 0], E[:, 1], s['stretch'] if stretch is None else stretch, 0.0,
-                  np.linalg.norm(R[E[:, 0]] - R[E[:, 1]], axis=1))
-        # bend: the far corners across each inner edge
-        order = np.argsort(te.ravel(), kind='stable')
-        tri_of = np.repeat(np.arange(len(T)), 3)[order]
-        e_sorted = te.ravel()[order]
-        first = np.searchsorted(e_sorted, np.arange(len(E)))
-        cnt = np.bincount(e_sorted, minlength=len(E))
-        inner = np.nonzero(cnt == 2)[0]
-        t0, t1 = tri_of[first[inner]], tri_of[first[inner] + 1]
-        a, b = E[inner, 0], E[inner, 1]
-
-        def far(t):
-            tt = T[t]
-            return np.where((tt[:, 0] != a) & (tt[:, 0] != b), tt[:, 0],
-                            np.where((tt[:, 1] != a) & (tt[:, 1] != b), tt[:, 1], tt[:, 2]))
-        c0, c1 = far(t0), far(t1)
-        bc = np.full(len(c0), s['bend'] if bend is None else bend)
-        if bend_at is not None:
-            bend_at = np.asarray(bend_at, float)
-            bc = np.maximum(bc, np.maximum(bend_at[c0], bend_at[c1]))
-        self.ties(c0, c1, 0.0, 0.0, np.linalg.norm(R[c0] - R[c1], axis=1))
-        self._comp[-1] = bc[~((self.w[c0] == 0) & (self.w[c1] == 0))]
-        if flat is not None:
-            fc = np.full(len(c0), float(flat))
-            if bend_at is not None:
-                fc = np.maximum(fc, np.maximum(bend_at[c0], bend_at[c1]))
-            R3 = R if R.shape[1] == 3 else np.hstack([R, np.zeros((len(R), 1))])
-            rest = np.linalg.norm(0.5 * (R3[a] + R3[b]) - 0.5 * (R3[c0] + R3[c1]), axis=1)
-            self.flatten(a, b, c0, c1, rest, fc)
-        return len(E), 0, len(c0)
-
-    def _mesh_any(self, faces, stretch, shear, bend, rest_pos):
-        """mesh() for faces of any size (the hose's quads): the same ties, walked face by face."""
-        s = self.settings
-        R = self.pos if rest_pos is None else np.asarray(rest_pos, float)
+    def mesh(self, faces, stretch=None, shear=None, bend=None):
+        """Tie a mesh's points as a sheet: its edges (the threads), its quads' diagonals, and across each edge the
+        two points on either side of it (the bend ties), at the lengths they have now."""
+        s = self.s
         edges, diag, opp = set(), set(), {}
         for f in faces:
             k = len(f)
@@ -233,255 +76,75 @@ class Fabric:
                 u, v = f[a], f[(a + 1) % k]
                 e = (min(u, v), max(u, v))
                 edges.add(e)
-                opp.setdefault(e, []).append(f[(a + 2) % k])
+                opp.setdefault(e, []).append(f[(a + 2) % k] if k == 3 else f[(a + 2) % k])
             if k == 4:
                 diag.add((min(f[0], f[2]), max(f[0], f[2])))
                 diag.add((min(f[1], f[3]), max(f[1], f[3])))
-
-        def tie(pairs, comp):
-            p = np.array(sorted(pairs), dtype=np.int64).reshape(-1, 2)
-            if len(p):
-                self.ties(p[:, 0], p[:, 1], comp, 0.0, np.linalg.norm(R[p[:, 0]] - R[p[:, 1]], axis=1))
-            return len(p)
-        ne = tie(edges, s['stretch'] if stretch is None else stretch)
-        nd = tie(diag, s['shear'] if shear is None else shear)
-        nb = tie({(o[0], o[1]) for o in opp.values() if len(o) == 2 and o[0] != o[1]}, s['bend'] if bend is None else bend)
-        return ne, nd, nb
-
-    def hold_chain(self, chain):
-        chain = np.asarray(chain, np.int64)
-        self.chains.append((chain, np.linalg.norm(np.diff(self.pos[chain], axis=0), axis=1)))
-
-    def _build(self):
-        I, J = np.concatenate(self._I), np.concatenate(self._J)
-        self._built = dict(I=I, J=J, rest=np.concatenate(self._rest), comp=np.concatenate(self._comp),
-                           slack=np.concatenate(self._slack), kind=np.concatenate(self._kind),
-                           batches=_colour(I, J, self.n, self.w == 0) if self.settings.get('walk') == 'gauss-seidel'
-                           else [])
-        if self._quads:
-            Q = [np.concatenate([q[k] for q in self._quads]) for k in range(6)]
-            self._built['quads'] = Q
-            self._built['qbatches'] = _colour(Q[0], Q[1], self.n, self.w == 0, more=(Q[2], Q[3]))
-
-    # ------------------------------------------------------------------ steps
+        e = np.array(sorted(edges), dtype=np.int64).reshape(-1, 2)
+        self.tie(e[:, 0], e[:, 1], s['stretch'] if stretch is None else stretch)
+        if diag:
+            d = np.array(sorted(diag), dtype=np.int64)
+            self.tie(d[:, 0], d[:, 1], s['shear'] if shear is None else shear)
+        b = np.array([(o[0], o[1]) for o in opp.values() if len(o) == 2 and o[0] != o[1]], dtype=np.int64).reshape(-1, 2)
+        if len(b):
+            self.tie(b[:, 0], b[:, 1], s['bend'] if bend is None else bend)
+        return len(e), len(diag), len(b)
 
     def step(self, h, body=None, neutral=False):
-        s = self.settings
-        if self._built is None:
-            self._build()
-        B = self._built
-        x, pv, w = self.pos, self.prev, self.w
+        """One step of h seconds. body(points) -> (points pushed out of what they must stay out of, touched mask)."""
+        s, x, pv, w = self.s, self.pos, self.prev, self.w
+        free = w > 0
         keep = (1.0 - s['damping']) ** (h * 60.0)
-        live = w > 0
-        v = (x[live] - pv[live]) * keep
-        pv[live] = x[live]
-        x[live] += v + np.asarray(s['gravity']) * h * h
-        comp = B['comp']
-        if self._sew is not None:
-            a, b, lo, hi, secs = self._sew
-            f = min(1.0, self.t / max(secs, 1e-9))
-            comp = comp.copy()
-            comp[a:b] = lo + (hi - lo) * f
-        alpha = comp / (h * h)
-        lam = np.zeros(len(B['I']))
-        lamq = np.zeros(len(B['quads'][0])) if 'quads' in B else None
-        I, J, rest, slack, kind = B['I'], B['J'], B['rest'], B['slack'], B['kind']
-        nb = len(B['batches'])
-        jac = s.get('walk', 'jacobi') == 'jacobi'
-        if jac:
-            cnt = np.maximum(np.bincount(np.concatenate([I, J]), minlength=self.n).astype(float), 1.0)
-        for it in range(s['iterations']):
-            if jac:
-                self._jacobi_walk(I, J, rest, slack, kind, alpha, lam, cnt)
-                if 'quads' in B:
-                    self._flat_walk(B, h, lamq, back=bool(it & 1))
-                continue
-            for q in (range(nb) if not it & 1 else range(nb - 1, -1, -1)):
-                k = B['batches'][q]
-                i, j = I[k], J[k]
-                d = x[j] - x[i]
-                L = np.sqrt(np.einsum('ij,ij->i', d, d))
-                tgt = rest[k]
-                sl = slack[k]
-                if sl.any():
-                    tgt = np.where(sl > 0, np.minimum(tgt * (1 + sl), np.maximum(tgt * (1 - sl), L)), tgt)
-                C = L - tgt
-                kd = kind[k]
-                if kd.any():
-                    C = np.where(kd == 1, np.maximum(C, 0.0), C)
-                wi, wj = w[i], w[j]
-                al = alpha[k]
-                dl = (-C - al * lam[k]) / (wi + wj + al)
-                dl = np.where(L > 1e-9, dl, 0.0)
-                lam[k] += dl
-                qv = (dl / np.maximum(L, 1e-9))[:, None] * d
-                x[i] -= wi[:, None] * qv
-                x[j] += wj[:, None] * qv
-            if 'quads' in B:
-                self._flat_walk(B, h, lamq, back=bool(it & 1))
-        self.hold()
+        v = (x - pv) * keep
+        pv[:] = x
+        x[free] += v[free] + np.asarray(s['gravity']) * h * h
+        ci, cj, rest = self.ci, self.cj, self.rest
+        alpha = self.comp / (h * h)
+        lam = np.zeros(len(ci))
+        wi, wj = w[ci], w[cj]
+        count = np.bincount(np.concatenate([ci, cj]), minlength=self.n).astype(float)
+        count = np.maximum(count, 1.0)
+        for _ in range(s['iterations']):
+            d = x[cj] - x[ci]
+            L = np.linalg.norm(d, axis=1)
+            ok = L > 1e-9
+            C = L - rest
+            dl = np.where(ok, (-C - alpha * lam) / np.maximum(wi + wj + alpha, 1e-12), 0.0)
+            lam += dl
+            q = (dl / np.maximum(L, 1e-9))[:, None] * d
+            acc = np.zeros_like(x)
+            np.add.at(acc, ci, -wi[:, None] * q)
+            np.add.at(acc, cj, wj[:, None] * q)
+            x += s['relax'] * acc / count[:, None]
         if body is not None:
-            p, touched = body(x.copy())
-            touched &= live
-            self.touch = touched
-            t = np.nonzero(touched)[0]
-            if len(t):
-                push = p[t] - x[t]
-                if neutral:
-                    pv[t] += push
-                mu = s['friction']
+            p, touch = body(x)
+            push = p - x
+            if s['friction']:
                 nl = np.linalg.norm(push, axis=1)
-                if mu:
-                    ok = nl > 1e-12
-                    u = np.where(ok[:, None], push / np.maximum(nl, 1e-12)[:, None], 0.0)
-                    sv = p[t] - pv[t]
-                    sv -= np.einsum('ij,ij->i', sv, u)[:, None] * u
-                    sll = np.linalg.norm(sv, axis=1)
-                    hold = mu * nl
-                    kk = np.where(sll <= hold, 1.0, hold / np.maximum(sll, 1e-12))
-                    kk = np.where(ok, kk, 0.0)
-                    p[t] -= kk[:, None] * sv
-                x[t] = p[t]
-                if neutral:          # (and what was running into the body stops: no speed kept along the push)
-                    u = push / np.maximum(nl, 1e-12)[:, None]
-                    vn = np.einsum('ij,ij->i', x[t] - pv[t], u)
-                    pv[t] += np.minimum(vn, 0.0)[:, None] * u
-            if self.chains:
-                self.hold(body, neutral)
-        self.t += h
+                u = push / np.maximum(nl, 1e-12)[:, None]
+                sl = p - pv
+                sl -= u * (sl * u).sum(1)[:, None]
+                sn = np.linalg.norm(sl, axis=1)
+                k = np.where(sn <= s['friction'] * nl, 1.0, s['friction'] * nl / np.maximum(sn, 1e-12))
+                k = np.where(touch & free, k, 0.0)
+                p = p - sl * k[:, None]
+            if neutral:
+                pv[touch] += (p - x)[touch]
+            x[free] = p[free]
 
-    def _jacobi_walk(self, I, J, rest, slack, kind, alpha, lam, cnt):
-        """every tie at once, each point moved by the mean of its ties' moves, over-relaxed"""
-        x, w = self.pos, self.w
-        d = x[J] - x[I]
-        L = np.sqrt(np.einsum('ij,ij->i', d, d))
-        tgt = rest
-        if slack.any():
-            tgt = np.where(slack > 0, np.minimum(rest * (1 + slack), np.maximum(rest * (1 - slack), L)), rest)
-        C = L - tgt
-        if kind.any():
-            C = np.where(kind == 1, np.maximum(C, 0.0), C)
-        wi, wj = w[I], w[J]
-        dl = np.where(L > 1e-9, (-C - alpha * lam) / np.maximum(wi + wj + alpha, 1e-12), 0.0)
-        lam += dl
-        q = (dl / np.maximum(L, 1e-9))[:, None] * d
-        acc = np.zeros_like(x)
-        for a in range(3):
-            acc[:, a] = np.bincount(J, weights=wj * q[:, a], minlength=self.n) - np.bincount(I, weights=wi * q[:, a],
-                                                                                          minlength=self.n)
-        x += self.settings['relax'] * acc / cnt[:, None]
-
-    def _flat_walk(self, B, h, lam, back=False):
-        x, w = self.pos, self.w
-        A_, B_, C_, D_, rest, comp = B['quads']
-        nb = len(B['qbatches'])
-        for q in (range(nb - 1, -1, -1) if back else range(nb)):
-            k = B['qbatches'][q]
-            a, b, c, d = A_[k], B_[k], C_[k], D_[k]
-            v = 0.5 * (x[a] + x[b]) - 0.5 * (x[c] + x[d])
-            L = np.sqrt(np.einsum('ij,ij->i', v, v))
-            C = L - rest[k]
-            al = comp[k] / (h * h)
-            W = 0.25 * (w[a] + w[b] + w[c] + w[d])
-            dl = (-C - al * lam[k]) / np.maximum(W + al, 1e-12)
-            dl = np.where(L > 1e-9, dl, 0.0)
-            lam[k] += dl
-            nv = (dl / np.maximum(L, 1e-9))[:, None] * v * 0.5
-            x[a] += w[a][:, None] * nv
-            x[b] += w[b][:, None] * nv
-            x[c] -= w[c][:, None] * nv
-            x[d] -= w[d][:, None] * nv
-
-    def hold(self, body=None, neutral=False, still=False):
-        x, pv, w, lead = self.pos, self.prev, self.w, self.settings['lead']
-        for ch, ln in self.chains:
-            for k in range(1, len(ch)):
-                i, b = ch[k], ch[k - 1]
-                if w[i] == 0:
-                    continue
-                d = x[i] - x[b]
-                L = np.linalg.norm(d) or 1.0
-                p = x[b] + d * (ln[k - 1] / L)
-                if still:
-                    pv[i] += p - x[i]
-                elif w[b] != 0:
-                    pv[b] += lead * (p - x[i])
-                if body is not None:
-                    q, t = body(p[None].copy())
-                    if t[0]:
-                        if neutral:
-                            pv[i] += q[0] - p
-                        p = q[0]
-                x[i] = p
-
-    def settle(self, body=None, h=1.0 / 120, most=600, tol=1e-4, damping=0.35, log=None, every=60, max_steps=None):
-        """Run to rest: steps until the fastest point moves less than tol a step (or max_steps), damped hard.
-        Returns the steps taken."""
-        s = self.settings
-        was = s['damping']
-        s['damping'] = damping
+    def settle(self, body=None, h=1.0 / 120.0, most=600, tol=1e-4, damping=0.35):
+        """Run to rest: steps until the fastest point moves less than tol a step (or most steps), its speed damped
+        hard so it settles instead of swinging. Returns the steps taken."""
+        was = self.s['damping']
+        self.s['damping'] = damping
         k = 0
-        t0 = time.time()
-        for k in range(most if max_steps is None else max_steps):
+        for k in range(1, most + 1):
             self.step(h, body, neutral=True)
-            if k % 10 == 9:
-                far = float(np.abs(self.pos - self.prev).max())
-                if log and (k + 1) % every == 0:
-                    log('fabric: step %d (%.0f s), fastest point %.4f a step' % (k + 1, time.time() - t0, far))
-                if far < tol:
-                    break
-        s['damping'] = was
+            if k % 10 == 0 and np.abs(self.pos - self.prev).max() < tol:
+                break
+        self.s['damping'] = was
         self.prev[:] = self.pos
-        return k + 1
-
-    def shift(self, i, d):
-        self.pos[i] += d
-        self.prev[i] += d
-
-    def strain(self, I, J, rest):
-        return np.linalg.norm(self.pos[I] - self.pos[J], axis=1) / np.maximum(rest, 1e-9)
-
-
-class MeshBody:
-    """A body for Fabric.step: the points must stay gap off a surface (given as its points and outward normals,
-    dense enough that the nearest point stands for the nearest surface) and above a floor."""
-
-    def __init__(self, pts, normals, gap=0.06, floor=None, floor_gap=0.03, reach=4.0):
-        from scipy.spatial import cKDTree
-        self.p = np.asarray(pts, float)
-        n = np.asarray(normals, float)
-        self.n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
-        self.tree = cKDTree(self.p)
-        self.gap, self.floor, self.floor_gap, self.reach = gap, floor, floor_gap, reach
-
-    def __call__(self, P):
-        d, j = self.tree.query(P, k=1, distance_upper_bound=self.reach)
-        near = np.isfinite(d)
-        j = np.where(near, j, 0)
-        nrm = self.n[j]
-        depth = np.einsum('ij,ij->i', P - self.p[j], nrm)
-        hit = near & (depth < self.gap)
-        P[hit] += (self.gap - depth[hit])[:, None] * nrm[hit]
-        if self.floor is not None:
-            fl = self.floor + self.floor_gap
-            low = P[:, 2] < fl
-            P[low, 2] = fl
-            hit |= low
-        return P, hit
-
-
-def vertex_normals(V, F):
-    """Area-weighted point normals of a mesh (faces as index lists), for a MeshBody."""
-    V = np.asarray(V, float)
-    N = np.zeros_like(V)
-    for f in F:
-        for k in range(1, len(f) - 1):
-            a, b, c = f[0], f[k], f[k + 1]
-            nrm = np.cross(V[b] - V[a], V[c] - V[a])
-            N[a] += nrm
-            N[b] += nrm
-            N[c] += nrm
-    return N
+        return k
 
 
 def bvh_body(tree, gap):
