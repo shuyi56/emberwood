@@ -1,12 +1,18 @@
-"""The arming doublet's sleeves: a padded sleeve for each arm, drafted on the body's own arm as cut.py drafts the
-body (every size a share of w, the neck's half-width).
+"""The arming doublet's sleeves, cut from the flat draft (sleeve_draft.py: the tape's measures, then a one-piece
+set-in sleeve) and sewn to the doublet's own armhole.
 
-Each is a tube round the arm's axis, the arm's skin (as the rays from the axis find it, drawn taut) let out for the
-padding and the shirt beneath. Quilted as the body is: upright channels, each a pillow of the padding between two
-lines of stitching; flat along the cuff, which is bound, and across the elbow, where a seam lets the arm bend. Over
-the shoulder it is closed with a rounded cap, so the cloth falls over the top of the arm and the body's own shoulder
-end lies under it. It is made apart from the body and meets it where the two cross: the body's armhole is open,
-and the sleeve fills it."""
+The draft's cloth is laid on the arm point for point:
+
+  the seam      the cap's edge lies on the armhole's edge, length for length: the shoulder point on the armhole's
+                top, the underarm seam on its lowest point, the front of the cap along the front of the armhole
+                and the back along the back
+  below it      from the bicep line down, each level line of the draft is a ring round the arm: the arm's own
+                section drawn taut and let out evenly until it is as long as the draft is wide there
+  the cap       between the seam and the bicep line the cloth runs straight from one to the other, and is then
+                lifted clear of the shoulder by the sleeve's room, so it rounds over the top of the arm
+
+It is quilted as the body is, in channels down its length (the seam under the arm on a line of stitching), flat at
+the armhole seam, the elbow and the cuff, which is bound."""
 import math
 
 import numpy as np
@@ -15,16 +21,15 @@ from mathutils.bvhtree import BVHTree
 from mathutils.kdtree import KDTree
 
 import fit
+import sleeve_draft
 
 RATIOS = dict(
-    sleeve_ease=0.30,        # the gap between arm and sleeve at the upper arm, in w
-    sleeve_ease_cuff=0.20,   # and at the cuff
-    sleeve_cuff=0.25,        # the cuff ends this far above the wrist, in w
-    sleeve_channel=0.46,     # a channel's width, in w
+    sleeve_draft.RATIOS,
+    sleeve_channel=0.46,     # a channel's width at the bicep line, in w
     sleeve_pad=0.13,         # the padding's depth at a channel's crown, in w
-    sleeve_cap=0.60,         # the cap's height over the arm's top ring, as a share of the ring's radius
-    sleeve_over=0.25,        # the crown stands this far above the shoulder's top, in w
     sleeve_seam=0.13,        # the half-width of the flat the elbow's seam leaves, in w
+    sleeve_let_out=1.6,      # the sleeve's room comes in over this far from the armhole seam, in w
+    sleeve_hang=1.3,         # the seam's hold on the trunk gives way to the arm's over this far from it, in w
 )
 STEP = 0.1                   # the rings' spacing along the arm, in units
 NA = 96                      # directions round the arm
@@ -90,61 +95,164 @@ def _arm_table(P, T, aw, M, z_lo, z_hi):
     return axs[:i_cap + 1], zs[:i_cap + 1], al, Ra
 
 
-def build_sleeves(body, M, rig, cloth, name='Doublet sleeve', ratios=RATIOS, base=None, log=print):
-    """A sleeve on each arm. base: the doublet's ratios (thickness, border, bind). Returns the objects."""
+def _resample(ring, n, start_back=True):
+    """A closed ring of points [m, 2] as n points evenly along its length, from its first point."""
+    seg = np.linalg.norm(np.roll(ring, -1, 0) - ring, axis=1)
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+    at = cum[-1] * np.arange(n) / n
+    closed = np.concatenate([ring, ring[:1]])
+    return np.stack([np.interp(at, cum, closed[:, c]) for c in (0, 1)], 1), float(cum[-1])
+
+
+def _path(pts):
+    """A line of points with its length along it: (points, cumulative length from 0 to 1)."""
+    cum = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
+    return pts, cum / cum[-1]
+
+
+def _along(path, u):
+    pts, cum = path
+    return np.stack([np.interp(u, cum, pts[:, c]) for c in range(pts.shape[1])], 1)
+
+
+def _weights(body, kd, groups, p):
+    acc, tot = {}, 0.0
+    for _, bi, dist in kd.find_n(p, 4):
+        k = 1.0 / (dist + 0.05)
+        for g in body.data.vertices[bi].groups:
+            if g.group in groups:
+                acc[g.group] = acc.get(g.group, 0.0) + k * g.weight
+                tot += k * g.weight
+    return {gi: v / tot for gi, v in acc.items()} if tot else {}
+
+
+def build_sleeves(body, M, rig, cloth, doublet, name='Doublet sleeve', ratios=RATIOS, base=None, log=print):
+    """A sleeve on each arm, sewn to the doublet's armholes. base: the doublet's ratios (thickness, border, bind).
+    Returns the objects."""
     base = base or {}
     w = M['w']
     P, T, aw = fit.body_arrays(body)
-    gi = {g.name: g.index for g in body.vertex_groups}
-    fore = [v.index for v in body.data.vertices if any(g.group == gi.get('Forearm.L') and g.weight > 0.5 for g in v.groups)]
-    z_elbow, z_wrist = float(P[fore, 2].max()), float(P[fore, 2].min())
-    z_cuff = z_wrist + ratios['sleeve_cuff'] * w
-    axs, zs, al, Ra = _arm_table(P, T, aw, M, z_cuff, M['z_side'] + 0.8 * w)
-    keep = zs >= z_cuff
-    zs, Ra, axs = zs[keep], Ra[keep], axs[keep]
-    cx, cy = float(axs[-1, 0]), float(axs[-1, 1])
-    t = np.clip((zs - z_cuff) / max(M['z_sh'] - z_cuff, 1e-6), 0.0, 1.0)
-    ease = (ratios['sleeve_ease_cuff'] + (ratios['sleeve_ease'] - ratios['sleeve_ease_cuff']) * fit._ss(0.0, 0.7, t)) * w
-    R = Ra + ease[:, None]
-    # the cap: a half-ellipse over the top ring
-    R_top = R[-1]
-    # (its crown stands over the shoulder's skin wherever that rises above the top ring: toward the neck the
-    # shoulder climbs, and a round cap would leave it bare between the cap and the body's own shoulder end)
+    co = np.array([v.co[:] for v in doublet.data.vertices])
+    hole = sleeve_draft.armhole(co, [list(p.vertices) for p in doublet.data.polygons])
+    b = {n: rig.data.bones[n] for n in ('UpperArm.L', 'Forearm.L')}
+    head, mid, tail = (rig.matrix_world @ v for v in (b['UpperArm.L'].head_local, b['Forearm.L'].head_local, b['Forearm.L'].tail_local))
+    m = sleeve_draft.measure(P, T, aw, hole, ((head.z, mid.z, tail.z), (head.x, head.y)), None, w, ratios)
+    d = sleeve_draft.draft(m, w, ratios)
+    h, wf, wb = d['cap'], d['front'], d['back']
+    log('doublet: sleeve from the draft: armhole %.2f, cap %.2f high, bicep line %.2f, elbow %.2f, cuff %.2f' % (
+        m['armhole'], h, d['bicep'], d['elbow'], d['cuff']))
+    z_bot, z_cuff, z_elbow = float(m['bottom'][2]), m['z_cuff'], m['z_elbow']
+    # --- the rings, from the cuff up to the bicep line (the underarm point's height)
+    axs, zs, al, Ra = _arm_table(P, T, aw, M, z_cuff, z_bot + 0.45 * w + 3.0 * STEP)
+    NS = 96
+    s = np.arange(NS) / NS                       # (round the sleeve from the seam: the back, the shoulder line, the front)
+    lev = np.arange(z_cuff, z_bot + 1e-6, 2 * STEP)[::-1]            # (from the bicep line down)
+    lev[0] = z_bot
+    y_of = h + (z_bot - lev)
+    width = np.where(y_of <= d['y_elbow'], np.interp(y_of, [h, d['y_elbow']], [d['bicep'], d['elbow']]),
+                     np.interp(y_of, [d['y_elbow'], d['y_cuff']], [d['elbow'], d['cuff']]))
     ca, sa = np.cos(al), np.sin(al)
-    h_min = ratios['sleeve_cap'] * float(R_top.mean())
-    top_xy = P[(P[:, 2] > float(zs[-1]) - 2.0) & (P[:, 2] < M['z_side'] + 1.0) & (P[:, 0] > 1.0)]
-    h_a = np.empty(NA)
-    for j in range(NA):
-        c = np.array([cx + 0.55 * R_top[j] * ca[j], cy + 0.55 * R_top[j] * sa[j]])
-        near = top_xy[np.hypot(top_xy[:, 0] - c[0], top_xy[:, 1] - c[1]) < 0.9]
-        z_skin = float(near[:, 2].max()) if len(near) else float(zs[-1])
-        h_a[j] = max(h_min, z_skin + ratios['sleeve_over'] * w - float(zs[-1]))
-    h_a = fit._blur(h_a[None, :], 3.0, 1, True)[0]
-    h = float(h_a.max())
-    K = 6
-    rings = [(float(z), R[i]) for i, z in enumerate(zs)]
-    for k in range(1, K + 1):
-        a = 0.5 * math.pi * k / K
-        # (a boxy crown: a superellipse, so it keeps its height out toward the rim before turning down)
-        rings.append((float(zs[-1]) + h_a * math.sin(a) ** 0.8, R_top * math.cos(a) ** 0.8))
-    z_dome = float(zs[-1])
-    ca, sa = np.cos(al), np.sin(al)
-    axr = np.concatenate([axs, np.repeat(axs[-1:], K, 0)])
-    G = np.array([[(axr[i, 0] + r[j] * ca[j], axr[i, 1] + r[j] * sa[j], z[j] if np.ndim(z) else z) for j in range(NA)] for i, (z, r) in enumerate(rings)])
-    rows = len(rings)
-    idx = np.arange(rows * NA).reshape(rows, NA)
+    tube = np.empty((len(lev), NS, 3))
+    for i, z in enumerate(lev):
+        k = int(np.clip(round((z - zs[0]) / STEP), 0, len(zs) - 1))
+        r = Ra[k]
+        off = 0.0
+        for _ in range(4):                       # (let out evenly until the ring is as long as the draft is wide)
+            ring = np.stack([(r + off) * ca, (r + off) * sa], 1)
+            L = float(np.linalg.norm(np.roll(ring, -1, 0) - ring, axis=1).sum())
+            off += (width[i] - L) / (2 * math.pi)
+        ring = np.stack([(r + off) * ca, (r + off) * sa], 1)[::-1]   # (from the body's side round by the back)
+        ring = np.roll(ring, 1, 0)                                   # (its first point at alpha = -pi: against the body)
+        q, _ = _resample(ring, NS)
+        tube[i, :, 0], tube[i, :, 1], tube[i, :, 2] = axs[k, 0] + q[:, 0], axs[k, 1] + q[:, 1], z
+    room = (d['bicep'] - m['bicep']) / (2 * math.pi)
+    # --- the seam: each column's place on the armhole, by its length along the cap's curve
+    i_top, i_bot = int(hole[:, 2].argmax()), int(hole[:, 2].argmin())
+    hole = np.roll(hole, -i_bot, 0)
+    i_top = (i_top - i_bot) % len(hole)
+    one, two = hole[:i_top + 1], np.concatenate([hole[i_top:], hole[:1]])[::-1]        # (both from the bottom up to the top)
+    back_p, front_p = (one, two) if one[:, 1].mean() > two[:, 1].mean() else (two, one)
+    back_c = sleeve_draft._half(wb, h, ratios['back_scoop'], ratios['crown'])           # (from the shoulder point out)
+    front_c = sleeve_draft._half(wf, h, ratios['front_scoop'], ratios['crown'])
+    x_col = -wb + s * (wb + wf)
+    A = np.empty((NS, 3))
+    y_cap = np.empty(NS)
+    for side, curve, path, cols in ((-1.0, back_c, _path(back_p), x_col < 0), (1.0, front_c, _path(front_p), x_col >= 0)):
+        cum = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(curve, axis=0), axis=1))])
+        cum /= cum[-1]
+        ax_ = np.abs(x_col[cols])
+        u = np.interp(ax_, curve[:, 0], cum)                # (0 at the shoulder point, 1 at the underarm)
+        y_cap[cols] = np.interp(ax_, curve[:, 0], curve[:, 1])
+        A[cols] = _along(path, 1.0 - u)
+    # --- the cap: from the seam straight to the bicep line, then lifted clear of the shoulder
+    KC = 12
+    v = (np.arange(KC) / KC)[:, None, None]
+    cap = A[None] * (1 - v) + tube[0][None] * v
+    skin = BVHTree.FromPolygons([Vector(p) for p in P], [tuple(int(i) for i in t) for t in T])
+    grid = np.concatenate([cap, tube])                    # [row, column, 3]
+    fixed = np.zeros(len(grid), bool)
+    fixed[0] = True
+    n_free = KC + 6                                       # (the cap's rows and the first few rings settle together)
+
+    # (the room comes in gradually from the seam, where the cloth is as close to the shoulder as the doublet's own
+    # armhole edge is: let out at once, the sleeve's head stood up off the shoulder as a puff above the seam)
+    def off_skin(p):
+        loc, nrm, _, dist = skin.find_nearest(Vector(p))
+        return loc, nrm, (dist if (Vector(p) - loc).dot(nrm) >= 0 else -dist)
+    at_seam = np.array([max(off_skin(A[j])[2], 0.05) for j in range(NS)])
+    run = np.concatenate([np.zeros((1, NS)), np.cumsum(np.linalg.norm(np.diff(grid[:n_free], axis=0), axis=2), 0)])
+    need = at_seam[None, :] + (room - at_seam[None, :]) * fit._ss(0.0, ratios['sleeve_let_out'] * w, run)
+
+    def clear(G):
+        for i in range(1, n_free):
+            for j in range(NS):
+                loc, nrm, sd = off_skin(G[i, j])
+                # (cloth hangs: on the top of the shoulder it rests, as close as the seam is; its room is round
+                # the arm's sides and under it)
+                rests = float(fit._ss(0.15, 0.75, nrm.z))
+                nd = need[i, j] + (at_seam[j] - need[i, j]) * rests
+                if sd < nd:
+                    G[i, j] = loc + nrm * nd
+    clear(grid)
+    for _ in range(30):
+        g = grid.copy()
+        mid_ = 0.25 * (g[:-2] + g[2:] + np.roll(g[1:-1], 1, 1) + np.roll(g[1:-1], -1, 1))
+        grid[1:n_free] = 0.5 * g[1:n_free] + 0.5 * mid_[:n_free - 1]
+        clear(grid)
+    rows = len(grid)
+    # --- the quilting, on the cloth's own lines: the channels follow the columns
+    n = 2 * max(3, int(round(d['bicep'] / (2 * ratios['sleeve_channel'] * w))))
+    border, bind_r, th = base.get('border', 0.30) * w, base.get('bind', 0.03) * w, base.get('thickness', 0.06) * w
+    du = np.roll(grid, -1, 1) - np.roll(grid, 1, 1)
+    dv = np.gradient(grid, axis=0)
+    nrm = np.cross(du, dv)
+    nrm /= np.maximum(np.linalg.norm(nrm, axis=2, keepdims=True), 1e-9)
+    c_ax = np.array([axs[-1, 0], axs[-1, 1]])
+    if float(((grid[KC + 4, :, :2] - c_ax) * nrm[KC + 4, :, :2]).sum()) < 0:
+        nrm = -nrm
+    step = np.linalg.norm(np.diff(grid, axis=0), axis=2)
+    from_seam = np.concatenate([np.zeros((1, NS)), np.cumsum(step, 0)])
+    z_g = grid[:, :, 2]
+    pillow = np.sin(math.pi * ((s[None, :] * n) % 1.0)) ** 0.55
+    inside = fit._ss(0.5 * border, border, from_seam) * fit._ss(0.5 * border, border, z_g - z_cuff)
+    seam = fit._ss(0.0, ratios['sleeve_seam'] * w, np.abs(z_g - z_elbow))
+    edge = z_g - z_cuff
+    bind = bind_r * np.exp(-((edge - 0.2 * border) / (0.22 * border)) ** 2)
+    lift = ratios['sleeve_pad'] * w * pillow * inside * seam + bind
+    lift[0] = 0.0
+    G = grid + nrm * lift[:, :, None]
+    idx = np.arange(rows * NS).reshape(rows, NS)
     faces = [list(q) for q in np.stack([idx[:-1], np.roll(idx[:-1], -1, 1), np.roll(idx[1:], -1, 1), idx[1:]], 2).reshape(-1, 4)]
-    circ = 2 * math.pi * float(Ra[len(Ra) // 2].mean() + ease[len(Ra) // 2])
-    n = 2 * max(3, int(round(circ / (2 * ratios['sleeve_channel'] * w))))
-    log('doublet: sleeve %d channels, cuff at %.1f, elbow at %.1f, cap %.1f over the arm\'s top ring' % (n, z_cuff, z_elbow, h))
-    border = base.get('border', 0.30) * w
-    bind_r = base.get('bind', 0.03) * w
-    th = base.get('thickness', 0.06) * w
-    trunk_arm = np.nonzero(aw > 0.5)[0]
-    kd = KDTree(len(trunk_arm))
-    for i in trunk_arm:
-        kd.insert(Vector(P[i]), int(i))
-    kd.balance()
+    kd_all, kd_arm, kd_trunk = (KDTree(len(P)) for _ in range(3))
+    for i, p in enumerate(P):
+        kd_all.insert(Vector(p), i)
+        (kd_arm if aw[i] > 0.5 else kd_trunk).insert(Vector(p), i)
+    for k in (kd_all, kd_arm, kd_trunk):
+        k.balance()
+    kd_hole = KDTree(len(hole))
+    for i, p in enumerate(hole):
+        kd_hole.insert(Vector(p), i)
+    kd_hole.balance()
     out = []
     for sgn, tag in ((1.0, 'L'), (-1.0, 'R')):
         V = G.reshape(-1, 3).copy()
@@ -153,38 +261,46 @@ def build_sleeves(body, M, rig, cloth, name='Doublet sleeve', ratios=RATIOS, bas
             V[:, 0] *= -1.0
             F = [f[::-1] for f in F]
 
-        def raised(p, sgn=sgn):
-            x = sgn * p[:, 0]
-            ang = np.arctan2(p[:, 1] - np.interp(p[:, 2], zs, axs[:, 1]), x - np.interp(p[:, 2], zs, axs[:, 0]))
-            pillow = np.sin(math.pi * ((ang * n / (2 * math.pi)) % 1.0)) ** 0.55
-            above = p[:, 2] - z_dome
-            capfade = 1.0 - fit._ss(0.0, h, above)
-            edge = p[:, 2] - z_cuff
-            seam = fit._ss(0.0, ratios['sleeve_seam'] * w, np.abs(p[:, 2] - z_elbow))
-            inside = fit._ss(0.5 * border, border, edge)
-            bind = bind_r * np.exp(-((edge - 0.2 * border) / (0.22 * border)) ** 2)
-            return ratios['sleeve_pad'] * w * pillow * seam * inside * capfade + bind
-
         def away(c, sgn=sgn):
-            ax_, ay_ = float(np.interp(c.z, zs, axs[:, 0])), float(np.interp(c.z, zs, axs[:, 1]))
-            up = max(c.z - z_dome, 0.0) / max(h, 1e-6)
-            return Vector((c.x - sgn * ax_, c.y - ay_, up * 2.0)).normalized()
+            k = int(np.clip(round((c.z - zs[0]) / STEP), 0, len(zs) - 1))
+            up = max(c.z - z_bot, 0.0) / max(h, 1e-6)
+            return Vector((c.x - sgn * axs[k, 0], c.y - axs[k, 1], 1.5 * up)).normalized()
 
-        o = fit._sheet('%s.%s' % (name, tag), [(V, F, raised, None, away)], M, cloth, body, kd, rig, lift=0.0, thickness=th)
-        _tube_uv(o, sgn, axs, zs, circ / (2 * math.pi))
+        o = fit._sheet('%s.%s' % (name, tag), [(V, F, 0.0, None, away)], M, cloth, body, kd_arm, rig, lift=0.0, thickness=th)
+        # (the seam is held as the doublet's armhole is, by the trunk; from there the arm takes the sleeve over)
+        groups = {g.index: o.vertex_groups[g.name] for g in body.vertex_groups if g.name in o.vertex_groups}
+        hang = ratios['sleeve_hang'] * w
+        for vtx in o.data.vertices:
+            p = Vector((sgn * vtx.co.x, vtx.co.y, vtx.co.z))
+            dist = kd_hole.find(p)[2]
+            if dist >= hang:
+                continue
+            f = float(fit._ss(0.0, hang, dist))
+            real = vtx.co.copy()
+            wt, wa = _weights(body, kd_trunk, groups, real), _weights(body, kd_arm, groups, real)
+            for gi, grp in groups.items():
+                val = (1 - f) * wt.get(gi, 0.0) + f * wa.get(gi, 0.0)
+                if val > 1e-3:
+                    grp.add([vtx.index], val, 'REPLACE')
+                else:
+                    grp.remove([vtx.index])
+        _tube_uv(o, s, from_seam, d['bicep'])
         out.append(o)
     return out
 
 
-def _tube_uv(o, sgn, axs, zs, R0):
-    """Each point's place on the flat cloth, in units: round the arm at its girth, by height."""
+def _tube_uv(o, s, from_seam, width):
+    """Each point's place on the flat cloth: across the sleeve, by its length down from the seam."""
     me = o.data
     lay = me.uv_layers.new(name='UVMap')
-    co = np.array([v.co[:] for v in me.vertices])
-    ang = np.arctan2(co[:, 1] - np.interp(co[:, 2], zs, axs[:, 1]), sgn * co[:, 0] - np.interp(co[:, 2], zs, axs[:, 0]))
+    rows, NS = from_seam.shape
+    # (the sheet's points are the grid's, in order, where none were merged; otherwise the nearest column's)
+    if len(me.vertices) != rows * NS:
+        return
     for p in me.polygons:
-        a = ang[list(p.vertices)]
-        if np.ptp(a) > math.pi:
-            a = np.where(a < 0, a + 2 * math.pi, a)
-        for li, a_, vi in zip(p.loop_indices, a, p.vertices):
-            lay.data[li].uv = (float(a_) * R0, float(co[vi, 2]))
+        cols = np.array([vi % NS for vi in p.vertices])
+        u = s[cols].copy()
+        if np.ptp(u) > 0.5:
+            u = np.where(u < 0.5, u + 1.0, u)
+        for li, u_, vi in zip(p.loop_indices, u, p.vertices):
+            lay.data[li].uv = (float(u_) * width, -float(from_seam[vi // NS, vi % NS]))

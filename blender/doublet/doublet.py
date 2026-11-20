@@ -56,11 +56,15 @@ FUSTIAN = dict(colour=tuple(c ** 2.2 for c in _rgb(DYE)), streak=0.10, yarn=0.6,
 def wear(body, heads, bare=BARE):
     """The doublet (and, unless bare, the chemise under it) on a body already built. Returns the doublet, the
     measures, and the height of the lowest hem."""
+    # (with a sleeve sewn in, the shoulder's end is not laid down onto the shoulder: the sleeve carries the line on,
+    # and a shoulder pinched down to the seam leaves the sleeve's head standing above it as a puff)
+    ratios = dict(cut.RATIOS, lay=0.0) if SLEEVES else cut.RATIOS
     o, m, covered = cut.build_doublet(body, heads, rig=bpy.data.objects.get('Rig'), cloth=female.mat(M_CLOTH),
-                                      thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET))
+                                      thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET),
+                                      ratios=ratios)
     MEASURES.update(m)
     if SLEEVES:
-        sleeve.build_sleeves(body, m, bpy.data.objects.get('Rig'), female.mat(M_CLOTH), base=cut.RATIOS)
+        sleeve.build_sleeves(body, m, bpy.data.objects.get('Rig'), female.mat(M_CLOTH), o, base=cut.RATIOS)
     chemise.linen_closeup('doublet fustian', FUSTIAN)
     lo = m['z_hem']
     if not bare:
