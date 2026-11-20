@@ -188,6 +188,7 @@ LAPEL = dict(
     point_len=0.70,        # the lapel's point as long as this share of the collar's (notch to point)
     belly=0.10,            # the outer edge's curve out past its straight line, in w
     spacing=0.07,
+    edge_rounds=8,         # rounds of evening out the cut edges
     tilt=25,               # the lapel starts this far turned off the chest (degrees), unfolded; the solver folds the rest
     steps=1600,
 )
@@ -227,6 +228,7 @@ def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
         n = FN[j].mean(1)
         n /= np.linalg.norm(n, axis=1, keepdims=True)
         return np.column_stack([xz[:, 0], y, xz[:, 1]]) + lift * n
+    outlines = []
     for end in (0, -1):
         foot = seg[end]
         sg = 1.0 if foot[0] > 0 else -1.0
@@ -257,6 +259,7 @@ def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
         bulge *= np.sign(bulge[0]) * sg
         outer = Pp[None] + q[:, None] * chord[None] + (4 * q * (1 - q))[:, None] * bulge[None]
         poly = np.vstack([B, N, G, Pp, outer])
+        outlines.append((B, N, poly))
         h = L_['spacing'] * w
         bnd = []
         for k in range(len(poly)):
@@ -327,6 +330,7 @@ def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
         log('collar: lapel turned back in %d steps (%d points), %.0f degrees off the pressed fold' % (k, nl, fold))
         TL = T[(T < nl).all(1)]                                         # (the lapel's own faces: the strip is the bodice's)
         out.append((fab.pos[:nl].copy(), TL))
+    lapels.outlines = outlines
     return out
 
 
@@ -368,6 +372,120 @@ def open_front(objs, M, E, D, L_=LAPEL):
         o.data.update()
         cut += len(dead)
     return cut
+
+
+def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
+    """Turn the bodice's own front back as the lapels: the bodice cloth inside each lapel's outline as cut (the outline
+    mirrored across its roll line, in the V above the break) is the flap; it stays joined to the bodice along the roll
+    line and the fabric solver turns it back over the roll onto the chest (start: as it lies, tilted a little off the
+    body; rest: mirrored across the roll and laid on the chest). The rest of the V is cut away (the opening). The
+    bodice's mesh is changed in place. Returns the flaps' faces cut, folded."""
+    import bmesh
+    import fabric as xf
+    from matplotlib.path import Path
+    from scipy.spatial import cKDTree
+    w = M['w']
+    h = L_['spacing'] * w
+    mw = np.array(o.matrix_world)
+    W = np.array([v.co[:] for v in o.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    bm.faces.ensure_lookup_table()
+    bm.verts.ensure_lookup_table()
+    front = bodyP[:, 1] < M['yc']
+    FP, FN = bodyP[front], bodyN[front]
+    tree = cKDTree(FP[:, [0, 2]])
+
+    def on_chest(xz, lift):
+        _, j = tree.query(xz, k=6)
+        y = FP[j, 1].min(1)
+        n = FN[j].mean(1)
+        n /= np.linalg.norm(n, axis=1, keepdims=True)
+        return np.column_stack([xz[:, 0], y, xz[:, 1]]) + lift[:, None] * n
+    C = np.array([f.calc_center_median()[:] for f in bm.faces]) @ mw[:3, :3].T + mw[:3, 3]
+    fv = [[v.index for v in f.verts] for f in bm.faces]
+    zb = min(B[1] for B, _, _ in outlines)
+    zn = max(N[1] for _, N, _ in outlines)
+    xn = max(abs(N[0]) for _, N, _ in outlines)
+    inV = (C[:, 1] < M['yc']) & (C[:, 2] > zb) & (np.abs(C[:, 0]) < xn * np.clip((C[:, 2] - zb) / (zn - zb), 0, 1.25))
+    owner = -np.ones(len(C), int)
+    dead = inV.copy()
+    moved = 0
+    for k, (B, N, poly) in enumerate(outlines):
+        e = (N - B) / np.linalg.norm(N - B)
+
+        def mirror(X):
+            d = X - B
+            return B + 2 * (d @ e)[:, None] * e[None] - d
+
+        def dist_line(X):
+            t_ = np.clip(((X - B) @ (N - B)) / ((N - B) @ (N - B)), 0, 1)
+            return np.linalg.norm(X - (B + t_[:, None] * (N - B)), axis=1)
+        cut = Path(mirror(poly))
+        xz = C[:, [0, 2]]
+        flap = inV & cut.contains_points(xz) & (owner < 0)
+        owner[flap] = k
+        dead &= ~flap
+        strip = (~inV) & (C[:, 1] < M['yc']) & (dist_line(xz) < 2.5 * h) & Path(poly).contains_points(xz)
+        fl_v = sorted({i for f in np.nonzero(flap)[0] for i in fv[f]})
+        st_v = sorted({i for f in np.nonzero(strip)[0] for i in fv[f]} - set(fl_v))
+        idx = np.array(fl_v + st_v)
+        loc = {g: j for j, g in enumerate(idx)}
+        nf = len(fl_v)
+        faces = [[loc[i] for i in fv[f]] for f in np.nonzero(flap | strip)[0] if all(i in loc for i in fv[f])]
+        tris = [(f[0], f[j], f[j + 1]) for f in faces for j in range(1, len(f) - 1)]
+        X0 = W[idx]
+        # the depth of each point behind the bodice's outer face (none on a sheet; kept for a bodice built thick)
+        rest = X0.copy()
+        rest[:nf] = on_chest(mirror(X0[:nf][:, [0, 2]]), np.full(nf, 0.16))
+        hinge = dist_line(X0[:, [0, 2]]) < 0.6 * h
+        a0, a1 = on_chest(B[None], np.zeros(1))[0], on_chest(N[None], np.zeros(1))[0]
+        ax = (a1 - a0) / np.linalg.norm(a1 - a0)
+        th = math.radians(L_['tilt'])
+        d = X0 - a0
+        par = (d @ ax)[:, None] * ax[None]
+        perp = d - par
+        start = X0.copy()
+        for sgn in (1, -1):
+            cand = a0 + par + perp * math.cos(th) + sgn * np.cross(ax[None], perp) * math.sin(th)
+            if (cand[:nf, 1] - X0[:nf, 1]).mean() < 0:                    # (toward the front: off the body)
+                start[:nf] = cand[:nf]
+                break
+        start[hinge] = X0[hinge]
+        fab = xf.Fabric(start, dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4))
+        fab.pin(np.concatenate([np.nonzero(hinge)[0], np.arange(nf, len(idx))]))
+        fab.mesh(tris, stretch=1e-6, rest_pos=rest, bend=1e-6, flat=1e-6)
+        body = xf.MeshBody(bodyP, bodyN, gap=0.13, reach=1.0)       # (over the bodice's own thickness, 0.045 w)
+        for _ in range(240):
+            fab.step(1 / 240, body, neutral=True)
+        steps = 240 + fab.settle(body, h=1 / 240, max_steps=L_['steps'], tol=1e-4)
+        off = np.degrees(np.arccos(np.clip(np.einsum('ij,ij->i', fab.pos[:nf] - a0, rest[:nf] - a0)
+                                           / np.maximum(np.linalg.norm(fab.pos[:nf] - a0, axis=1) * np.linalg.norm(rest[:nf] - a0, axis=1), 1e-9), -1, 1)))
+        log('collar: bodice front %d turned back as the lapel in %d steps: %d points, %.0f degrees off the pressed fold '
+            '(median), %.0f at worst' % (k, steps, nf, float(np.median(off)), float(off.max())))
+        inv = np.linalg.inv(mw)
+        loc_new = fab.pos[:nf] @ inv[:3, :3].T + inv[:3, 3]
+        for j, g in enumerate(fl_v):
+            bm.verts[g].co = loc_new[j]
+        moved += nf
+    bmesh.ops.delete(bm, geom=[bm.faces[i] for i in np.nonzero(dead)[0]], context='FACES')
+    bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    # the cut edges round the opening and the lapels evened out: a cut along the mesh's faces leaves a staircase
+    bm.verts.ensure_lookup_table()
+    edge_v = [v for v in bm.verts if v.is_boundary and (mw[:3, :3] @ np.array(v.co[:]) + mw[:3, 3])[1] < M['yc']
+              and (mw[:3, :3] @ np.array(v.co[:]) + mw[:3, 3])[2] > zb - 0.4 * w]
+    for _ in range(L_['edge_rounds']):
+        new = {}
+        for v in edge_v:
+            nb = [e.other_vert(v) for e in v.link_edges if e.is_boundary]
+            if len(nb) == 2:
+                new[v] = v.co + 0.5 * ((nb[0].co + nb[1].co) * 0.5 - v.co)
+        for v, c in new.items():
+            v.co = c
+    bm.to_mesh(o.data)
+    bm.free()
+    o.data.update()
+    return int((owner >= 0).sum()), moved
 
 
 def over_lapels(pos, D, laps, M, gap=0.09):
@@ -464,22 +582,28 @@ def build():
     sol = o.modifiers.new('thickness', 'SOLIDIFY')
     sol.thickness = 0.07 * M['w']
     sol.offset = 0
-    print('collar: the bodice opened above the break, %d faces cut' % open_front(
-        [c for c in bpy.data.objects if c.name.startswith('Redingote bodice') and c.type == 'MESH'], M, E, D), flush=True)
-    for i, (lp, lt) in enumerate(laps):
-        lme = bpy.data.meshes.new('Lapel %d' % i)
-        lme.from_pydata([tuple(p) for p in smooth_edges(lp, lt)], [], [tuple(int(j) for j in t) for t in lt])
-        lme.update()
-        lo = bpy.data.objects.new('Collar lapel %d' % i, lme)
-        bpy.context.scene.collection.objects.link(lo)
-        lme.materials.append(cloth)
-        for p in lme.polygons:
-            p.use_smooth = True
-        m1 = lo.modifiers.new('thickness', 'SOLIDIFY')
-        m1.thickness, m1.offset = 0.07 * M['w'], 0
-        if par is not None:
-            lo.parent = par
-            lo.matrix_parent_inverse = par.matrix_world.inverted()
+    for c in bpy.data.objects:                       # (the buttons above the break: the front is open there)
+        if c.name.startswith('Redingote bodice') and c.name.endswith('buttons'):
+            open_front([c], M, E, D)
+    if os.environ.get('COLLAR_LAPEL_PIECES'):        # (the earlier way, a lapel laid on as its own piece)
+        for i, (lp, lt) in enumerate(laps):
+            lme = bpy.data.meshes.new('Lapel %d' % i)
+            lme.from_pydata([tuple(p) for p in smooth_edges(lp, lt)], [], [tuple(int(j) for j in t) for t in lt])
+            lme.update()
+            lo = bpy.data.objects.new('Collar lapel %d' % i, lme)
+            bpy.context.scene.collection.objects.link(lo)
+            lme.materials.append(cloth)
+            m1 = lo.modifiers.new('thickness', 'SOLIDIFY')
+            m1.thickness, m1.offset = 0.07 * M['w'], 0
+            if par is not None:
+                lo.parent = par
+                lo.matrix_parent_inverse = par.matrix_world.inverted()
+    else:
+        nfl, nv = fold_front(b, lapels.outlines, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
+        print('collar: %d faces of the bodice front turned back (%d points)' % (nfl, nv), flush=True)
+    if os.environ.get('HIDE_COLLAR'):               # (the bodice alone, its front turned back: the collar out of sight)
+        o.hide_render = True
+        o.visible_camera = o.visible_shadow = o.visible_diffuse = o.visible_glossy = False
     if not os.environ.get('SHOW_BODICE'):
         b.hide_render = True
         for c in bpy.data.objects:
