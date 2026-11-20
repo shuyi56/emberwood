@@ -382,6 +382,13 @@ shows in `rq.py ping` ("priority -2: repeat 3") and on the dashboard next to the
 send the repeat, and the nightly stats count the penalised requests and the steps per thread. The hogging warnings above
 stay as they are. The numbers are `PEN` in `rq.py`.
 
+## What the render machine needs installed
+
+Besides Blender (`bpy`), the petticoat's pattern code needs the Python packages `shapely` and `triangle`
+(`pip install shapely triangle`). On 2026-11-19 the machine had neither, and the first four flow checks of the riding
+skirt over the petticoat (#252 to #254, #256) failed on `ModuleNotFoundError`. They are installed in the running
+container now, but a fresh container needs them again: put the line in the environment's setup script.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it

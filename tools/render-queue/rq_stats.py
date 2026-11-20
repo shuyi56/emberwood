@@ -137,8 +137,8 @@ def compute(hours=None, names=None):
         c, f = ts(r["created"]), ts(r.get("finished"))
         js = per_req.get(r["id"], [])
         first = min((j["start"] for j in js), default=None)
-        if r["state"] == "cancelled":
-            continue
+        if r["state"] == "cancelled" or r["state"].startswith("superseded"):
+            continue                                    # (never rendered: not a request that waited)
         if first is None and f is not None:
             first = c                                   # answered from the cache
         if first is not None and first < c:

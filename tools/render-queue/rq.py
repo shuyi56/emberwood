@@ -47,7 +47,7 @@ Batching rules (John, 2026-11-19)
   * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
     job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
-import argparse, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
+import argparse, functools, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("RQ_HOME", HERE)   # queue.json, results/, events.jsonl: next to the code unless RQ_HOME says
@@ -94,6 +94,7 @@ def sets():
     return {}
 
 
+@functools.lru_cache(maxsize=None)
 def ts(t):
     import calendar
     return calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ"))
@@ -886,6 +887,8 @@ def job_gb(job):
     p = job.get("param") or ""
     if "OUTFIT=" in p:
         return min(6.0, 2.0 + 0.6 * len(re.search(r"OUTFIT=(\S+)", p)[1].split(",")))
+    if "HABIT_PIECES" in p or "habit_all" in p or "petticoat" in p:
+        return 7.0                  # (nightly 2026-11-20: two habit/petticoat builds side by side, #255 and #256, one killed at 142 s)
     if "--mannequin" in p:
         return 2.0                                     # (no head, face or hair: a light build)
     return 7.6 if "warden" in p else 4.0
@@ -1242,18 +1245,30 @@ HOG = {"wait_s": 120, "hour_share": 0.5, "hour_min_s": 600,     # over half the 
        "streak": 5}                              # 5 submissions in a row while another thread had one waiting
 
 
+_SECS = {}      # job key -> (seconds, requests it served): a finished job's manifest never changes
+
+
+def _job_seconds(k):
+    if k in _SECS:
+        return _SECS[k]
+    for d in (k, k + "-failed"):
+        mp = os.path.join(RESULTS, d, "manifest.json")
+        if os.path.exists(mp):
+            try:
+                m = json.load(open(mp))
+            except ValueError:
+                return (0.0, 1)        # (being written: not cached, read again next time)
+            _SECS[k] = (m.get("seconds", 0), max(1, len(m.get("requests") or [1])))
+            return _SECS[k]
+    return (0.0, 1)
+
+
 def request_seconds(r):
     """A request's share of render time: each of its jobs' seconds, split among the requests that job served."""
     t = 0.0
     for k in r.get("jobs") or []:
-        for d in (k, k + "-failed"):
-            mp = os.path.join(RESULTS, d, "manifest.json")
-            if os.path.exists(mp):
-                try:
-                    m = json.load(open(mp))
-                except ValueError:
-                    break
-                t += m.get("seconds", 0) / max(1, len(m.get("requests") or [1])); break
+        sec, n = _job_seconds(k)
+        t += sec / n
     return t
 
 
@@ -1353,9 +1368,11 @@ def hog_warnings(s, at=None, thread=None):
     run, best = [], {}
     for r in subs:
         run = run + [r] if run and run[-1]["thread"] == r["thread"] else [r]
-        lo, hi = ts(run[0]["created"]), ts(r["created"])
-        others = any(o["thread"] != r["thread"] and ts(o["created"]) < hi and
-                     (not o.get("finished") or ts(o["finished"]) > lo) for o in srt)
+        hi = ts(r["created"])
+        # (another thread had a request waiting or rendering at the moment one of the run's requests was sent)
+        others = any(o["thread"] != r["thread"] and o.get("created") and not o["state"].startswith(("cancelled", "superseded"))
+                     and ts(o["created"]) <= ts(x["created"]) and
+                     (not o.get("finished") or ts(o["finished"]) > ts(x["created"])) for o in srt for x in run)
         if len(run) >= HOG["streak"] and others and hi > at - 3600 * HOG["repeat_h"]:
             best[r["thread"]] = [x["id"] for x in run]
     for t, ids in best.items():
