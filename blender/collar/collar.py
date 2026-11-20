@@ -1015,7 +1015,7 @@ def build():
     sub = o.modifiers.new('smooth', 'SUBSURF')
     sub.levels = sub.render_levels = 1
     sol = o.modifiers.new('thickness', 'SOLIDIFY')
-    sol.thickness = 0.07 * M['w']
+    sol.thickness = _bodice.RATIOS['thickness'] * M['w']       # (the bodice's own cloth: the collar is as thick as the lapels it meets)
     sol.offset = 0
     for c in bpy.data.objects:                       # (the buttons above the break: the front is open there)
         if c.name.startswith('Redingote bodice') and c.name.endswith('buttons'):
