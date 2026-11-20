@@ -17,6 +17,7 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_flags.py`, `flags.json` | post-render artifact flags on every finished job, and `calibrate` for the nightly job (see "Post-render flags") |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -405,6 +406,55 @@ under "last result", with the result folder `/mnt/project-files/render-queue/res
 ids). Ping, then open the images yourself. The render-queue thread messages you only when something needs a
 decision: a failed or killed job, a merge conflict, a hogging warning, or a request it had to refuse. Identical code
 is never rendered twice: an unchanged request is answered from the cache at once.
+
+## Post-render flags
+
+Every finished job is checked before its result lands (`rq_flags.py`, called from `finish()`): image statistics,
+the `.glb`'s structure and the log, with PIL and numpy only, no Blender. It takes under a second for a view job and
+about 15 s for a sheet (two 35 MB `.glb` files are read). The flags go into `manifest.json` (`flags`, `flags_summary`,
+and the raw numbers under `flag_metrics`), into `render.log` as `[flags]` lines, into the request (`flags` in
+`queue.json` and in the `finished` line `serve` prints, which the queue thread passes on to the requesting thread)
+and into `events.jsonl`.
+
+A **warn** flag only reports. A **fail** flag on a job that exited 0 makes the result a failed one
+(`results/KEY-failed`, `failed_by_flags` in the manifest), because the same code would render the same broken
+image again. If a fail is a false alarm, `python3 rq_flags.py accept KEY --reason "..."` moves the result back to
+`results/KEY` and records the override, which the nightly calibration reads.
+
+Each flag id is also the artifact tag a rejection carries (`rq_reject.py add ... --artifacts ID,ID`):
+
+| Id | What it catches | Level |
+| --- | --- | --- |
+| `black_frame`, `white_frame`, `blank_frame` | a black, blown-out or one-colour image | fail |
+| `figure_missing` | a panel that is almost all background: the figure is hidden, missing or off camera | warn, fail when empty |
+| `figure_cropped` | the figure runs off a panel edge (turns, pieces and sprite cells; head views are framed tight on purpose and walks only check the top) | warn |
+| `noise` | speckled surfaces from sampling (a lower limit for denoised and check renders) | warn |
+| `fireflies` | isolated bright pixels on the figure (8 or more) | warn, fail when many |
+| `black_patches` | pure black areas on the figure: out of transparent or light bounces in cut-out hair, a broken shader | warn, fail when large |
+| `missing_texture` | magenta pixels | warn, fail when large |
+| `unexpected_alpha` | transparent pixels in a view that should be opaque | warn |
+| `same_as_main`, `same_as_previous` | every image of the job equals main's render of the same job (or, with no main render, the last render of it at an earlier commit): the change does not show | warn |
+| `frozen_animation` | walk or run frames (sheets and GIFs) or sprite walk columns that do not move | warn, fail when identical |
+| `wrong_size` | an image that is not the size the request asked for (`views.py` turns, heads, walks; sprite cells and `cells.png`) | fail |
+| `missing_output`, `tiny_file` | an expected file that was not written (from the job and the log's `Saved:` and `wrote` lines), or one smaller than any real render | fail |
+| `log_error` | a traceback or error line in the log of a job that exited 0 | warn |
+| `glb_empty`, `glb_no_mesh`, `glb_no_skin`, `glb_no_animation` | an empty or unreadable `.glb`; meshes, joints or animations gone since the last export (listed by name) | fail / warn |
+| `glb_bad_vertices`, `glb_bad_weights`, `glb_bounds` | NaN, infinite or extreme positions; skin weights that do not sum to 1 or joints out of range; a model whose size changed a lot | fail / warn |
+| `flags_crashed` | the checks themselves crashed (the job is delivered as it is) | warn |
+
+Thresholds live in `flags.json`: each check is `metric op limit` with a `warn` and/or a `fail` limit, and may carry
+limits of its own for denoised renders under `by_quality`. Layouts (`layouts`) say how each output is cut into
+panels and which edges a figure must stay inside. Check a folder by hand with `python3 rq_flags.py check DIR`, or
+the whole history with `python3 rq_flags.py scan results --refs`. Tests: `python3 test_rq_flags.py` (27 planted
+artifacts).
+
+**Calibration.** The nightly job runs `rq_reject.py summary --mark`, then
+`python3 rq_flags.py calibrate --rejections /mnt/project-files/render-queue/rejections.jsonl`. For each rejection
+with `artifacts` it re-measures the rejected file (and the marked `region`, if any), lists what the flags caught and
+missed, and for a miss proposes the limit that would have caught it, but only if that limit fires on no more than
+2% of the newest results nobody rejected (`--max-rate`); noisier proposals are listed as held back. Rejections with
+human `tags` but no `artifacts` are listed with the checks that might apply. `--write` applies the proposals to
+`flags.json` and bumps its `version`; the nightly PR carries the change.
 
 ## Conflicts
 

@@ -1,0 +1,269 @@
+{
+  "_doc": "Thresholds for rq_flags.py. Each check has a metric, an op (a flag fires when `value op limit` holds), and a warn and/or fail limit. A fail turns the job into a failed result when fail_marks_job_failed is true. rq_flags.py calibrate proposes edits to the warn and fail limits from rejections.jsonl. Units: luminance 0-255; fractions 0-1; *_per_mpx per million pixels of figure. A check may carry by_quality: {\"denoised\": {...}} limits for jobs rendered with --denoise or at quality check.",
+  "version": 1,
+  "fail_marks_job_failed": true,
+  "checks": {
+    "black_frame": {
+      "metric": "lum_p99",
+      "op": "<",
+      "fail": 8,
+      "msg": "the image is black or nearly black"
+    },
+    "white_frame": {
+      "metric": "lum_p01",
+      "op": ">",
+      "fail": 247,
+      "msg": "the image is white or blown out"
+    },
+    "blank_frame": {
+      "metric": "lum_std",
+      "op": "<",
+      "warn": 2.5,
+      "fail": 0.6,
+      "msg": "the image is one flat colour"
+    },
+    "figure_missing": {
+      "metric": "fg_fraction_min",
+      "op": "<",
+      "warn": 0.02,
+      "fail": 0.002,
+      "msg": "a panel is almost all background: the figure is missing, hidden or off camera"
+    },
+    "figure_cropped": {
+      "metric": "edge_touch_max",
+      "op": ">",
+      "warn": 0.03,
+      "msg": "the figure runs off a panel edge"
+    },
+    "noise": {
+      "metric": "noise_p50",
+      "op": ">",
+      "warn": 4.0,
+      "by_quality": {
+        "denoised": {
+          "warn": 2.5
+        }
+      },
+      "msg": "speckled surfaces: sampling noise on the figure"
+    },
+    "fireflies": {
+      "metric": "fireflies_per_mpx",
+      "op": ">",
+      "warn": 60,
+      "fail": 2000,
+      "msg": "isolated bright pixels (fireflies)"
+    },
+    "black_patches": {
+      "metric": "pure_black_fraction",
+      "op": ">",
+      "warn": 0.012,
+      "fail": 0.05,
+      "msg": "pure black areas on the figure (out of transparent or light bounces, or a broken shader)"
+    },
+    "missing_texture": {
+      "metric": "magenta_fraction",
+      "op": ">",
+      "warn": 0.0005,
+      "fail": 0.01,
+      "msg": "magenta pixels: a missing texture or a broken material"
+    },
+    "unexpected_alpha": {
+      "metric": "alpha_fraction",
+      "op": ">",
+      "warn": 0.001,
+      "msg": "transparent pixels in a view that should be opaque"
+    },
+    "same_as_main": {
+      "metric": "changed_fraction",
+      "op": "<",
+      "warn": 0.0002,
+      "msg": "the image is the same as main's render of this view: the change does not show"
+    },
+    "same_as_previous": {
+      "metric": "changed_fraction_prev",
+      "op": "<",
+      "warn": 0.0002,
+      "msg": "the image is the same as the last render of this view at an earlier commit"
+    },
+    "frozen_animation": {
+      "metric": "frames_changed_min",
+      "op": "<",
+      "warn": 0.002,
+      "fail": 1e-05,
+      "msg": "animation frames are identical or nearly so: the pose does not move"
+    },
+    "wrong_size": {
+      "metric": "size_mismatch",
+      "op": ">",
+      "fail": 0.5,
+      "msg": "the image is not the size or aspect the request asked for"
+    },
+    "tiny_file": {
+      "metric": "bytes_short",
+      "op": ">",
+      "fail": 0.5,
+      "msg": "the file is smaller than any real render of its kind"
+    },
+    "missing_output": {
+      "metric": "missing_count",
+      "op": ">",
+      "fail": 0.5,
+      "msg": "an expected output file was not written"
+    },
+    "log_error": {
+      "metric": "log_errors",
+      "op": ">",
+      "warn": 0.5,
+      "msg": "the log has an error or traceback although the job exited 0"
+    },
+    "glb_empty": {
+      "metric": "glb_empty",
+      "op": ">",
+      "fail": 0.5,
+      "msg": "the .glb has no scene, nodes or mesh data"
+    },
+    "glb_no_mesh": {
+      "metric": "glb_meshes_lost",
+      "op": ">",
+      "warn": 0.5,
+      "fail": 10,
+      "msg": "meshes are missing from the .glb"
+    },
+    "glb_no_skin": {
+      "metric": "glb_skin_problem",
+      "op": ">",
+      "fail": 0.5,
+      "msg": "the .glb has no skin, or fewer joints than before"
+    },
+    "glb_no_animation": {
+      "metric": "glb_anims_lost",
+      "op": ">",
+      "warn": 0.5,
+      "fail": 999,
+      "msg": "animations are missing from the .glb"
+    },
+    "glb_bad_vertices": {
+      "metric": "glb_bad_vertex_count",
+      "op": ">",
+      "fail": 0.5,
+      "msg": "NaN, infinite or extreme vertex positions"
+    },
+    "glb_bad_weights": {
+      "metric": "glb_bad_weight_fraction",
+      "op": ">",
+      "warn": 0.001,
+      "fail": 0.05,
+      "msg": "skin weights that do not sum to 1, or joints out of range"
+    },
+    "glb_bounds": {
+      "metric": "glb_extent_ratio",
+      "op": ">",
+      "warn": 1.5,
+      "fail": 4,
+      "msg": "the model's size changed a lot from the last export"
+    }
+  },
+  "image": {
+    "bg_tolerance": 14,
+    "fg_min_alpha": 8,
+    "edge_band": 1,
+    "firefly_jump": 70,
+    "firefly_min_lum": 170,
+    "pure_black_max": 3,
+    "same_pixel_tolerance": 2,
+    "firefly_min_count": 8
+  },
+  "layouts": [
+    {
+      "glob": "cell-*.png",
+      "panels": "single",
+      "edges": "tblr",
+      "alpha": true,
+      "surface": false
+    },
+    {
+      "glob": "cells.png",
+      "panels": "none",
+      "alpha": true
+    },
+    {
+      "glob": "ranger-blender.png",
+      "panels": "none",
+      "alpha": true,
+      "figure": false
+    },
+    {
+      "glob": "turn*.png",
+      "panels": "turn",
+      "edges": "tblr"
+    },
+    {
+      "glob": "pieces*.png",
+      "panels": "turn",
+      "edges": "tblr"
+    },
+    {
+      "glob": "head*.png",
+      "panels": "head",
+      "edges": ""
+    },
+    {
+      "glob": "walk*.png",
+      "panels": "walk",
+      "edges": "t",
+      "frames": true
+    },
+    {
+      "glob": "run*.png",
+      "panels": "run",
+      "edges": "t",
+      "frames": true
+    },
+    {
+      "glob": "*.png",
+      "panels": "none",
+      "figure": false
+    }
+  ],
+  "file_min_bytes": {
+    "*.png": 1500,
+    "*.gif": 2000,
+    "*.glb": 1000000,
+    "*.blend": 1000000
+  },
+  "cell_size": [
+    128,
+    160
+  ],
+  "views_py": {
+    "script": "blender/base/views.py",
+    "default_size": 360,
+    "angles": [
+      "front",
+      "3/4",
+      "profile",
+      "back3/4",
+      "back"
+    ]
+  },
+  "log": {
+    "error_patterns": [
+      "Traceback \\(most recent call last\\)",
+      "^\\w*Error: ",
+      "\\bERROR\\b",
+      "Segmentation fault",
+      "\\[killed"
+    ],
+    "benign_patterns": [
+      "Draco is not available",
+      "MeshOptimizer is not available"
+    ]
+  },
+  "glb": {
+    "max_abs_position": 10000,
+    "weight_tolerance": 0.02,
+    "require_skin": true,
+    "require_animation": true,
+    "expected_animations": []
+  }
+}
