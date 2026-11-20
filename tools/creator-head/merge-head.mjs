@@ -9,6 +9,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { mergeDocuments, dedup, join, weld, simplifyPrimitive, prune, unpartition } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import sharp from 'sharp';
+import { cleanHead } from './clean-head.mjs';
 
 const [, , basePath, headPath, outPath, ratioArg] = process.argv;
 const ratio = parseFloat(ratioArg || '0.25'), hairRatio = parseFloat(process.argv[6] || '0.4'), hairSoft = parseFloat(process.argv[7] || '5');
@@ -89,6 +90,11 @@ for (const m of headDoc.getRoot().listMeshes()) for (const pr of m.listPrimitive
   if (pr.getAttribute('POSITION').getCount() > 100000 && mt && mt.getAlphaMode() === 'OPAQUE')
     simplifyPrimitive(pr, { simplifier: MeshoptSimplifier, ratio, error: 0.0001, lockBorder: true });
 }
+// The head's topology made clean (clean-head.mjs, John 2026-11-20): the creator grid's ends rebuilt as real poles,
+// the simplifier's slivers, non-manifold edges, slits and unused points gone; rq_topo.py checks the result
+for (const [name, r] of cleanHead(headDoc))
+  console.log(`clean ${name}: ${r.poles} poles rebuilt, ${r.collapsed} slivers collapsed, ${r.nonmanifold} non-manifold faces, ` +
+              `${r.filled} holes and ${r.slits || 0} slits closed, ${r.unused} unused points, triangles ${r.tris[0]} -> ${r.tris[1]}`);
 
 // The mouth's shading for the world: the sculpt round the mouth (the folds from the nose wings to the corners, the dip
 // above the upper lip, the fold under the lower lip, the parting) is modelled for the creator's soft, scattering skin;

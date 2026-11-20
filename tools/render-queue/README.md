@@ -271,22 +271,31 @@ John's request (2026-11-20): any change to a face or head checks that its topolo
   quad meshes as built; `game`, the decimated triangles). `clean` is the absolute standard: none of the integrity
   faults, no ngons on the face, no poles in the eye and mouth zones, 2 or more concentric loops round each eye and
   the mouth with alignment 0.7, symmetric to 0.002 H (game heads: the integrity part only).
-- **Calibrated on the approved heads** (2026-11-20): the creator's raw Ranger, Warden and Sorceress heads (from
-  `export-head.js`), the ranger's Blender head (`views.py --figure ranger`, at main), and the three game heads
-  (`public/models/ranger.glb`, `warden.glb`, the sorceress's `sorceress.glb`). Re-run
-  `python3 rq_topo.py --calibrate topo_baseline.json DIR/topo.json ...` when John approves a face. None of them is
-  clean, and the band holds what they are:
-  - the creator heads are a 600 x 445 grid of rings up the head (100% quads, no poles, manifold, no flips), but no
-    loop runs round an eye or the mouth (alignment 0.44 to 0.48: the rings and columns run straight through the
-    lids and the lips), and both ends of the grid are rings of 600 vertices drawn together into one point, unmerged
-    (931 duplicate vertices at the crown and under the neck, and an open seam of no area at the crown);
-  - the ranger's Blender head is the same grid with 162 ngons and 72 three-edge poles in a row under the nose,
-    where the mouth's finer band is stitched in;
-  - the game heads are decimated triangles: the ranger's carries 8,024 vertices no face uses; the warden's and the
-    sorceress's have a non-manifold edge and a hole on the forehead, the crown's duplicates, and folded slivers
-    (1% of their edges past 72 degrees, the ranger's 17).
-  So today `clean` fails on every head: concentric loops need the face rebuilt on a loop topology, which is a
-  separate piece of work. The `verdict` is what catches a face change that makes a head worse.
+- **Calibrated on the approved heads** (2026-11-20, after the cleanup below): the creator's raw Ranger and
+  Sorceress heads (from `export-head.js`, with the fixed grid ends), the ranger's Blender head (`views.py --figure
+  ranger`, at main), and the three cleaned game heads (`public/models/ranger.glb`, `warden.glb`, the sorceress's
+  `sorceress.glb`). Re-run `python3 rq_topo.py --calibrate topo_baseline.json DIR/topo.json ...` when John approves
+  a face. Every band now holds zero integrity faults, so any hole, fold, duplicate or loose vertex is flagged.
+  glTF splits vertices along UV seams; `collect()` welds exactly coincident points before it reads the topology
+  (`counts.seam_splits_welded`), so a seam is not read as a hole.
+- **What the first run found, and what was fixed:**
+  - the creator heads are a 600 x 445 grid of rings up the head. Both ends of the grid were rings of 600 vertices
+    drawn into one point, unmerged, and the crown ring was pressed flat into a line (601 non-manifold edges and
+    600 triangles of no area once the seams are welded). Fixed at the source in the Face Creator's
+    `buildHeadGeometry` (project files): a ring drawn to a point, or enclosing no area, is merged into one pole
+    vertex and the ring below it fans to that pole. A fresh export passes every integrity check and renders the
+    same (changed pixels 0.01% or less, clay and textured, four views);
+  - the game heads (decimated triangles) carried the crown's duplicates, folded slivers, a non-manifold edge and
+    a hole on the forehead (warden, sorceress), and 8,024 vertices no face used (ranger). `merge-head.mjs` now runs
+    `tools/creator-head/clean-head.mjs` on the head after the simplify: it rebuilds the poles as fans, collapses
+    triangles of no area and folds, merges twins, keeps two faces on a non-manifold edge, closes slits and small
+    holes, and drops unused vertices. The three game heads were cleaned with it; all pass `clean`, and render the
+    same (changed pixels 0.1% or less);
+  - still open: no loop runs round an eye or the mouth on any head (alignment 0.44 to 0.48: the rings and columns
+    run straight through the lids and the lips), and the ranger's Blender head has 162 ngons and 72 three-edge
+    poles in a row under the nose. So `clean` still fails on the source heads for the loops alone; concentric
+    loops need the face rebuilt on a loop topology, which is separate work. The warden's and sorceress's game
+    heads stay rougher than the ranger's (1% of edges past 72 degrees against 17), which the game band allows.
 - **Tested:** `python3 rq_topo.py --selftest DIR` (no Blender: a grid head, with a hole, a flipped face, duplicates
   and a bump, and a head of concentric loops); and the Ranger creator head with a rough cheek, a hole in the lower
   lid and six flipped faces: all three flagged and ringed in the right places.

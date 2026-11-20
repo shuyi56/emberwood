@@ -30,6 +30,10 @@ name, as in `tools/render-queue/topo_baseline.json`, to judge it on its own appr
 
     python3 tools/render-queue/rq_topo.py --glb creator-head.glb --out DIR --label "creator head (Ranger), raw export"
 
+`merge-head.mjs` runs `clean-head.mjs` on the head after the simplify, so a game head comes out without holes, folds,
+duplicate or unused vertices (the simplify leaves those at the poles and on thin slivers). It also runs on its own:
+`node clean-head.mjs in.glb out.glb`.
+
 ## The Warden
 
 Her body and clothes come from `blender/warden/export_glb.py` (it needs `blender/warden/warden.py` and the base

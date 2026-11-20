@@ -959,12 +959,19 @@ def collect(o, head=None):
         ev_ = np.empty(len(me.edges) * 2, np.int64)
         me.edges.foreach_get('vertices', ev_)
         ev_ = ev_.reshape(-1, 2)
-        ek = set((np.minimum(lv, lv[np.r_[1:len(lv), 0]]) * n + np.maximum(lv, lv[np.r_[1:len(lv), 0]])).tolist())
+        fof = np.repeat(np.arange(len(tot)), tot)          # (each loop's next round its own face)
+        k = np.arange(len(lv))
+        nx_ = fo[fof] + (k - fo[fof] + 1) % tot[fof]
+        ek = set((np.minimum(lv, lv[nx_]) * n + np.maximum(lv, lv[nx_])).tolist())
         loose_edges = int(sum(1 for a, b in ev_ if min(a, b) * n + max(a, b) not in ek)) if len(ev_) < 2_000_000 else 0
     finally:
         ev.to_mesh_clear()
-    joined = False
+    joined, splits = False, 0
     if len(tot) and (tot == 3).all():          # (a glTF: triangles only; back to the quads it was cut from)
+        # glTF splits a vertex wherever its UV or normal changes (the seams): points at exactly one place are one
+        # point of the surface, so they are welded before the topology is read (or every seam reads as a hole)
+        X, lv, splits, unused = weld_exact(X, lv)
+        loose_edges += unused          # (points no face uses, which the weld leaves out: counted as loose)
         X, fo, lv, joined = join_tris(X, fo, lv)
     bvh = BVHTree.FromPolygons([tuple(p) for p in X.tolist()],
                                [tuple(lv[fo[i]:fo[i + 1]].tolist()) for i in range(len(fo) - 1)], epsilon=0.0)
@@ -975,7 +982,23 @@ def collect(o, head=None):
             r = bvh.find_nearest(Vector(p))
             out[i] = r[3] if r[0] is not None else np.inf
         return out
-    return X, fo, lv, loose_edges, joined, nearest
+    return X, fo, lv, loose_edges, (joined, splits), nearest
+
+
+def weld_exact(X, lv):
+    """The points of a triangle list at exactly the same place (to 1e-7 of the head's size) made one: returns the
+    points, the faces' corners renumbered, how many were welded, and how many no face used (they drop out)."""
+    s = float(np.ptp(X[:, 2])) or 1.0
+    q = np.round(X / (1e-7 * s)).astype(np.int64)
+    used = np.zeros(len(X), bool)
+    used[lv] = True
+    _, first, inv = np.unique(q, axis=0, return_index=True, return_inverse=True)
+    inv = inv.ravel()
+    keep = np.zeros(len(first), bool)
+    keep[inv[lv]] = True
+    newid = np.cumsum(keep) - 1
+    welded = int(used.sum() - keep.sum())
+    return X[first[keep]], newid[inv[lv]], welded, int((~used).sum())
 
 
 def join_tris(X, fo, lv):
@@ -1020,9 +1043,10 @@ def run(out, objects=None, head=None, stem='topo', title='', label=None):
     items = []
     for o in objects:
         try:
-            X, fo, fv, le, joined, nearest = collect(o, head)
+            X, fo, fv, le, (joined, splits), nearest = collect(o, head)
             eyes = eye_centres(o, head)
             S, F = analyse(label or o.name, X, fo, fv, eyes=eyes, loose_edges=le, joined=joined, nearest=nearest)
+            S['counts']['seam_splits_welded'] = splits
             lim, src, which = limits(S['kind'], S['name'])
             S['limits_from'] = (os.path.basename(src) + ': ' if src else '') + which
             S['flags'], S['verdict'] = judge(S, lim, S['kind'])
