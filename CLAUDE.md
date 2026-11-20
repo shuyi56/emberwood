@@ -84,3 +84,10 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   five rounds on one problem. Then render the best result so far (a clay draft with its contour sheet) and report:
   what each round tried, the numbers before and after, whether the cause looks like tuning, modelling or the solver,
   and what you would try next. John decides from there.
+
+## Retrospective after a long modelling session
+
+- When a long modelling session ends and John accepts the result, write a retrospective and lessons learned in
+  `docs/clothing-solvers/`: what was built, what failed and why (tuning, modelling or solver), the key numbers,
+  which checks caught or missed problems, and what to do differently.
+- Add to the existing files where a lesson fits. Create a new file for a new topic. Commit it to the thread's branch.
