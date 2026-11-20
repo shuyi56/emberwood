@@ -479,11 +479,11 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     EV, EF = [], []
     for q, (P, N) in rows.items():
         for c, nrm, Rk in zip(P, N, sizes[q]):
-            tube = 0.32 * Rk
+            tube = 0.17 * Rk                 # (a thin ring: it barely stands over the leather round the hole)
             u = np.cross(nrm, [0.0, 0.0, 1.0])
             u /= max(np.linalg.norm(u), 1e-9)
             path = c[None, :] + (Rk - tube) * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * np.cross(nrm, u))
-            path = np.concatenate([path, path[:1]]) + nrm * 0.4 * tube
+            path = np.concatenate([path, path[:1]]) + nrm * 0.2 * tube
             v, f = _tube(path, tube, 8, ring=True)
             EF += [[i + len(EV) for i in ff] for ff in f]
             EV += list(v)

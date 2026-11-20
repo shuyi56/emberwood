@@ -30,8 +30,8 @@ M_LEATHER = female.mat_def(75, 'boot leather', female.ramp(0x4a2f1f, 0.1), 0.24,
 
 
 M_THREAD = female.mat_def(76, 'boot thread', female.ramp(0x8a6a3a, 0.1), 0.0)
-M_EYELET = female.mat_def(77, 'boot eyelet', female.ramp(0x9a7a3a, 0.15), 0.35)
-M_LACE = female.mat_def(78, 'boot lace', female.ramp(0xd9d1c0, 0.1), 0.35)
+M_EYELET = female.mat_def(77, 'boot eyelet', female.ramp(0x8c8a84, 0.15), 0.35)
+M_LACE = female.mat_def(78, 'boot lace', female.ramp(0x2a2018, 0.1), 0.35)
 SHAFT = 'lace'               # the shaft sewn on the foot (last.SHAFTS)
 CREASE = True                # the ankle bent and the folds it makes set into the leather
 RELIEVE = ()                 # frames of the stride to let the leather out for where the hose is through it (last.relieve; off: it did not cut the through count, which may be a fault of the check's rays)

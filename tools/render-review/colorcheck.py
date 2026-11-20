@@ -59,7 +59,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('figure')
     ap.add_argument('--out', default='.')
-    ap.add_argument('--try', dest='tries', nargs='*', default=[], help="swatches to test before changing a file: 'boot leather=0x3a2418'")
+    ap.add_argument('--try', dest='tries', nargs='*', action='extend', default=[], help="swatches to test before changing a file: 'boot leather=0x3a2418'")
     a = ap.parse_args()
     import female, boot, hose
     mats = {m['name']: m for m in female.MATERIALS.values()}
