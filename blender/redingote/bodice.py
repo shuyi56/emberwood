@@ -8,7 +8,7 @@ round it, the edges cut along measured lines), cut as a tailored habit bodice is
   the neckline  high, a clean edge round the base of the neck, for the collar (another piece) to be sewn to
   the armholes  a clean edge along the armhole loop the sleeve's head is sewn to (redingote/armhole.py, shared with
                 the sleeves; until that lands, a stand-in at the same ratios)
-  the front     closed, the right front lapped over the left, a row of small domed buttons down the middle from the
+  the front     two fronts, the right front lapped over the left (two_fronts), a row of small domed buttons down the middle from the
                 neck to the front's point
   the seams     as an 1880s bodice was cut: two darts each side of the front, run from under the bust to the hip,
                 the underarm seam, a curved side-back seam from the back of the armhole into the waist, and the
@@ -212,9 +212,11 @@ def seams(M, ap, ratios=RATIOS):
     return f
 
 
-def surface_lift(M, ap, ratios=RATIOS):
+def surface_lift(M, ap, ratios=RATIOS, under=False):
     """How far each point of the cut shell is raised off it: the seams' grooves and allowances, and the right front
-    lapped over the left (a cloth's thickness proud, ending in a step a little past the middle)."""
+    a cloth's thickness proud, where it lies over the left (two_fronts cuts the fronts apart on the right front's
+    edge; the left front's own points there stand LAP_GAP past it and are not raised). under: the left front's
+    underlap, which lies on the shell under the right front."""
     w, yc = M['w'], M['yc']
     sm = seams(M, ap, ratios)
     th = ratios['thickness'] * w
@@ -227,10 +229,77 @@ def surface_lift(M, ap, ratios=RATIOS):
         # under the shell went through the ease into the skin wherever there is no corset under the cloth)
         groove = g * (1.0 - np.exp(-(d / gw) ** 2)) + al * np.exp(-((d - 1.8 * gw) / gw) ** 2)
         front = fit._ss(yc - 0.5 * w, yc - 1.5 * w, p[:, 1])
-        over = th * fit._ss(lap + 0.02 * w, lap - 0.04 * w, p[:, 0]) * front
-        edge = -0.6 * g * np.exp(-((p[:, 0] - lap - 0.03 * w) / (0.7 * gw)) ** 2) * front
-        return g + s * (groove - g) + over + edge
+        over = 0.0 if under else th * (p[:, 0] < lap + 0.5 * LAP_GAP) * front
+        return g + s * (groove - g) + over
     return lift
+
+
+LAP_GAP = 0.006              # the left front's points on the cut stand this far past the right front's edge (apart, so they are not welded back)
+LAP_TOP = None               # the underlap's top, when the fronts are open above it (the collar module sets it: the lapels' break)
+
+
+def two_fronts(V, faces, M, ratios=RATIOS, top=None):
+    """The front cut into its two fronts, as a bodice that buttons is made. The right front ends at its edge, lap past
+    the middle; the left front begins there and runs on under the right front to lap past the middle on the other
+    side (the underlap: the buttons are sewn through to it). The sheet is cut along the right front's edge from the
+    hem to the neck, the points on the cut doubled so the two fronts are separate cloth, and the underlap is drafted
+    as the left front's own continuation: the shell under the right front, between the two lap lines.
+    Returns (points, faces, (underlap points, underlap faces))."""
+    w, yc = M['w'], M['yc']
+    lap = ratios['lap'] * w
+    V = V.copy()
+    frontv = V[:, 1] < yc - 0.5 * w
+    near = [k for k, f in enumerate(faces) if frontv[f].all() and np.abs(V[f, 0]).max() < lap + 1.5 * w]
+    nearv = np.array(sorted({i for k in near for i in faces[k]}))
+    snap = nearv[np.abs(V[nearv, 0] - lap) < 0.012]
+    V[snap, 0] = lap                                 # (points a hair off the cut are set on it: no slivers)
+    d = np.zeros(len(V))
+    d[nearv] = V[nearv, 0] - lap
+    d[snap] = 0.0
+    keep, right, left, cross = [], [], [], []
+    ns = set(near)
+    for k, f in enumerate(faces):
+        if k not in ns:
+            keep.append(f)
+        elif d[f].max() <= 0:
+            right.append(f)
+        elif d[f].min() >= 0:
+            left.append(f)
+        else:
+            cross.append(f)
+    V, rp = fit.trim(V, cross, lambda p: lap - p[:, 0], snap=1e-9)
+    right += rp
+    n1 = len(V)
+    V, lp = fit.trim(V, cross, lambda p: p[:, 0] - lap, snap=1e-9)
+    n2 = len(V)
+    left = [list(f) for f in left + lp]
+    # the left front's own points on the cut: the cut's new ones (made apart already) and doubles of the sheet's own
+    dup = {}
+    on = set(snap.tolist())
+    extra = []
+    for f in left:
+        for j, i in enumerate(f):
+            if i in on:
+                if i not in dup:
+                    dup[i] = len(V) + len(extra)
+                    extra.append(V[i])
+                f[j] = dup[i]
+    if extra:
+        V = np.concatenate([V, np.array(extra)])
+    mine = np.concatenate([np.arange(n1, n2), np.array(sorted(dup.values()), int)]).astype(int)
+    V[mine, 0] = lap + LAP_GAP
+    # the underlap: the shell under the right front from its edge back to the left front's own edge
+    src = [list(f) for f in right if V[f, 0].max() > -lap - 0.02]
+    U, uf = fit.trim(V, src, lambda p: p[:, 0] + lap)
+    if top is not None:
+        U, uf = fit.trim(U, uf, lambda p: top - p[:, 2])
+    used = np.array(sorted({i for f in uf for i in f}))
+    re = -np.ones(len(U), int)
+    re[used] = np.arange(len(used))
+    U = U[used].copy()
+    uf = [[int(re[i]) for i in f] for f in uf]
+    U[np.abs(U[:, 0] - lap) < 1e-6, 0] = lap + LAP_GAP           # (its edge on the left front's own points)
+    return V, keep + right + left, (U, uf)
 
 
 def _union_hull(G, M, under, ease):
@@ -479,7 +548,10 @@ def build_bodice(body, head_objs=(), rig=None, cloth=None, button=None, under=()
         kd.insert(Vector(P[i]), int(i))
     kd.balance()
     th = ratios['thickness'] * w
-    o = fit._sheet(name, [(V, faces, surface_lift(M, ap, ratios))], M, cloth, body, kd, rig, lift=0.0, thickness=th)
+    V, faces, (U, uf) = two_fronts(V, faces, M, ratios, LAP_TOP)
+    log('bodice: cut into two fronts on the right front\'s edge; the left front\'s underlap, %d faces' % len(uf))
+    o = fit._sheet(name, [(V, faces, surface_lift(M, ap, ratios)), (U, uf, surface_lift(M, ap, ratios, under=True))],
+                   M, cloth, body, kd, rig, lift=0.0, thickness=th)
     girth = 2 * math.pi * float(np.hypot(V[:, 0], V[:, 1] - M['yc'])[np.abs(V[:, 2] - M['z_bust']) < 0.1].mean())
     cut._cloth_uv(o, M, girth / (2 * math.pi))
     neck, hem = neckline(M, ratios), hemline(M, ratios)
