@@ -15,10 +15,10 @@ const GROW = 1.0;
 export function faceLock(headDoc, pr, boxesToo = false) {
   const P = pr.getAttribute('POSITION').getArray(), n = P.length / 3, lock = new Uint8Array(n);
   // the creator's own marks: _EYEPATCH (the lids' margins and the skin round them) and _MOUTHPATCH (the parting line and the lips)
-  const marks = ['_EYEPATCH', '_MOUTHPATCH'].map((m) => pr.getAttribute(m)).filter(Boolean);
+  const marks = ['_EYEPATCH', '__EYEPATCH', '_MOUTHPATCH', '__MOUTHPATCH', '_NOSEPATCH', '__NOSEPATCH'].map((m) => pr.getAttribute(m)).filter(Boolean);
   let used = 'box';
   for (const m of marks) { const A = m.getArray(); for (let v = 0; v < n; v++) if (A[v] > 0.5) lock[v] = 1; }
-  if (marks.length) used = marks.length === 2 ? '_EYEPATCH + _MOUTHPATCH' : '_EYEPATCH or _MOUTHPATCH';
+  if (marks.length) used = 'the creator\'s _EYEPATCH, _MOUTHPATCH';
   if (!boxesToo) return { lock, held: lock.reduce((a, b) => a + b, 0), used: marks.length ? used : 'none', n };
   let top = -1e9, bot = 1e9;
   for (let v = 0; v < n; v++) { top = Math.max(top, P[3 * v + 1]); }
