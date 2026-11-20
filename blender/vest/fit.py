@@ -565,9 +565,13 @@ def build_vest(body, head_objs=(), rig=None, material=None, name='Vest', ratios=
         if steps is not None:
             steps.append((nm, V.copy(), faces))
     V, faces = keep_main(V, faces, log=log)
-    kd = KDTree(len(P))
-    for i, p in enumerate(P):
-        kd.insert(Vector(p), i)
+    # (it follows the trunk's skin only, as the gambeson does: a point at the breastplate's side lies nearer the
+    # hanging arm's skin than the flank, and with the arms held out it was carried off by the arm, the plates
+    # stretched sideways into bands and the shoulder strap torn from the chest)
+    trunk = np.nonzero(aw < 0.5)[0]
+    kd = KDTree(len(trunk))
+    for i in trunk:
+        kd.insert(Vector(P[i]), int(i))
     kd.balance()
     th = ratios['thickness'] * M['w']
     o = _sheet(name, [(V, faces)], M, material, body, kd, rig, lift=0.0, thickness=th)

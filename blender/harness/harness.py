@@ -37,8 +37,35 @@ SHOULDERS = os.environ.get('HARNESS_NO_SHOULDERS') is None
 LAYER_GAP = drape.LAYER_GAP
 
 
+ARM_EXTRA = float(os.environ.get('HARNESS_ARM_EXTRA', '0.33'))   # the arms hang this much further out, in radians
+
+
+def swing_arms(extra):
+    """Both arms held further out from the body at the shoulder, by extra radians (about 19 degrees for 0.33). The
+    layers' side wall (shirt, gambeson, vest, plates) runs from the torso's side at 4.6 out to 6.3, across an arm that
+    hangs from 4.4 to 7.2; held out, the arm clears it and the sleeve is no longer caught under the breastplate.
+    The pose only: the body's own shape and every garment's draft (made on the rest shape) are as they were, so the
+    shirt's kept settled shape is still the one to use. Edits the shoulders' keyframes, every frame of them."""
+    for side, sgn in (('R', 1.0), ('L', -1.0)):
+        o = bpy.data.objects.get('Shoulder.' + side)
+        if o is None:
+            continue
+        o.rotation_euler[1] += sgn * extra
+        if o.animation_data and o.animation_data.action:
+            for fc in female._fcurves(o.animation_data.action):
+                if fc.data_path == 'rotation_euler' and fc.array_index == 1:
+                    for kp in fc.keyframe_points:
+                        kp.co[1] += sgn * extra
+                        kp.handle_left[1] += sgn * extra
+                        kp.handle_right[1] += sgn * extra
+                    fc.update()
+    bpy.context.scene.frame_set(1)
+    bpy.context.view_layer.update()
+
+
 def build():
     res = SP.build()
+    swing_arms(ARM_EXTRA)
     body = bpy.data.objects['Skin body']
     rig = bpy.data.objects.get('Rig')
     head = bpy.data.objects.get('Head')

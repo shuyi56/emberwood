@@ -99,9 +99,12 @@ class Shoulder:
         reach = (self.th <= math.radians(ratios['cop'] + ratios['curl']))[:, None] & (np.abs(self.al) <= math.radians(ratios['round_cop']))[None, :]
         # (and lifted only where something still comes through it, locally, not the whole dome by its worst point)
         rest = np.maximum(near - even, 0.0)
-        for _ in range(4):
-            rest = np.maximum(rest, fit._blur(fit._blur(rest, 2.5, 0, False), 3.5, 1, True))
-        self.R_cop = even + rest
+        for _ in range(6):
+            rest = np.maximum(rest, fit._blur(fit._blur(rest, 5.0, 0, False), 7.0, 1, True))
+        cop = even + rest
+        # (the rim toward the neck is smoothed once more, never below the even dome)
+        soft = fit._blur(fit._blur(cop, 3.0, 0, False), 4.0, 1, True)
+        self.R_cop = np.where(neckward, np.maximum(soft, even), cop)
         self.R_side = float(self.R[int(round(90.0 / D_TH)), int(round(180.0 / D_AL))])
 
     def radius(self, th, al, cop=False):
@@ -270,6 +273,35 @@ def raise_plates(S, log=print):
     return pieces, rivets
 
 
+def _smooth_weights(o, rounds):
+    """The skin weights averaged over the mesh's neighbours: the nearest skin flips between arm and chest from point to
+    point near the collar, and the plate's rim there came out hammered."""
+    me = o.data
+    n = len(me.vertices)
+    nb = [[] for _ in range(n)]
+    for e in me.edges:
+        a, b = e.vertices
+        nb[a].append(b)
+        nb[b].append(a)
+    groups = list(o.vertex_groups)
+    W = np.zeros((n, len(groups)))
+    for gi, g in enumerate(groups):
+        for i in range(n):
+            try:
+                W[i, gi] = g.weight(i)
+            except RuntimeError:
+                pass
+    for _ in range(rounds):
+        W2 = W.copy()
+        for i in range(n):
+            if nb[i]:
+                W2[i] = 0.5 * W[i] + 0.5 * W[nb[i]].mean(axis=0)
+        W = W2
+    for gi, g in enumerate(groups):
+        for i in range(n):
+            g.add([i], float(W[i, gi]), 'REPLACE')
+
+
 def build_spaulders(body, M, worn, rig=None, plate=None, name='Spaulder', ratios=RATIOS, log=print, sheet=None):
     """A spaulder on each shoulder of the body, over the garments `worn` (objects). sheet: a path to draw the flat
     blanks to (the left shoulder's)."""
@@ -279,13 +311,24 @@ def build_spaulders(body, M, worn, rig=None, plate=None, name='Spaulder', ratios
     for i, p in enumerate(P):
         kd.insert(Vector(p), i)
     kd.balance()
+    # (the lames hang from the arm: they take the arm's own skinning, whole. Taking the nearest skin's mixture of arm and
+    # chest, a lame's end by the armpit was stretched across the two when the arm was held out, into a flat plank.
+    # The cop, over the shoulder's top, keeps the mixture.)
+    arm_pts = np.nonzero(aw > 0.5)[0]
+    kd_arm = KDTree(len(arm_pts))
+    for i in arm_pts:
+        kd_arm.insert(Vector(P[i]), int(i))
+    kd_arm.balance()
     out = []
     for side, tag in ((1.0, 'L'), (-1.0, 'R')):
         S = Shoulder(P, aw, M, tree, side, ratios)
         pieces, rivets = raise_plates(S, log)
         t = ratios['plate'] * M['w']
-        out.append(fit._sheet('%s.%s' % (name, tag), pieces, M, plate, body, kd, rig, lift=0.0, thickness=t))
-        fit._sheet('%s rivets.%s' % (name, tag), rivets, M, plate, body, kd, rig, lift=0.0, thickness=0.0)
+        cop = fit._sheet('%s.%s' % (name, tag), pieces[:1], M, plate, body, kd, rig, lift=0.0, thickness=t)
+        _smooth_weights(cop, 12)
+        out.append(cop)
+        out.append(fit._sheet('%s lames.%s' % (name, tag), pieces[1:], M, plate, body, kd_arm, rig, lift=0.0, thickness=t))
+        fit._sheet('%s rivets.%s' % (name, tag), rivets, M, plate, body, kd_arm, rig, lift=0.0, thickness=0.0)
         bl = blanks(S)
         log('spaulder %s: centre (%.2f, %.2f, %.2f), radius %.2f at the side; blanks: %s' % (
             tag, *S.C, float(S.radius(np.array([math.pi / 2]), np.array([0.0]))[0]),
