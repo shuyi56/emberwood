@@ -12,6 +12,8 @@ The limits (CIE Lab, D65):
   - when the lightness gap is under 25, the hue gap must be 20 degrees or more (CLAUDE.md: a brown beside brown
     vanishes; separate by hue, not by value alone);
   - the grayscale view (relative luminance) must separate them by 6 of 100 or more;
+  - an accent (the eyelet rings) must stand out from the leather by dE 8 or more but by no more than the lace does
+    plus 2: a ring brighter than the lace takes the eye from the lacing;
   - a cord laid over a surface must be lighter than that surface's own shadow tone (its ramp's darkest) by 10 L, and
     not darker than its mid tone by more than 8 L: a dark cord in a dark opening reads as a black hole and
     darkens what is around it.
@@ -49,9 +51,11 @@ def hue_gap(a, b):
 
 
 # what touches what on the boot, and which parts are cords lying over a surface
-PAIRS = {'boot': [('boot leather', 'boot lace'), ('boot leather', 'boot eyelet'), ('boot lace', 'boot eyelet'),
+PAIRS = {'boot': [('boot leather', 'boot lace'), ('boot lace', 'boot eyelet'),
                   ('boot leather', 'boot thread'), ('boot leather', 'hose wool'), ('hose wool', 'skin'),
                   ('boot lace', 'hose wool')]}
+# an accent (the rings) sits tone on tone: it must read, but never pull the eye from the cord it frames
+ACCENTS = {'boot': [('boot eyelet', 'boot leather', 'boot lace')]}
 CORDS = {'boot': [('boot lace', 'boot leather')]}
 
 
@@ -89,6 +93,17 @@ def main():
         if Lc < Lm - 8:
             why.append('cord L %.0f is more than 8 darker than the surface\'s mid tone (%.0f)' % (Lc, Lm))
         cords.append((c, s, Lc, Ls, Lm, why)); bad += bool(why)
+    accents = []
+    for acc, base, main in ACCENTS[a.figure]:
+        eA, eM = float(np.linalg.norm(tone(acc) - tone(base))), float(np.linalg.norm(tone(main) - tone(base)))
+        why = []
+        if eA > eM + 2:
+            why.append('%s stands out from the %s (dE %.0f) more than the %s does (dE %.0f): it takes the eye from the %s' % (acc, base, eA, main, eM, main))
+        if eA < 8:
+            why.append('%s is nearly the %s (dE %.0f): it vanishes' % (acc, base, eA))
+        accents.append((acc, base, main, eA, eM, why)); bad += bool(why)
+    for acc, base, main, eA, eM, why in accents:
+        print('%-3s accent %-11s on %-12s dE %4.1f (the %s on it: %4.1f)  %s' % ('OK' if not why else 'BAD', acc, base, eA, main, eM, '; '.join(why)))
     for p, q, dL, dE, dH, why in rows:
         print('%-3s %-12s on %-12s dL %5.1f  dE %5.1f  hue gap %5.1f  %s' % ('OK' if not why else 'BAD', p, q, dL, dE, dH, '; '.join(why)))
     for c, s, Lc, Ls, Lm, why in cords:
