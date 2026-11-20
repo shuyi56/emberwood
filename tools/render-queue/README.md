@@ -280,7 +280,29 @@ right after the build, beside the geometry checks:
   texture-only or material-only re-run the same settled points, so it gets the same key and costs nothing.
 - **Measure without rendering:** `tools/render-queue/rq_views.py --figure F --mannequin --poses all --flow-only`
   builds, checks in every pose and renders nothing. `python3 rq_flow.py --selftest DIR` checks the metrics on
-  three test sleeves (smooth, a stretched patch, a seam drawn 10% short) outside Blender.
+  four test sleeves (smooth, a stretched patch, a seam drawn 10% short, a slit) and four lacings on a shin
+  (good, taut, flipped, sunk) outside Blender.
+
+### Lacework
+
+Any object whose name holds `lace` (the boot's `Boot lace.L/.R`) is checked as lacing instead of as cloth, against
+the cloth and the body under it. Each run of lace between two eyelets (one tube) is measured along its centre line:
+
+- **float / sink:** how far it stands off the surface it crosses, or sinks into it, in lace radii. A lace lifted
+  over another at a crossing stands 2 radii off, so the float limit is 3.
+- **contour:** the contour path is the chord between the run's eyelets laid on the surface (each point taken to
+  the surface and lifted by the lace's radius), the way a real lace lies over a shin. `dev` is how far the run
+  leaves it, `tension` its length over the contour's (under 0.97 it is shorter than the shape it crosses, so it
+  must cut through it; over 1.25 it is slack), and `arch` how far its middle rises over its chord against the
+  contour's (1 follows the curve, near 0 a straight taut lace across the shin).
+- **crossings:** where two runs cross, which one lies on top. It should be the same lace all the way up; `flips`
+  counts the crossings that disagree. `hits` counts crossings where the two runs pass through each other.
+
+The results are in `flow.json` under `laces`, with `<stem>-lace.png`: the lacing over clay in four views, each run
+dark when well inside its limits and on the strain ramp when near or past one, drawn thin where it runs under
+the surface, flagged runs ringed and numbered. The defaults are set from the self test's geometry; `--calibrate`
+widens them from approved laces (it reads `laces` from the flow files like the garments).
+
 
 ## Review before the queue
 

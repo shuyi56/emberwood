@@ -55,7 +55,7 @@ import time
 
 import numpy as np
 
-VERSION = 4
+VERSION = 5
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
@@ -530,7 +530,7 @@ def judge(S, lim):
     """Flags against the approved band: 'watch' past a limit, 'likely rejection' well past it."""
     flags, worst = [], 'ok'
     for k, v in lim.items():
-        if k in LAYER_LIMITS:
+        if k in LAYER_LIMITS or k in LACE_LIMITS:
             continue
         x = S.get(k)
         if x is None or v is None:
@@ -549,6 +549,283 @@ def judge(S, lim):
                               -(f['limit'] / max(f['value'], 1e-9) if f['metric'] in LOWER_IS_WORSE
                                 else f['value'] / max(f['limit'], 1e-9))))
     return flags, worst
+
+
+# ---------------------------------------------------------------------------------------------------- lacework
+
+LACE_NAMES = ('lace',)        # objects whose name holds one of these are lacing: checked as laces, not as cloth
+# float, sink and dev in the lace's own radii (a lace lifted over another at a crossing stands 2 radii off)
+LACE_LIMITS = {'lace_float_max': 3.0, 'lace_sink_max': 0.5, 'lace_dev_max': 3.0, 'lace_tension_min': 0.97,
+               'lace_slack_max': 1.25, 'lace_arch_min': 0.5, 'lace_flips': 0, 'lace_hits': 0}
+LACE_LOWER = ('lace_tension_min', 'lace_arch_min')
+
+
+def lace_segments(X, T, bins=16):
+    """A lace mesh's runs, each one tube (one connected part) between two eyelets: its centre line [k, 3] (the
+    tube's points binned along its own long axis, each bin's mean, ends included) and its radius."""
+    part = components(len(X), np.r_[T[:, 0], T[:, 1]], np.r_[T[:, 1], T[:, 2]])
+    out = []
+    for c in np.unique(part):
+        P = X[part == c]
+        if len(P) < 12:
+            continue
+        mu = P.mean(0)
+        _, _, vt = np.linalg.svd(P - mu, full_matrices=False)
+        t = (P - mu) @ vt[0]
+        edges = np.linspace(t.min(), t.max(), bins + 1)
+        k = np.clip(np.searchsorted(edges, t, side='right') - 1, 0, bins - 1)
+        C = np.array([P[k == i].mean(0) for i in range(bins) if (k == i).any()])
+        if len(C) < 3:
+            continue
+        A, B = C[:-1], C[1:]                  # (radius: each point's distance to the centre line's segments)
+        AB = B - A
+        t_ = np.clip(((P[:, None] - A[None]) * AB[None]).sum(2) / np.maximum((AB * AB).sum(1), 1e-12)[None], 0, 1)
+        Q = A[None] + t_[..., None] * AB[None]
+        rad = float(np.median(np.min(np.linalg.norm(P[:, None] - Q, axis=2), axis=1)))
+        out.append((C, rad))
+    return out
+
+
+def _len(P):
+    return float(np.linalg.norm(np.diff(P, axis=0), axis=1).sum())
+
+
+def lace_check(name, X, T, nearest, place=None, lim=None):
+    """How one lace object's runs lie on what they cross. nearest(p) -> (point on the surface, its normal outward)
+    or None, for the surfaces under the lace (the boot, the leg). Per run, along its centre line:
+      float / sink   how far the lace stands off the surface, or sinks into it (its gap: distance less its radius),
+                     in lace radii
+      dev            how far it leaves the contour path: the chord between its ends laid on the surface (each point
+                     of the chord taken to the surface and lifted by the lace's radius), which a lace drawn over a
+                     shin follows; a taut lace cuts straight across the curve and leaves it (in lace radii)
+      tension        its length over the contour path's: under 1 it is shorter than the surface it crosses, so it
+                     must cut into it; well over 1 it is slack
+      arch           how far its middle rises over its chord, over how far the contour path's does: 1 follows the
+                     curve, near 0 a straight taut lace across a curved shin
+    and over the runs: where two cross, the one on top (it should be the same lace all the way up: flips counts the
+    crossings that disagree), and hits, two runs passing through each other at a crossing."""
+    lim = dict(LACE_LIMITS, **(lim or {}))
+    segs = lace_segments(X, T)
+    runs = []
+    for C, rad in segs:
+        k = len(C)
+        s = np.linspace(0.0, 1.0, k)[:, None]
+        chord = (1 - s) * C[0] + s * C[-1]
+        gap, cont, nrm = np.zeros(k), np.zeros((k, 3)), np.zeros((k, 3))
+        ok = np.ones(k, bool)
+        for i in range(k):
+            a = nearest(C[i])
+            b = nearest(chord[i])
+            if a is None or b is None:
+                ok[i] = False
+                continue
+            loc, n_ = a
+            gap[i] = (float(np.dot(C[i] - loc, n_)) - rad) / max(rad, 1e-9)
+            cont[i] = b[0] + b[1] * rad
+            nrm[i] = b[1]
+        if ok.sum() < 3:
+            continue
+        ends = [i for i in (0, k - 1) if ok[i]]
+        if ends and np.mean([gap[i] for i in ends]) < -1.0:     # (a surface wound inward: its ends sit outside)
+            gap = -gap - 2.0
+            cont = cont - 2 * nrm * rad
+            nrm = -nrm
+            flip = -1.0
+        else:
+            flip = 1.0
+        inner = ok.copy()
+        inner[[0, -1]] = False            # (the ends sit in their eyelets)
+        dev = np.abs(((C - cont) * nrm).sum(1))[inner] / max(rad, 1e-9) if inner.any() else np.zeros(1)
+        Lc = _len(cont[ok])
+        mid = k // 2
+        sag_l = float(np.dot(C[mid] - chord[mid], nrm[mid]))
+        sag_c = float(np.dot(cont[mid] - chord[mid], nrm[mid]))
+        arch = sag_l / sag_c if abs(sag_c) > 0.5 * rad else 1.0
+        runs.append({'centre': C, 'radius': rad, 'float': float(max(gap[inner].max(), 0)) if inner.any() else 0.0,
+                     'sink': float(max(-gap[inner].min(), 0)) if inner.any() else 0.0, 'dev': float(dev.max()),
+                     'tension': _len(C) / max(Lc, 1e-9), 'arch': float(arch), 'mid': C[mid], 'len': _len(C),
+                     'flip': flip, 'normals': nrm})
+    # crossings: runs whose centre lines pass near each other away from their ends
+    flips, hits, crossings = 0, 0, []
+    d0 = (runs[0]['centre'][-1] - runs[0]['centre'][0]) if runs else np.zeros(3)
+    dirs = [np.sign(np.dot(r['centre'][-1] - r['centre'][0], d0)) or 1.0 for r in runs]
+    for i in range(len(runs)):
+        for j in range(i + 1, len(runs)):
+            A, B = runs[i]['centre'][3:-3], runs[j]['centre'][3:-3]
+            if not len(A) or not len(B):
+                continue
+            D = np.linalg.norm(A[:, None] - B[None], axis=2)
+            a, b = np.unravel_index(np.argmin(D), D.shape)
+            reach = 2 * (runs[i]['radius'] + runs[j]['radius'])
+            if D[a, b] > reach or dirs[i] == dirs[j]:
+                continue
+            p = 0.5 * (A[a] + B[b])
+            n_ = nearest(p)
+            if n_ is None:
+                continue
+            top = i if np.dot(A[a] - B[b], n_[1]) * runs[i]['flip'] > 0 else j
+            crossings.append((dirs[top], p))
+            if D[a, b] < 0.9 * (runs[i]['radius'] + runs[j]['radius']):     # (through each other, not touching)
+                hits += 1
+    if crossings:
+        main = np.sign(sum(d for d, _ in crossings)) or 1.0
+        flips = sum(1 for d, _ in crossings if d != main)
+    S = {'runs': len(runs), 'crossings': len(crossings), 'lace_flips': int(flips), 'lace_hits': int(hits)}
+    if runs:
+        S.update(lace_float_max=_r(max(r['float'] for r in runs)), lace_sink_max=_r(max(r['sink'] for r in runs)),
+                 lace_dev_max=_r(max(r['dev'] for r in runs)), lace_tension_min=_r(min(r['tension'] for r in runs)),
+                 lace_slack_max=_r(max(r['tension'] for r in runs)), lace_arch_min=_r(min(r['arch'] for r in runs)),
+                 radius=_r(float(np.median([r['radius'] for r in runs])), 4))
+    # each run judged: its worst trouble, as a share of its limit
+    spots = []
+    for n, r in enumerate(runs):
+        why = []
+        if r['float'] > lim['lace_float_max']:
+            why.append(f"floats {r['float']:.1f} lace radii off the surface")
+        if r['sink'] > lim['lace_sink_max']:
+            why.append(f"sinks {r['sink']:.1f} lace radii into it")
+        if r['tension'] < lim['lace_tension_min']:
+            why.append(f"taut: {r['tension']:.3f} of the contour's length, so it cuts across the shape")
+        if r['tension'] > lim['lace_slack_max']:
+            why.append(f"slack: {r['tension']:.2f} of the contour's length")
+        if r['dev'] > lim['lace_dev_max']:
+            why.append(f"leaves the contour by {r['dev']:.1f} lace radii")
+        if r['arch'] < lim['lace_arch_min']:
+            why.append(f"straight across the curve (arch {r['arch']:.2f} of the surface's)")
+        r['bad'] = max(r['float'] / max(lim['lace_float_max'], 1e-6), r['sink'] / max(lim['lace_sink_max'], 1e-6),
+                       r['dev'] / max(lim['lace_dev_max'], 1e-6),
+                       (1 - r['tension']) / max(1 - lim['lace_tension_min'], 1e-6),
+                       (1 - r['arch']) / max(1 - lim['lace_arch_min'], 1e-6))
+        if why:
+            spots.append({'run': n, 'at': [round(float(x), 2) for x in r['mid']], 'where': place(r['mid']) if place else None,
+                          'why': '; '.join(why), 'bad': round(float(r['bad']), 2)})
+    spots.sort(key=lambda x: -x['bad'])
+    for i, sp in enumerate(spots):
+        sp['n'] = i + 1
+    S['spots'] = spots[:8]
+    flags, worst = [], 'ok'
+    for k, v in lim.items():
+        x = S.get(k)
+        if x is None:
+            continue
+        low = k in LACE_LOWER
+        if (x < v) if low else (x > v):
+            far = (x < v - 2 * (1 - v)) if low else (x > (v * 1.5 if v else 1))
+            lvl = 'likely rejection' if far else 'watch'
+            flags.append({'metric': k, 'value': x, 'limit': v, 'level': lvl})
+            worst = lvl if lvl == 'likely rejection' or worst == 'ok' else worst
+    S['flags'], S['verdict'] = flags, worst
+    return S, runs
+
+
+def lace_heatmap(surf, laces, path, lim, panel=320):
+    """The lacing over the clay surfaces it crosses, in the four views, framed on the lacing: each run coloured by
+    its worst trouble as a share of its limit (the strain ramp: 1.0 at the limit), flagged runs ringed and numbered
+    as in flow.json's laces. surf: [(X, tris)]; laces: [(name, S, runs)]."""
+    from PIL import Image, ImageDraw
+    allC = np.concatenate([r['centre'] for _, _, runs in laces for r in runs])
+    lo, hi = allC.min(0) - 1.0, allC.max(0) + 1.0
+    cx, cy, cz = 0.5 * (lo + hi)
+    span = max(hi[2] - lo[2], np.linalg.norm(hi[:2] - lo[:2])) * 1.05
+    k = (panel - 20) / max(span, 1e-6)
+    W, H = panel * len(VIEWS) + 160, panel + 40
+    sheet = Image.new('RGB', (W, H), BG)
+    d = ImageDraw.Draw(sheet)
+    d.text((8, 6), 'lacing: runs near or past a limit coloured by their worst trouble / limit (dark: well inside); '
+                   'thin: under the surface; rings: flagged runs', fill=INK)
+    P = np.concatenate([X[T] for X, T in surf]) if surf else np.zeros((0, 3, 3))
+    for vi, (vname, ang) in enumerate(VIEWS):
+        a = math.radians(ang)
+
+        def proj(Q):
+            xr = (Q[..., 0] - cx) * math.cos(a) + (Q[..., 1] - cy) * math.sin(a)
+            yr = -(Q[..., 0] - cx) * math.sin(a) + (Q[..., 1] - cy) * math.cos(a)
+            return np.stack([panel / 2 + xr * k, panel / 2 + (cz - Q[..., 2]) * k], -1), yr
+        if len(P):
+            P2, dep = proj(P)
+            keep = ((P2[..., 0] > -20) & (P2[..., 0] < panel + 20) & (P2[..., 1] > -20) & (P2[..., 1] < panel + 20)).any(1)
+            ids = _ids(P2[keep], dep[keep].mean(1), panel, panel)
+            nrm = np.cross(P[keep][:, 1] - P[keep][:, 0], P[keep][:, 2] - P[keep][:, 0])
+            nrm /= np.maximum(np.linalg.norm(nrm, axis=1), 1e-12)[:, None]
+            nx = nrm[:, 0] * math.cos(a) + nrm[:, 1] * math.sin(a)
+            ny = -nrm[:, 0] * math.sin(a) + nrm[:, 1] * math.cos(a)
+            lit = 0.55 + 0.45 * np.abs(-0.45 * nx - 0.8 * ny + 0.4 * nrm[:, 2])
+            col = np.array(CLAY, float)[None] * lit[:, None]
+            img = _paint(ids, col)
+            zbuf = np.full(ids.shape, np.inf)
+            okp = ids >= 0
+            zbuf[okp] = dep[keep].mean(1)[ids[okp]]
+        else:
+            img = np.zeros((panel, panel, 3), np.uint8) + np.array(BG, np.uint8)
+            zbuf = np.full((panel, panel), np.inf)
+        tile = Image.fromarray(img)
+        td = ImageDraw.Draw(tile)
+        rings = []
+        for name, S, runs in laces:
+            flagged = {sp['run']: sp['n'] for sp in S['spots']}
+            for n, r in enumerate(runs):
+                q, dq = proj(r['centre'])
+                c = tuple(int(v) for v in ramp(np.array([r['bad']]))[0]) if r['bad'] >= 0.8 else (60, 52, 44)
+                away = -r['normals'][:, 0] * math.sin(a) + r['normals'][:, 1] * math.cos(a) > 0.15
+                pts, under = [], []
+                for (u, v), z, aw in zip(q, dq, away):
+                    iu, iv = int(u), int(v)
+                    under.append(0 <= iu < panel and 0 <= iv < panel and zbuf[iv, iu] < z - 0.25)
+                    pts.append(None if aw else (float(u), float(v)))
+                for i, (p0, p1) in enumerate(zip(pts, pts[1:])):
+                    if p0 and p1:       # (a lace sunk under the surface it crosses: drawn thin through it)
+                        td.line((p0, p1), fill=c, width=1 if under[i] and under[i + 1] else 3)
+                if n in flagged and pts[len(pts) // 2]:
+                    u, v = pts[len(pts) // 2]
+                    near = [g for g in rings if abs(g[0] - u) < 10 and abs(g[1] - v) < 10]
+                    if near:            # (two runs flagged at one crossing: one ring, both numbers)
+                        near[0][2].append(flagged[n])
+                    else:
+                        rings.append((u, v, [flagged[n]], tag(name)))
+        for u, v, ns, tg in rings:
+            td.ellipse((u - 8, v - 8, u + 8, v + 8), outline=RING, width=2)
+            td.text((u + 10, v - 6), tg + ','.join(str(x) for x in sorted(ns)), fill=RING)
+        sheet.paste(tile, (vi * panel, 30))
+        d.text((vi * panel + 6, 18), vname, fill=INK)
+    lx, ly = panel * len(VIEWS) + 8, H - 34
+    for i in range(120):
+        d.line((lx + i, ly, lx + i, ly + 10), fill=tuple(int(v) for v in ramp(np.array([i / 80.0]))[0]))
+    d.text((lx, ly + 12), '0       1.0 = limit  1.5', fill=INK)
+    sheet.save(path)
+    return path
+
+
+def _bvh_nearest(geoms, reach=1.5):
+    """nearest(p) over several surfaces (mathutils BVH trees): the closest point on any, and its normal."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+    trees = [BVHTree.FromPolygons([tuple(p) for p in X], [tuple(int(i) for i in t) for t in T]) for X, T in geoms]
+
+    def nearest(p):
+        best = None
+        for tr in trees:
+            loc, nrm, _, dist = tr.find_nearest(Vector(p), reach)
+            if loc is not None and (best is None or dist < best[2]):
+                best = (np.array(loc), np.array(nrm), dist)
+        return None if best is None else (best[0], best[1])
+    return nearest
+
+
+def _mesh(o, dg):
+    ev = o.evaluated_get(dg)
+    me = ev.to_mesh()
+    try:
+        me.calc_loop_triangles()
+        n, m = len(me.vertices), len(me.loop_triangles)
+        X = np.empty(n * 3)
+        me.vertices.foreach_get('co', X)
+        Mw = np.array(ev.matrix_world)
+        X = X.reshape(-1, 3) @ Mw[:3, :3].T + Mw[:3, 3]
+        T = np.empty(m * 3, np.int64)
+        me.loop_triangles.foreach_get('vertices', T)
+        return X, T.reshape(-1, 3)
+    finally:
+        ev.to_mesh_clear()
 
 
 # ---------------------------------------------------------------------------------------------------- the band
@@ -930,7 +1207,7 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     import bpy
     t = time.time()
     lim, src = limits(pose)
-    lim = dict(LAYER_LIMITS, **lim)
+    lim = dict(LAYER_LIMITS, **dict(LACE_LIMITS, **lim))
     place = body_places(female) if female is not None else None
     off = []
     for o in objects:
@@ -942,8 +1219,11 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     dg = bpy.context.evaluated_depsgraph_get()
     rep = {'version': VERSION, 'pose': pose, 'limits': lim, 'limits_from': os.path.basename(src) if src else 'defaults',
            'garments': {}, 'skipped': {}}
-    items, geoms = [], []
+    items, geoms, lace_obs = [], [], []
     for o in objects:
+        if any(k in o.name.lower() for k in LACE_NAMES):
+            lace_obs.append(o)
+            continue
         try:
             g = collect(o, dg)
             if g is None:
@@ -971,10 +1251,39 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
         md.show_viewport = True
     if off:
         bpy.context.view_layer.update()
+    off = []
+    if lace_obs:
+        try:
+            # (the surfaces the lace lies on as rendered, thickness included: the lace sits on the leather's face)
+            dg = bpy.context.evaluated_depsgraph_get()
+            surf = [_mesh(bpy.data.objects[g[0]], dg) if g[0] in bpy.data.objects else (g[1], g[2]) for g in geoms]
+            body = bpy.data.objects.get('Skin body')
+            if body is not None:
+                surf.append(_mesh(body, dg))
+            nearest = _bvh_nearest(surf)
+            laces = []
+            rep['laces'] = {}
+            for o in lace_obs:
+                X, T = _mesh(o, dg)
+                S, runs = lace_check(o.name, X, T, nearest, place, {k: lim[k] for k in LACE_LIMITS if k in lim})
+                rep['laces'][o.name] = S
+                rep['skipped'].pop(o.name, None)
+                laces.append((o.name, S, runs))
+            if laces and (heat == 'always' or any(S['verdict'] != 'ok' for _, S, _ in laces)):
+                lb = [sf for g, sf in zip(geoms, surf) if not g[0].lower().startswith(('hose',))]
+                rep['lace_heatmap'] = os.path.basename(lace_heatmap(lb or surf, laces,
+                                                                    os.path.join(out, stem + '-lace.png'), lim))
+        except Exception as e:
+            rep['laces_error'] = f'{type(e).__name__}: {e}'
+    for md in off:
+        md.show_viewport = True
+    if off:
+        bpy.context.view_layer.update()
     order = {'ok': 0, 'watch': 1, 'likely rejection': 2}
     # (the layer check is reported but not yet in the verdict: on the riding habit it reads hems and floors as pokes;
     # it joins the verdict once it is calibrated against renders where a layer really comes through)
-    rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] or ['ok'], key=order.get)
+    rep['verdict'] = max([S['verdict'] for S in rep['garments'].values()] +
+                         [S['verdict'] for S in rep.get('laces', {}).values()] or ['ok'], key=order.get)
     if items and (heat == 'always' or rep['verdict'] != 'ok'):
         try:
             rep['heatmap'] = os.path.basename(heatmap(items, os.path.join(out, stem + '-heat.png'), lim,
@@ -1055,6 +1364,11 @@ def line(rep):
         sp = next((p for p in S['spots'] if p.get('where')), None)
         bits.append(f"{name} {S['verdict']}: {f['metric']} {f['value']} (limit {f['limit']})"
                     + (f", worst at the {sp['where']} ({sp['hint']})" if sp else ''))
+    for name, S in rep.get('laces', {}).items():
+        if S['verdict'] != 'ok':
+            sp = S['spots'][0] if S['spots'] else {}
+            bits.append(f"{name} {S['verdict']}: " + (f"run {sp.get('n')} at the {sp.get('where')}: {sp.get('why')}"
+                                                       if sp else ', '.join(f['metric'] for f in S['flags'])))
     for r in rep.get('layers', [])[:0]:
         if r['verdict'] != 'ok':
             sp = r['spots'][0] if r['spots'] else {}
@@ -1093,6 +1407,68 @@ def _sleeve(n_u=48, n_v=40, r=2.2, length=16.0, bump=0.0, short_seam=0.0, slit=F
     return X, np.array(tris), np.array(ref, float)
 
 
+def _tube(C, rad, sides=6):
+    """A closed tube round the centre line C [k, 3] (the self test's laces)."""
+    V, F = [], []
+    for i, c in enumerate(C):
+        t = C[min(i + 1, len(C) - 1)] - C[max(i - 1, 0)]
+        t = t / max(np.linalg.norm(t), 1e-12)
+        u = np.cross(t, [0.0, 0.0, 1.0])
+        u = u / max(np.linalg.norm(u), 1e-12)
+        v = np.cross(t, u)
+        for a in np.linspace(0, 2 * np.pi, sides, endpoint=False):
+            V.append(c + rad * (np.cos(a) * u + np.sin(a) * v))
+    k = len(C)
+    for i in range(k - 1):
+        for j in range(sides):
+            a, b = i * sides + j, i * sides + (j + 1) % sides
+            F += [(a, b, b + sides), (a, b + sides, a + sides)]
+    return np.array(V), np.array(F)
+
+
+def _shin_lacing(kind, R=2.2, rad=0.06, levels=4, half=math.radians(35), dz=1.0, k=24):
+    """Criss-cross lacing on a cylinder 'shin' (axis z, front -y as the figure's), and the cylinder's nearest(). kind:
+      good     every run on the curve, the runs going one way lifted over the others at the crossings
+      taut     every run a straight chord between its eyelets, cutting across the curve
+      flipped  as good, but which lace lies on top changes from one crossing to the next
+      sunk     as good, but sunk 0.7 radii into the shin"""
+    V, F = [], []
+    for lv in range(levels):
+        z0 = lv * dz
+        for sgn in (1, -1):
+            s = np.linspace(0, 1, k)
+            th = sgn * (-half + 2 * half * s)
+            top = sgn == 1 if kind != 'flipped' else (sgn == 1) == (lv % 2 == 0)
+            rho = R + rad + (2.2 * rad * np.exp(-((s - 0.5) / 0.12) ** 2) if top else 0.0)
+            if kind == 'sunk':
+                rho = rho - 0.7 * rad
+            C = np.stack([rho * np.sin(th), -rho * np.cos(th), z0 + dz * s], 1)
+            if kind == 'taut':
+                C = (1 - s)[:, None] * C[0] + s[:, None] * C[-1]
+            v, f = _tube(C, rad)
+            F.append(f + sum(len(x) for x in V))
+            V.append(v)
+
+    def nearest(p):
+        q = np.array([p[0], p[1], 0.0])
+        n = q / max(np.linalg.norm(q), 1e-12)
+        return np.array([R * n[0], R * n[1], p[2]]), n
+    return np.concatenate(V), np.concatenate(F), nearest
+
+
+def _cylinder(R=2.2, z0=-0.5, z1=4.5, n=48, m=20):
+    a = np.linspace(-0.9, 0.9, n)
+    z = np.linspace(z0, z1, m)
+    A, Z = np.meshgrid(a, z, indexing='ij')
+    X = np.stack([R * np.sin(A), -R * np.cos(A), Z], -1).reshape(-1, 3)
+    T = []
+    for i in range(n - 1):
+        for j in range(m - 1):
+            q = i * m + j
+            T += [(q, q + m, q + m + 1), (q, q + m + 1, q + 1)]
+    return X, np.array(T)
+
+
 def selftest(out):
     """Four sleeves: a smooth one (the approved band is calibrated from it), one with a stretched patch, one whose
     seam edges were drawn 10% apart on the pattern, and one with a slit. The smooth one must pass, the others be
@@ -1115,6 +1491,23 @@ def selftest(out):
     assert res['peak']['peaks'] >= 1 and res['peak']['verdict'] != 'ok', res['peak']['flags']
     assert res['seam']['seam_mismatch_pct'] > 5 and res['seam']['verdict'] != 'ok', res['seam']['seams']
     assert res['slit']['holes'] == 1 and res['slit']['verdict'] != 'ok', res['slit']['openings']
+    # the lacing on a shin: the good lacing must pass, the taut, flipped and sunk ones be flagged
+    lres, laces = {}, []
+    for n, kind in enumerate(('good', 'taut', 'flipped', 'sunk')):
+        X, T, nearest = _shin_lacing(kind)
+        S, runs = lace_check(kind, X, T, nearest)
+        lres[kind] = S
+        print('lace', kind, S['verdict'], {k: S.get(k) for k in LACE_LIMITS}, flush=True)
+        if kind in ('good', 'taut'):
+            laces.append((kind, S, runs))
+    lace_heatmap([_cylinder()], laces[:1], os.path.join(out, 'selftest-lace-good.png'), LACE_LIMITS)
+    lace_heatmap([_cylinder()], laces[1:], os.path.join(out, 'selftest-lace-taut.png'), LACE_LIMITS)
+    assert lres['good']['verdict'] == 'ok' and lres['good']['crossings'] == 4, lres['good']
+    assert lres['taut']['lace_arch_min'] < 0.2 and lres['taut']['lace_tension_min'] < 0.97, lres['taut']
+    assert lres['taut']['verdict'] != 'ok', lres['taut']['flags']
+    assert lres['flipped']['lace_flips'] == 2 and lres['flipped']['verdict'] != 'ok', lres['flipped']
+    assert lres['sunk']['lace_sink_max'] > 0.5 and lres['sunk']['verdict'] != 'ok', lres['sunk']['flags']
+    res['laces'] = lres
     json.dump({'limits': lim, 'results': res}, open(os.path.join(out, 'selftest.json'), 'w'), indent=1)
     print('self test passed', flush=True)
 
@@ -1129,13 +1522,15 @@ def main():
     elif '--calibrate' in a:
         i = a.index('--calibrate')
         dst, srcs = a[i + 1], a[i + 2:]
-        by_pose, per, lay = {}, {}, {}
+        by_pose, per, lay, lac = {}, {}, {}, {}
         for p in srcs:
             rep = json.load(open(p))
             reps = rep['poses'].items() if 'poses' in rep else [(rep.get('pose', 'rest'), rep)]
             for pose, r in reps:
                 for x in r.get('layers', []):
                     lay.setdefault(pose, []).append(x)
+                for S in r.get('laces', {}).values():
+                    lac.setdefault(pose, []).append(S)
                 for name, S in r['garments'].items():
                     by_pose.setdefault(pose, {})[name + ' / ' + os.path.basename(os.path.dirname(os.path.abspath(p)))] = S
                     per.setdefault(pose, {})[name] = {k: S.get(k) for k in DEFAULT_LIMITS}
@@ -1150,6 +1545,18 @@ def main():
             if pose in poses:
                 poses[pose]['poke_pct'] = round(max(LAYER_LIMITS['poke_pct'], MARGIN * max(x['poke_pct'] for x in xs)), 3)
                 poses[pose]['poke_max'] = round(max(LAYER_LIMITS['poke_max'], MARGIN * max(x['poke_max'] for x in xs)), 3)
+        for pose, xs in lac.items():          # (the lacing's band: the approved laces' worst, with the margin)
+            band = poses.setdefault(pose, dict(poses.get('rest', {})))
+            for k, v in LACE_LIMITS.items():
+                got = [S[k] for S in xs if S.get(k) is not None]
+                if not got:
+                    continue
+                if k in LACE_LOWER:
+                    band[k] = round(min(v, min(got) - (1 - min(got)) * (MARGIN - 1) - 0.01), 3)
+                elif k in ('lace_flips', 'lace_hits'):
+                    band[k] = max(v, max(got))
+                else:
+                    band[k] = round(max(v, MARGIN * max(got)), 3)
         # (every approved garment judged again on the band it made: none may be flagged but on its outlier metrics)
         for pose, g in by_pose.items():
             for name, S in g.items():
