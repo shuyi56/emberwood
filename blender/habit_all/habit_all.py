@@ -58,6 +58,10 @@ DYE = int(os.environ.get('HABIT_DYE', '121621'), 16)
 # they read as black lines; set here to the sleeves' spacing (units are 2.62 cm: 0.115 = 3 mm), on the skirt's own
 # sewing module: {(piece, module): {NAME: value}}.
 OVERRIDES = {('skirt', 'sew'): {'STITCH': 0.115, 'GAP': 0.046, 'THREAD': 0.022}}
+# (only above this height, in units: the petticoat's flounce and tucks are wider than the skirt's own hem pattern, and fitted
+# over them the skirt's surface outran its pieces and opened in long slits. The back's gathers at the waist, which stand
+# out through the skirt, are above it.)
+SKIRT_OVER_ZMIN = float(os.environ.get('HABIT_UNDER_ZMIN', '28'))
 SHARED = ('sorceress_pendant', 'shared', 'base')
 PIECE_DIRS = tuple(os.path.join(ROOT, p) + os.sep for p in {d for _, _, ds in ORDER for d in ds} | {'corset', 'gown'})
 
@@ -109,8 +113,10 @@ class Piece:
                     sys.path.remove(d)
 
 
-def _points(prefixes):
-    """The worn layers' points in world space, as they stand now (the rig, the modifiers)."""
+def _points(prefixes, zmin=-1e9):
+    """The worn layers' points in world space: the evaluated mesh (the rig and the modifiers) of the layers that are not
+    cloth the solver laid at rest (the corset), and the bare mesh of the rest (the petticoat: evaluating its thickness and
+    subdivision made a mesh several times larger that Blender then kept, and the render ran out of memory)."""
     import bpy
     import numpy as np
     dg = bpy.context.evaluated_depsgraph_get()
@@ -118,22 +124,27 @@ def _points(prefixes):
     for o in bpy.data.objects:
         if o.type != 'MESH' or o.hide_render or not o.name.startswith(tuple(prefixes)):
             continue
-        e = o.evaluated_get(dg)
-        me = e.to_mesh()
-        co = np.empty(len(me.vertices) * 3)
-        me.vertices.foreach_get('co', co)
         mw = np.array(o.matrix_world)
-        out.append(co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3])
-        e.to_mesh_clear()
+        if o.name.startswith('Petticoat'):
+            co = np.empty(len(o.data.vertices) * 3)
+            o.data.vertices.foreach_get('co', co)
+        else:
+            e = o.evaluated_get(dg)
+            me = e.to_mesh()
+            co = np.empty(len(me.vertices) * 3)
+            me.vertices.foreach_get('co', co)
+            e.to_mesh_clear()
+        P = co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3]
+        out.append(P[P[:, 2] >= zmin])
     return np.concatenate(out)
 
 
 def _fit_over_layers(self):
     """The skirt module's make_skirt, handed what lies under it, so its draft clears it."""
     make, draft = self.mod.make_skirt, self.mod.draft
-    pts = _points(SKIRT_OVER)
+    pts = _points(SKIRT_OVER, SKIRT_OVER_ZMIN)
     pts = pts[::max(1, len(pts) // 40000)]            # (its sections need an outline, not every point: 570 000 of them ran out of memory)
-    print('habit_all: the skirt fitted over %d points of %s' % (len(pts), ', '.join(SKIRT_OVER)), flush=True)
+    print('habit_all: the skirt fitted over %d points of %s above z %.0f' % (len(pts), ', '.join(SKIRT_OVER), SKIRT_OVER_ZMIN), flush=True)
     self.mod.make_skirt = lambda body, rig, M, **kw: make(body, rig, M, under=draft.under_body(pts), **kw)
 
 
