@@ -401,105 +401,34 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         p = by[q + ' shaft']
         g = p['start'] + p['eyelets']
         rows[q] = (X[g] + Nv[g] * tl, Nv[g])
-    # hand-punched, not stepped off by a machine: each eyelet sits a little off its place along the edge and in from
-    # it, and the rings differ a little in size
-    side_ = o.name.rsplit('.', 1)[-1]
-    rng = np.random.default_rng(sum(map(ord, side_)) + 17)
-    pitch = r['eyelet_pitch']
-    R = r['eyelet']
-    for q in rows:
-        P, N = rows[q]
-        P = P.copy()
-        for k in range(len(P)):
-            t = P[min(k + 1, len(P) - 1)] - P[max(k - 1, 0)]
-            t /= max(np.linalg.norm(t), 1e-9)
-            u = np.cross(N[k], t)
-            P[k] = P[k] + t * rng.normal(0, 0.03 * pitch) + u * rng.normal(0, 0.10 * R) * (1 if q == 'outer' else -1)
-        Ns_ = np.array([N[max(0, k - 2):k + 3].mean(0) for k in range(len(N))])     # (the row's normals smoothed: a
-        N = Ns_ / np.maximum(np.linalg.norm(Ns_, axis=1, keepdims=True), 1e-9)       # vertex normal alone is noisy)
-        rows[q] = (P, N)
-    sizes = {q: R * (1 + rng.normal(0, 0.05, len(rows[q][0]))) for q in rows}
     # the eyelets: rings lying on the leather, a tube round the hole
+    R, tube = r['eyelet'], 0.32 * r['eyelet']
     ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
     EV, EF = [], []
-    for q, (P, N) in rows.items():
-        for c, nrm, Rk in zip(P, N, sizes[q]):
-            tube = 0.32 * Rk
+    for P, N in rows.values():
+        for c, nrm in zip(P, N):
             u = np.cross(nrm, [0.0, 0.0, 1.0])
             u /= max(np.linalg.norm(u), 1e-9)
-            path = c[None, :] + (Rk - tube) * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * np.cross(nrm, u))
+            path = c[None, :] + (R - tube) * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * np.cross(nrm, u))
             path = np.concatenate([path, path[:1]]) + nrm * 0.4 * tube
             v, f = _tube(path, tube, 8, ring=True)
             EF += [[i + len(EV) for i in ff] for ff in f]
             EV += list(v)
     eyelets = _on_boot(o, np.array(EV), EF, o.name.replace('Boot', 'Boot eyelets'), metal, rig)
-    # the lace: a cord that goes down into each hole, crosses the opening to the next hole up on the other side
-    # (one strand over the other at every crossing, as it is threaded), with its own slack and a width that varies
-    from mathutils.bvhtree import BVHTree
-    tree = BVHTree.FromPolygons([tuple(v) for v in X], [tuple(p.vertices) for p in o.data.polygons])
-
-    def onto(p, off):
-        hit = tree.find_nearest(tuple(p))
-        if hit[0] is None:
-            return p
-        nrm = np.array(hit[1])
-        out = Nv[list(o.data.polygons[hit[2]].vertices)].mean(axis=0)      # (the side the leather's normals face)
-        if nrm @ out < 0:
-            nrm = -nrm
-        return np.array(hit[0]) + nrm * (off + tl)       # (the leather's face: its sheet and its thickness)
-
+    # the lace: from each eyelet across the opening to the next one up on the other side, criss-cross, lying over
+    # the tongue between them
     (Pi, Ni), (Po, No) = rows['inner'], rows['outer']
     LV, LF = [], []
-
-    def strand(path, rad):
-        v, f = _tube(path, np.asarray(rad)[:, None, None] if np.ndim(rad) else rad, 8)
-        LF.extend([[i + len(LV) for i in ff] for ff in f])
-        LV.extend(list(v))
-
     n = min(len(Pi), len(Po))
-    rl = r['lace']
-    s = np.linspace(0.0, 1.0, 13)[:, None]
     for k in range(n - 1):
-        for j, ((A, NA), (B, NB)) in enumerate((((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])),
-                                                 ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1])))):
-            slack = rng.uniform(0.0, 0.6) * rl
-            # the cord is drawn from hole to hole along the leather's own curve: a Hermite curve that leaves each
-            # hole along the surface there (so it arches over the shin as the contour does, not across the chord),
-            # a cord's width over it; at every crossing the same strand lies on top, a full cord over the other
-            d = B - A
-            tA = d - NA * (d @ NA)
-            tB = d - NB * (d @ NB)
-            h00, h10, h01, h11 = 2 * s ** 3 - 3 * s ** 2 + 1, s ** 3 - 2 * s ** 2 + s, -2 * s ** 3 + 3 * s ** 2, s ** 3 - s ** 2
-            path = h00 * A + h10 * tA + h01 * B + h11 * tB
-            Ns = (1 - s) * NA + s * NB
-            Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
-            w = np.minimum(1.0, 6 * np.minimum(s[:, 0], 1 - s[:, 0]))[:, None]        # (down into the hole at each end)
-            bump = np.sin(np.pi * s) ** 2
-            lift = rl * (0.95 + 0.1 * w) + slack * np.sin(np.pi * s) + (2.7 * rl * bump if j == 0 else 0.0)
-            path = path + Ns * lift
-            wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
-            ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
-            strand(path, rl * wob * ends * (1.05 if j == 0 else 1.0))
-    # the top: the two ends come out of the top holes and hang loose, long, one over the other, curving over the
-    # panels and the foot's top as the leather does
-    A, NA, B, NB = Pi[n - 1], Ni[n - 1], Po[n - 1], No[n - 1]
-    nn = 0.5 * (NA + NB)
-    nn /= np.linalg.norm(nn)
-    es = (B - A) / max(np.linalg.norm(B - A), 1e-9)
-    et = np.cross(nn, es)
-    et *= 1.0 if et[2] > 0 else -1.0
-    for sd, P_, N_, Lk in ((-1, A, NA, 3.2), (1, B, NB, 4.4)):
-        tt = np.linspace(0, 1, 40)
-        Lc = Lk * pitch
-        pts = []
-        for x in tt:
-            q = P_ + sd * es * (0.7 * Lc * x * (1 - 0.4 * x) + 0.08 * Lc * np.sin(3.1 * x)) - et * (Lc * x ** 1.1) \
-                + 0.5 * rl * np.sin(9 * x) * es
-            pts.append(onto(q, rl * 1.3 + 0.6 * rl * np.sin(np.pi * x)) if x > 0.04 else P_ - N_ * 0.8 * rl)
-        pts = np.array(pts)
-        for _ in range(3):
-            pts[2:-2] = 0.25 * pts[1:-3] + 0.5 * pts[2:-2] + 0.25 * pts[3:-1]
-        strand(pts, rl * 1.15 * (1 - 0.08 * tt))
+        for (A, NA), (B, NB) in (((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])), ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1]))):
+            s = np.linspace(0.0, 1.0, 9)[:, None]
+            up = 0.5 * (NA + NB)
+            mid = 0.5 * (A + B) + up * (r['lace'] * 0.5)              # (drawn tight: flat over the tongue)
+            path = (1 - s) ** 2 * (A + NA * r['lace']) + 2 * s * (1 - s) * mid + s ** 2 * (B + NB * r['lace'])
+            v, f = _tube(path, r['lace'])
+            LF += [[i + len(LV) for i in ff] for ff in f]
+            LV += list(v)
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
