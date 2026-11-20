@@ -71,3 +71,11 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   `drape.LAYER_GAP` off the gambeson's outside on the posed body (`drape.clear_of`, geometry, no solver). A cloth
   settle collides with a garment's thin sheet; its thickness is added after, so check with `spots.py`, which counts
   free cloth lying inside the outer garment's thickness as well as held cloth through it.
+
+## Contours before renders
+
+- After any solver run, and before any render, look at the contours of the result: level cuts at several heights,
+  the front and side profiles (`blender/base/contours.py`), and a bend or strain map on the flat pattern (the
+  sleeve's: `SLEEVE_STRAIN=path`). A shaded render hides what an outline shows.
+- An outline that is perfectly round, stepped or kinked has a cause: fix the cause first, then render.
+- Show the contour sheet with the result.
