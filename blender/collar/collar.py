@@ -17,12 +17,16 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 
+# The proportions are measured off John's reference photo (an 1890s habit on a form, 3/4 view), against the form's
+# neck half-width (the w here): the stand about 0.6 w at the back, the fall about 0.75 w over the shoulder and about
+# 1 w at the points, the points nearly square; the lapel small, the opening breaking about 1.1 w below the neck at the
+# top button, the notch about square, and the lapel's point a little shorter than the collar's.
 RATIOS = dict(
-    stand=0.75,            # the stand's height (neck edge to the roll line), in w
-    fall_back=0.60,        # the fall's depth at the back, in w
-    fall_front=1.20,       # the fall's depth at the points
-    notch=0.70,            # the slant of the front end: the point stands this far past its foot at the neck edge, in w
-    gap=0.90,              # the open gap between the two front ends at the neck edge, in w
+    stand=0.65,            # the stand's height (neck edge to the roll line), in w
+    fall_back=0.75,        # the fall's depth at the back, in w
+    fall_front=0.70,       # the fall's depth at the points
+    notch=0.35,            # the slant of the front end: the point stands this far past its foot at the neck edge, in w
+    gap=0.80,              # the open gap between the two front ends at the neck edge, in w
     lean=0.18,             # how far the stand leans in toward the neck, as a share of its height
     spacing=0.075,         # the grid's point spacing, in w
 )
@@ -102,7 +106,7 @@ def draft(E, M, R=RATIOS):
     remap = -np.ones(len(pts), int)
     remap[used] = np.arange(len(used))
     pts, T = pts[used], remap[T]
-    return dict(UV=pts, T=T, L=L, stand=st, idx=idx, arc=arc, s0=-0.5 * L)
+    return dict(UV=pts, T=T, L=L, stand=st, idx=idx, arc=arc, s0=-0.5 * L, smax=smax)
 
 
 SETTINGS = dict(
@@ -171,14 +175,16 @@ def solve(D, E, M, bodyP, bodyN, S=SETTINGS, R_=RATIOS, log=print):
 
 
 LAPEL = dict(
-    drop=1.45,             # the break point (where the lapel's roll line ends, at the top button) below the neck edge's front, in w
-    width=0.75,            # how far the lapel's point stands out from its foot at the neck edge, in w
-    point_drop=0.30,       # and how far below the neck edge it sits: the notch between it and the collar's point
+    drop=1.60,             # the break point (where the lapel's roll line ends, at the top button) below the neck edge's front, in w
+    notch_at=0.50,         # the notch on the collar's front edge: this share of the way from the roll to its point
+    notch_angle=80,        # the notch's opening, in degrees
+    point_len=0.70,        # the lapel's point as long as this share of the collar's (notch to point)
+    belly=0.10,            # the outer edge's curve out past its straight line, in w
     spacing=0.07,
 )
 
 
-def lapels(E, M, bodyP, bodyN, D, L_=LAPEL, log=print):
+def lapels(E, M, bodyP, bodyN, D, cpos, L_=LAPEL, log=print):
     """The two lapels: the bodice's fronts turned back below the collar. Each is cut flat as the triangle the roll
     line (from the collar's end at the neck edge down to the break point) leaves outside it, out to the lapel's point,
     and laid back on the chest in the solver, its roll line held. Returns [(points, triangles)] for the two sides."""
@@ -200,27 +206,49 @@ def lapels(E, M, bodyP, bodyN, D, L_=LAPEL, log=print):
     for end in (0, -1):
         foot = seg[end]
         sg = 1.0 if foot[0] > 0 else -1.0
-        B = np.array([0.0, foot[2] - L_['drop'] * w])                     # the break point (x, z), at the top button
+        # the lapel as a tailor cuts it: the roll line (break B up to the neck at N), the gorge (N out along the collar's
+        # seam to the notch G), the notch's other side up to the lapel's point P, and the outer edge from P back to B
+        # in a soft convex curve
+        B = np.array([0.0, foot[2] - L_['drop'] * w])
         N = np.array([foot[0], foot[2]])
-        Pp = np.array([foot[0] + sg * L_['width'] * w, foot[2] - L_['point_drop'] * w])
-        tri2 = np.array([B, N, Pp])
+        # in harmony with the collar: the notch G sits on the collar's own front edge (as solved), part way from the
+        # roll down to the collar's point C, and the lapel's point mirrors C across the notch: the same length, turned
+        # down by the notch's angle
+        UVc = D['UV']
+        side = np.sign(cpos[:, 0]) == sg
+        endpts = np.nonzero(side & (np.abs(UVc[:, 0]) > D['smax'](UVc[:, 1]) - 0.6 * L_['spacing'] * w) & (UVc[:, 1] >= D['stand']))[0]
+        C3 = cpos[endpts[np.argmax(UVc[endpts, 1])]]
+        R3 = cpos[endpts[np.argmin(UVc[endpts, 1])]]
+        C = C3[[0, 2]]
+        G = R3[[0, 2]] + L_['notch_at'] * (C - R3[[0, 2]])
+        v = (C - G) * L_['point_len']
+        a = math.radians(L_['notch_angle'])
+        cands = [np.array([v[0] * math.cos(t) - v[1] * math.sin(t), v[0] * math.sin(t) + v[1] * math.cos(t)]) for t in (a, -a)]
+        Pp = G + max(cands, key=lambda u: sg * u[0])                       # (the turn that takes it outward, the notch opening sideways)
+        q = np.linspace(0, 1, 24)[1:-1]
+        chord = B - Pp
+        bulge = np.array([chord[1], -chord[0]]) / np.linalg.norm(chord) * L_['belly'] * w
+        bulge *= np.sign(bulge[0]) * sg
+        outer = Pp[None] + q[:, None] * chord[None] + (4 * q * (1 - q))[:, None] * bulge[None]
+        poly = np.vstack([B, N, G, Pp, outer])
         h = L_['spacing'] * w
-        # points: the triangle's edges and a grid inside it
         bnd = []
-        for a, b in ((0, 1), (1, 2), (2, 0)):
-            n = max(int(np.linalg.norm(tri2[b] - tri2[a]) / (0.7 * h)), 2)
-            bnd += [tri2[a] + (tri2[b] - tri2[a]) * k / n for k in range(n)]
-        lo, hi = tri2.min(0), tri2.max(0)
+        for k in range(len(poly)):
+            a, b = poly[k], poly[(k + 1) % len(poly)]
+            n = max(int(np.linalg.norm(b - a) / (0.7 * h)), 1)
+            bnd += [a + (b - a) * j / n for j in range(n)]
+        bnd = np.array(bnd)
+        from matplotlib.path import Path
+        path = Path(poly)
+        lo, hi = poly.min(0), poly.max(0)
         gx, gz = np.meshgrid(np.arange(lo[0], hi[0], h), np.arange(lo[1], hi[1], h))
-        G = np.column_stack([gx.ravel(), gz.ravel()])
-        dl = Delaunay(tri2)
-        inside = dl.find_simplex(G) >= 0
-        G = G[inside]
-        cr = lambda a, b: a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]     # noqa: E731
-        d = np.min([np.abs(cr(tri2[(i + 1) % 3] - tri2[i], G - tri2[i])) / np.linalg.norm(tri2[(i + 1) % 3] - tri2[i]) for i in range(3)], 0)
-        G = G[d > 0.45 * h]
-        UV = np.vstack([bnd, G])
+        Gr = np.column_stack([gx.ravel(), gz.ravel()])
+        Gr = Gr[path.contains_points(Gr)]
+        dmin = np.min(np.linalg.norm(Gr[:, None] - bnd[None], axis=2), 1)
+        Gr = Gr[dmin > 0.45 * h]
+        UV = np.vstack([bnd, Gr])
         T = Delaunay(UV).simplices
+        T = T[path.contains_points(UV[T].mean(1))]
         # lay it on the chest, the roll line (B to N) held, the rest let go onto the bodice
         X = on_chest(UV, 0.04)
         BN_ = N - B
@@ -257,11 +285,50 @@ def open_front(objs, M, E, D, L_=LAPEL):
                 if abs(c.x) < half or (o.name.endswith('buttons') and c.z > zb - 0.15 * M['w']):
                     dead.append(f)
         bmesh.ops.delete(bm, geom=dead, context='FACES')
+        # the cut edge laid straight along the V (a face-by-face cut leaves a staircase that reads as a broken fold)
+        inv = mw.inverted()
+        for v in bm.verts:
+            if not v.is_boundary or o.name.endswith('buttons'):
+                continue
+            c = mw @ v.co
+            if c.y < M['yc'] and zb - 0.3 * M['w'] < c.z < zn + 0.3 * M['w']:
+                half = xn * min(max((c.z - zb) / max(zn - zb, 1e-6), 0.0), 1.2)
+                if abs(abs(c.x) - half) < 0.45 * M['w']:
+                    c.x = math.copysign(half, c.x if c.x != 0 else 1.0)
+                    v.co = inv @ c
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
         bm.to_mesh(o.data)
         bm.free()
         o.data.update()
         cut += len(dead)
     return cut
+
+
+def over_lapels(pos, D, laps, M, gap=0.09):
+    """The collar's fall lies over the lapels (the lapel's gorge is sewn under it): any of the collar's points behind
+    a lapel, or nearer it than gap, set out in front of it, and the move eased into the cloth around."""
+    import fabric as xf
+    P = np.vstack([lp for lp, _ in laps])
+    Nn = np.vstack([xf.vertex_normals(lp, lt) for lp, lt in laps])
+    Nn[Nn[:, 1] > 0] *= -1                             # (toward the front: -y)
+    body = xf.MeshBody(P, Nn, gap=gap, reach=0.6)
+    fall = D['UV'][:, 1] > D['stand']
+    Q, hit = body(pos.copy())
+    move = np.where((fall & hit)[:, None], Q - pos, 0.0)
+    # ease the move out over the neighbouring points (a few rounds of averaging along the mesh's edges)
+    T = D['T']
+    E_ = np.unique(np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1), axis=0)
+    for _ in range(6):
+        acc = np.zeros_like(move)
+        cnt = np.zeros(len(move))
+        np.add.at(acc, E_[:, 0], move[E_[:, 1]])
+        np.add.at(acc, E_[:, 1], move[E_[:, 0]])
+        np.add.at(cnt, E_[:, 0], 1)
+        np.add.at(cnt, E_[:, 1], 1)
+        avg = acc / np.maximum(cnt, 1)[:, None]
+        move = np.where(np.linalg.norm(avg, axis=1, keepdims=True) > np.linalg.norm(move, axis=1, keepdims=True), avg, move)
+        move[~fall] = 0.0
+    return pos + move
 
 
 def smooth_edges(pos, T, rounds=4, k=0.5):
@@ -309,6 +376,8 @@ def build():
     N = N * np.where(((N[:, :2] * rad).sum(1) < 0)[:, None], -1, 1)
     sel = BV[:, 2] > 44
     pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
+    laps = lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D, pos)
+    pos = over_lapels(pos, D, laps, M)
     pos = smooth_edges(pos, D['T'])
     me = bpy.data.meshes.new('Collar')
     me.from_pydata([tuple(p) for p in pos], [], [tuple(int(i) for i in t) for t in D['T']])
@@ -331,7 +400,7 @@ def build():
     sol.offset = 0
     print('collar: the bodice opened above the break, %d faces cut' % open_front(
         [c for c in bpy.data.objects if c.name.startswith('Redingote bodice') and c.type == 'MESH'], M, E, D), flush=True)
-    for i, (lp, lt) in enumerate(lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D)):
+    for i, (lp, lt) in enumerate(laps):
         lme = bpy.data.meshes.new('Lapel %d' % i)
         lme.from_pydata([tuple(p) for p in smooth_edges(lp, lt)], [], [tuple(int(j) for j in t) for t in lt])
         lme.update()
