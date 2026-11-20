@@ -311,9 +311,55 @@ def skin_field(S, head_y, box, M, nh, step=None):
     thick = S['lid_t'] + (S['margin_t'] - S['lid_t']) * np.exp(-(np.maximum(dist, 0) / (1.2 * e)) ** 2)
     L = bed(S, X, Z, soft=True) - thick * nrm
     Hh = np.array([[head_y(xx, zz) for xx in xs] for zz in zs])
+    # (the head arrives with its own sculpted eye hollow; the carve replaces it, so the skin is built over the
+    # head with that hollow filled: the head where it stands proud of the smooth span across the box, the span
+    # where the head falls back from it. Built over the hollow, the skin dipped into a trough round the lids)
+    outside0 = (X < x0) | (X > x1) | (Z < z0) | (Z > z1)
+    # (the span is a Coons patch over the box, cubic along both rows and columns: it leaves the head on all four
+    # sides with the head's own depth and slope, the face's plane over a shut eye. A harmonic membrane sagged back
+    # toward the temple and left the lids standing proud of the face; columns alone missed the nose's slope and
+    # drew the box's sides as lines)
+    def hermite_fill(V, coord, lo, hi, axis):
+        # cubic across [lo, hi] along the axis (0 rows: z; 1 columns: x), from the values and slopes just outside
+        n = V.shape[axis]
+        a_ = max(1, int(np.searchsorted(coord, lo, 'left')) - 1)
+        b_ = min(n - 2, int(np.searchsorted(coord, hi, 'right')))
+        take = lambda k: np.take(V, k, axis=axis)
+        va, vb = take(a_), take(b_)
+        sa, sb = (take(a_) - take(a_ - 1)) / h, (take(b_ + 1) - take(b_)) / h
+        Ln = coord[b_] - coord[a_]
+        t = np.clip((coord - coord[a_]) / Ln, 0, 1)
+        sh = [1, 1]
+        sh[axis] = -1
+        t = t.reshape(sh)
+        if axis == 0:
+            va, vb, sa, sb = va[None], vb[None], sa[None], sb[None]
+        else:
+            va, vb, sa, sb = va[:, None], vb[:, None], sa[:, None], sb[:, None]
+        h00, h10, h01, h11 = 2 * t**3 - 3 * t**2 + 1, t**3 - 2 * t**2 + t, -2 * t**3 + 3 * t**2, t**3 - t**2
+        out = h00 * va + h10 * Ln * sa + h01 * vb + h11 * Ln * sb
+        inside_ = (coord >= coord[a_]) & (coord <= coord[b_])
+        return np.where(inside_.reshape(sh), out, V)
+    Lv = hermite_fill(Hh, zs, z0, z1, 0)
+    Lu = hermite_fill(Hh, xs, x0, x1, 1)
+    span = Lu + Lv - hermite_fill(Lv, xs, x0, x1, 1)
+    span = _blur(span, max(2, int(round(2.5 * e / h))))
+    edge0 = np.minimum.reduce([X - x0, x1 - X, Z - z0, z1 - Z])
+    # (the span replaces the head inside the box outright, eased in over 6 mm: it meets the head with its depth and
+    # slope, so the hand-over is smooth. Kept wherever it stood proud of the span, the head's own hollow drew its
+    # rim round the eye as a ring, and a smooth minimum's offset where the two agreed drew the box's outline)
+    Hh = Hh + (span - Hh) * smooth(0.0, 6.0 * e, edge0)
     # (the lids' tissue is tallest over the middle of the eye and narrows to almost nothing at the corners: a
     # full reach carried round a corner spread the lid's deep bed onto the side of the nose)
-    reach = np.where(near_up, S['crease'], 0.8 * S['lower_fold']) * (0.3 + 0.7 * along ** 0.6)
+    # (the lid lies on the ball only as far as the face lets it: past that, the fat under the skin fills the
+    # socket, so the lid stands no deeper behind the face's plane than a shallow sulcus above and a faint trough
+    # below. Followed round the ball to the crease, it fell 10 mm behind the brow into a ring-shaped moat)
+    # (which lid, as a weight that turns over smoothly across the line out of each corner: a hard switch made a
+    # step along that line wherever the lids' reach or depth differ, a bright streak out of both canthi)
+    wu = _blur(near_up.astype(float), max(2, int(round(2.0 * e / h))))
+    sulcus = (1.5 + 1.0 * wu) * e
+    L = -smax(-L, -(Hh + sulcus), 4.0 * e)
+    reach = (wu * S['crease'] + (1 - wu) * 0.8 * S['lower_fold']) * (0.3 + 0.7 * along ** 0.6)
     # the fill is held to the lid well inside the lid's reach, then the lid hands over to it across a band
     # 3 mm wide (a hard edge to the held cells drew the reach's outline as a ridge)
     core = dist <= reach - 2.5 * e
@@ -333,8 +379,8 @@ def skin_field(S, head_y, box, M, nh, step=None):
     # the crease of the upper lid and the soft fold under the lower lid, fading toward the corners and the border
     corner = smooth(0.0, 0.3, np.clip(1 - np.abs((xl - S['xc']) / S['a']), 0, 1))
     toward_border = smooth(0.0, 4 * e, np.minimum.reduce([X - x0, x1 - X, Z - z0, z1 - Z]))
-    cr = near_up * S['crease_d'] * np.exp(-((dist - S['crease']) / (1.1 * e)) ** 2) * corner
-    fo = (~near_up) * 0.35 * S['crease_d'] * np.exp(-((dist - S['lower_fold']) / (1.8 * e)) ** 2) * corner
+    cr = wu * S['crease_d'] * np.exp(-((dist - S['crease']) / (1.1 * e)) ** 2) * corner
+    fo = (1 - wu) * 0.35 * S['crease_d'] * np.exp(-((dist - S['lower_fold']) / (1.8 * e)) ** 2) * corner
     Y = Y + (cr + fo) * toward_border
     # never closer to the ball and its socket than a thin lid
     # (over the ball itself only: the socket's tissue past its edge is only what the lids rest on at the corners;
@@ -440,7 +486,7 @@ def carve(G, Z, TH, block, S, head_y, out_rings=26, in_rings=9, side=1):
         x, z = Pk[:, 0], Pk[:, 1]
         y = field(x, z)
         # (into the head's exact surface over the last rings, which the field only samples)
-        wb = smooth(0.8, 1.0, rk)
+        wb = smooth(0.94, 1.0, rk)
         if wb.any():
             y = y + (np.array([head_y(side * a_, b_) for a_, b_ in zip(x, z)]) - y) * wb
         pts.append(np.stack([side * x, y, z], 1))
@@ -622,15 +668,19 @@ def caruncle(S, side=1, n=14, m=8):
     P = []
     for i in range(n + 1):
         u = i / n
-        xl = -S['med'] + u * w
-        zt = float(margin_point(S, xl, True)[1])
-        zb = float(margin_point(S, xl, False)[1])
         for j in range(m + 1):
             v = j / m
+            # (its outer edge, the plica, bows out toward the cornea in a crescent and lies flat on the ball:
+            # a straight edge standing off the ball read as a cut-out wedge)
+            xl = -S['med'] + w * u * (0.8 + 0.4 * math.sin(math.pi * v) ** 0.8)
+            zt = float(margin_point(S, xl, True)[1])
+            zb = float(margin_point(S, xl, False)[1])
             z = zt + (zb - zt) * v
-            # tucked under the lids at its top and bottom (v 0, 1) and at the corner, full in its middle
-            swell = math.sin(math.pi * v) * math.sin(math.pi * min(1.0, 0.25 + 0.75 * u)) ** 0.7
-            y = float(bed(S, cx + xl, z)) - S['film'] - 0.55 * w * 0.45 * swell * (1 - 0.6 * u ** 2)
+            # tucked under the lids at its top and bottom (v 0, 1), full a third of the way out, nothing at the plica
+            swell = math.sin(math.pi * v) * math.sin(math.pi * min(1.0, 0.2 + 0.8 * u)) ** 0.8 * (1 - u ** 3)
+            # (on the lids' own soft bed and never forward of their wet lines' margin: on the hard bed it stood
+            # out of the corner in front of the skin when seen from the nose's side)
+            y = float(bed(S, cx + xl, z, soft=True)) - S['film'] - min(0.3 * w, 0.6 * S['margin_t']) * swell
             P.append((side * (cx + xl), y, z))
     P = np.array(P)
     F = []
