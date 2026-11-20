@@ -18,11 +18,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 
 RATIOS = dict(
-    stand=0.55,            # the stand's height (neck edge to the roll line), in w
+    stand=0.75,            # the stand's height (neck edge to the roll line), in w
     fall_back=0.60,        # the fall's depth at the back, in w
     fall_front=1.20,       # the fall's depth at the points
     notch=0.70,            # the slant of the front end: the point stands this far past its foot at the neck edge, in w
-    gap=0.45,              # the open gap between the two front ends at the neck edge, in w
+    gap=0.90,              # the open gap between the two front ends at the neck edge, in w
     lean=0.18,             # how far the stand leans in toward the neck, as a share of its height
     spacing=0.075,         # the grid's point spacing, in w
 )
@@ -63,7 +63,6 @@ def draft(E, M, R=RATIOS):
     (back at 0), t up from it, the triangles, the roll-line's mask and the neck-edge points. E: neck_edge's curve."""
     from scipy.spatial import Delaunay
     w = M['w']
-    ds = np.linalg.norm(np.roll(E, -1, 0) - E, axis=1)
     ang = 2 * np.pi * np.arange(len(E)) / len(E)
     gap_ang = R['gap'] * w / np.mean(np.hypot(E[:, 0], E[:, 1] - M['yc']))
     inside = (ang > gap_ang / 2) & (ang < 2 * np.pi - gap_ang / 2)
@@ -97,9 +96,8 @@ def draft(E, M, R=RATIOS):
     T = tri.simplices[ok]
     # drop sliver triangles from the boundary
     A = pts[T]
-    e = [np.linalg.norm(A[:, i] - A[:, (i + 1) % 3], axis=1) for i in range(3)]
     area = 0.5 * np.abs((A[:, 1, 0] - A[:, 0, 0]) * (A[:, 2, 1] - A[:, 0, 1]) - (A[:, 2, 0] - A[:, 0, 0]) * (A[:, 1, 1] - A[:, 0, 1]))
-    T = T[area > 0.04 * h * h]
+    T = T[area > 0.01 * h * h]
     used = np.unique(T)
     remap = -np.ones(len(pts), int)
     remap[used] = np.arange(len(used))
@@ -108,11 +106,11 @@ def draft(E, M, R=RATIOS):
 
 
 SETTINGS = dict(
-    flare=0.30,            # the stand's flare outward from the neck, in radians off the vertical (a turned-down collar spreads)
+    flare=0.12,            # the stand's flare outward from the neck, in radians off the vertical (a turned-down collar spreads)
     fold=1.10,             # the fall folded over, below the horizontal, in radians
-    lift=0.06,             # the fall's cloth stands this far off the stand where it is turned over
+    lift=0.16,             # the fall's cloth stands this far off the stand where it is turned over
     stretch=1e-6, bend=1e-6, flat=1e-6, crease=1e-6,
-    gap=0.05,              # the cloth's stand-off from the bodice and the body
+    gap=0.10,              # the cloth's stand-off from the bodice and the body
     steps=1800,
 )
 
@@ -149,7 +147,8 @@ def design(D, E, M, S=SETTINGS):
     R = Eo + tt * d1
     out = -n
     d2 = out * math.cos(b) - u[None] * math.sin(b)                     # the fall, turned over and down
-    folded = R + dd * d2 + (dd > 0) * (out * S['lift'] + np.array([0, 0, S['lift']]))
+    roll = np.minimum(dd / (0.35 * M['w']), 1.0) ** 0.5                 # (a rounded roll, not a hinge: the fall eases off the stand)
+    folded = R + dd * d2 + roll * (out * S['lift'] + np.array([0, 0, 0.6 * S['lift']]))
     funnel = R + dd * d1
     return folded, funnel, Eo
 
@@ -169,6 +168,118 @@ def solve(D, E, M, bodyP, bodyN, S=SETTINGS, R_=RATIOS, log=print):
     k = fab.settle(body, h=1 / 240, max_steps=S['steps'], tol=2e-4, log=log)
     log('collar: settled in %d steps' % k)
     return fab.pos.copy(), folded
+
+
+LAPEL = dict(
+    drop=1.45,             # the break point (where the lapel's roll line ends, at the top button) below the neck edge's front, in w
+    width=0.75,            # how far the lapel's point stands out from its foot at the neck edge, in w
+    point_drop=0.30,       # and how far below the neck edge it sits: the notch between it and the collar's point
+    spacing=0.07,
+)
+
+
+def lapels(E, M, bodyP, bodyN, D, L_=LAPEL, log=print):
+    """The two lapels: the bodice's fronts turned back below the collar. Each is cut flat as the triangle the roll
+    line (from the collar's end at the neck edge down to the break point) leaves outside it, out to the lapel's point,
+    and laid back on the chest in the solver, its roll line held. Returns [(points, triangles)] for the two sides."""
+    from scipy.spatial import Delaunay, cKDTree
+    import fabric as xf
+    w = M['w']
+    seg = E[D['idx']]
+    out = []
+    front = bodyP[:, 1] < M['yc']
+    tree = cKDTree(bodyP[front][:, [0, 2]])
+    FP, FN = bodyP[front], bodyN[front]
+
+    def on_chest(xz, lift):
+        _, j = tree.query(xz, k=6)
+        y = FP[j, 1].min(1)                            # the frontmost cloth under each point
+        n = FN[j].mean(1)
+        n /= np.linalg.norm(n, axis=1, keepdims=True)
+        return np.column_stack([xz[:, 0], y, xz[:, 1]]) + lift * n
+    for end in (0, -1):
+        foot = seg[end]
+        sg = 1.0 if foot[0] > 0 else -1.0
+        B = np.array([0.0, foot[2] - L_['drop'] * w])                     # the break point (x, z), at the top button
+        N = np.array([foot[0], foot[2]])
+        Pp = np.array([foot[0] + sg * L_['width'] * w, foot[2] - L_['point_drop'] * w])
+        tri2 = np.array([B, N, Pp])
+        h = L_['spacing'] * w
+        # points: the triangle's edges and a grid inside it
+        bnd = []
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            n = max(int(np.linalg.norm(tri2[b] - tri2[a]) / (0.7 * h)), 2)
+            bnd += [tri2[a] + (tri2[b] - tri2[a]) * k / n for k in range(n)]
+        lo, hi = tri2.min(0), tri2.max(0)
+        gx, gz = np.meshgrid(np.arange(lo[0], hi[0], h), np.arange(lo[1], hi[1], h))
+        G = np.column_stack([gx.ravel(), gz.ravel()])
+        dl = Delaunay(tri2)
+        inside = dl.find_simplex(G) >= 0
+        G = G[inside]
+        cr = lambda a, b: a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]     # noqa: E731
+        d = np.min([np.abs(cr(tri2[(i + 1) % 3] - tri2[i], G - tri2[i])) / np.linalg.norm(tri2[(i + 1) % 3] - tri2[i]) for i in range(3)], 0)
+        G = G[d > 0.45 * h]
+        UV = np.vstack([bnd, G])
+        T = Delaunay(UV).simplices
+        # lay it on the chest, the roll line (B to N) held, the rest let go onto the bodice
+        X = on_chest(UV, 0.04)
+        BN_ = N - B
+        t_ = np.clip(((UV - B) @ BN_) / (BN_ @ BN_), 0, 1)
+        dist = np.linalg.norm(UV - (B + t_[:, None] * BN_), axis=1)
+        fab = xf.Fabric(X, dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4))
+        fab.pin(np.nonzero(dist < 0.3 * h)[0])
+        fab.mesh(T, stretch=1e-6, rest_pos=np.column_stack([UV, np.zeros(len(UV))]), bend=1e-6, flat=1e-6)
+        body = xf.MeshBody(bodyP, bodyN, gap=0.07, reach=1.0)
+        k = fab.settle(body, h=1 / 240, max_steps=600, tol=2e-4)
+        log('collar: lapel settled in %d steps, %d points' % (k, len(UV)))
+        out.append((fab.pos.copy(), T))
+    return out
+
+
+def open_front(objs, M, E, D, L_=LAPEL):
+    """Open the bodice's front above the break point into the V the lapels turn back from: the faces inside the V
+    (and the buttons above the break) are cut away. The V runs from the break point up to the collar's two ends."""
+    import bmesh
+    seg = E[D['idx']]
+    xn = 0.5 * (abs(seg[0][0]) + abs(seg[-1][0]))
+    zn = 0.5 * (seg[0][2] + seg[-1][2])
+    zb = zn - L_['drop'] * M['w']
+    cut = 0
+    for o in objs:
+        mw = o.matrix_world
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        dead = []
+        for f in bm.faces:
+            c = mw @ f.calc_center_median()
+            if c.y < M['yc'] and c.z > zb:
+                half = xn * min((c.z - zb) / max(zn - zb, 1e-6), 1.2)
+                if abs(c.x) < half or (o.name.endswith('buttons') and c.z > zb - 0.15 * M['w']):
+                    dead.append(f)
+        bmesh.ops.delete(bm, geom=dead, context='FACES')
+        bm.to_mesh(o.data)
+        bm.free()
+        o.data.update()
+        cut += len(dead)
+    return cut
+
+
+def smooth_edges(pos, T, rounds=4, k=0.5):
+    """Even out the cut edges: each point on the outline moved toward the mean of its two outline neighbours (a few
+    rounds), so the solver's last jitter and the triangulation's steps do not leave a ragged edge."""
+    E = np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1)
+    E, c = np.unique(E, axis=0, return_counts=True)
+    B = E[c == 1]
+    nb = {}
+    for a, b in B:
+        nb.setdefault(a, []).append(b)
+        nb.setdefault(b, []).append(a)
+    idx = np.array([i for i, v in nb.items() if len(v) == 2])
+    J = np.array([nb[i] for i in idx])
+    P = pos.copy()
+    for _ in range(rounds):
+        P[idx] += k * (0.5 * (P[J[:, 0]] + P[J[:, 1]]) - P[idx])
+    return P
 
 
 def build():
@@ -198,6 +309,7 @@ def build():
     N = N * np.where(((N[:, :2] * rad).sum(1) < 0)[:, None], -1, 1)
     sel = BV[:, 2] > 44
     pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
+    pos = smooth_edges(pos, D['T'])
     me = bpy.data.meshes.new('Collar')
     me.from_pydata([tuple(p) for p in pos], [], [tuple(int(i) for i in t) for t in D['T']])
     me.update()
@@ -215,8 +327,24 @@ def build():
     sub = o.modifiers.new('smooth', 'SUBSURF')
     sub.levels = sub.render_levels = 1
     sol = o.modifiers.new('thickness', 'SOLIDIFY')
-    sol.thickness = 0.045 * M['w']
+    sol.thickness = 0.07 * M['w']
     sol.offset = 0
+    print('collar: the bodice opened above the break, %d faces cut' % open_front(
+        [c for c in bpy.data.objects if c.name.startswith('Redingote bodice') and c.type == 'MESH'], M, E, D), flush=True)
+    for i, (lp, lt) in enumerate(lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D)):
+        lme = bpy.data.meshes.new('Lapel %d' % i)
+        lme.from_pydata([tuple(p) for p in smooth_edges(lp, lt)], [], [tuple(int(j) for j in t) for t in lt])
+        lme.update()
+        lo = bpy.data.objects.new('Collar lapel %d' % i, lme)
+        bpy.context.scene.collection.objects.link(lo)
+        lme.materials.append(cloth)
+        for p in lme.polygons:
+            p.use_smooth = True
+        m1 = lo.modifiers.new('thickness', 'SOLIDIFY')
+        m1.thickness, m1.offset = 0.07 * M['w'], 0
+        if par is not None:
+            lo.parent = par
+            lo.matrix_parent_inverse = par.matrix_world.inverted()
     if not os.environ.get('SHOW_BODICE'):
         b.hide_render = True
         for c in bpy.data.objects:
