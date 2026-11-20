@@ -572,6 +572,13 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     for line, X, tri in made:                         # (the folded extensions joined to the bodice on its own roll points)
         Xl = X @ inv[:3, :3].T + inv[:3, 3]
         vs = list(line) + [bm.verts.new(tuple(c)) for c in Xl]
+        # (the lapel's points are bound to the bones as the roll points next to them are: points with no weights
+        # are left behind when the figure is posed or turned, and the lapel hangs in the air)
+        dl = bm.verts.layers.deform.verify()
+        lc = np.array([v.co[:] for v in line])
+        for v, c in zip(vs[len(line):], Xl):
+            for g, wgt in line[int(np.argmin(((lc - c) ** 2).sum(1)))][dl].items():
+                v[dl][g] = wgt
         for t_ in tri:
             try:
                 bm.faces.new([vs[int(i)] for i in t_]).smooth = True
@@ -728,6 +735,12 @@ def build():
                                  mods=[(m.type, getattr(m, 'thickness', None), getattr(m, 'offset', None)) for m in b.modifiers]), fh)
         nfl, folded = fold_front(b, DRAFTED['outlines'], M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
         print('collar: the bodice front turned back as the lapels (%d faces)' % nfl, flush=True)
+        if os.environ.get('COLLAR_FOLD_OUT'):          # (for the contour sheet: python3 blender/collar/contours.py <this> sheet.png)
+            import pickle
+            Vf = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
+            with open(os.environ['COLLAR_FOLD_OUT'], 'wb') as fh:
+                pickle.dump(dict(V=Vf, F=[list(p.vertices) for p in b.data.polygons], skinP=BV, M=M, folded=FOLDED,
+                                 skinF=[list(p.vertices) for p in body.data.polygons], outlines=DRAFTED['outlines']), fh)
         pos = over_lapels(pos, D, folded, M)
     else:
         pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
