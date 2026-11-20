@@ -44,7 +44,8 @@ LIFE = {
     'cover_up': 1.5,         # the upper lid covers this much of the top of the iris
     'cover_lo': 0.3,         # and the lower lid this much of its foot
     'lift': 1.3,             # the line between the corners passes this far below the pupil
-    'lateral': 0.95,         # the outer corner sits this far out from the pupil, in eyeball radii
+    'lateral': 1.1,          # the outer corner sits this far out from the pupil, in eyeball radii (13 mm: with the
+                             # inner corner at IPD / 4 from the midline the opening is 28.5 mm, the pupil near its middle)
     'medial': 0.25,          # the inner corner sits this far from the midline, in IPDs (intercanthal = IPD / 2)
     'crease': 8.0,           # the upper lid's crease above the lash line
     'crease_d': 0.5,         # and how deep it folds
@@ -52,7 +53,7 @@ LIFE = {
     'brow_ahead': 10.0,      # the cornea's apex stands this far behind the brow, in profile
     'cheek_behind': 2.0,     # and this far behind the cheek's front below it (Hertel's figures put the lateral
                              # rim 16-18 mm behind the apex; the soft cheek over the zygoma stands about level)
-    'caruncle_w': 4.0,       # the caruncle, in the inner corner
+    'caruncle_w': 5.0,       # the caruncle, in the inner corner
 }
 # the lids' shape (the traced photograph, female.py's EYE_*): heights in half-widths over the corner line
 LID = {'top_peak': (-0.18, 0.62), 'bot_low': (0.30, 0.32), 'inner_angles': (50.0, 13.0),
@@ -115,12 +116,15 @@ def lid_curve(top, L=LID):
     return P[:, 0], np.maximum(0.0, P[:, 1])
 
 
-def spec(H, ipd, pupil_z, front_y, scale=1.0, tilt=0.092, life=None):
+def spec(H, ipd, pupil_z, front_y, scale=1.0, tilt=0.092, life=None, almond=None):
     """The eye derived from the head. H: chin to crown; ipd: between the pupils; pupil_z: their height;
     front_y(x, z): the depth of the head's front (before any eye) at a point, in model units. scale: the eye's
     size against life (1 is life size; the face's shape and the eye spacing stay as measured).
     Returns a dict of model-unit sizes, positions (for the eye at x > 0; the other is its mirror) and the
-    measures they came from."""
+    measures they came from.
+    almond: {'top': heights, 'bot': heights, 'lift_ratio': r}: the opening takes the Face Creator's own almond for its
+    shape: the lids' curves (401 samples over u -1..1, in half-widths) at their own heights, and the corner line
+    lift_ratio half-widths below the pupil. The corners and the ball stay as measured."""
     Lf = dict(LIFE, **(life or {}))
     mm = H / Lf['head_h']
     e = mm * scale
@@ -146,9 +150,15 @@ def spec(H, ipd, pupil_z, front_y, scale=1.0, tilt=0.092, life=None):
     iris_r = lim
     us, ht = lid_curve(True)
     _, hb = lid_curve(False)
+    if almond:
+        us = np.linspace(-1, 1, len(almond['top']))
+        ht, hb = np.asarray(almond['top'], float), np.asarray(almond['bot'], float)
     u0 = -xc / a
     kt = ((iris_r - Lf['cover_up'] * e) + lift) / (a * float(np.interp(u0, us, ht)))
     kb = ((iris_r - Lf['cover_lo'] * e) - lift) / (a * float(np.interp(u0, us, hb)))
+    if almond:
+        kt = kb = 1.0
+        lift = almond['lift_ratio'] * a
     S = {'mm': mm, 'e': e, 'H': H, 'ipd': ipd, 'scale': scale,
          'centre': (px, apex_y + apex, pupil_z),          # the ball's centre (the eye at x > 0)
          'r': r, 'cornea_R': Rc, 'cornea_c': cc, 'apex': apex, 'limbus': lim, 'limbus_z': zl,
@@ -357,7 +367,10 @@ def skin_field(S, head_y, box, M, nh, step=None):
     # (which lid, as a weight that turns over smoothly across the line out of each corner: a hard switch made a
     # step along that line wherever the lids' reach or depth differ, a bright streak out of both canthi)
     wu = _blur(near_up.astype(float), max(2, int(round(2.0 * e / h))))
-    sulcus = (1.5 + 1.0 * wu) * e
+    # (deeper toward the corners: the canthi are tied back to the bone, the inner one deepest, so there the lid
+    # follows the ball down instead of bridging to the face's plane. Held near the plane, the inner third of the
+    # opening stood off the ball and showed the socket's lining)
+    sulcus = (1.5 + 1.0 * wu) * e + (2.5 + 2.5 * smooth(0.5 * S['a'], -0.5 * S['a'], xl - S['xc'])) * e * (1 - smooth(0.0, 0.85, along))
     L = -smax(-L, -(Hh + sulcus), 4.0 * e)
     reach = (wu * S['crease'] + (1 - wu) * 0.8 * S['lower_fold']) * (0.3 + 0.7 * along ** 0.6)
     # the fill is held to the lid well inside the lid's reach, then the lid hands over to it across a band
