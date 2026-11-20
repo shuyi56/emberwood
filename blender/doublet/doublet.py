@@ -55,14 +55,16 @@ FUSTIAN = dict(colour=tuple(c ** 2.2 for c in _rgb(DYE)), streak=0.10, yarn=0.6,
 
 
 # The shirt worn under the sleeved gambeson: closer to the body, and only a little of it showing, a band below the
-# gambeson's cuffs and below its skirt.
+# gambeson's cuffs and below its skirt. Its cloth is drafted to about the room it is pressed into under the gambeson
+# (0.34 off the skin): drafted fuller, the band below the gambeson's hem stood out to 0.91 in a roll just under the
+# held line, all the spare cloth let out where it was free to go.
 SHIRT = dict(
     drape.RATIOS,
-    loose=0.22,              # (0.50 alone: under a padded coat the shirt is taken in)
-    flare=0.06,
+    loose=0.08,              # (0.50 alone: under a padded coat the shirt is taken in)
+    flare=0.0,
     sleeve_full=0.20,
     sleeve_bell=0.04,
-    full=0.16,
+    full=0.04,
     hem=cut.RATIOS['hem_drop'] + 0.45,     # a band of it below the gambeson's skirt
     cuff=0.08,                             # and below its cuffs (the gambeson's ends 0.25 w above the wrist)
     cuff_in=0.30,
