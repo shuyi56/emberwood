@@ -318,7 +318,7 @@ def _sole(edge, z_welt, r):
     return V, F, sd, su, path
 
 
-TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.21, 0.27, 0.40     # (shares of the shin's width: see cut_lace)
+TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.34, 0.06, 0.40     # (shares of the shin's width: see cut_lace)
 
 
 def cut_lace(D, faces, f, r, weights, lift_on):
