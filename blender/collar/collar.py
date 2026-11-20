@@ -188,7 +188,11 @@ LAPEL = dict(
     point_len=0.70,        # the lapel's point as long as this share of the collar's (notch to point)
     belly=0.10,            # the outer edge's curve out past its straight line, in w
     spacing=0.07,
-    edge_rounds=8,         # rounds of evening out the cut edges
+    edge_rounds=8,
+    fold_deg=172,          # the lapel's pressed fold: how far it turns back over the roll line, in degrees
+    fold_gap=0.17,         # its stand-off from the bodice under it (over the bodice's own thickness, 0.045 w)
+    fold_radius=0.06,      # the fold's inside radius: the cloth's thickness turned round, not a knife edge
+         # rounds of evening out the cut edges
     tilt=25,               # the lapel starts this far turned off the chest (degrees), unfolded; the solver folds the rest
     steps=1600,
 )
@@ -374,6 +378,9 @@ def open_front(objs, M, E, D, L_=LAPEL):
     return cut
 
 
+FOLD_FABRIC = dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4)
+
+
 def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     """Turn the bodice's own front back as the lapels: the bodice cloth inside each lapel's outline as cut (the outline
     mirrored across its roll line, in the V above the break) is the flap; it stays joined to the bodice along the roll
@@ -382,6 +389,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     bodice's mesh is changed in place. Returns the flaps' faces cut, folded."""
     import bmesh
     import fabric as xf
+    import folds as fo
     from matplotlib.path import Path
     from scipy.spatial import cKDTree
     w = M['w']
@@ -411,6 +419,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     owner = -np.ones(len(C), int)
     dead = inV.copy()
     moved = 0
+    replace = []
     for k, (B, N, poly) in enumerate(outlines):
         e = (N - B) / np.linalg.norm(N - B)
 
@@ -452,24 +461,56 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
                 start[:nf] = cand[:nf]
                 break
         start[hinge] = X0[hinge]
-        fab = xf.Fabric(start, dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4))
-        fab.pin(np.concatenate([np.nonzero(hinge)[0], np.arange(nf, len(idx))]))
-        fab.mesh(tris, stretch=1e-6, rest_pos=rest, bend=1e-6, flat=1e-6)
-        body = xf.MeshBody(bodyP, bodyN, gap=0.13, reach=1.0)       # (over the bodice's own thickness, 0.045 w)
-        for _ in range(240):
-            fab.step(1 / 240, body, neutral=True)
-        steps = 240 + fab.settle(body, h=1 / 240, max_steps=L_['steps'], tol=1e-4)
-        off = np.degrees(np.arccos(np.clip(np.einsum('ij,ij->i', fab.pos[:nf] - a0, rest[:nf] - a0)
-                                           / np.maximum(np.linalg.norm(fab.pos[:nf] - a0, axis=1) * np.linalg.norm(rest[:nf] - a0, axis=1), 1e-9), -1, 1)))
-        log('collar: bodice front %d turned back as the lapel in %d steps: %d points, %.0f degrees off the pressed fold '
-            '(median), %.0f at worst' % (k, steps, nf, float(np.median(off)), float(off.max())))
-        inv = np.linalg.inv(mw)
-        loc_new = fab.pos[:nf] @ inv[:3, :3].T + inv[:3, 3]
-        for j, g in enumerate(fl_v):
-            bm.verts[g].co = loc_new[j]
-        moved += nf
-    bmesh.ops.delete(bm, geom=[bm.faces[i] for i in np.nonzero(dead)[0]], context='FACES')
+        if os.environ.get('COLLAR_DUMP') and k == 0:                    # (the fold's inputs, for the fold helper's test)
+            import json
+            os.makedirs(os.path.dirname(os.environ['COLLAR_DUMP']), exist_ok=True)
+            np.savez(os.environ['COLLAR_DUMP'], flat=X0[:, [0, 2]], flat3=X0, rest=rest, T=np.array(tris), start=start,
+                     pins=np.arange(nf, len(idx)), roll=np.array([B, N]), B=B, N=N, nf=nf, bodyP=bodyP, bodyN=bodyN,
+                     gap=L_['fold_gap'], settings=json.dumps(dict(FOLD_FABRIC, mesh=dict(stretch=1e-6, bend=1e-6, flat=1e-6))))
+        # the roll line marked on the cloth (a row of points along it, so the fold has edges to turn on), then the
+        # pressed fold made by folds.py's hinges: the target eased in, the flap laid over with it, held until the
+        # measured angle across the roll is within a degree of the target
+        flat2 = X0[:, [0, 2]]
+        P2, T2, (st2, x02), kept = fo.mark_line(flat2, np.array(tris), np.array([B, N]), [start, X0])
+        lap = np.concatenate([kept < nf, np.zeros(len(P2) - len(kept), bool)])
+        line_pts = np.arange(len(kept), len(P2))
+        roll = np.array([B, N])
+        if np.median(fo.Crease(roll, 1.0).frame(P2[lap])[2]) < 0:
+            roll = roll[::-1]
+        ang = math.radians(L_['fold_deg'])
+        st2[line_pts] = x02[line_pts]
+        fab = xf.Fabric(st2, dict(FOLD_FABRIC))
+        fab.pin(np.concatenate([np.nonzero(~lap)[0]]))                   # (the strip and the roll's own points)
+        crease = fo.Crease(roll, ang, L_['fold_radius'])
+        fab.mesh([tuple(t) for t in T2], stretch=1e-6, rest_pos=np.column_stack([P2, np.zeros(len(P2))]), bend=1e-6,
+                 flat=1e-6, bend_at=fo.soft_at(P2, T2, [crease]))
+        body = xf.MeshBody(bodyP, bodyN, gap=L_['fold_gap'], reach=1.0)
+        F = fo.Folds(fab, P2, T2)
+        F.add(roll, ang, radius=L_['fold_radius'])
+        rep = F.bake(body=body, log=lambda *a_: None)
+        log('collar: bodice front %d turned back as the lapel by the fold hinges: %s' % (k, str(rep).replace(chr(10), '; ')))
+        replace.append((np.nonzero(flap | strip)[0], fab.pos.copy(), T2))
+        moved += int(lap.sum())
+    inv = np.linalg.inv(mw)
+    gone = set(np.nonzero(dead)[0].tolist())
+    for fi, _, _ in replace:
+        gone |= set(fi.tolist())
+    bmesh.ops.delete(bm, geom=[bm.faces[i] for i in sorted(gone)], context='FACES')
+    new_v = []
+    for _, X, T2 in replace:                          # (the folded sheet in place of the faces it was cut from)
+        Xl = X @ inv[:3, :3].T + inv[:3, 3]
+        vs = [bm.verts.new(tuple(c)) for c in Xl]
+        for t in T2:
+            try:
+                bm.faces.new([vs[i] for i in t])
+            except ValueError:
+                pass
+        new_v += vs
+    bm.verts.ensure_lookup_table()
+    # (welded to the bodice where the sheet's held edge meets it: the same points, held where they lay)
+    bmesh.ops.remove_doubles(bm, verts=list(set(new_v) | {v for v in bm.verts if v.is_boundary}), dist=1e-3)
     bmesh.ops.delete(bm, geom=[v for v in bm.verts if not v.link_faces], context='VERTS')
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     # the cut edges round the opening and the lapels evened out: a cut along the mesh's faces leaves a staircase
     bm.verts.ensure_lookup_table()
     edge_v = [v for v in bm.verts if v.is_boundary and (mw[:3, :3] @ np.array(v.co[:]) + mw[:3, 3])[1] < M['yc']
