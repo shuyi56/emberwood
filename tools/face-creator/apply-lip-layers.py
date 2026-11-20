@@ -118,7 +118,7 @@ function lipMapCanvas() {
      "  // the lips' top layer: the clearcoat lobe, its normal the lip's own with the grooves and flakes at full depth\n"
      "  fs = fs.replace('#include <clearcoat_normal_fragment_maps>', '#include <clearcoat_normal_fragment_maps>\\n#if defined( USE_CLEARCOAT ) && defined( USE_BUMPMAP )\\n' +\n"
      "    '  if ( skLip > 0.0 ) { vec2 ldx = dFdx( vMapUv ), ldy = dFdy( vMapUv ); float lh = texture2D( lipMap, vMapUv ).b;\\n' +\n"
-     "    '    vec2 ldH = clamp( -lipCoatBump * skLip * vec2( texture2D( lipMap, vMapUv + ldx ).b - lh, texture2D( lipMap, vMapUv + ldy ).b - lh ), -0.6, 0.6 );\\n' +\n"
+     "    '    vec2 ldH = clamp( -lipCoatBump * skLip * vec2( texture2D( lipMap, vMapUv + ldx ).b - lh, texture2D( lipMap, vMapUv + ldy ).b - lh ), -0.25, 0.25 );\\n' +\n"
      "    '    clearcoatNormal = perturbNormalArb( - vViewPosition, normalize( mix( clearcoatNormal, normal, skLip ) ), ldH, faceDirection ); }\\n#endif');\n"
      "  fs = fs.replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\\n#ifdef USE_CLEARCOAT\\n' +\n"
      "    '  if ( skLip > 0.0 ) { float lf = texture2D( lipMap, vMapUv ).b;\\n' +\n"
