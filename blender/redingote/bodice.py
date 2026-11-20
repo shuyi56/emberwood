@@ -85,6 +85,13 @@ WOOL = dict(solver.LINEN, mass=0.9, tension=200.0, compression=60.0, shear=40.0,
 COARSE = (0.25, 144)         # the solver's own draft of the basque: (grid step, columns round the body)
 
 
+# The front's cut above the top button, when the bodice is to have lapels: a function (V, faces, M) -> [(name, f)],
+# each f positive on the cloth that stays, called once the hem, armholes and neckline are cut. The collar module
+# (blender/collar/collar.py) sets it: it drafts the lapels with the collar and cuts the front's opening round them,
+# so the lapels are the bodice's own cloth with clean cut edges, ready to be turned back.
+FRONT = None
+
+
 def apex(P, aw, M):
     """The bust's apex: (half-distance between the apexes, its height), from the torso's front."""
     T = P[(aw < 0.5) & (P[:, 0] > 0.15 * M['w']) & (np.abs(P[:, 2] - M['z_bust']) < 0.6 * M['w']) & (P[:, 1] < M['yc'])]
@@ -457,6 +464,10 @@ def build_bodice(body, head_objs=(), rig=None, cloth=None, button=None, under=()
     for nm, f in lines:
         V, faces = fit.trim(V, faces, f)
         log('bodice: trimmed %s, %d faces left' % (nm, len(faces)))
+    if FRONT is not None:                            # (the front's own cut, when a collar gives it lapels: see FRONT)
+        for nm, f in FRONT(V, faces, M):
+            V, faces = fit.trim(V, faces, f)
+            log('bodice: trimmed %s, %d faces left' % (nm, len(faces)))
     if settle and rig is not None:
         move = _settle_basque(P, T, aw, M, hb, body, rig, list(colliders), list(under), lines, ratios, log, corset)
         used = sorted({i for f in faces for i in f})
