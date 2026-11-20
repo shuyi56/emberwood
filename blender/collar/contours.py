@@ -92,8 +92,25 @@ def sheet(D, out):
             draw(ax[1, col], e, p @ e, acr, -ey, 'across roll %d at %.0f%% of its length (front is up)' % (k, 100 * f),
                  ((c0 - 2.0, c0 + 2.0), (-yc + 0.3, -yc + 4.3)))
             col += 1
-    for k, x in enumerate((-1.2,)):
-        draw(ax[2, k], ex, x, -ey, ez, 'side section at x %.1f (front is right)' % x, ((-yc + 0.5, -yc + 4.5), (zb - 1, zn + 1.5)))
+    # the front's own strain, from the solve with the lapels (the fold's pull taken up by the bodice's cloth)
+    a = ax[2, 0]
+    fr = D.get('front') or {}
+    if 'E' in fr:
+        P0, P1, E, st = fr['P0'], fr['P1'], fr['E'], fr['strain']
+        lim = max(0.5, float(np.percentile(np.abs(st), 99)))
+        lc = LineCollection(P0[E][:, :, [0, 2]], array=st, cmap='coolwarm', linewidths=0.8)
+        lc.set_clim(-lim, lim)
+        a.add_collection(lc)
+        plt.colorbar(lc, ax=a, label='strain, %')
+        hp = P0[fr['held']]
+        a.plot(hp[:, 0], hp[:, 2], '.', color='0.3', ms=1.5)
+        mv = np.linalg.norm(P1 - P0, axis=1)
+        a.set_aspect('equal')
+        a.autoscale()
+        a.set_title('the front\'s strain with the lapels folded (grey: held points)\n5%% %.2f, 95%% %.2f, worst %.1f / %.1f %%; moved up to %.3f'
+                    % (np.percentile(st, 5), np.percentile(st, 95), st.min(), st.max(), mv.max()), fontsize=9)
+    else:
+        draw(ax[2, 0], ex, -1.2, -ey, ez, 'side section at x -1.2 (front is right)', ((-yc + 0.5, -yc + 4.5), (zb - 1, zn + 1.5)))
     # the strain on the flat pattern: each edge's length folded against its length as drafted
     a = ax[2, 1]
     stx = []

@@ -189,9 +189,10 @@ LAPEL = dict(
     belly=0.10,            # the outer edge's curve out past its straight line, in w
     spacing=0.07,
     edge_rounds=8,         # rounds of evening out the cut edges
-    fold_deg=160,          # the lapel's soft roll: how far it turns back over the roll line, in degrees (short of a pressed 180, so it stands off the chest at the roll and comes down to it at its edge)
+    whole_steps=1500,      # steps of the solve with the front let go (see _with_front)
+    fold_deg=176,          # the lapel's fold: a full turn back over the roll line, pressed (degrees)
     fold_gap=0.12,         # the least the lapel may lie off the bodice under it: less than the fold's own stand-off (twice its radius), so the body is a floor under the lapel and does not push the turn open
-    fold_radius=0.18,      # the roll's inside radius: a soft roll, not a pressed crease
+    fold_radius=0.10,      # the fold's inside radius: the cloth's thickness turned round, not a knife edge
     fold_row=0.05,         # rows of points marked parallel to the roll through the turn, this far apart
     # The fold's solve. The lapel hangs from the turn's fine rows: at the cloth's usual step (1/240 s) and give (1e-6)
     # its own weight stretched those rows by a fifth to double (the contour sheet's strain map), and the lapel came out
@@ -440,6 +441,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     del FOLDED[:]
     bm = bmesh.new()
     bm.from_mesh(o.data)
+    bm.verts.layers.deform.verify()                   # (made now: adding a layer later would invalidate the points held)
     bm.verts.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
     edge = np.array([v.is_boundary for v in bm.verts])
@@ -447,7 +449,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     C = np.array([W[f].mean(0) for f in fv])
     P = W[:, [0, 2]]
     inv = np.linalg.inv(mw)
-    made, moved = [], 0
+    made, moved, parts = [], 0, []
     for k, (B, N, poly) in enumerate(outlines):
         L = np.linalg.norm(N - B)
         u = (N - B) / L
@@ -562,15 +564,41 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
         body = xf.MeshBody(bodyP[use], bodyN[use], gap=L_['fold_gap'], reach=1.0) if L_.get('body', True) else None
         F = fo.Folds(fab, P2, T2)
         F.add(roll, ang, radius=L_['fold_radius'])
-        rep = F.bake(body=body, log=lambda *a_: None, **L_.get('bake', {}))
+        # (a fold solved before with the same cloth, body and settings is read back: the standing rule for solved folds)
+        import hashlib
+        import json as _json
+        hh = hashlib.sha1()
+        for arr in (P2, T2, start, bodyP[use], bodyN[use]):
+            hh.update(np.ascontiguousarray(np.round(np.asarray(arr, float), 5)).tobytes())
+        hh.update(_json.dumps([{k_: v_ for k_, v_ in L_.items() if k_.startswith('fold_') or k_ in ('bake', 'tilt')},
+                              FOLD_FABRIC], sort_keys=True, default=str).encode())
+        cfile = os.path.join(fo.cache_dir(), 'lapel-%s.npz' % hh.hexdigest()[:20])
+        if os.path.exists(cfile) and not os.environ.get('COLLAR_NO_CACHE'):
+            got = np.load(cfile, allow_pickle=True)
+            fab.pos[:] = got['pos']
+            rep = str(got['report']) + ' (from the fold cache)'
+        else:
+            rep = F.bake(body=body, log=lambda *a_: None, **L_.get('bake', {}))
+            os.makedirs(fo.cache_dir(), exist_ok=True)
+            np.savez(cfile, pos=fab.pos, report=str(rep))
         log('collar: front %d: lapel extension of %d points on %d roll points (roll %.2f long on the cloth, %.2f in front view), turned back by the fold hinges: %s'
             % (k, len(ext), nl, arc[-1], t[line[-1]] - t0, str(rep).replace(chr(10), '; ')))
         X = fab.pos.copy()
-        made.append(([bm.verts[int(i)] for i in line], X[ns:], tri))
+        made.append((line, X[ns:], tri))
+        parts.append(dict(st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use))
         FOLDED.append(dict(flat=P2, pos=X, T=T2.copy(), lap=lap, roll=roll, report=str(rep), body=(bodyP[use], bodyN[use])))
         moved += len(ext)
+    if L_.get('whole', True):
+        Wn = _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log)
+        for i in np.nonzero(np.abs(Wn - W).max(1) > 0)[0]:
+            bm.verts[int(i)].co = tuple(Wn[i] @ inv[:3, :3].T + inv[:3, 3])
+        made = [(ln, pt['ext'], tri) for (ln, _, tri), pt in zip(made, parts)]
+        for Lk, pt in zip(FOLDED, parts):
+            Lk['pos'] = np.vstack([Wn[pt['st_v']], pt['ext']])
     for line, X, tri in made:                         # (the folded extensions joined to the bodice on its own roll points)
         Xl = X @ inv[:3, :3].T + inv[:3, 3]
+        bm.verts.ensure_lookup_table()
+        line = [bm.verts[int(i)] for i in line]
         vs = list(line) + [bm.verts.new(tuple(c)) for c in Xl]
         # (the lapel's points are bound to the bones as the roll points next to them are: points with no weights
         # are left behind when the figure is posed or turned, and the lapel hangs in the air)
@@ -589,6 +617,127 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     bm.free()
     o.data.update()
     return moved, [(L_['pos'], L_['T']) for L_ in FOLDED]
+
+
+FRONT_SOLVE = {}     # the front cloth before and after the solve with the lapels (for the contour sheet's strain map)
+
+
+def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=print):
+    """The folds held while the bodice's front is let go: the lapels as folded (each on its own, against a front held
+    still) and the front's cloth round them in one fabric, the front free from the break up between the armholes and
+    held at its border (the armholes, shoulders and neck, the buttoned lap, the cloth below). The hinges keep the
+    folds; whatever the turned lapels pull on the roll lines is taken up by the front's cloth, not by pins. The
+    front's rest is its drafted shape; the lapels' is their flat pattern. Returns the bodice's points, the front's
+    moved; parts[k]['ext'] is updated."""
+    import fabric as xf
+    import folds as fo
+    w, yc = M['w'], M['yc']
+    zb = min(B[1] for B, _, _ in outlines)
+    zn = max(N[1] for _, N, _ in outlines)
+    xm = max(np.abs(q[:, 0]).max() for _, _, q in outlines) + 0.8      # (inside the body's own box: see fold_front)
+    inr = (C[:, 1] < yc) & (np.abs(C[:, 0]) < xm) & (C[:, 2] > zb - 1.5 * w) & (C[:, 2] < zn + 1.0 * w)
+    reg = np.nonzero(inr)[0]
+    R = np.array(sorted({i for f in reg for i in fv[f]}))
+    outside = {i for f in np.nonzero(~inr)[0] for i in fv[f]}
+    loc = -np.ones(len(W), int)
+    loc[R] = np.arange(len(R))
+    nR = len(R)
+    lap = 0.30 * w + 0.3 * w
+    rollv = set(np.concatenate([pt['line'] for pt in parts]).tolist())
+    # (held: the region's border, the buttoned lap, and the cloth's own cut edges but the roll lines: the armholes
+    # and the neck are sewn to the sleeves and the collar)
+    held = np.array([(i in outside) or (abs(W[i, 0]) < lap and W[i, 2] < zb - 0.1 * w) or (edge[i] and i not in rollv)
+                     for i in R])
+    offs = np.cumsum([nR] + [len(pt['ext']) for pt in parts])
+    pos = np.vstack([W[R]] + [pt['ext'] for pt in parts])
+    fab = xf.Fabric(pos.copy(), dict(FOLD_FABRIC))
+    fab.pin(np.nonzero(held)[0])
+    Tr = np.array([(loc[f[0]], loc[f[j]], loc[f[j + 1]]) for k in reg for f in [fv[k]] for j in range(1, len(f) - 1)])
+    fab.mesh([tuple(int(i) for i in t) for t in Tr], stretch=L_['fold_stretch'], rest_pos=pos.copy(), bend=1e-6, flat=1e-6)
+    Hs, rests, comps, Fs = [], [], [], []
+    ang = math.radians(L_['fold_deg'])
+    for k, pt in enumerate(parts):
+        ns = pt['ns']
+        full = np.concatenate([loc[pt['st_v']], offs[k] + np.arange(len(pt['ext']))])
+        if (full < 0).any():
+            raise ValueError('lapel %d: its strip reaches outside the front that is solved' % k)
+        flat = np.column_stack([pos[:, 0], pos[:, 2]])
+        flat[full] = pt['P2']
+        Tk = full[pt['T2']]
+        ext_t = Tk[(pt['T2'] >= ns).any(1)]
+        crease = fo.Crease(pt['roll'], ang, L_['fold_radius'])
+        fab.mesh([tuple(int(i) for i in t) for t in ext_t], stretch=L_['fold_stretch'],
+                 rest_pos=np.column_stack([flat, np.zeros(len(flat))]), bend=1e-6, flat=1e-6,
+                 bend_at=fo.soft_at(flat, Tk, [crease]))
+        F = fo.Folds(fab, flat, Tk)
+        F.add(pt['roll'], ang, radius=L_['fold_radius'])
+        Hs.append(np.concatenate(F._H))
+        rests.append(np.concatenate(F._rest))
+        comps.append(np.concatenate(F._comp))
+        Fs.append(F)
+    H, rest, comp = np.concatenate(Hs), np.concatenate(rests), np.concatenate(comps)
+    batches = fo._colour(H, fab.w == 0)
+    # the bodies: under the front's cloth, its own drafted surface (the taut line over the corset and what else is
+    # worn under it: the cloth may lift off it or slide on it, not sink through it; on the bare body alone the front
+    # fell 0.2 onto the skin); under the lapels, the front and the body as in their own fold
+    skin = xf.MeshBody(bodyP[own], bodyN[own], gap=0.0, reach=1.0)
+    use = parts[0]['use']
+    for pt in parts[1:]:
+        use = use & pt['use']
+    cloth = xf.MeshBody(bodyP[use], bodyN[use], gap=L_['fold_gap'], reach=1.0)
+
+    def body(x):
+        p = x.copy()
+        t = np.zeros(len(x), bool)
+        p[:nR], t[:nR] = skin(x[:nR])
+        p[nR:], t[nR:] = cloth(x[nR:])
+        return p, t
+    h = L_['bake']['h']
+    was = fab.settings['damping']
+    fab.settings['damping'] = 0.35
+    far, step = 0.0, 0
+    for step in range(1, L_['whole_steps'] + 1):
+        fab.step(h, body, neutral=True)
+        lam = np.zeros(len(H))
+        for _ in range(4):
+            Fs[0]._walk(H, rest, comp, h, batches, lam)
+        p, touched = body(fab.pos.copy())
+        live = touched & (fab.w > 0)
+        fab.pos[live] = p[live]
+        if step % 20 == 0:
+            far = float(np.abs(fab.pos - fab.prev).max())
+            if L_.get('debug') and step % 100 == 0:
+                Cc = np.abs(fo._wrap(fo.dihedral(fab.pos, H) - rest))
+                jj = np.argsort(Cc)[-3:]
+                for q in jj:
+                    log('    hinge off by %.1f deg (rest %.1f): points %s free %s at %s' % (
+                        math.degrees(Cc[q]), math.degrees(rest[q]), H[q].tolist(), (fab.w[H[q]] > 0).tolist(),
+                        np.round(fab.pos[H[q]].mean(0), 2)))
+            if L_.get('debug') and step % 100 == 0:
+                dm = np.linalg.norm(fab.pos - pos, axis=1)
+                j = int(np.argmax(dm))
+                log('  step %d: fold angles %s; moved most %.3f at point %d (%s) %s from %s; front median %.4f; fastest %.5f' % (
+                    step, ', '.join('%.1f' % F.measure()[0][0] for F in Fs), dm[j], j, 'front' if j < nR else 'lapel',
+                    np.round(fab.pos[j], 2), np.round(pos[j], 2), np.median(dm[:nR][~held]), far))
+            if step > 200 and far < 2e-5:
+                break
+    fab.settings['damping'] = was
+    Wn = W.copy()
+    Wn[R] = fab.pos[:nR]
+    for k, pt in enumerate(parts):
+        pt['ext'] = fab.pos[offs[k]:offs[k + 1]].copy()
+    mv = np.linalg.norm(Wn[R] - W[R], axis=1)
+    E = np.unique(np.sort(np.vstack([Tr[:, [0, 1]], Tr[:, [1, 2]], Tr[:, [2, 0]]]), 1), axis=0)
+    l0 = np.linalg.norm(pos[E[:, 0]] - pos[E[:, 1]], axis=1)
+    ok = l0 > 0.02
+    st = 100 * (np.linalg.norm(fab.pos[E[:, 0]] - fab.pos[E[:, 1]], axis=1) / np.maximum(l0, 1e-9) - 1)[ok]
+    FRONT_SOLVE.clear()
+    FRONT_SOLVE.update(P0=pos[:nR].copy(), P1=fab.pos[:nR].copy(), E=E[ok], strain=st, held=held)
+    log('collar: the folds held with the front let go: %d front points free of %d, %d steps (fastest point %.5f); the '
+        'front moved up to %.3f (median %.4f), its strain 5%% %.2f, 95%% %.2f, worst %.1f / %.1f %%; fold angles %s' % (
+            int((~held).sum()), nR, step, far, mv.max(), np.median(mv[~held]), np.percentile(st, 5), np.percentile(st, 95),
+            st.min(), st.max(), ', '.join('%.1f' % F.measure()[0][0] for F in Fs)))
+    return Wn
 
 
 def over_lapels(pos, D, laps, M, gap=0.09):
@@ -741,7 +890,8 @@ def build():
             Vf = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
             with open(os.environ['COLLAR_FOLD_OUT'], 'wb') as fh:
                 pickle.dump(dict(V=Vf, F=[list(p.vertices) for p in b.data.polygons], skinP=BV, M=M, folded=FOLDED,
-                                 skinF=[list(p.vertices) for p in body.data.polygons], outlines=DRAFTED['outlines']), fh)
+                                 skinF=[list(p.vertices) for p in body.data.polygons], outlines=DRAFTED['outlines'],
+                                 front=dict(FRONT_SOLVE)), fh)
         pos = over_lapels(pos, D, folded, M)
     else:
         pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
