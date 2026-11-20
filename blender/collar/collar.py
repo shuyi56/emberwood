@@ -556,7 +556,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
         fab.pin(np.arange(ns))                                           # (the bodice's own cloth: the strip and the roll's points)
         crease = fo.Crease(roll, ang, L_['fold_radius'])
         fab.mesh([tuple(int(i) for i in t_) for t_ in T2], stretch=L_['fold_stretch'], rest_pos=np.column_stack([P2, np.zeros(len(P2))]),
-                 bend=1e-6, flat=1e-6, bend_at=fo.soft_at(P2, T2, [crease]))
+                 bend=L_.get('fold_bend', 1e-6), flat=L_.get('fold_bend', 1e-6), bend_at=fo.soft_at(P2, T2, [crease]))
         # (the cloth right beside the roll is what the lapel turns round: it is not in the lapel's way. Left in, it
         # pushes the turn's own rows a full gap off and the fold is strained apart.)
         beside = np.zeros(len(bodyP), bool)             # (beside either roll: at the break the two turns meet)
@@ -672,7 +672,7 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
         ext_t = Tk[(pt['T2'] >= ns).any(1)]
         crease = fo.Crease(pt['roll'], ang, L_['fold_radius'])
         fab.mesh([tuple(int(i) for i in t) for t in ext_t], stretch=L_['fold_stretch'],
-                 rest_pos=np.column_stack([flat, np.zeros(len(flat))]), bend=1e-6, flat=1e-6,
+                 rest_pos=np.column_stack([flat, np.zeros(len(flat))]), bend=L_.get('fold_bend', 1e-6), flat=L_.get('fold_bend', 1e-6),
                  bend_at=fo.soft_at(flat, Tk, [crease]))
         F = fo.Folds(fab, flat, Tk)
         F.add(pt['roll'], ang, radius=L_['fold_radius'])
