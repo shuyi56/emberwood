@@ -42,7 +42,7 @@ LEATHER = dict(
     gap=0.03,                # how far the leather is kept off the hose
     steps=120,
 )
-HOLD = {'sole': 0.30, 'collar': 0.60}   # how far up from the upper's lower edge, and down from its top, it is held
+HOLD = {'sole': 0.30, 'collar': 0.25}   # how far up from the upper's lower edge, and down from its top, it is held
 # The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge. The foot's seams,
 # then each shaft's (last.SHAFTS); a seam whose pieces a boot does not have is passed over.
 SEAMS = (
@@ -486,7 +486,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     return eyelets, lace
 
 
-CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=1.2, gain=0.4)  # (the ankle's bend in degrees, and the holds)
+CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=0.5, gain=0.4)  # (the ankle's bend in degrees, and the holds)
 
 
 def _deform(o, rig):

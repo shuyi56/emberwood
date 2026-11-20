@@ -64,7 +64,7 @@ RATIOS = {
     'ease': 0.035,           # the shaft's room over the leg's taut section (a finger's width all round)
     'slope': 0.20,           # the most the shaft closes in on the leg for each unit it goes down
     'ankle_girth': 1.12,     # the shaft's least girth, as a multiple of the ankle's (laced: the heel goes in open)
-    'flare': 0.008,          # the top's flare
+    'flare': 0.0,          # the top's flare
     'flare_span': 0.30,
     'calf_swell': 0.015,     # the shaft's own swell over the calf, past the ease (as a laced boot is cut)
     'calf_span': 0.25,       # over this far either way of the calf's fullest
@@ -89,6 +89,9 @@ RATIOS = {
     'stitch_in': 0.012,      # the stitches' row, this far in from the edge
     'lace_gap': 0.035,       # the lacing's opening down the front, drawn tight (about 9 mm between the edges)
     'binding_ring': 0.0,     # 1 sews a binding band round the top (0: none, the panels' top edges bare)
+    'top_fit': 0.85,         # how far the top is drawn in from the calf's width to the leg's own (1: all the way)
+    'top_snug': 0.65,        # how much of the ease is taken out at the top (laced close to the leg)
+    'top_back': 0.045,       # the panels' top edge stands this much higher at the back than at the front
     'tongue_rise': 0.090,    # the last carried on this far above the boot's top, for the tongue (the most it can stand)
     'tongue': 0.050,         # (the vamp's throat: how far it is cut under each panel past its front edge)
     'eyelet_in': 0.028,      # the eyelets' row, this far in from the front edge
@@ -97,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0058,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -142,7 +145,13 @@ def shaft(P, leg, M, z_top, r, log=print):
     # one, less the slope over the height between them
     dz = np.abs(zs[:, None] - zs[None, :])
     R = (R[None, :, :] - r['slope'] * dz[:, :, None]).max(1)
-    R = R + r['ease'] + r['flare'] * _ss(z_top - r['flare_span'], z_top, zs)[:, None] ** 2
+    # over the calf the lacing draws the leather in to the leg: the calf's width is not carried on up to the top
+    # (which left the top a wide ring standing off the leg all round), the leg's own section is, nearly
+    w = (r['top_fit'] * _ss(M['calf_z'], z_top - 0.5, zs))[:, None]
+    R = R * (1.0 - w) + taut * w
+    # (laced, the leather lies closer to the leg the higher it goes: the ease is let down over the calf to the top)
+    R = R + (r['ease'] * (1.0 - r['top_snug'] * _ss(M['calf_z'], z_top - 0.3, zs)))[:, None] \
+        + r['flare'] * _ss(z_top - r['flare_span'], z_top, zs)[:, None] ** 2
     R = R + r['calf_swell'] * np.exp(-((zs - M['calf_z']) / r['calf_span']) ** 2)[:, None]
     girth = (R * (2 * np.pi / COLS)).sum(1)
     R *= np.maximum(1.0, r['ankle_girth'] * M['ankle'] / girth)[:, None]       # (the heel has to pass)
@@ -337,6 +346,9 @@ def cut_lace(D, faces, f, r, weights, lift_on):
         return half + TONGUE_UNDER * shin(A[:, 5])
     side, front, vs, zb = f['side'], f['front'], f['vamp'], f['z_top'] - r['binding']
     lap = r['lap']
+
+    def topz(A):                                       # (the panels' top edge: level at the front, rising to the back)
+        return f['z_top'] + r['top_back'] * (1.0 - _ss(-0.6, 0.6, front(A)))
     pieces = []
     for q in ('inner', 'outer'):
         k = -1.0 if q == 'inner' else 1.0
@@ -346,7 +358,7 @@ def cut_lace(D, faces, f, r, weights, lift_on):
             fr = front(A) > 0
             return k * side(A) - np.where(fr, half, -lap if k > 0 else 0.0)
         Dp, fp = _compact(*fit.trim(*fit.trim(*fit.trim(D, faces, mine), lambda A: lap - vs(A)),
-                                    lambda A: f['z_top'] - A[:, 5]))          # (the panel's top edge)
+                                    lambda A: topz(A) - A[:, 5]))             # (the panel's top edge)
         back = (front(Dp) <= 0)
         d_back = np.where(back, k * side(Dp) + lap, FAR) if k > 0 else np.full(len(Dp), FAR)
         d_a = (lap - vs(Dp)) * f['kc']
@@ -355,7 +367,7 @@ def cut_lace(D, faces, f, r, weights, lift_on):
         sd = np.minimum(d_back, d_a)
         add_p = lift_on(Dp, lift)
         e = {'A ' + q: np.abs(vs(Dp) - lap) < NEAR, 'D': (np.abs(mine(Dp)) < NEAR) & back,
-             'L': (np.abs(mine(Dp)) < NEAR) & ~back, 'E': Dp[:, 5] < f['z_welt'] + NEAR, 'F': Dp[:, 5] > f['z_top'] - NEAR,
+             'L': (np.abs(mine(Dp)) < NEAR) & ~back, 'E': Dp[:, 5] < f['z_welt'] + NEAR, 'F': Dp[:, 5] > topz(Dp) - NEAR,
              'H': (np.abs(np.abs(side(Dp)) - tw(Dp)) < 0.5 * GRAIN) & ~back & (vs(Dp) < 0)}
         pieces.append(dict(name=q + ' shaft', V=add_p, F=fp, up=(0, 0, 1), lift=lift, edges=e, sd=sd,
                            su=np.where(d_back < d_a, Dp[:, 5], Dp[:, 4]), W=Dp[:, 9:],
