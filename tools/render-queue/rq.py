@@ -286,6 +286,60 @@ def git(*a, check=True, cwd=REPO):
     return r
 
 
+LOCK = os.path.join(DATA, "queue.lock")
+_lock_depth = 0
+
+
+class qlock:
+    """One writer at a time for queue.json, across processes (an O_EXCL lock file; a lock older than 60 s is a
+    dead process's and is broken). Re-entrant, so a locked command can call save()."""
+    def __enter__(self):
+        global _lock_depth
+        if _lock_depth == 0:
+            end = time.time() + 45
+            while True:
+                try:
+                    fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.write(fd, f"{os.getpid()} {now()}".encode()); os.close(fd)
+                    break
+                except FileExistsError:
+                    try:
+                        if time.time() - os.path.getmtime(LOCK) > 60:
+                            os.unlink(LOCK)
+                            continue
+                    except OSError:
+                        pass
+                    if time.time() > end:
+                        break                      # never block the queue for good: go on without the lock
+                    time.sleep(0.05)
+        _lock_depth += 1
+        return self
+
+    def __exit__(self, *e):
+        global _lock_depth
+        _lock_depth -= 1
+        if _lock_depth == 0:
+            try:
+                os.unlink(LOCK)
+            except OSError:
+                pass
+
+
+def locked(fn):
+    @functools.wraps(fn)
+    def w(*a, **k):
+        with qlock():
+            return fn(*a, **k)
+    return w
+
+
+_LISTS = ("requests", "intents")
+
+
+def _clean(o):
+    return json.dumps({k: v for k, v in o.items() if not k.startswith("_")}, sort_keys=True)
+
+
 def load():
     try:
         with open(STATE) as f:
@@ -293,36 +347,80 @@ def load():
     except FileNotFoundError:
         s = {"next": 1, "requests": []}
     s.setdefault("ready", []); s.setdefault("sheet_due", False); s.setdefault("sheets_done", {})
+    # what this process saw, so save() can tell its own changes from other processes' (a three-way merge)
+    s["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in s.get(k, [])} for k in _LISTS},
+                  "top": {k: json.dumps(v, sort_keys=True) for k, v in s.items() if k not in _LISTS and not k.startswith("_")}}
     return s
+
+
+def merge_disk(s, disk):
+    """s is this process's copy (loaded some time ago, perhaps before a slow step); disk is the file now.
+    Keep what this process changed, and take everything else from the file: a request another thread added, a
+    cancel, a state another process set. Without this the last writer won and lost the others' changes."""
+    base = s.get("_base")
+    if base is None:
+        return s
+    out = {k: v for k, v in s.items() if not k.startswith("_")}
+    for k, v in disk.items():
+        if k in _LISTS or k.startswith("_"):
+            continue
+        if k in ("next", "next_intent"):
+            out[k] = max(out.get(k, 1), v)
+        elif k not in out or json.dumps(out[k], sort_keys=True) == base["top"].get(k):
+            out[k] = v                                   # unchanged here: the file's value is newer
+    for k in _LISTS:
+        if k not in s and k not in disk:
+            continue
+        b = base["lists"].get(k, {})
+        mine = {o["id"]: o for o in s.get(k, [])}
+        theirs = {o["id"]: o for o in disk.get(k, [])}
+        merged = []
+        for i in sorted(set(mine) | set(theirs)):
+            m, d = mine.get(i), theirs.get(i)
+            if m is not None and (i not in b or _clean(m) != b[i]):
+                if (k == "requests" and d is not None and d.get("state") == "cancelled" and i in b
+                        and json.loads(b[i]).get("state") != "cancelled" and m.get("state") in ("pending", "rendering", "conflict")):
+                    merged.append(d)                     # cancelled meanwhile: the cancel stands
+                else:
+                    merged.append(m)                     # changed or added here
+            elif d is not None:
+                merged.append(d)                         # unchanged here, or added elsewhere: the file's version
+            elif m is not None and i not in b:
+                merged.append(m)
+        out[k] = merged
+    return out
 
 
 def save(s):
     """Compact JSON, written and then read back: the shared folder is a network mount, and a replace on it once
-    left the file cut short. A local copy is kept too."""
+    left the file cut short. A local copy is kept too. Under the lock, merged with what the file holds now."""
+    orig = s
+    base = s.get("_base")
     s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]]}
     os.makedirs(WORK, exist_ok=True)
     for _ in range(5):
-        # (keep requests another process added since s was loaded: plan() holds s through slow git merges; read
-        # again on every try, since an add that lands between the write and the check is what made it fail)
-        try:
+        with qlock():
+            try:
+                with open(STATE) as f:
+                    disk = json.load(f)
+                s = merge_disk({**s, "_base": base}, disk)
+                if s["requests"]:
+                    s["next"] = max(s["next"], max(r["id"] for r in s["requests"]) + 1)
+            except (OSError, ValueError, KeyError):
+                pass
+            data = json.dumps({k: v for k, v in s.items() if not k.startswith("_")}, separators=(",", ":"))
+            with open(os.path.join(WORK, "queue.local.json"), "w") as f:
+                f.write(data)
+            with open(STATE, "w") as f:
+                f.write(data); f.flush(); os.fsync(f.fileno())
+            time.sleep(0.2)
             with open(STATE) as f:
-                disk = json.load(f)
-            have = {r["id"] for r in s["requests"]}
-            extra = [r for r in disk.get("requests", []) if r["id"] not in have and r["id"] >= min(have | {10 ** 9})]
-            if extra:
-                s["requests"] = sorted(s["requests"] + extra, key=lambda r: r["id"])
-                s["next"] = max(s["next"], disk.get("next", 1))
-        except (OSError, ValueError, KeyError):
-            pass
-        data = json.dumps(s, separators=(",", ":"))
-        with open(os.path.join(WORK, "queue.local.json"), "w") as f:
-            f.write(data)
-        with open(STATE, "w") as f:
-            f.write(data); f.flush(); os.fsync(f.fileno())
-        time.sleep(0.5)
-        with open(STATE) as f:
-            if f.read() == data:
-                return
+                if f.read() == data:
+                    w = json.loads(data)        # what the file holds now is this process's new base
+                    orig["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in w.get(k, [])} for k in _LISTS},
+                                     "top": {k: json.dumps(v, sort_keys=True) for k, v in w.items()
+                                             if k not in _LISTS and not k.startswith("_")}}
+                    return
     sys.exit(f"could not write {STATE} intact; the local copy is in {WORK}/queue.local.json")
 
 
@@ -1070,6 +1168,7 @@ def open_intents(s):
             and i["eta"] + INTENT_TTL_S > t]
 
 
+@locked
 def cmd_intent(a):
     """A thread says what it is about to send, before it does the work, so the queue can hold a related job for it."""
     s = load()
@@ -1102,6 +1201,7 @@ def cmd_intents(a):
                   f"eta {time.strftime('%H:%M:%SZ', time.gmtime(i['eta']))}  {i['branch']}  {i.get('note') or ''}")
 
 
+@locked
 def cmd_drop_intent(a):
     s = load()
     for i in s.get("intents", []):
@@ -1170,6 +1270,7 @@ def is_extra(v):
     return RQ_VIEWS in w and not any(f in w for f in ("--turn", "--head", "--walk", "--run", "--cells"))
 
 
+@locked
 def cmd_add(a):
     s = load()
     outs = [o for o in a.outputs.split(",") if o]
@@ -1530,6 +1631,7 @@ def cmd_ping(a):
             print(f"  advice: {v}")
 
 
+@locked
 def cmd_ready(a):
     s = load()
     if a.branch not in s["ready"]:
@@ -1537,6 +1639,7 @@ def cmd_ready(a):
     save(s)
 
 
+@locked
 def cmd_sheet_due(a):
     s = load(); s["sheet_due"] = True; save(s)
 
@@ -1667,6 +1770,7 @@ def cmd_export(a):
     print(a.out, len(rows), "rows")
 
 
+@locked
 def cmd_cancel(a):
     s = load()
     for r in s["requests"]:
