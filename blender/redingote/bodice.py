@@ -85,10 +85,12 @@ WOOL = dict(solver.LINEN, mass=0.9, tension=200.0, compression=60.0, shear=40.0,
 COARSE = (0.25, 144)         # the solver's own draft of the basque: (grid step, columns round the body)
 
 
-# The front's cut above the top button, when the bodice is to have lapels: a function (V, faces, M) -> [(name, f)],
-# each f positive on the cloth that stays, called once the hem, armholes and neckline are cut. The collar module
-# (blender/collar/collar.py) sets it: it drafts the lapels with the collar and cuts the front's opening round them,
-# so the lapels are the bodice's own cloth with clean cut edges, ready to be turned back.
+# The fronts' cuts above the top button, when the bodice is to have lapels: a function (V, faces, M) ->
+# dict(right=f, left=f), each f positive on the cloth that stays, called once the piece is cut and settled, as it is
+# cut into its two fronts (two_fronts): the right front is cut by `right`, the left front and its underlap by `left`.
+# The collar module (blender/collar/collar.py) sets it: it drafts the lapels with the collar and cuts each front open
+# along its own roll line, from its own edge at the top button up to the neck, so each lapel can be drafted on from
+# its front's cloth and turned back.
 FRONT = None
 
 
@@ -235,15 +237,16 @@ def surface_lift(M, ap, ratios=RATIOS, under=False):
 
 
 LAP_GAP = 0.006              # the left front's points on the cut stand this far past the right front's edge (apart, so they are not welded back)
-LAP_TOP = None               # the underlap's top, when the fronts are open above it (the collar module sets it: the lapels' break)
 
 
-def two_fronts(V, faces, M, ratios=RATIOS, top=None):
+def two_fronts(V, faces, M, ratios=RATIOS, cuts=None):
     """The front cut into its two fronts, as a bodice that buttons is made. The right front ends at its edge, lap past
     the middle; the left front begins there and runs on under the right front to lap past the middle on the other
     side (the underlap: the buttons are sewn through to it). The sheet is cut along the right front's edge from the
     hem to the neck, the points on the cut doubled so the two fronts are separate cloth, and the underlap is drafted
     as the left front's own continuation: the shell under the right front, between the two lap lines.
+    cuts: dict(right=f, left=f), each front's own cut above the top button (see FRONT): the right front's cloth is
+    cut by `right`, the left front's and the underlap's by `left`.
     Returns (points, faces, (underlap points, underlap faces))."""
     w, yc = M['w'], M['yc']
     lap = ratios['lap'] * w
@@ -291,8 +294,10 @@ def two_fronts(V, faces, M, ratios=RATIOS, top=None):
     # the underlap: the shell under the right front from its edge back to the left front's own edge
     src = [list(f) for f in right if V[f, 0].max() > -lap - 0.02]
     U, uf = fit.trim(V, src, lambda p: p[:, 0] + lap)
-    if top is not None:
-        U, uf = fit.trim(U, uf, lambda p: top - p[:, 2])
+    if cuts is not None:
+        U, uf = fit.trim(U, uf, cuts['left'])
+        V, right = fit.trim(V, right, cuts['right'])
+        V, left = fit.trim(V, left, cuts['left'])
     used = np.array(sorted({i for f in uf for i in f}))
     re = -np.ones(len(U), int)
     re[used] = np.arange(len(used))
@@ -533,10 +538,6 @@ def build_bodice(body, head_objs=(), rig=None, cloth=None, button=None, under=()
     for nm, f in lines:
         V, faces = fit.trim(V, faces, f)
         log('bodice: trimmed %s, %d faces left' % (nm, len(faces)))
-    if FRONT is not None:                            # (the front's own cut, when a collar gives it lapels: see FRONT)
-        for nm, f in FRONT(V, faces, M):
-            V, faces = fit.trim(V, faces, f)
-            log('bodice: trimmed %s, %d faces left' % (nm, len(faces)))
     if settle and rig is not None:
         move = _settle_basque(P, T, aw, M, hb, body, rig, list(colliders), list(under), lines, ratios, log, corset)
         used = sorted({i for f in faces for i in f})
@@ -548,7 +549,7 @@ def build_bodice(body, head_objs=(), rig=None, cloth=None, button=None, under=()
         kd.insert(Vector(P[i]), int(i))
     kd.balance()
     th = ratios['thickness'] * w
-    V, faces, (U, uf) = two_fronts(V, faces, M, ratios, LAP_TOP)
+    V, faces, (U, uf) = two_fronts(V, faces, M, ratios, FRONT(V, faces, M) if FRONT is not None else None)
     log('bodice: cut into two fronts on the right front\'s edge; the left front\'s underlap, %d faces' % len(uf))
     o = fit._sheet(name, [(V, faces, surface_lift(M, ap, ratios)), (U, uf, surface_lift(M, ap, ratios, under=True))],
                    M, cloth, body, kd, rig, lift=0.0, thickness=th)
