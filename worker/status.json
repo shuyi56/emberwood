@@ -1,5 +1,5 @@
 {
-    "state":  "BUSY free memory under 9 GB",
+    "state":  "READY (no render-jobs branch on origin yet)",
     "job":  null,
     "pending":  [
 
