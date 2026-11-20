@@ -460,19 +460,21 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     for k in range(n - 1):
         for j, ((A, NA), (B, NB)) in enumerate((((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])),
                                                  ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1])))):
-            slack = rng.uniform(0.0, 0.5) * rl
-            over = (1.0 if (j + k) % 2 == 0 else -0.2) * rl             # (this strand over the other, or under it)
-            up = 0.5 * (NA + NB)
-            mid = 0.5 * (A + B) + up * (rl * 0.9 + over + slack)
-            mid = mid + (B - A) * rng.normal(0, 0.035)                    # (the crossing drifts a little up or down)
-            path = (1 - s) ** 2 * (A - NA * 0.8 * rl) + 2 * s * (1 - s) * mid + s ** 2 * (B - NB * 0.8 * rl)
-            # the cord lies over the curve of the shin: every point between the holes is brought onto the tongue's
-            # surface and held a cord's width over it, the over strand a cord higher
-            lift = rl * (1.1 + slack / rl * 0.5 + np.where(over > 0, 1.0, -0.1))
-            for i in range(2, len(path) - 2):
-                path[i] = onto(path[i], float(lift) if np.ndim(lift) == 0 else float(lift))
-            for _ in range(2):                                     # (smoothed so it runs as one curve)
-                path[2:-2] = 0.25 * path[1:-3] + 0.5 * path[2:-2] + 0.25 * path[3:-1]
+            slack = rng.uniform(0.0, 0.6) * rl
+            # the cord is drawn from hole to hole along the leather's own curve: a Hermite curve that leaves each
+            # hole along the surface there (so it arches over the shin as the contour does, not across the chord),
+            # a cord's width over it; at every crossing the same strand lies on top, a full cord over the other
+            d = B - A
+            tA = d - NA * (d @ NA)
+            tB = d - NB * (d @ NB)
+            h00, h10, h01, h11 = 2 * s ** 3 - 3 * s ** 2 + 1, s ** 3 - 2 * s ** 2 + s, -2 * s ** 3 + 3 * s ** 2, s ** 3 - s ** 2
+            path = h00 * A + h10 * tA + h01 * B + h11 * tB
+            Ns = (1 - s) * NA + s * NB
+            Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
+            w = np.minimum(1.0, 6 * np.minimum(s[:, 0], 1 - s[:, 0]))[:, None]        # (down into the hole at each end)
+            bump = np.sin(np.pi * s) ** 2
+            lift = rl * (-0.8 + 1.9 * w) + slack * np.sin(np.pi * s) + (2.3 * rl * bump if j == 0 else 0.0)
+            path = path + Ns * lift
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
             ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
             strand(path, rl * wob * ends * (1.05 if j == 0 else 1.0))
