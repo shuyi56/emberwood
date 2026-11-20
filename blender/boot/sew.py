@@ -415,6 +415,8 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             t /= max(np.linalg.norm(t), 1e-9)
             u = np.cross(N[k], t)
             P[k] = P[k] + t * rng.normal(0, 0.03 * pitch) + u * rng.normal(0, 0.10 * R) * (1 if q == 'outer' else -1)
+        Ns_ = np.array([N[max(0, k - 2):k + 3].mean(0) for k in range(len(N))])     # (the row's normals smoothed: a
+        N = Ns_ / np.maximum(np.linalg.norm(Ns_, axis=1, keepdims=True), 1e-9)       # vertex normal alone is noisy)
         rows[q] = (P, N)
     sizes = {q: R * (1 + rng.normal(0, 0.05, len(rows[q][0]))) for q in rows}
     # the eyelets: rings lying on the leather, a tube round the hole
