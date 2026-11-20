@@ -27,6 +27,7 @@ import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 import fit  # noqa: E402
 import chemise  # noqa: E402
+import drape  # noqa: E402
 import cut  # noqa: E402
 import sleeve  # noqa: E402
 
@@ -53,6 +54,21 @@ FUSTIAN = dict(colour=tuple(c ** 2.2 for c in _rgb(DYE)), streak=0.10, yarn=0.6,
                sheen=0.25, relief=0.6, pitch=chemise.PITCH * 70.0 / 42.0)
 
 
+# The shirt worn under the sleeved gambeson: closer to the body, and only a little of it showing, a band below the
+# gambeson's cuffs and below its skirt.
+SHIRT = dict(
+    drape.RATIOS,
+    loose=0.22,              # (0.50 alone: under a padded coat the shirt is taken in)
+    flare=0.06,
+    sleeve_full=0.20,
+    sleeve_bell=0.04,
+    full=0.16,
+    hem=cut.RATIOS['hem_drop'] + 0.45,     # a band of it below the gambeson's skirt
+    cuff=0.08,                             # and below its cuffs (the gambeson's ends 0.25 w above the wrist)
+    cuff_in=0.30,
+)
+
+
 def wear(body, heads, bare=BARE):
     """The doublet (and, unless bare, the chemise under it) on a body already built. Returns the doublet, the
     measures, and the height of the lowest hem."""
@@ -76,15 +92,17 @@ def wear(body, heads, bare=BARE):
         x_in, z_lo = float(np.abs(hole[:, 0]).min()) - 0.3 * m['w'], float(hole[:, 2].min()) - 0.5 * m['w']
 
         def covered_arm(p, share, z=z_cuff + border):
+            # (the shirt's sleeve is held whole, down to its end: it ends just past the gambeson's cuff, and nothing of
+            # it hangs free from the cloth held inside)
             under_cap = (np.abs(p[:, 0]) > x_in) & (p[:, 2] > z_lo)
-            return np.where((share >= 0.5) | under_cap, p[:, 2] - z, -1.0)
+            return np.where(share >= 0.5, 1.0, np.where(under_cap, p[:, 2] - z, -1.0))
         under.update(sleeves=sl, covered_arm=covered_arm,
                      gap_arm=0.8 * sleeve.RATIOS['sleeve_pinch'] * m['w'])
     chemise.linen_closeup('doublet fustian', FUSTIAN)
     lo = m['z_hem']
     if not bare:
         # (the shirt has half the doublet's ease to lie in: the rest is the doublet's own lining and the lacing's pull)
-        _, d = chemise.dress(body, m, under=under)
+        _, d = chemise.dress(body, m, under=under, ratios=SHIRT if SLEEVES else None)
         lo = min(lo, d.z_hem_worn)
     return o, m, lo
 

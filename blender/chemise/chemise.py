@@ -116,11 +116,11 @@ def linen_closeup(name, P=LINEN):
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
 
 
-def dress(body, m, under=None):
+def dress(body, m, under=None, ratios=None):
     """The chemise on a body already built (m: fit.measure's measurements), under another garment or alone (see
     drape.build_chemise). Returns the object and its draft."""
     o, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
-                               settle=os.environ.get('CHEMISE_DRAWN') is None, under=under,
+                               settle=os.environ.get('CHEMISE_DRAWN') is None, under=under, ratios=ratios or drape.RATIOS,
                                colliders=[c for c in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if c])
     linen_closeup('chemise linen')
     return o, d
