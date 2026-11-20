@@ -55,7 +55,7 @@ import time
 
 import numpy as np
 
-VERSION = 6
+VERSION = 7
 HERE = os.path.dirname(os.path.abspath(__file__))
 CM = 165.0 / 63.0              # a unit in centimetres (the figure: 165 cm, 63 units)
 PATTERN_UV = ('pattern', 'flat', 'cut')
