@@ -38,24 +38,30 @@ and Blender's cloth (`blender/chemise/solver.py`).
   `land_along`, `land_off` and `land_worst` in the report. Treat `|along|` over one row as a failed fold even when
   the angle passes.
 
-## S3. Cloth tears in creases of the body, the armpit above all (missing feature, fixed; geometry upstream)
+## S3. Cloth tears in creases of the body, the armpit above all (modelling first; solver mitigation added)
+
+- Modelling cause found on the redingote bodice: the armhole was cut by `max(loop, f_seam)`, and the plumb seam
+  surface ran through the crease under the arm, which left a toothed edge and a tongue pointing forward. Fixed by
+  cutting by the seam loop alone (`/mnt/project-files/petticoat/bodice-armhole-on-the-loop.patch`). Check the armhole
+  cut first when an armpit tears: a cut surface that passes through the crease makes the tear before any solver runs.
 
 - Symptom: ragged edges, slits or knots at the bottom of the armhole and behind the armpit, on several garments
   (chemise knot at the armhole, holes between the vest's armhole and the plates, the bodice's slit at the armpit,
   the undersleeve torn between arm and back). The worst strain of the piece sits in the crease.
-- Cause, solver side: `MeshBody` pushed each point along the normal of its single nearest surface point. In a
+- Cause, solver side (it makes a crease worse wherever cloth is pushed off the body there): `MeshBody` pushed each point along the normal of its single nearest surface point. In a
   crease (the torso's side against the arm's inner face, and the rest-pose arm sinks 0.2 to 0.25 into the side
   there) the nearest point flips between the two walls from one cloth point to the next, so neighbours are pushed
   in opposite directions across the crease. The same flip hits any placement that projects onto "the nearest
   skin" (it is how the undersleeve tore between arm and back in `sewn.py`), and Blender's collision on a collider
   that intersects itself.
-- Fix in the local solver: `MeshBody(..., planes=8)` keeps each point off both walls of a crease at once (the
+- Mitigation in the local solver: `MeshBody(..., planes=8)` keeps each point off both walls of a crease at once (the
   nearest sample's plane and the nearest sample facing more than 60 degrees away within `band`), so the push in a
   crease is out along its bisector. Test (`blender/shared/test_crease_body.py`: a torso and an arm with the arm sunk
   0.2, a strip cut 6 % long falling into the crease): worst body push jump between neighbours 5.6 to 2.2 per unit of
   spacing; worst strain in the crease 35 % with `planes=1`, 23 % with `planes=8` (away from the crease 15 to 17 %,
   the strip's own sag). Default stays 1 so existing pieces do not change.
-- Fix upstream (geometry, the garment and anatomy threads): give the cloth a body with the armpit bridged, one
+- Still open on the body (anatomy): the rest-pose arm sinks 0.2 to 0.25 into the torso's side. Also, for the garment
+  and anatomy threads: give the cloth a body with the armpit bridged, one
   smooth surface from the chest's and back's walls over the pit to the arm (as the gown's fuse fillet does), and
   the arm clear of the side instead of sunk into it. For Blender's cloth, collide with that bridged proxy, never with
   a mesh that intersects itself. Lay the seam and the first rows of the sleeve by one smooth curve from the
