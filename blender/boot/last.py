@@ -93,7 +93,7 @@ RATIOS = {
     'eyelet_pitch': 0.085,   # and this far apart up it (about 2.2 cm)
     'eyelet_first': 0.045,   # the lowest, this far over the ankle seam
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
-    'lace': 0.0085,          # the lace's radius (a round cord about 2.7 mm across)
+    'lace': 0.0058,          # the lace's radius (a round cord about 2.7 mm across)
 }
 PLAIN = ('slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart

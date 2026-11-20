@@ -475,7 +475,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
                 path[2:-2] = 0.25 * path[1:-3] + 0.5 * path[2:-2] + 0.25 * path[3:-1]
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
             ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
-            strand(path, rl * wob * ends * (1.1 if j == 0 else 1.0))
+            strand(path, rl * wob * ends * (1.05 if j == 0 else 1.0))
     # the top: the two ends come out of the top holes and hang loose, long, one over the other, curving over the
     # panels and the foot's top as the leather does
     A, NA, B, NB = Pi[n - 1], Ni[n - 1], Po[n - 1], No[n - 1]
@@ -495,7 +495,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         pts = np.array(pts)
         for _ in range(3):
             pts[2:-2] = 0.25 * pts[1:-3] + 0.5 * pts[2:-2] + 0.25 * pts[3:-1]
-        strand(pts, rl * 1.3 * (1 - 0.08 * tt))
+        strand(pts, rl * 1.15 * (1 - 0.08 * tt))
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
