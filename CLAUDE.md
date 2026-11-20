@@ -72,6 +72,17 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   settle collides with a garment's thin sheet; its thickness is added after, so check with `spots.py`, which counts
   free cloth lying inside the outer garment's thickness as well as held cloth through it.
 
+## Colour coding is part of the draft stage
+
+- Every draft gets a flat, distinct colour per material or part, so the parts can be told apart before any texture
+  is laid on. Include the colour map with the draft.
+- Before any textured render, run the colour-map check (`tools/render-review/colorcheck.py`, built by the hose
+  thread; use it once it is on the branch). It flags: touching parts whose value gap is too small (also compared in
+  grayscale), hue clashes between parts that should read separately, and dark materials that blacken their
+  neighbours.
+- Fix flagged pairs on swatches first, not on the whole figure.
+- No textured render with an unresolved colour flag unless John accepts it.
+
 ## Contours before renders
 
 - After any solver run, and before any render, look at the contours of the result: level cuts at several heights,
