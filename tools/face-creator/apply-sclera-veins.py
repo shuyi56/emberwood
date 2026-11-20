@@ -18,6 +18,29 @@ import sys
 
 MARK = '/* @@SCLERA_VEINS@@ */'
 
+V1_TRUNKS = """    function hAt(u, f) { return f >= 0 ? f * lidTop(u, OPEN) : f * lidBot(u, OPEN); }      // (f: -1 the lower margin .. 1 the upper)
+    [0.62, 0.05, -0.6].forEach(function (f0, ti) {
+      var ph = 2 * r(), end = 0.4 + 0.07 * r(), len = 0.985 - end, steps = Math.round(len / 0.0075), prev = root;
+      for (var st = 1; st <= steps; st++) {
+        var t = st / steps, u = side * (0.985 - len * t), f = f0 * Math.sin(Math.PI * 0.5 * Math.min(1, t * 1.25)) * (1 - 0.1 * t);
+        var h = hAt(u, f) + 0.012 * Math.sin(t * 15 + ph + ti) * (0.3 + t) + 0.003 * normal(r);
+        prev = addNode([u, h], prev);
+      }
+    });
+"""
+V2_TRUNKS = """    function hAt(u, f) { return f >= 0 ? f * lidTop(u, OPEN) : f * lidBot(u, OPEN); }      // (f: -1 the lower margin .. 1 the upper)
+    // (a fan: five trunks spread over the whole height of the white, opening early, each ending at its own place on the
+    // limbus's arc, and curving a little as they go)
+    [0.88, 0.5, 0.08, -0.36, -0.8].forEach(function (f0, ti) {
+      var ph = 2 * r(), end = 0.34 + 0.12 * r() + 0.06 * (1 - Math.abs(f0)), len = 0.985 - end, steps = Math.round(len / 0.0075), prev = root;
+      for (var st = 1; st <= steps; st++) {
+        var t = st / steps, u = side * (0.985 - len * t), f = f0 * (1 - Math.pow(1 - Math.min(1, t * 1.12), 1.7)) * (1 - 0.06 * t);
+        var h = hAt(u, f) + 0.011 * Math.sin(t * 13 + ph + ti * 1.7) * (0.3 + t) + 0.003 * normal(r);
+        prev = addNode([u, h], prev);
+      }
+    });
+"""
+
 OLD_ROOTS = """  var nodes = [], parent = [];
   function addNode(p, par) { nodes.push(p); parent.push(par); }
   [-1, 1].forEach(function (side) {
@@ -38,11 +61,13 @@ NEW_ROOTS = """  var nodes = [], parent = [];
   [-1, 1].forEach(function (side) {
     var root = addNode([0.985 * side, 0], -1);
     function hAt(u, f) { return f >= 0 ? f * lidTop(u, OPEN) : f * lidBot(u, OPEN); }      // (f: -1 the lower margin .. 1 the upper)
-    [0.62, 0.05, -0.6].forEach(function (f0, ti) {
-      var ph = 2 * r(), end = 0.4 + 0.07 * r(), len = 0.985 - end, steps = Math.round(len / 0.0075), prev = root;
+    // (a fan: five trunks spread over the whole height of the white, opening early, each ending at its own place on the
+    // limbus's arc, and curving a little as they go)
+    [0.88, 0.5, 0.08, -0.36, -0.8].forEach(function (f0, ti) {
+      var ph = 2 * r(), end = 0.34 + 0.12 * r() + 0.06 * (1 - Math.abs(f0)), len = 0.985 - end, steps = Math.round(len / 0.0075), prev = root;
       for (var st = 1; st <= steps; st++) {
-        var t = st / steps, u = side * (0.985 - len * t), f = f0 * Math.sin(Math.PI * 0.5 * Math.min(1, t * 1.25)) * (1 - 0.1 * t);
-        var h = hAt(u, f) + 0.012 * Math.sin(t * 15 + ph + ti) * (0.3 + t) + 0.003 * normal(r);
+        var t = st / steps, u = side * (0.985 - len * t), f = f0 * (1 - Math.pow(1 - Math.min(1, t * 1.12), 1.7)) * (1 - 0.06 * t);
+        var h = hAt(u, f) + 0.011 * Math.sin(t * 13 + ph + ti * 1.7) * (0.3 + t) + 0.003 * normal(r);
         prev = addNode([u, h], prev);
       }
     });
@@ -64,7 +89,15 @@ def main(main_path, html_path):
     old_main = open(main_path, encoding='utf-8').read()
     html = open(html_path, encoding='utf-8').read()
     if MARK in html:
-        print('already has the corner-rooted vessels')
+        if V2_TRUNKS in html:
+            print('already has the fanned corner-rooted vessels')
+            return
+        if V1_TRUNKS not in html:
+            raise SystemExit('the vessels were changed by hand; nothing written')
+        i = html.index('<script type="module">') + len('<script type="module">')
+        j = html.index('</script>', i)
+        open(html_path, 'w', encoding='utf-8').write(html.replace(V1_TRUNKS, V2_TRUNKS))
+        print('vessel trunks fanned out in', html_path)
         return
     i = html.index('<script type="module">') + len('<script type="module">')
     j = html.index('</script>', i)
