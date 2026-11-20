@@ -19,6 +19,12 @@ build:
                looking level ahead in the body poses (female.carry_head), as a real neck holds it.
 --pose-crop REGIONS  with --poses: also a crop of each region (as --crop names them) in every pose, from the same
                camera as the strip: DIR/pose-crop-REGION.png, one tile per pose (default height 300, --pose-size)
+--topo         the face topology check (rq_topo.py: edge loops round the eyes and mouth, quads, poles, manifold,
+               strays, duplicates, flipped normals, distortion, sharpness, symmetry and the contour's smoothness) on
+               the head right after the build, before any render: DIR/topo.json and DIR/topo-sheet.png. On by itself
+               whenever the job's commit changes a face or head file or function against main
+               (rq_topo.face_changed). Report-only: it never stops a render. RQ_TOPO=0 turns it off.
+--topo-only    the build and the topology check, no renders
 
 Regions (centred on the figure's axis, so one crop serves every angle; both sides show):
   neck, shoulder, armhole, bust, elbow, waist, wrist (the cuff), hips (the seat), hand, knee, hem (floor length),
@@ -45,6 +51,47 @@ V = {'__file__': VIEWS_PY, '__name__': 'views_lib'}
 exec(compile(src[:cut], VIEWS_PY, 'exec'), V)
 T_LOADED = time.time()
 bpy, female, opt, argv = V['bpy'], V['female'], V['opt'], V['argv']
+
+TOPO_ONLY = '--topo-only' in argv
+for _k in ('--topo', '--topo-only'):
+    while _k in argv:
+        argv.remove(_k)
+        TOPO_ASKED = True
+if TOPO_ONLY:          # (views.py renders nothing it is not asked for: drop what would render)
+    for k in ('--turn', '--head', '--clay', '--clay-only', '--poses'):
+        while k in argv:
+            argv.remove(k)
+    for k in ('--cells', '--walk', '--run', '--crop', '--pieces'):
+        while k in argv:
+            i = argv.index(k)
+            del argv[i:i + 2]
+
+
+def topo_wanted():
+    """Whether to run the face topology check: asked for, or the commit changes a face or head against main."""
+    if os.environ.get('RQ_TOPO', '1') == '0':
+        return False, 'RQ_TOPO=0'
+    if globals().get('TOPO_ASKED'):
+        return True, 'asked (--topo)'
+    try:
+        sys.path.insert(0, HERE)
+        import rq_topo
+        return rq_topo.face_changed(os.path.dirname(os.path.dirname(HERE)), argv=argv)
+    except Exception as e:
+        return False, f'{type(e).__name__}: {e}'
+
+
+def topo(out):
+    """The face topology check on the head as built (rq_topo.py); never fails the job."""
+    try:
+        sys.path.insert(0, HERE)
+        import rq_topo
+        # (named after the figure, so a head John approved before is judged on its own approved band)
+        return rq_topo.run(out, label=f"{V.get('FIGURE', 'figure')} Blender head")
+    except Exception as e:
+        print(f'rq topo: skipped ({type(e).__name__}: {e})', flush=True)
+        return None
+
 
 POSES = ('rest', 'arms-up', 'arms-fwd', 'elbows', 'step', 'crouch', 'twist') + tuple(getattr(female, 'HEAD_POSES', {}))
 ALL_VIEWS = [('front', 0), ('3/4', 45), ('profile', 90), ('back 3/4', 135), ('back', 180)]
@@ -354,6 +401,16 @@ def main():
             except Exception as e:      # (a check must never fail the render)
                 print(f'rq geometry: skipped ({type(e).__name__}: {e})', flush=True)
             checked['s'] = round(time.time() - t, 1)
+        want, why = topo_wanted() if '--list' not in argv and not opt('--save') else (False, '')
+        if want:
+            t = time.time()
+            print(f'rq topo: running ({why})', flush=True)
+            topo(out)
+            checked['topo'] = round(time.time() - t, 1)
+        if TOPO_ONLY:
+            print('rq topo: --topo-only, stopping before the renders', flush=True)
+            sys.stdout.flush()
+            os._exit(0)
         return r
     V['F'].build = build_then_check
     t = time.time()
@@ -363,6 +420,8 @@ def main():
         return
     if 's' in checked:
         timing['geometry'] = checked['s']      # (inside views.py's own 'build N s', which includes it)
+    if 'topo' in checked:
+        timing['topo'] = checked['topo']
     for name, fn, on in (('crops', crops, bool(opt('--crop'))), ('poses', poses, '--poses' in argv)):
         if on:
             t = time.time()

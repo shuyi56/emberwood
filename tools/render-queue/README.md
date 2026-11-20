@@ -17,6 +17,7 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_topo.py` | the face topology check: edge loops, poles, manifold, strays, normals, smoothness and symmetry of a head, with a sheet, before the render |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -232,6 +233,63 @@ checked yet.
 - garments past the geometry bands (over 2% inside, stretched past 1.3x, squashed below 0.7x)
 - body-ratio drift past 1% from the median
 - rejections by tag, garment and who, and the rounds of requests per piece
+
+## The face topology check: a clean head before the render
+
+John's request (2026-11-20): any change to a face or head checks that its topology is clean before it is rendered.
+`rq_topo.py` does it, and `rq_views.py` runs it right after the build, before the first render.
+
+- **When.** On by itself in a views job whose commit changes a face or head against main: a file whose name is a
+  face part (`face*`, `head*`, `ear*`, `eye*`, `lip*`, `nose*`, `brow*`, `jaw*`, `creator*`, the `creator-head/`
+  tools), a change inside a face or head function or setting of a Python file (`face_relief`, `sculpt_eyes`,
+  `build_head`, `MOUTH_Z`, `EYE_*` ...), or a `--set` of one. Any views job asks for it with `--topo`;
+  `--topo-only` builds, checks and renders nothing (about 2.5 minutes for the ranger). `RQ_TOPO=0` turns it off.
+  The game's faces come from the Face Creator, outside the repository: after `export-head.js` or `merge-head.mjs`,
+  run `python3 tools/render-queue/rq_topo.py --glb HEAD.glb --out DIR --label NAME` (bpy) on what it wrote.
+- **Report-only.** It never stops a render. Files: `topo.json` (per head: the measures, the counts, the flags, the
+  clean standard and what fails it, the worst spots with their places such as "right eye, lower lid") and
+  `topo-sheet.png`: clay with curvature shading in three views, close-ups of the eyes, mouth and nose with the
+  wireframe over them (on a mesh too fine to draw, every 14th pixel an edge loop, so the mesh's flow shows; poles
+  as dots, loops found round a feature in green), and the contour's roughness as a heatmap, with the worst spots
+  ringed and numbered as in `topo.json`. Attach the sheet beside the render. The nightly report lists every head
+  flagged or not clean.
+- **The head is measured first** and the zones come from it: H chin to crown, the eyes' centres (the eyeballs,
+  found by place), IPD, the nose tip, the stomion from the midline profile, the mouth's width; the eye zones
+  (orbicularis, 0.85 x 0.62 eye widths), the mouth zone (0.75 x 0.48 mouth widths) and the nose zone are where the
+  face deforms, so where loops must run round and poles must not sit.
+- **What it measures:** quads, triangles and ngons (a glTF's triangles are joined back into the quads they were
+  cut from when they come in pairs, as an exporter writes them; a decimated game head stays triangles); poles
+  (3, 5, 6+ edges) overall and in each zone; non-manifold edges and vertices, holes other than the neck,
+  loose vertices and wire edges, stray islands, duplicate vertices (Merge by Distance at 1e-5 H), degenerate
+  faces, flipped normals and an inside-out mesh; sharp angles and distortion (Mesh Analysis), the contour's
+  smoothness (each point's mean curvature against its neighbours'), symmetry (the mirrored surface, and mirror
+  twins); and the edge loops round each eye and the mouth, walked as Alt-click does: closed loops that run round
+  the feature, walks that break at a pole or a triangle inside it, and how much of the zone's edge length runs
+  round or out from the feature (alignment: 0.45 is a mesh laid with no regard to it, near 1 concentric loops).
+- **Two verdicts.** `verdict` is the regression check against `topo_baseline.json`: a head John approved before is
+  judged on its own band (it must stay no worse than he passed it), any other on the worst of its kind (`source`,
+  quad meshes as built; `game`, the decimated triangles). `clean` is the absolute standard: none of the integrity
+  faults, no ngons on the face, no poles in the eye and mouth zones, 2 or more concentric loops round each eye and
+  the mouth with alignment 0.7, symmetric to 0.002 H (game heads: the integrity part only).
+- **Calibrated on the approved heads** (2026-11-20): the creator's raw Ranger, Warden and Sorceress heads (from
+  `export-head.js`), the ranger's Blender head (`views.py --figure ranger`, at main), and the three game heads
+  (`public/models/ranger.glb`, `warden.glb`, the sorceress's `sorceress.glb`). Re-run
+  `python3 rq_topo.py --calibrate topo_baseline.json DIR/topo.json ...` when John approves a face. None of them is
+  clean, and the band holds what they are:
+  - the creator heads are a 600 x 445 grid of rings up the head (100% quads, no poles, manifold, no flips), but no
+    loop runs round an eye or the mouth (alignment 0.44 to 0.48: the rings and columns run straight through the
+    lids and the lips), and both ends of the grid are rings of 600 vertices drawn together into one point, unmerged
+    (931 duplicate vertices at the crown and under the neck, and an open seam of no area at the crown);
+  - the ranger's Blender head is the same grid with 162 ngons and 72 three-edge poles in a row under the nose,
+    where the mouth's finer band is stitched in;
+  - the game heads are decimated triangles: the ranger's carries 8,024 vertices no face uses; the warden's and the
+    sorceress's have a non-manifold edge and a hole on the forehead, the crown's duplicates, and folded slivers
+    (1% of their edges past 72 degrees, the ranger's 17).
+  So today `clean` fails on every head: concentric loops need the face rebuilt on a loop topology, which is a
+  separate piece of work. The `verdict` is what catches a face change that makes a head worse.
+- **Tested:** `python3 rq_topo.py --selftest DIR` (no Blender: a grid head, with a hole, a flipped face, duplicates
+  and a bump, and a head of concentric loops); and the Ranger creator head with a rough cheek, a hole in the lower
+  lid and six flipped faces: all three flagged and ringed in the right places.
 
 ## Review before the queue
 

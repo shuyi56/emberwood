@@ -24,7 +24,11 @@ clothes, skinning and the walk and idle animations are the Blender export (`blen
    (HAIR_EVEN 0.85, HAIR_LIFT 0.45: a little of its own colour as emission), which went dark and streaky in the sun. Also needs `sharp` (0.33.5). Needs `@gltf-transform/core`,
    `@gltf-transform/extensions`, `@gltf-transform/functions` (4.1.1) and `meshoptimizer` (0.22.0).
 
-Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator.
+Rerun both after a new Blender export (export_glb.py writes the Blender head back) or a change to the creator. After a
+change to a face, check its topology on what they wrote before the render (report-only; `--label` an approved head's
+name, as in `tools/render-queue/topo_baseline.json`, to judge it on its own approved band):
+
+    python3 tools/render-queue/rq_topo.py --glb creator-head.glb --out DIR --label "creator head (Ranger), raw export"
 
 ## The Warden
 
