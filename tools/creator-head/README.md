@@ -30,6 +30,12 @@ name, as in `tools/render-queue/topo_baseline.json`, to judge it on its own appr
 
     python3 tools/render-queue/rq_topo.py --glb creator-head.glb --out DIR --label "creator head (Ranger), raw export"
 
+The simplify is `head-lock.mjs`: the head goes to 0.2 of the creator grid's triangles (it was 0.25; the hair is 0.2 of its
+joined strands, it was 0.4), with every vertex flagged by the creator's `_EYEPATCH` attribute held, so a carved eye
+patch keeps its lid loops. The Warden: head 131k -> 104k triangles, hair 258k -> 129k, file 40.6 -> 34.2 MB, same look
+in front, 3/4, back and top. A tighter head ratio (0.1) blurs the lower-lip crease; the cut stops where the lips are
+still crisp.
+
 `merge-head.mjs` runs `clean-head.mjs` on the head after the simplify, so a game head comes out without holes, folds,
 duplicate or unused vertices (the simplify leaves those at the poles and on thin slivers). It also runs on its own:
 `node clean-head.mjs in.glb out.glb`.
