@@ -5,6 +5,7 @@ and the doublet's cloth.
 
     python3 blender/base/views.py --figure doublet --mannequin --head --out DIR
     DOUBLET_BARE=1 ...        the doublet alone, nothing under it
+    DOUBLET_SLEEVES=1 ...     with sleeves (the chemise's own sleeves do not yet fit under them: use with BARE)
 
 --head frames the garment here (HEAD_CZ, HEAD_H below): from its hem to the chin."""
 import os
@@ -27,6 +28,7 @@ import sorceress_pendant as SP  # noqa: E402
 import fit  # noqa: E402
 import chemise  # noqa: E402
 import cut  # noqa: E402
+import sleeve  # noqa: E402
 
 # Fustian (a linen warp, a cotton weft) dyed with madder: the commonest arming doublet. DOUBLET=rrggbb for another dye.
 DYE = int(os.environ.get('DOUBLET', '6f2a25'), 16)
@@ -36,6 +38,7 @@ M_LACE = female.mat_def(75, 'doublet lace', female.ramp(0xb9a67c, 0.12), 0.0, cl
 M_AIGLET = female.mat_def(76, 'doublet aiglet', female.ramp(0xb08a3c, 0.12), 0.0, closeup='gold')
 MEASURES = {}
 BARE = os.environ.get('DOUBLET_BARE') is not None
+SLEEVES = os.environ.get('DOUBLET_SLEEVES') is not None      # (the doublet with its sleeves: see sleeve.py)
 if not BARE:
     LIGHT_SCALE = chemise.LIGHT_SCALE          # (the white sleeves need the same light: see chemise.py)
 
@@ -56,6 +59,8 @@ def wear(body, heads, bare=BARE):
     o, m, covered = cut.build_doublet(body, heads, rig=bpy.data.objects.get('Rig'), cloth=female.mat(M_CLOTH),
                                       thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET))
     MEASURES.update(m)
+    if SLEEVES:
+        sleeve.build_sleeves(body, m, bpy.data.objects.get('Rig'), female.mat(M_CLOTH), base=cut.RATIOS)
     chemise.linen_closeup('doublet fustian', FUSTIAN)
     lo = m['z_hem']
     if not bare:

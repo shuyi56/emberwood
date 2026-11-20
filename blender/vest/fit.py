@@ -593,6 +593,7 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
         V, faces = piece[0], piece[1]
         up = piece[2] if len(piece) > 2 else lift          # (a piece's own lift: a number, or a function of its points)
         coord = piece[3] if len(piece) > 3 else None       # (and its own paint coordinate: a function of its points)
+        away = piece[4] if len(piece) > 4 else None        # (and its own way out at a face's centre: for a tube round an arm)
         pb = bmesh.new()
         vmap = {i: pb.verts.new(V[i]) for i in sorted({i for f in faces for i in f})}
         for f in faces:
@@ -608,7 +609,8 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
             flip = []
             for f in pb.faces:
                 c = f.calc_center_median()
-                if f.normal.dot(Vector((c.x, c.y - M['yc'], 0.6 * abs(f.normal.z) + 0.05)).normalized()) < 0:
+                ref = away(c) if away else Vector((c.x, c.y - M['yc'], 0.6 * abs(f.normal.z) + 0.05)).normalized()
+                if f.normal.dot(ref) < 0:
                     flip.append(f)
             if flip:
                 bmesh.ops.reverse_faces(pb, faces=flip)
@@ -644,7 +646,7 @@ def _sheet(name, pieces, M, material, body, kd, rig, lift, thickness):
     if material is not None:
         me.materials.append(material)
     groups = {g.index: o.vertex_groups.new(name=g.name) for g in body.vertex_groups
-              if g.name.split('.')[0] in ('Pelvis', 'Chest', 'Neck', 'UpperArm')}
+              if g.name.split('.')[0] in ('Pelvis', 'Chest', 'Neck', 'UpperArm', 'Forearm')}
     bverts = body.data.vertices
     for v in me.vertices:
         near = kd.find_n(v.co, 4)
