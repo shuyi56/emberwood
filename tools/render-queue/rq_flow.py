@@ -618,7 +618,9 @@ def body_places(f):
         x, y, z = float(p[0]), float(p[1]), float(p[2])
         side = 'right' if x < 0 else 'left'
         face = 'front' if y < 0 else 'back'
-        if abs(x) > 0.85 * shx and wrist - 1.0 < z < sh + 1.0 and z > hip - 2.0:
+        # (the arm: outside the shoulder's width and above the hips; lower down the hanging hand and the hip overlap,
+        # and cloth there is the hip's)
+        if abs(x) > 0.85 * shx and wrist - 1.0 < z < sh + 1.0 and z > hip + 3.0:
             r = 'armhole' if z > sh - 3.5 and abs(x) < 1.2 * shx else 'upper arm' if z > sh - up + 1.5 else \
                 'elbow' if z > sh - up - 1.5 else 'forearm' if z > wrist + 1.0 else 'wrist'
             return f'{side} {r}, {face}'
@@ -986,7 +988,7 @@ def run(objects, out, female=None, stem='flow', title='', heat='always', write=T
     return rep
 
 
-def layer_check(geoms, place=None, reach=1.0, through=0.03, most=20000):
+def layer_check(geoms, place=None, reach=1.0, through=0.03, most=20000, deepest=0.5):
     """Layers poking through the layer over them (the petticoat's gathers through the corset, a skirt through the
     bodice). For each pair of garments, the points of one that lie within reach of the other's surface: if most of
     them are on its inside, it is worn under it, and those standing out through it (more than through past its
@@ -995,6 +997,11 @@ def layer_check(geoms, place=None, reach=1.0, through=0.03, most=20000):
     from mathutils.bvhtree import BVHTree
     trees = {n: BVHTree.FromPolygons([tuple(p) for p in X], [tuple(int(i) for i in t) for t in T])
              for n, X, T in geoms}
+    # (a point past the over layer's edge is beside it, not through it: faces on a boundary don't count)
+    rim = {}
+    for n, X, T in geoms:
+        tri_e, _, _, t1 = edges_of(T)
+        rim[n] = (t1[tri_e] < 0).any(1)
     out = []
     for over, Xo, To in geoms:
         lo, hi = Xo.min(0) - reach, Xo.max(0) + reach
@@ -1005,24 +1012,26 @@ def layer_check(geoms, place=None, reach=1.0, through=0.03, most=20000):
             P = P[::max(1, len(P) // most)]
             if len(P) < 50:
                 continue
-            d, at = [], []
+            d, at, edge = [], [], []
             for p in P:
-                loc, nrm, _, dist = trees[over].find_nearest(Vector(p), reach)
+                loc, nrm, fi, dist = trees[over].find_nearest(Vector(p), reach)
                 if loc is None:
                     continue
                 d.append((Vector(p) - loc).dot(nrm))
                 at.append(p)
+                edge.append(bool(rim[over][fi]))
             if len(d) < 50:
                 continue
             d, at = np.array(d), np.array(at)
             inside = (d < 0).mean()
             if inside < 0.7:            # (mostly outside it: worn over it, or beside it; not this pair's way round)
                 continue
-            poke = d > through
+            # through: just outside the over layer (not far past it, which is another surface), under its cloth
+            poke = (d > through) & (d < deepest) & ~np.array(edge)
             r = {'under': under, 'over': over, 'near': int(len(d)), 'poke_pct': round(100.0 * poke.mean(), 2),
-                 'poke_max': round(float(d.max()), 3), 'spots': []}
+                 'poke_max': round(float(d[poke].max()) if poke.any() else 0.0, 3), 'spots': []}
             taken = []
-            for i in np.argsort(-d)[:2000]:
+            for i in np.argsort(-np.where(poke, d, -np.inf))[:2000]:
                 if not poke[i] or len(taken) >= 5:
                     break
                 if taken and np.min(np.linalg.norm(np.array(taken) - at[i], axis=1)) < 1.5:
