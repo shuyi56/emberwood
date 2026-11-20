@@ -11,6 +11,7 @@ The limits (CIE Lab, D65):
   - touching parts need a lightness gap of 12 or more, or a colour distance (dE) of 25 or more;
   - when the lightness gap is under 25, the hue gap must be 20 degrees or more (CLAUDE.md: a brown beside brown
     vanishes; separate by hue, not by value alone);
+  - the grayscale view (relative luminance) must separate them by 6 of 100 or more;
   - a cord laid over a surface must be lighter than that surface's own shadow tone (its ramp's darkest) by 10 L, and
     not darker than its mid tone by more than 8 L: a dark cord in a dark opening reads as a black hole and
     darkens what is around it.
@@ -30,6 +31,12 @@ def lab(rgb):
     f = lambda t: t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
     fx, fy, fz = f(x), f(y), f(z)
     return np.array([116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)])
+
+
+def gray(rgb):
+    c = np.asarray(rgb, float) / 255.0
+    c = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
+    return 100.0 * float(0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])      # (relative luminance, 0-100: what a grayscale view shows)
 
 
 def hue(L):
@@ -52,15 +59,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('figure')
     ap.add_argument('--out', default='.')
+    ap.add_argument('--try', dest='tries', nargs='*', default=[], help="swatches to test before changing a file: 'boot leather=0x3a2418'")
     a = ap.parse_args()
     import female, boot, hose
     mats = {m['name']: m for m in female.MATERIALS.values()}
+    for t in a.tries:
+        n, h = t.rsplit('=', 1)
+        mats[n] = dict(mats[n], ramp=np.array(female.ramp(int(h, 16), 0.1), dtype=np.float32))
     tone = lambda n, i=2: lab(mats[n]['ramp'][i])
     rows, bad = [], 0
     for p, q in PAIRS[a.figure]:
         A, B = tone(p), tone(q)
         dL, dE, dH = abs(A[0] - B[0]), float(np.linalg.norm(A - B)), hue_gap(A, B)
+        dG = abs(gray(mats[p]['ramp'][2]) - gray(mats[q]['ramp'][2]))
         why = []
+        if dG < 6:
+            why.append('the same grey in a grayscale view (gap %.1f of 100)' % dG)
         if dL < 12 and dE < 25:
             why.append('too close in value and colour (dL %.0f, dE %.0f)' % (dL, dE))
         if dL < 25 and dH < 20 and min(np.hypot(A[1], A[2]), np.hypot(B[1], B[2])) > 8:
