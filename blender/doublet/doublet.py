@@ -63,13 +63,28 @@ def wear(body, heads, bare=BARE):
                                       thread=female.mat(M_THREAD), lace=female.mat(M_LACE), metal=female.mat(M_AIGLET),
                                       ratios=ratios)
     MEASURES.update(m)
+    under = dict(covered=covered, gap=0.5 * cut.RATIOS['ease'] * m['w'], garment=o)
     if SLEEVES:
-        sleeve.build_sleeves(body, m, bpy.data.objects.get('Rig'), female.mat(M_CLOTH), o, base=cut.RATIOS)
+        sl = sleeve.build_sleeves(body, m, bpy.data.objects.get('Rig'), female.mat(M_CLOTH), o, base=cut.RATIOS)
+        # (the shirt's sleeve goes inside the gambeson's: covered from a little above the sleeve's cuff up, and pressed
+        # as close to the arm as the sleeve comes, where it lies between the arm and the body)
+        z_cuff = min(min(v.co.z for v in s_.data.vertices) for s_ in sl)
+        border = cut.RATIOS['border'] * m['w']
+        # (and so is whatever of the shirt's body lies out past the gambeson's armhole over the shoulder, under the
+        # sleeve's cap)
+        hole = sleeve.sleeve_draft.armhole(np.array([v.co[:] for v in o.data.vertices]), [list(q.vertices) for q in o.data.polygons])
+        x_in, z_lo = float(np.abs(hole[:, 0]).min()) - 0.3 * m['w'], float(hole[:, 2].min()) - 0.5 * m['w']
+
+        def covered_arm(p, share, z=z_cuff + border):
+            under_cap = (np.abs(p[:, 0]) > x_in) & (p[:, 2] > z_lo)
+            return np.where((share >= 0.5) | under_cap, p[:, 2] - z, -1.0)
+        under.update(sleeves=sl, covered_arm=covered_arm,
+                     gap_arm=0.8 * sleeve.RATIOS['sleeve_pinch'] * m['w'])
     chemise.linen_closeup('doublet fustian', FUSTIAN)
     lo = m['z_hem']
     if not bare:
         # (the shirt has half the doublet's ease to lie in: the rest is the doublet's own lining and the lacing's pull)
-        _, d = chemise.dress(body, m, under=dict(covered=covered, gap=0.5 * cut.RATIOS['ease'] * m['w'], garment=o))
+        _, d = chemise.dress(body, m, under=under)
         lo = min(lo, d.z_hem_worn)
     return o, m, lo
 

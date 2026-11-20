@@ -690,20 +690,63 @@ def build_chemise(body, M, rig=None, material=None, name='Chemise', ratios=RATIO
                     # (held right out to the garment's edge and let go over a short way beyond it: cloth half held under
                     # the edge is caught between the garment and the body and torn about)
                     held = (1.0 - share) * fit._ss(-0.3 * w, 0.0, under['covered'](now))
+                    # (and, under a sleeved garment, the shirt's sleeve inside the garment's sleeve, pressed against the arm)
+                    # (held whole: the sleeve is shut in the garment's sleeve from the cuff up, with no room to fall, and
+                    # cloth half held in so tight a room was thrown about by the solver, and the whole shirt with it)
+                    arm_held = (under['covered_arm'](now, share) > 0).astype(float) if 'covered_arm' in under else np.zeros(len(now))
+                    held = np.maximum(held, arm_held)
+                    if 'covered_arm' in under:
+                        # (and every point held at all is held whole: posed, with the arms out, cloth half held at the
+                        # armhole was carried through the garment's edge by the arm's bones and thrown by the solver)
+                        held = (held > 0.02).astype(float)
                     moved = 0
                     for i in np.nonzero(held > 0)[0]:
                         p = Vector(now[i])
-                        loc, nrm, _, dist = trees[0].find_nearest(p)
+                        on_arm = arm_held[i] > 0 and share[i] >= 0.5
+                        loc, nrm, _, dist = trees[1 if on_arm else 0].find_nearest(p)
                         d = dist if (p - loc).dot(nrm) >= 0 else -dist
-                        if d > under['gap']:
-                            now[i] = p + (loc + nrm * under['gap'] - p) * float(held[i])
+                        g_ = under['gap_arm'] if on_arm else under['gap']
+                        if d > g_:
+                            now[i] = p + (loc + nrm * g_ - p) * float(held[i])
                             moved += 1
                     me.vertices.foreach_set('co', now.reshape(-1))
                     me.update()
                     # (kept on the mesh: base/spots.py checks that every held point is still under the garment)
                     me.attributes.new('held', 'FLOAT', 'POINT').data.foreach_set('value', held.astype(np.float32))
                     log('chemise: %d points held under the %s, %d of them pressed in' % (int((held > 0).sum()), under['garment'].name, moved))
+                    # (the garment's sleeves are no collider: the shirt's sleeve inside them is held, and their inner side, which
+                    # lies against the trunk under the arm, crossed the body's cloth there and threw it)
                     solver.settle(o, rig, [body, *colliders, under['garment']], pinned=held, P=dict(solver.LINEN, frames=60), log=log)
+                    # (a few free points can still be flung, alone or in small flaps: brought back to their neighbours,
+                    # which the threads around them hold)
+                    after = np.array([v.co[:] for v in me.vertices])
+                    ed = np.array([e.vertices[:] for e in me.edges])
+                    l0 = np.linalg.norm(now[ed[:, 0]] - now[ed[:, 1]], axis=1)
+                    nb = [[] for _ in range(len(after))]
+                    for a_, b_ in ed:
+                        nb[a_].append(b_)
+                        nb[b_].append(a_)
+                    fixed = 0
+                    for _ in range(40):
+                        l1 = np.linalg.norm(after[ed[:, 0]] - after[ed[:, 1]], axis=1)
+                        torn = l1 > 2.5 * np.maximum(l0, 0.02)
+                        if not torn.any():
+                            break
+                        flung = np.zeros(len(after), bool)
+                        # (of a torn thread, the end that moved furthest from where it was)
+                        mv_a = np.linalg.norm(after[ed[torn, 0]] - now[ed[torn, 0]], axis=1)
+                        mv_b = np.linalg.norm(after[ed[torn, 1]] - now[ed[torn, 1]], axis=1)
+                        flung[np.where(mv_a >= mv_b, ed[torn, 0], ed[torn, 1])] = True
+                        flung &= held < 0.5
+                        for i in np.nonzero(flung)[0]:
+                            ok = [j for j in nb[i] if not flung[j]]
+                            after[i] = after[ok].mean(0) + (now[i] - now[ok].mean(0)) if ok else now[i]
+                        fixed += int(flung.sum())
+                    if fixed:
+                        me.vertices.foreach_set('co', after.reshape(-1))
+                        me.attributes['rest'].data.foreach_set('vector', after.reshape(-1))
+                        me.update()
+                        log('chemise: %d flung points brought back to the cloth round them' % fixed)
                 if cache:
                     os.makedirs(os.path.dirname(os.path.abspath(cache)), exist_ok=True)
                     keep = dict(co=np.array([v.co[:] for v in me.vertices], dtype=np.float32))

@@ -16,6 +16,11 @@ for d in ('doublet', 'vest', 'chemise', 'sorceress_pendant', 'shared', 'base'):
 os.environ.setdefault('HEAD_GLB', '')
 os.environ.setdefault('NO_DRESS', '1')
 os.environ.setdefault('NO_ACC', '1')
+# (the gambeson with its sleeves: HARNESS_SLEEVELESS=1 for the sleeveless one)
+if os.environ.get('HARNESS_SLEEVELESS') is None:
+    os.environ.setdefault('DOUBLET_SLEEVES', '1')
+    # (the shirt settled under the sleeved gambeson is kept apart from the one under the sleeveless)
+    os.environ.setdefault('CHEMISE_CACHE', os.path.join(HERE, '..', 'chemise', 'kept', 'under-sleeved-doublet.npz'))
 import bpy  # noqa: E402
 import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402

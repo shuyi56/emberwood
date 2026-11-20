@@ -79,3 +79,8 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   sleeve's: `SLEEVE_STRAIN=path`). A shaded render hides what an outline shows.
 - An outline that is perfectly round, stepped or kinked has a cause: fix the cause first, then render.
 - Show the contour sheet with the result.
+- Stop iterating when the fixes stop paying. Keep the contour and strain numbers of each round of a fix. Stop when
+  two rounds in a row improve them only slightly, when a round makes them worse, when the same flaw comes back, or at
+  five rounds on one problem. Then render the best result so far (a clay draft with its contour sheet) and report:
+  what each round tried, the numbers before and after, whether the cause looks like tuning, modelling or the solver,
+  and what you would try next. John decides from there.

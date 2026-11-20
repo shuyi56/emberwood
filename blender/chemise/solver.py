@@ -9,6 +9,8 @@ shape through the bones, so the garment still follows the rig.
 The figure is 63 units tall where a woman is 1.65 m, and the solver takes a unit for a metre, so cloth of real
 stiffness would hang like tissue. LINEN's numbers are for this scale: found by trial on swatch.py's bench against how a linen
 sleeve breaks (folds a few centimetres across, 1 to 2 units), not copied from a preset."""
+import os
+
 import bpy
 import numpy as np
 
@@ -145,8 +147,23 @@ def settle(o, rig, colliders, pinned=None, full=None, P=LINEN, log=print):
     sc.frame_end = max(sc.frame_end, P['frames'])
     import time
     t0 = time.time()
+    trace = os.environ.get('SOLVER_TRACE') is not None
+    prev, told = posed.copy(), False
     for f in range(1, P['frames'] + 1):
         sc.frame_set(f)
+        if trace and not told:
+            # (where the cloth first jumps: the points that move furthest in one frame, where they started)
+            cur = np.empty(n * 3)
+            cloth.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.vertices.foreach_get('co', cur)
+            cur = cur.reshape(-1, 3)
+            step = np.linalg.norm(cur - prev, axis=1)
+            if step.max() > 0.5:
+                worst = np.argsort(-step)[:25]
+                log('solver trace: frame %d, step %.2f at most; worst points started at (pin):' % (f, float(step.max())))
+                for i in worst:
+                    log('   %6d  (%.2f, %.2f, %.2f)  pin %.2f  step %.2f' % (i, *posed[i], float(pinned[i]) if pinned is not None else 0.0, float(step[i])))
+                told = True
+            prev = cur
     dg = bpy.context.evaluated_depsgraph_get()
     ev = cloth.evaluated_get(dg)
     out = np.empty(n * 3)
