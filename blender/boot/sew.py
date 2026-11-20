@@ -414,7 +414,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             t = P[min(k + 1, len(P) - 1)] - P[max(k - 1, 0)]
             t /= max(np.linalg.norm(t), 1e-9)
             u = np.cross(N[k], t)
-            P[k] = P[k] + t * rng.normal(0, 0.07 * pitch) + u * rng.normal(0, 0.22 * R) * (1 if q == 'outer' else -1)
+            P[k] = P[k] + t * rng.normal(0, 0.03 * pitch) + u * rng.normal(0, 0.10 * R) * (1 if q == 'outer' else -1)
         rows[q] = (P, N)
     sizes = {q: R * (1 + rng.normal(0, 0.05, len(rows[q][0]))) for q in rows}
     # the eyelets: rings lying on the leather, a tube round the hole
@@ -438,7 +438,13 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 
     def onto(p, off):
         hit = tree.find_nearest(tuple(p))
-        return np.array(hit[0]) + np.array(hit[1]) * off if hit[0] is not None else p
+        if hit[0] is None:
+            return p
+        nrm = np.array(hit[1])
+        out = Nv[list(o.data.polygons[hit[2]].vertices)].mean(axis=0)      # (the side the leather's normals face)
+        if nrm @ out < 0:
+            nrm = -nrm
+        return np.array(hit[0]) + nrm * off
 
     (Pi, Ni), (Po, No) = rows['inner'], rows['outer']
     LV, LF = [], []
