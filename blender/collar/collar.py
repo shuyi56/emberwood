@@ -704,7 +704,7 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
     for step in range(1, L_['whole_steps'] + 1):
         fab.step(h, body, neutral=True)
         lam = np.zeros(len(H))
-        for _ in range(4):
+        for _ in range(L_['bake'].get('passes', 4)):
             Fs[0]._walk(H, rest, comp, h, batches, lam)
         p, touched = body(fab.pos.copy())
         live = touched & (fab.w > 0)
