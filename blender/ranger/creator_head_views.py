@@ -6,17 +6,18 @@ import argparse
 import math
 import os
 import sys
+import tempfile
 
 import bpy
 from mathutils import Vector
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--glb', required=True)
-ap.add_argument('--out', required=True)
+ap.add_argument('--out', default=os.path.join(tempfile.gettempdir(), 'creator-head-views'))
 ap.add_argument('--size', type=int, default=1000)
 ap.add_argument('--samples', type=int, default=96)
 ap.add_argument('--denoise', action='store_true')
-args = ap.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else [])
+args = ap.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:])
 os.makedirs(args.out, exist_ok=True)
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
