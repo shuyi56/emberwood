@@ -164,6 +164,8 @@ def profile(FL):
         if t > 0.80:
             bot = max(bot, cap_bot)
         arch = math.exp(-((t - EXP['arch_peak']) / EXP['arch_span']) ** 2)
+        # (the outer half never crosses the middle: a negative half width folds the section over itself)
+        wo = max(wo, 0.2 * wi)
         rows.append((t, wi, wo, top, bot, arch))
     rows = np.array(rows)
     # the arch's height under the navicular, solved so the footprint's arch index is the measured one (Xiong 2010)
@@ -249,6 +251,15 @@ def build(s, FL, floor, cx, y_ankle=0.0, n=40):
             rr.append(np.stack([c[0] + 0.5 * w_ * np.cos(a), np.full(m, c[1]), c[2] + 0.5 * h_ * np.sin(a)], 1))
         _loft(bm, rr)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    # (outward normals checked by the signed volume: a closed shape with inward normals reads inside-out to the
+    # anatomy's distance field and wrecks the ankle's fillet)
+    bm.faces.ensure_lookup_table()
+    vol = 0.0
+    for f_ in bm.faces:
+        c = f_.calc_center_median()
+        vol += c.dot(f_.normal) * f_.calc_area()
+    if vol < 0:
+        bmesh.ops.reverse_faces(bm, faces=bm.faces[:])
     mt1 = (cx + s * (R['ball_in'] * R['foot_w'] * FL), y0 - R['ball_len'] * FL, floor)
     mt5 = (cx - s * ((1 - R['ball_in']) * R['foot_w'] * FL), y0 - R['out_ball_len'] * FL, floor)
     MARKS[s] = dict(
