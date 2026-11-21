@@ -113,7 +113,7 @@ for s_, sd_, mine in ((top, sT, frontz & (sU > -1e9)), (und, sU, frontz & (W[:, 
     tl = ((X - N) @ u) / ln
     wf = np.clip(1 + sdf / band, 0, 1); wf = wf * wf * (3 - 2 * wf)
     X = X + (bowdev(tl) * wf)[:, None] * nrm[None]
-    H = rollh(tl)
+    H = rollh(tl) * 0
     ii = np.nonzero(sel)[0]
     yf = yfront(X[ii]); yf = np.where(np.isfinite(yf), yf, W[ii, 1])
     W[ii, 1] = (1 - wf[ii]) * W[ii, 1] + wf[ii] * yf - 0.5 * H[ii] * wf[ii] ** 2 + 0.03 * on[ii]
@@ -156,20 +156,43 @@ for k, s_ in enumerate((top, und)):
         T = T[np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) > 1e-7]
     sd = np.maximum((P - N) @ nrm, 0)
     tl = ((P - N) @ u) / ln
-    X = P - 2 * sd[:, None] * nrm[None] + (bowdev(tl) * np.exp(-(sd / opt.get('bow_over', 1.5)) ** 2))[:, None] * nrm[None]
-    H = rollh(tl); yfx = yfront(X)
+    # The lapel as tailors describe it (Diduch, "What exactly is pad stitching"; Permanent Style, "How to correct a
+    # flattened lapel"; Parisian Gentleman, "The lapel roll"): the break is never a pressed crease but a rounded
+    # roll, and the lapel is not a flat flap laid on the chest: padded over the hand, row by row parallel to the roll
+    # line, it "stays curled" across its whole width and so hugs the chest. A mirrored, laid-flat lapel is exactly
+    # the "flattened" lapel a cleaner's press makes. So, across the lapel from the break (d the cloth's own length):
+    #   the roll   a half turn of radius r: the cloth leaves the front, swells r into the V, and comes back over
+    #              itself 2r above the front
+    #   the curl   from there the lapel bends back toward the body on a wide arc, so that its outer edge just comes
+    #              down onto the chest; narrower cloth (toward the foot) only makes part of the turn.
+    # The roll stays open all the way down to the foot (the "belly" is at the buttoning point): it tapers only over
+    # the last tenth.
+    wloc = np.maximum((np.abs(sgn * lapw - N[0]) * abs(u[1])) * (1 - np.clip(tl, 0, 1)) * 2.0 / 2.0, 1e-3)   # the lapel's width at this height
+    r0 = opt.get('roll_radius', 0.18)
+    rr = r0 * np.clip((1 - tl) / 0.1, 0.25, 1) * np.clip((tl + 0.05) / 0.1, 0.4, 1)
+    rr = np.minimum(rr, wloc / np.pi * 0.9 + 0.02)
+    arc = np.pi * rr
+    th = np.minimum(sd, arc) / rr
+    ex = rr * np.sin(th)                               # toward the V (+) during the turn
+    hh = rr * (1 - np.cos(th))
+    rest = np.maximum(sd - arc, 0)
+    Rc = np.maximum((wloc - arc) ** 2 / (4 * rr) * opt.get('curl', 1.0), 0.6)
+    ph = rest / Rc
+    phm = np.arccos(np.clip(1 - (2 * rr - t1) / Rc, -1, 1))             # where the curl reaches the chest
+    ex = ex - Rc * np.sin(np.minimum(ph, phm)) - np.maximum(ph - phm, 0) * Rc
+    hh = np.where(rest > 0, np.maximum(2 * rr - Rc * (1 - np.cos(np.minimum(ph, phm))), t1), hh)
+    X = P - sd[:, None] * nrm[None] + ex[:, None] * nrm[None] + (bowdev(tl))[:, None] * nrm[None]
+    H = rollh(tl) * 0; yfx = yfront(X)
     Q = np.zeros((len(P), 3))
     for i in range(len(P)):
-        r = np.clip(sd[i] / tw, 0, 1); r = r * r * (3 - 2 * r)
-        off = t0 + (t1 - t0) * r + H[i] * float(rollprof(np.array([sd[i]]))[0])
+        off = t0 + hh[i]
         ya = (yfx[i] if np.isfinite(yfx[i]) else -3.5) - off
         hit = bvh.ray_cast(Vector((X[i, 0], -40.0, X[i, 1])), Vector((0, 1, 0)))
         if hit[0] is None:
             Q[i] = (X[i, 0], ya, X[i, 1]); continue
-        n = np.array(hit[1][:]); n = n if n[1] < 0 else -n
-        p = np.array(hit[0][:]) + n * off
-        g = np.clip(sd[i] / 0.3, 0, 1)
-        Q[i] = (1 - g) * np.array([X[i, 0], min(ya, p[1]), X[i, 1]]) + g * p
+        p = np.array(hit[0][:]); p[1] -= off
+        g = np.clip(sd[i] / 0.5, 0, 1)
+        Q[i] = (1 - g) * np.array([X[i, 0], ya, X[i, 1]]) + g * np.array([X[i, 0], min(ya, p[1]) if sd[i] > arc[i] else ya, X[i, 1]])
     # the lapel is one smooth sheet: it does not follow each wrinkle of what it lies on. Its depth is faired hard, then
     # brought forward wherever that would sink it into the ground; twice.
     nb = [set() for _ in range(len(P))]
@@ -178,19 +201,19 @@ for k, s_ in enumerate((top, und)):
     cz = np.nonzero(sd < 1e-9)[0]                     # the crease's own points: over the front's edge there
     if len(crease3) > 2 and len(cz):
         dc, jc = cKDTree(crease3[:, [0, 2]]).query(X[cz], k=2); wg = 1 / (dc + 1e-3)
-        Q[cz, 1] = (crease3[jc][:, :, 1] * wg).sum(1) / wg.sum(1) - 0.03 - t0
+        Q[cz, 1] = (crease3[jc][:, :, 1] * wg).sum(1) / wg.sum(1) - 0.03 - t0 if False else Q[cz, 1]
     ground = Q[:, 1].copy()
     w = np.clip(sd / 0.08, 0, 1); idx = np.nonzero((w > 1e-3) & np.array([len(x) > 0 for x in nb]))[0]
     for rep in range(opt.get('sheet', 3)):
-        for r in range(opt.get('fair', 120)):
+        for r in range(opt.get('fair', 12)):
             A = np.array([Q[list(nb[i])][:, 1].mean() for i in idx]); Q[idx, 1] += 0.7 * w[idx] * (A - Q[idx, 1])
         Q[idx, 1] = np.minimum(Q[idx, 1], ground[idx])
     for r in range(15):
         A = np.array([Q[list(nb[i])][:, 1].mean() for i in idx]); Q[idx, 1] += 0.5 * w[idx] * (A - Q[idx, 1])
     base = len(W2) + sum(len(v) for v in newV)
     newV.append(Q); newF += [tuple(int(i) + base for i in t_) for t_ in T]
-    print('unbutton_fold: %s lapel: %.1f cm wide at the neckline, %.1f cm long; standing up to %.2f off the front'
-          % ('upper' if s_ is top else 'under', 2.62 * sd.max(), 2.62 * (P[:, 1].max() - P[:, 1].min()), (H * rollprof(sd)).max()))
+    print('unbutton_fold: %s lapel: %.1f cm wide at the neckline, %.1f cm long; the roll %.1f cm high at its fullest'
+          % ('upper' if s_ is top else 'under', 2.62 * sd.max(), 2.62 * (P[:, 1].max() - P[:, 1].min()), 2.62 * 2 * rr.max()))
 bm = bmesh.new(); bm.from_mesh(b.data)
 vs = [bm.verts.new(tuple(q_ @ inv[:3, :3].T + inv[:3, 3])) for Q in newV for q_ in Q]
 allv = list(bm.verts)
