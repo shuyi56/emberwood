@@ -52,7 +52,7 @@ import numpy as np
 
 VERSION = 1
 SOLVE_VERSION = 7         # (bumped whenever the solve itself changes: its cached settles and motions are dropped)
-MOTION_VERSION = 2        # (bumped when the motions change (not the solve): only the cached motions are dropped)
+MOTION_VERSION = 3        # (bumped when the motions change (not the solve): only the cached motions are dropped)
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (os.path.join(HERE, '..', '..', 'blender', 'shared'), os.path.join(HERE, 'blender', 'shared'), HERE):
     if os.path.exists(os.path.join(_p, 'fabric.py')):
@@ -699,6 +699,7 @@ class HairFabric(Fabric):
     segment (a local shape constraint, as TressFX's and other game hair solvers keep a strand's style), then set at
     its length. tune_stiffness() sets `shape` from hair's own stiffness against its weight."""
     shape = 0.712
+    head_R = np.eye(3)       # the head's turn from rest: the drawn directions turn with it (see hold)
 
     def step(self, h, body=None, neutral=False):
         """fabric.py's step with the body left to the chains: each strand is walked root to tip and every point,
@@ -712,7 +713,11 @@ class HairFabric(Fabric):
     def hold(self, body=None, neutral=False):
         C, L, lead = self.chains
         x, pv, w = self.pos, self.prev, self.w
-        R = self._rest_dir
+        # (the drawn directions turn with the head: the shape target is the strand's drawn shape on the head as it is
+        # now. Left at rest, a head yaw is lost by the minimal rotation from parent to child, which has no twist about
+        # the parent's axis, and a curl round the vertical is pulled back toward its unturned shape. Found by the bun
+        # thread: 0.20 HH of shape error after a 90 degree turn, 0.012 with this.)
+        R = self._rest_dir @ self.head_R.T
         for k in range(1, C.shape[1]):
             m = C[:, k] >= 0
             i, j, r = C[m, k], C[m, k - 1], L[m, k - 1]
@@ -1032,6 +1037,7 @@ def check_pose(pose, strands, W, settled, walk, cache=None):
             Rh, oh, Rb, ob = mv(t)
             state.update(Rh=Rh, oh=oh, Rb=Rb, ob=ob)
             f.pos[roots] = root_home @ Rh.T + oh * UNITS
+            f.head_R = Rh
             f.step(h, body)
             if t >= warm and k % 4 == 0:
                 frames.append(((f.pos / UNITS - oh) @ Rh))
