@@ -231,8 +231,17 @@ STYLES = dict(
     # (Gentleman's Gazette); the break 0 to 1 cm above the top button (Mueller und Sohn, women's jacket draft), with the top
     # button at the under-bust: drop 3.6 w puts the break at z 43.1 (bust 45.25, waist 39.35). The depth of the V is a
     # design choice (none of the four pages gives a number for it): EXPERIMENTAL.
-    modern=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=1.00, notch=0.30, gap=1.8),
-            dict(LAPEL, drop=3.6, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, lapel_width=1.73, tip_round=0.20, **NOTCH_LAPEL)),
+    # Redrafted (John, 2026-11-21, "redraft properly"): (1) the break 0.5 cm over the top button (break_z; Mueller und
+    # Sohn 0 to 1 cm); (2) the collar's fall at the fronts 0.75 cm less (Mueller und Sohn, lapel drafted on the break line:
+    # where the break lines overlap below the bust line, the collar's width minus 0.5 to 1 cm): 1.00 w is 5.1 cm, 0.85 w
+    # 4.4 cm; (3) the lapel kept off the bust (bust_clear): in the fold lab the 3.5 in lapel's flap stood up to 0.7 off the
+    # chest over the breast's upper slope and its fold sagged to 141-145 deg there, because a flat lapel cannot lie on that
+    # doubly curved surface. Its outer edge stays inside the apex line (apex_x, this body 1.66) up to the breast's upper
+    # edge, measured on the skin: the front profile at the apex flattens (under 0.2 forward per 0.5 up) 2.3 above the apex,
+    # 1.16 w. Above that it widens to the drafted 3.5 in at the notch.
+    modern=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=0.85, notch=0.30, gap=1.8),
+            dict(LAPEL, drop=3.6, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, lapel_width=1.73, tip_round=0.20,
+                 **NOTCH_LAPEL)),   # (bust_clear=dict(top=1.16, blend=0.5) tried 2026-11-21, m2: the edge came out as an L-shaped shelf at the breast's top and the roll still sagged to 144 deg over the bust: off)
     # (tried 2026-11-21, round m4: tangent_end=0.35 and fold_radius=0.30 together made it worse: the outer edge came out as a flat
     # bottom edge, not a taper (the control point stood too high), and the softer roll crumpled: lapel strain worst +83 / +132 %,
     # bend 177 deg, the flap 0.5 off its draft. Reverted; see tangent_end in lapel_outlines for the next try, 0.75.)
@@ -259,6 +268,32 @@ def round_tip(poly, r):
     return np.vstack([Bn, poly[1:], Bo[None], arc])
 
 
+def break_z(z_nominal, M, log=None):
+    """The break point's height, set on the top button. Mueller und Sohn's lapel draft puts the break 0 to 1 cm above
+    the top button, and the draft topology check (PR 87) found the drafted drops left the top button 1.8 (turned),
+    3.1 (notch) and 2.5 cm (modern) under the break: the buttons are spaced from the neck down (bodice.buttons) and the
+    lapel cut took away those above the break. So the break is moved to the button nearest the drafted drop, 0.5 cm
+    above it (the middle of the rule); the buttons, which pass the bust, waist and spacing rules, stay where they are."""
+    try:
+        import bodice as _b
+        R_, w = _b.RATIOS, M['w']
+        z1 = float(_b.neckline(M, R_)(np.array([0.0]))[0]) - 0.40 * w
+        z0 = float(_b.hemline(M, R_)(np.array([0.0]))[0]) + 0.55 * w
+        n = max(2, int(round((z1 - z0) / (R_['button_step'] * w))) + 1)
+        zs = np.linspace(z1, z0, n)
+    except Exception as e:                           # (no bodice measures here: the drafted drop as it was)
+        if log: log('collar: break left at its drafted drop (%s)' % e)
+        return z_nominal
+    zb = float(zs[np.argmin(np.abs(zs - z_nominal))]) + BREAK_OVER_BUTTON
+    if log: log('collar: break set 0.5 cm over the top button: z %.2f (drafted %.2f, %.1f cm %s)'
+                % (zb, z_nominal, abs(zb - z_nominal) * UNIT_CM, 'lower' if zb < z_nominal else 'higher'))
+    return zb
+
+
+UNIT_CM = 2.62                 # (1 unit, as the lapel's width note has it)
+BREAK_OVER_BUTTON = 0.5 / UNIT_CM
+
+
 def lapel_outlines(E, M, D, cpos, L_=None):
     """Each lapel's outline as it lies turned back, in (x, z): (break point B, neck point N, polygon)."""
     L_ = LAPEL if L_ is None else L_
@@ -271,7 +306,7 @@ def lapel_outlines(E, M, D, cpos, L_=None):
         # the lapel as a tailor cuts it: the roll line (break B up to the neck at N), the gorge (N out along the collar's
         # seam to the notch G), the notch's other side up to the lapel's point P, and the outer edge from P back to B
         # in a soft convex curve
-        B = np.array([-sg * L_.get('break_x', 0.0), foot[2] - L_['drop'] * w])       # (its front's own edge: past the middle, on the other side)
+        B = np.array([-sg * L_.get('break_x', 0.0), break_z(foot[2] - L_['drop'] * w, M, print if end == 0 else None)])       # (its front's own edge: past the middle, on the other side)
         N = np.array([foot[0], foot[2]])
         # in harmony with the collar: the notch G sits on the collar's own front edge (as solved), part way from the
         # roll down to the collar's point C, and the lapel's point mirrors C across the notch: the same length, turned
@@ -332,6 +367,18 @@ def lapel_outlines(E, M, D, cpos, L_=None):
             # edge, so it arrives there vertical.
             Cq = np.array([B[0], Pp[1] + L_['tangent_end'] * (B[1] - Pp[1])])
             outer = ((1 - q) ** 2)[:, None] * Pp[None] + (2 * q * (1 - q))[:, None] * Cq[None] + (q ** 2)[:, None] * B[None]
+        if L_.get('bust_clear') and 'apex_x' in M:
+            bc = L_['bust_clear']
+            zt = M.get('apex_z', M.get('z_bust')) + bc['top'] * w
+            xa = M['apex_x'] - bc.get('margin', 0.0) * w
+            t_ = np.clip((outer[:, 1] - zt) / (bc.get('blend', 0.5) * w), 0, 1)
+            t_ = t_ * t_ * (3 - 2 * t_)                              # (0 below the breast's top: held in; 1 above: as drafted)
+            lim = xa + t_ * 1e3
+            ox = np.minimum(sg * outer[:, 0], lim)
+            moved = np.abs(ox - sg * outer[:, 0]).max()
+            outer = np.column_stack([sg * ox, outer[:, 1]])
+            if end == 0:
+                print('collar: lapel kept off the bust: outer edge inside x %.2f up to z %.2f (moved in up to %.2f)' % (xa, zt, moved))
         poly = np.vstack([B, N, G, Pp, outer])
         if L_.get('tip_round'):
             poly = round_tip(poly, L_['tip_round'] * w)
@@ -443,19 +490,41 @@ def open_front(objs, M, E, D, L_=LAPEL):
     seg = E[D['idx']]
     xn = 0.5 * (abs(seg[0][0]) + abs(seg[-1][0]))
     zn = 0.5 * (seg[0][2] + seg[-1][2])
-    zb = zn - L_['drop'] * M['w']
+    zb = break_z(zn - L_['drop'] * M['w'], M)
     cut = 0
     for o in objs:
         mw = o.matrix_world
         bm = bmesh.new()
         bm.from_mesh(o.data)
         dead = []
-        for f in bm.faces:
-            c = mw @ f.calc_center_median()
-            if c.y < M['yc'] and c.z > zb:
-                half = xn * min((c.z - zb) / max(zn - zb, 1e-6), 1.2)
-                if abs(c.x) < half or (o.name.endswith('buttons') and c.z > zb - 0.15 * M['w']):
-                    dead.append(f)
+        if o.name.endswith('buttons'):
+            # (whole buttons: one above the break goes, the top button just under it stays whole. A per-face test cut
+            # the top button in half once the break sat 0.5 cm over it, inside the button's own radius)
+            seen = set()
+            for f0 in bm.faces:
+                if f0.index in seen:
+                    continue
+                isl, todo = [], [f0]
+                seen.add(f0.index)
+                while todo:
+                    f = todo.pop()
+                    isl.append(f)
+                    for e in f.edges:
+                        for g in e.link_faces:
+                            if g.index not in seen:
+                                seen.add(g.index)
+                                todo.append(g)
+                cz = sum((mw @ f.calc_center_median()).z for f in isl) / len(isl)
+                cy = sum((mw @ f.calc_center_median()).y for f in isl) / len(isl)
+                if cy < M['yc'] and cz > zb:
+                    dead += isl
+        else:
+            for f in bm.faces:
+                c = mw @ f.calc_center_median()
+                if c.y < M['yc'] and c.z > zb:
+                    half = xn * min((c.z - zb) / max(zn - zb, 1e-6), 1.2)
+                    if abs(c.x) < half:
+                        dead.append(f)
         bmesh.ops.delete(bm, geom=dead, context='FACES')
         # the cut edge laid straight along the V (a face-by-face cut leaves a staircase that reads as a broken fold)
         inv = mw.inverted()
