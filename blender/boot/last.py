@@ -378,9 +378,9 @@ def _sole(edge, z_welt, r):
 
 
 TOE_SMOOTH = 120     # (passes of Taubin smoothing over the toe box)
-TOE_SLICE = 0.25     # (the slices the toe dome is fitted in, units along the foot)
+TOE_SLICE = 0.45     # (the slices the toe dome is fitted in, units along the foot)
 TOE_ANG = 36         # (angular bins of its envelope)
-TOE_ENV = 30         # (smoothing passes of the envelope)
+TOE_ENV = 150        # (smoothing passes of the envelope)
 TOE_SWELL = 4        # (rounds of spreading the toe box's clearance shortfall)
 TOE_SPREAD = 40      # (neighbour passes that spread it)
 TOE_BRIDGE = 0.5    # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
