@@ -17,6 +17,13 @@ build:
                rest, arms-up, arms-fwd, elbows, step, crouch, twist, and the head poses the base figure defines
                (female.HEAD_POSES: nod, look-down, look-up, tilt, turn). The head rides the chest and is held
                looking level ahead in the body poses (female.carry_head), as a real neck holds it.
+--joins NAMES  the join check (tools/joins): G0/G1/G2 continuity across each named join of tools/joins/presets.json
+               (neck, foot-top, ...; all for every preset whose meshes are in the scene), on the built meshes before
+               the first render: DIR/join-NAME.json and DIR/join-NAME.png (the contour sheet: sections with curvature
+               combs, G1/G2 along the join, normal-deviation, zebra and matcap views), and a summary in geometry.json.
+               Report-only unless RQ_PRECHECK holds "joins": true, which stops the job before it renders when a
+               join fails. --joins-only stops after the checks (no render at all). RQ_JOINS=NAMES does the same as
+               --joins for every job.
 --pose-crop REGIONS  with --poses: also a crop of each region (as --crop names them) in every pose, from the same
                camera as the strip: DIR/pose-crop-REGION.png, one tile per pose (default height 300, --pose-size)
 
@@ -363,6 +370,48 @@ def layer_gaps(out):
             json.dump(g, f, indent=1)
 
 
+def joins(out):
+    """The join check (tools/joins/joins.py, John 2026-11-21): continuity across each named join on the built
+    meshes, before any render. Report-only unless RQ_PRECHECK has "joins": true."""
+    names = opt('--joins') or os.environ.get('RQ_JOINS')
+    if not names:
+        return
+    root = os.path.normpath(os.path.join(HERE, '..', '..'))
+    sys.path.insert(0, os.path.join(root, 'tools', 'joins'))
+    sys.path.insert(0, os.path.join(root, 'blender', 'shared'))
+    import dump
+    import joins as J
+    presets = json.load(open(J.PRESETS))['joins']
+    want = list(presets) if names == 'all' else names.split(',')
+    t = time.time()
+    scene = dump.dump_scene()
+    have = {k.split('/')[0] for k in scene}
+    reps, skipped = [], []
+    for nm in want:
+        p = presets.get(nm)
+        if p is None or p['a'] not in have or (p.get('b') and p['b'] not in have):
+            skipped.append(nm)
+            continue
+        try:
+            reps += J.preset([nm], scene, out)
+        except (Exception, SystemExit) as e:          # (one join that cannot be measured never stops the others)
+            print(f'rq joins: {nm} skipped ({type(e).__name__}: {e})', flush=True)
+            skipped.append(nm)
+    summ = {r['name']: {k: r.get(k) for k in ('verdict', 'summary', 'cause', 'rms_k_per_cm', 'g1_deg_max', 'steps',
+                                               'joins') if k in r} for r in reps}
+    gp = os.path.join(out, 'geometry.json')
+    g = json.load(open(gp)) if os.path.exists(gp) else {}
+    g['joins'] = {'joins': summ, 'skipped': skipped, 'seconds': round(time.time() - t, 1)}
+    with open(gp, 'w') as f:
+        json.dump(g, f, indent=1, default=str)
+    lim = json.loads(os.environ.get('RQ_PRECHECK') or '{}')
+    bad = [n for n, r in summ.items() if r.get('verdict') == 'fail']
+    if lim.get('joins') and bad:
+        with open(os.path.join(out, 'precheck.json'), 'w') as f:
+            json.dump({'failed': [f'join {n} fails continuity' for n in bad], 'limits': {'joins': True}}, f, indent=1)
+        raise SystemExit('rq precheck: joins failed: ' + ', '.join(bad))
+
+
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), 'rq-views'))
     os.makedirs(out, exist_ok=True)
@@ -400,8 +449,23 @@ def main():
                 traceback.print_exc()
                 print(f'rq layer gaps: skipped ({type(e).__name__}: {e})', flush=True)
             checked['gaps'] = round(time.time() - t, 1)
-            if '--gaps-only' in argv:
+            if '--gaps-only' in argv and '--joins-only' not in argv:
                 print('rq layer gaps: --gaps-only, stopping before the renders', flush=True)
+                sys.stdout.flush()
+                os._exit(0)
+        if (opt('--joins') or os.environ.get('RQ_JOINS')) and '--list' not in argv and not opt('--save'):
+            t = time.time()
+            try:
+                joins(out)
+            except SystemExit:
+                raise
+            except Exception as e:      # (report-only unless the precheck asks: never fails the render)
+                import traceback
+                traceback.print_exc()
+                print(f'rq joins: skipped ({type(e).__name__}: {e})', flush=True)
+            checked['joins'] = round(time.time() - t, 1)
+            if '--joins-only' in argv:
+                print('rq joins: --joins-only, stopping before the renders', flush=True)
                 sys.stdout.flush()
                 os._exit(0)
         return r
@@ -415,6 +479,8 @@ def main():
         timing['geometry'] = checked['s']      # (inside views.py's own 'build N s', which includes it)
     if 'gaps' in checked:
         timing['layer_gaps'] = checked['gaps']
+    if 'joins' in checked:
+        timing['joins'] = checked['joins']
     for name, fn, on in (('crops', crops, bool(opt('--crop'))), ('poses', poses, '--poses' in argv)):
         if on:
             t = time.time()
