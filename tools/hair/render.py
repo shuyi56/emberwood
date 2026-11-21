@@ -45,6 +45,7 @@ F0 = ((ETA - 1) / (ETA + 1)) ** 2  # Fresnel at normal incidence
 CLUMP = 0.55                       # the creator's clump profile: children gather to 55% of the way to their guide at
                                    # the tip (hair-building-guide.md, "Drape" 5), EXPERIMENTAL
 HEAD_CLOUD = None
+FRONT_BOOST = 4.0                  # children per hair at the front against the back (drawing density only)
 LIGHT0 = np.array([-0.45, -0.55, 0.70])     # key light for the front view: front, high, from the character's right
 LIGHT = LIGHT0.copy()                       # turntable: the light turns with the camera (set by each Canvas), so every
                                             # view is lit the same way and the back is judged lit, not in silhouette
@@ -69,7 +70,16 @@ def grow_children(F, Gm, n, seed=5):
     per = SF.point_area(F)
     p = F['density'] * per
     p = p / p.sum()
-    idx = rng.choice(len(p), size=n, p=p)
+    # more, finer children where the face is framed: the front locks and the bangs are drawn with FRONT_BOOST times
+    # the children per hair, each carrying that much less hair, so the coverage stays the budget's
+    b = np.ones(len(p))
+    if 'lock' in Gm:
+        gl = Gm['lock'].astype(int)
+        near = gl[cKDTree(Gm['roots']).query(F['P'])[1]]
+        b[near >= 1] = FRONT_BOOST
+    q = p * b / (p * b).sum()
+    idx = rng.choice(len(p), size=n, p=q)
+    hairs = (p[idx] / q[idx]) / n                    # share of all the hairs each child carries (sums to about 1)
     root = F['P'][idx] + (rng.random((n, 3)) - 0.5) * 0.004
     R, X = Gm['roots'], Gm['X']
     # blend only guides of the same lock: the face-framing hair (in front of the split) on each side of the part, and
@@ -105,7 +115,7 @@ def grow_children(F, Gm, n, seed=5):
     L = last[near] * (0.9 + 0.1 * rng.random(n))
     keep = np.arange(S1)[None] <= L[:, None]
     path[~keep] = np.nan
-    return path
+    return path, hairs
 
 
 def view_basis(az_deg):
@@ -200,7 +210,8 @@ def hair_samples(paths, px):
     P = (A[:, None] * (1 - f)[None, :, None] + B[:, None] * f[None, :, None]).reshape(-1, 3)
     T = np.repeat(unit(B - A), k, 0)
     along = np.repeat(np.nonzero(ok)[1], k) + np.tile(f, len(A))
-    return P, T, along
+    child = np.repeat(np.nonzero(ok)[0], k)
+    return P, T, along, child
 
 
 def shade(P, T, along, view, mode, shadow):
@@ -255,22 +266,27 @@ def deep_shadow(P, cv_light_px, hairs_per_child):
     ks = key[o]
     start = np.r_[0, np.nonzero(np.diff(ks))[0] + 1]
     rank = np.arange(len(o)) - np.repeat(start, np.diff(np.r_[start, len(o)]))
-    cnt = np.empty(len(o)); cnt[o] = rank
-    cover = hairs_per_child * 80e-6 / (cv_light_px * SF.HH_MM / 1000)      # share of a light texel one sample blocks
-    # each sample stands for one pixel-length of hair: its blocking share over the texel
-    return np.exp(-cover * cnt * 0.6)
+    cover = np.asarray(hairs_per_child, float) * np.ones(len(P)) * 80e-6 / (cv_light_px * SF.HH_MM / 1000)
+    # (share of a light texel one sample blocks; each sample stands for one pixel-length of hair) summed over the
+    # samples nearer the light in the same texel
+    cs = np.cumsum(cover[o])
+    before = cs - cover[o] - np.repeat(np.r_[0, cs][start] , np.diff(np.r_[start, len(o)]))
+    acc = np.empty(len(o)); acc[o] = before
+    return np.exp(-acc * 0.6)
 
 
-def render_hair(cv, paths, mode, backdrop, zb, hairs_per_child):
-    P, T, along = hair_samples(paths, cv.px)
+def render_hair(cv, paths, mode, backdrop, zb, hairs_per_child, return_cov=False):
+    P, T, along, child = hair_samples(paths, cv.px)
+    hairs_per_child = np.asarray(hairs_per_child, float) * np.ones(len(paths))
     i, j, z, ok = cv.project(P)
     vis = ok.copy()
     vis[ok] = z[ok] < zb[j[ok], i[ok]] + 0.004
-    P, T, along, i, j, z = P[vis], T[vis], along[vis], i[vis], j[vis], z[vis]
-    sh = deep_shadow(P, cv.px * 2, hairs_per_child)
+    P, T, along, i, j, z, child = P[vis], T[vis], along[vis], i[vis], j[vis], z[vis], child[vis]
+    hpc = hairs_per_child[child]
+    sh = deep_shadow(P, cv.px * 2, hpc)
     c = shade(P, T, along, cv.fwd, mode, sh)
     # coverage of a pixel by one child's sample: hairs_per_child fibres 80 um wide over a pixel's width
-    a1 = 1 - (1 - min(1.0, 80e-6 / (cv.px * SF.HH_MM / 1000))) ** hairs_per_child
+    a1 = 1 - (1 - min(1.0, 80e-6 / (cv.px * SF.HH_MM / 1000))) ** hpc
     zmin = np.full((cv.H, cv.W), np.inf)
     np.minimum.at(zmin, (j, i), z)
     w = np.exp(-(z - zmin[j, i]) / 0.02) * a1            # weighted blended OIT: front hair dominates (McGuire 2013)
@@ -278,10 +294,12 @@ def render_hair(cv, paths, mode, backdrop, zb, hairs_per_child):
     for k in range(3):
         np.add.at(acc[..., k], (j, i), c[:, k] * w)
     np.add.at(wsum, (j, i), w)
-    np.add.at(logT, (j, i), np.log(1 - a1) * np.ones_like(w))
+    np.add.at(logT, (j, i), np.log(1 - a1) * np.ones_like(w))      # (a1 per sample)
     Tr = np.exp(logT)[..., None]
     avg = acc / np.maximum(wsum, 1e-12)[..., None]
     img = backdrop * Tr + avg * (1 - Tr)
+    if return_cov:
+        return img, 1 - Tr[..., 0]
     return img
 
 
@@ -365,12 +383,13 @@ def main():
     F = SF.build(surf)
     body = json.load(gzip.open(head))['bodies']['mannequin']
     Gm = dict(np.load(os.path.join(gdir, 'groom.npz')))
-    paths = grow_children(F, Gm, nch)
+    paths, share = grow_children(F, Gm, nch)
     total = float(Gm['total']) if 'total' in Gm else float(Gm['n_hairs'].sum())
-    hpc = total / nch
+    hpc = total * share                    # hairs each child carries
     np.savez_compressed(os.path.join(out, 'children.npz'), paths=paths.astype(np.float32))
     from PIL import Image
-    rep = {'children': nch, 'hairs_per_child': round(hpc, 2)}
+    rep = {'children': nch, 'hairs_per_child': round(float(hpc.mean()), 2),
+           'hairs_per_child_front': round(float(hpc.min()), 2)}
     for mode in ('clay', 'full'):
         row = []
         for az in (0, 45, 90, 135, 180):

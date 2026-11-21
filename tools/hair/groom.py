@@ -245,8 +245,10 @@ PART_HALF = 0.004         # STYLE: the part's half-width, HH (about 1 mm), as th
 BANG_EX = 0.213                    # HH: the outer canthus. Farkas' women: intercanthal 31.8 mm (the creator's alar
                                    # note) and a 30.7 mm eye fissure put the canthus 46.6 mm out; the fissure's centre,
                                    # 31.3 mm, sits on the creator's pupil (30.7 mm), so the two agree
-BANG_DEPTH_MM = 32.0               # the section's depth on the part behind the hairline: [MBG]'s 1 to 1.5 inches each
-                                   # side of the part, front to back (its middle, 1.25 in)
+BANG_DEPTH_MM = 60.0               # the section's depth on the part behind the hairline, from the ground truth: the
+                                   # Face Creator's Ranger roots its curtain bangs 60 mm back along the part (at z 0.98,
+                                   # y -0.125). [MBG]'s 1 to 1.5 in (25-38 mm) gave too little hair to cover the brow
+                                   # ([CC]: start further back for fuller bangs)
 BANG_GUIDE_X = 4                   # guide density in the bangs against the rest
 Z_CHEEK = 0.415                    # HH: the cheekbone's height in the creator (main.js, the cheekbones' gaussian)
 Z_CHIN_LOCK = 0.0                  # HH: the chin, [OGL]'s shortest length for the outer pieces
@@ -309,7 +311,35 @@ BANG_ROOT_LIFT_MM = 6.0            # the dried root's volume off the forehead, e
 BANG_LIE_MM = 1.0                  # where the combed bang lies off the skin below that
 
 
-def comb_bangs(surf, col, roots, d0, sweep, comb, seg_hh, S):
+def creator_field(style_path, front=True):
+    """The Face Creator's own strands (its export) as a flow field to comb along: points, unit tangents, and the
+    length of strand left from each point to its tip. front: only the strands rooted at the front of the head (the
+    curtain bangs, their cover locks and the face-framing locks)."""
+    import gzip
+    d = json.load(gzip.open(style_path))
+    P, T, R = [], [], []
+    for st in d['strands']:
+        p = np.array(st['p'], float).reshape(-1, 3)
+        if front and not (p[0, 1] < -0.1 and p[0, 2] > 0.7):
+            continue
+        seg = np.linalg.norm(np.diff(p, axis=0), axis=1)
+        rem = np.r_[np.cumsum(seg[::-1])[::-1], 0.0]
+        t = np.gradient(p, axis=0); t /= np.maximum(np.linalg.norm(t, axis=1, keepdims=True), 1e-9)
+        P.append(p); T.append(t); R.append(rem)
+    from scipy.spatial import cKDTree
+    P, T, R = np.concatenate(P), np.concatenate(T), np.concatenate(R)
+    return dict(P=P, T=T, rem=R, tree=cKDTree(P))
+
+
+TRACE_PULL = 0.5                   # how far each combed step is drawn onto the creator's strands (0 none, 1 onto them)
+TRACE_K = 8
+FRAME_TH = 0.9                     # rad: the face-framing hair combed with the creator's framing locks (in front of the
+                                   # temples, |theta| under about 52 deg)
+FRAME_PULL = 0.3
+FRAME_ON_Z = 0.15                  # HH: the framing hair is laid on the face down to the jaw, then falls
+
+
+def comb_bangs(surf, col, roots, d0, sweep, comb, seg_hh, S, field=None, out=None, pull=None, lie_hh=None):
     """The combing pass: the bangs are combed into their style and laid on the face, as a brush lays them, instead of
     being left to gravity (a lone hair holds a shape only over its 4.5 cm elastogravity length, so a solve lets a
     swept bang fall straight). Each step heads from the comb out toward the temple, then down beside the eye, and is
@@ -319,23 +349,48 @@ def comb_bangs(surf, col, roots, d0, sweep, comb, seg_hh, S):
     X = np.zeros((G, S + 1, 3)); X[:, 0] = roots; X[:, 1] = roots + d0 * seg_hh
     d = d0.copy()
     side = np.sign(sweep[:, 0])
-    out = np.c_[side * 0.55, -0.2 * np.ones(G), -0.8 * np.ones(G)]      # (down over the brow's corner as much as out)
+    if out is None:
+        out = np.c_[side * 0.55, -0.2 * np.ones(G), -0.8 * np.ones(G)]  # (down over the brow's corner as much as out)
+    pull = TRACE_PULL if pull is None else pull
+    target = None
+    if field is not None:                 # the length: what is left of the creator's nearest strand past the root
+        target = field['rem'][field['tree'].query(roots)[1]]
     for k in range(2, S + 1):
         s_m = k * seg_hh * HH_M
         t1 = SF.sm(0.0, BANG_OUT_M, s_m); t2 = SF.sm(BANG_OUT_M, BANG_SWEEP_M, s_m)
         want = (comb * (1 - t1) + out * t1) * (1 - t2) + sweep * t2
+        if field is not None:             # traced: along the creator's strands where the comb meets them
+            dist, nb = field['tree'].query(X[:, k - 1], k=TRACE_K)
+            w = 1.0 / np.maximum(dist, 1e-3) ** 2
+            tf = (field['T'][nb] * w[..., None]).sum(1); tf /= np.maximum(np.linalg.norm(tf, axis=1, keepdims=True), 1e-9)
+            near = (dist[:, 0] < 0.1)[:, None]
+            want = np.where(near, tf, want)
         d = 0.5 * d + 0.5 * want
         d /= np.linalg.norm(d, axis=1, keepdims=True)
         x = X[:, k - 1] + d * seg_hh
+        if field is not None:
+            dist, nb = field['tree'].query(x, k=TRACE_K)
+            w = 1.0 / np.maximum(dist, 1e-3) ** 2
+            pf = (field['P'][nb] * w[..., None]).sum(1) / w.sum(1)[:, None]
+            x = x + pull * (pf - x) * (dist[:, :1] < 0.1)
         lie = (BANG_LIE_MM + (BANG_ROOT_LIFT_MM - BANG_LIE_MM) * (1 - SF.sm(0.0, 0.03, s_m))) / SF.HH_MM
         on = x[:, 2] > 0.2
+        if lie_hh is not None:            # laid on the skin at its own depth in the lock (the face-framing hair: the
+            lie = lie_hh                   # creator's framing locks lie on the cheek)
+            on = x[:, 2] > FRAME_ON_Z
+        elif field is not None:
+            on[:] = False                  # (traced hair lies where the creator's does: only kept out of the head)
+            pen = col.head_depth(torch.tensor(x, dtype=torch.float64)).numpy()
+            q = x - SF.CENTRE; u = q / np.linalg.norm(q, axis=1, keepdims=True)
+            x = x + u * np.maximum(pen + lie, 0)[:, None]
         if on.any():                      # laid on the skin: moved along the radius to the lie height, in or out,
             # then out of the collider where it stands over the skin (it bridges the eye socket, as a comb does)
             import torch
             q = x[on] - SF.CENTRE; u = q / np.linalg.norm(q, axis=1, keepdims=True)
-            x[on] = SF.CENTRE + u * (surf.radius(u) + lie)[:, None]
+            lo = lie[on] if np.ndim(lie) else lie
+            x[on] = SF.CENTRE + u * (surf.radius(u) + lo)[:, None]
             pen = col.head_depth(torch.tensor(x[on], dtype=torch.float64)).numpy()
-            x[on] = x[on] + u * np.maximum(pen + lie, 0)[:, None]
+            x[on] = x[on] + u * np.maximum(pen + lo, 0)[:, None]
         dd = x - X[:, k - 1]
         d = dd / np.linalg.norm(dd, axis=1, keepdims=True)
         X[:, k] = X[:, k - 1] + d * seg_hh                  # (each step kept one segment long)
@@ -344,6 +399,14 @@ def comb_bangs(surf, col, roots, d0, sweep, comb, seg_hh, S):
             q = X[on, k] - SF.CENTRE; u = q / np.linalg.norm(q, axis=1, keepdims=True)
             pen = col.head_depth(torch.tensor(X[on, k], dtype=torch.float64)).numpy()
             X[on, k] += u * np.maximum(pen + 0.2 / SF.HH_MM, 0)[:, None]
+        low = X[:, k, 2] <= 0.2
+        if low.any():                     # (below the chin: kept off the body, out along the level radius)
+            q = X[low, k] - np.array([SF.AXIS[0], SF.AXIS[1], 0.0]); q[:, 2] = 0
+            u = q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-9)
+            pen = col.body_depth(torch.tensor(X[low, k], dtype=torch.float64)).numpy()
+            X[low, k] += u * np.maximum(pen + 1.0 / SF.HH_MM, 0)[:, None]
+    if field is not None:
+        return X, target
     return X
 
 
@@ -453,7 +516,8 @@ def clear_follicles(roots, d0, N, seg_hh, col, layer, step_deg=5.0):
 
 
 EAR_X = 0.33                       # HH: the head's half-width at the ear (measured on the export: 0.326-0.343 at z .4-.5)
-EAR_OUT = 0.08                     # HH: EXPERIMENTAL, how far the ear stands off the head (about 18 mm)
+EAR_OUT = 0.035                    # HH: how far the ear stands off the head: the creator's EAR.EY (main.js), the
+                                   # ground truth. 0.08 (EXPERIMENTAL before) held the side hair 13 mm wider than the creator's
 EAR_AXES = (0.5 * EAR_OUT + 0.005, 0.06, 0.5 * (SF.EAR_TOP - SF.EAR_BOTTOM))
 
 
@@ -596,7 +660,7 @@ class Layers:
         return float(self.cum.max()) * SF.HH_MM
 
 
-def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=None, bangs=True, reuse=None):
+def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=None, bangs=True, reuse=None, trace=None):
     """reuse: a previous groom.npz. The guides do not act on each other (no hair-hair contact; the layer is a fixed
     function of the roots), so a guide with the same root and the same style as in that groom settles to the same
     place: it is copied, and only the rest (here the bangs, while they are being styled) are solved."""
@@ -648,11 +712,19 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X0 = np.concatenate([roots[:, None], roots[:, None] + np.cumsum(dd * seg_hh, 1)], 1)
         kb0 = bang_set(X0, bang)
     solve = np.ones(len(idx), bool)
+    frame = np.zeros(len(idx), bool)
+    same = False
     if reuse is not None:
-        P = np.load(reuse)
-        same = (len(P['roots']) == len(roots)) and P['X_uncut'].shape[1] == S + 1
-        if same:
-            solve = bang | ~np.all(np.abs(P['roots'] - roots) < 1e-9, axis=1)
+        from scipy.spatial import cKDTree
+        P0 = np.load(reuse)
+        same = P0['X_uncut'].shape[1] == S + 1
+        if same:                          # guides matched by their roots (the bang section may have grown or shrunk)
+            dist, j = cKDTree(P0['roots']).query(roots)
+            hit = dist < 1e-9
+            solve = bang | ~hit
+            P = {k: np.zeros((len(idx),) + P0[k].shape[1:], P0[k].dtype) for k in ('X_uncut', 'X', 'lengths')}
+            for k in P:
+                P[k][hit] = P0[k][j[hit]]
         print('reuse: %d of %d guides copied' % ((~solve).sum(), len(idx)) if same else 'reuse: groom differs, full solve')
 
     def settle_some(D, mask=None):
@@ -668,13 +740,27 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         return X, Dn
     if bangs:
         # the bangs are combed, not solved: their paths come from the combing pass and are never settled
-        Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S)
+        field = creator_field(trace) if trace else None
+        Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S, field)
+        if field is not None:
+            Xb, bang_len = Xb
         solve &= ~bang
-        if reuse is None:
+        if not same:
             P = {'X_uncut': np.zeros((len(idx), S + 1, 3)), 'X': np.zeros((len(idx), S + 1, 3)),
                  'lengths': np.zeros(len(idx), int)}
         P = {k: np.array(P[k]) for k in ('X_uncut', 'X', 'lengths')}
         P['X_uncut'][bang] = Xb
+        if field is not None:
+            # the face-framing hair (in front of the temples) is combed too, along the creator's framing locks onto
+            # the cheek, then straight down in front of the shoulder; cut by the style's line like the rest
+            thr = SF.theta(roots)
+            frame = ~bang & (np.abs(thr) < FRAME_TH) & (roots[:, 2] > 0.55)
+            down = np.tile([0.0, 0.0, -1.0], (frame.sum(), 1))
+            lie_f = np.clip(layer.root_cum[frame], 1.0 / SF.HH_MM, 10.0 / SF.HH_MM)
+            Xf, _ = comb_bangs(surf, col, roots[frame], d0[frame], np.c_[np.sign(roots[frame, 0]) * 1e-3, down[:, 1:]],
+                           comb[frame], seg_hh, S, field, out=down, pull=FRAME_PULL, lie_hh=lie_f)
+            solve &= ~frame
+            P['X_uncut'][frame] = Xf
     t0 = time.time()
     X, D = settle_some(D)
     if (~solve).any():
@@ -685,6 +771,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     endz = ranger_cut_z(SF.theta(X[:, -1]))
     if bangs:
         endz[bang] = bang_cut_z(bt[bang])
+    trace_len = None
+    if bangs and trace:
+        trace_len = np.maximum(3, np.round(bang_len * HH_M / SEG_M)).astype(int)
     lengths = np.full(len(idx), S)
     for g in range(len(idx)):
         below = np.where(X[g, 1:, 2] < endz[g])[0]
@@ -692,11 +781,16 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             lengths[g] = max(3, below[0])
     mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
     if (~solve).any():
-        reused = ~solve & ~bang
+        reused = ~solve & ~bang & ~frame
         lengths[reused] = P['lengths'][reused]
+        mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
+    if trace_len is not None:             # traced bangs end where the creator's do
+        lengths[bang] = trace_len
         mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
     if bangs:
         P['X'][bang] = Xb                 # (the combed bangs, cut below by the mask)
+        if frame.any():
+            P['X'][frame] = P['X_uncut'][frame]
     X2, D = settle_some(D, mask)
     t2 = time.time()
     X2[:, 1:][mask == 0] = np.nan
@@ -723,7 +817,8 @@ def main():
     body = json.load(gzip.open(head))['bodies']['mannequin']
     log = []
     reuse = a[a.index('--reuse') + 1] if '--reuse' in a else None
-    Gm = build_groom(surf, F, body, n_guides=n, log=log, reuse=reuse)
+    trace = a[a.index('--trace') + 1] if '--trace' in a else None
+    Gm = build_groom(surf, F, body, n_guides=n, log=log, reuse=reuse, trace=trace)
     np.savez_compressed(os.path.join(out, 'groom.npz'), **{k: v for k, v in Gm.items() if isinstance(v, np.ndarray)})
     rep = dict(guides=int(len(Gm['idx'])), hairs=int(Gm['total']), hairs_per_guide=round(float(Gm['n_hairs'][0]), 1),
                elastogravity_cm=round(ELASTOGRAVITY_M * 100, 2), layer_max_mm=round(Gm['layer_max_mm'], 2),
