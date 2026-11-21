@@ -704,10 +704,12 @@ def fuse_lower():
     # instep, seen in its curvature; a shrink-free (Taubin) smoothing over the feet takes them out without thinning
     # the toes)
     if MEASURED_FOOT:
-        wf = _ssn(FLOOR_Z + 5.0, FLOOR_Z + 3.5, co[:, 2])
-        for _ in range(FOOT_SMOOTH):
-            co = relax(co, 1.0 * wf, 1)
-            co = relax(co, -1.06 * wf, 1)
+        # (gentle steps, 0.5 and -0.53, and a wide fade to the shin: full steps with a short fade tore the shin
+        # skin where the weight fell off, render 333)
+        wf = _ssn(FLOOR_Z + 7.0, FLOOR_Z + 3.0, co[:, 2])
+        for _ in range(2 * FOOT_SMOOTH):
+            co = relax(co, 0.5 * wf, 1)
+            co = relax(co, -0.53 * wf, 1)
         # (the front of the ankle: where the shin comes down onto the instep the union leaves a crease; the skin
         # there is relaxed as one patch, like the seat, so the shin runs into the instep as one concave line)
         az, ay, ax_ = co[:, 2] - FLOOR_Z, co[:, 1], np.abs(np.abs(co[:, 0]) - 2.8 * UNIT)
