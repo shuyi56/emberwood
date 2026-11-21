@@ -50,7 +50,8 @@ th = sol.thickness
 # closing edge, tangent to it. So the V closes well above the fold's foot, and from there down the front is one straight
 # closed line, which the buttons hold; the top button sits just under where the V closes, on the line the fold becomes.
 foot = opt.get('foot', M['z_bust'] + opt.get('foot_over_bust', -0.6))
-bow = opt.get('bow')                                   # (None: as much as brings the line in tangent to the edge)
+belly = opt.get('belly', 0.0 if 'bow' in opt else 0.7)    # the cut line's swing out from the chord (a true curved cut)
+bow = opt.get('bow', 0.0 if belly else None)           # (the earlier way: the cloth drawn along the surface; None: tangent to the edge)
 def bowdev(t):
     t = np.clip(t, 0, 1); return bow * 6.75 * t * t * (1 - t)
 def ss01(a_, b_, x_):
@@ -94,15 +95,30 @@ for layer, sg in ((1, -1.0), (2, 1.0)):               # (the right front's neck 
     n = np.array([-u[1], u[0]]); n = n if n[0] * -sg > 0 else -n       # toward the V
     sides.append(dict(layer=layer, sg=sg, N=N, B=B, u=u, n=n, ln=ln))
     if bow is None: bow = opt.get('tangent', 0.9) * abs(u[0] / u[1]) * ln / 6.75
-    geom = [f for f in bm.faces if all(v[lay] == layer for v in f.verts) and min(W[v.index, 2] for v in f.verts) > foot - 0.4
-            and max(W[v.index, 1] for v in f.verts) < yc]
-    ge = list({e for f in geom for e in f.edges}); gv = list({v for f in geom for v in f.verts})
-    co = Vector(tuple(inv[:3, :3] @ np.array([N[0], 0, N[1]]) + inv[:3, 3])); no = Vector((n[0], 0, n[1]))
-    r = bmesh.ops.bisect_plane(bm, geom=geom + ge + gv, dist=1e-5, plane_co=co, plane_no=no)
-    for g in r['geom_cut']:
-        if isinstance(g, bmesh.types.BMVert): g[lay] = layer
-    bm.verts.ensure_lookup_table(); bm.faces.ensure_lookup_table()
-    W = world(); L_ = np.array([v[lay] for v in bm.verts])
+    # the line as it is cut: straight, or (belly) a true curve that swings out from the chord, away from the V, so
+    # that more of the front lies past it and the lapel is wider (John: "the lapel is too thin needs to be wider").
+    # A curve is cut as K short straight cuts, each through its own stretch of the cloth.
+    K = opt.get('cut_segments', 16) if belly else 1
+    ts = np.linspace(0, 1, K + 1)
+    Cp = N[None] + (ts * ln)[:, None] * u[None] - (belly * 6.75 * ts * ts * (1 - ts))[:, None] * n[None]
+    sides[-1]['Cp'] = Cp
+    for k in range(K):
+        lo, hi = (-9.0 if k == 0 else ts[k]), (9.0 if k == K - 1 else ts[k + 1])
+        geom = []
+        for f in bm.faces:
+            if any(v[lay] != layer for v in f.verts): continue
+            if min(W[v.index, 2] for v in f.verts) <= foot - 0.4 or max(W[v.index, 1] for v in f.verts) >= yc: continue
+            c = f.calc_center_median()
+            tc = ((c.x - N[0]) * u[0] + (c.z - N[1]) * u[1]) / ln
+            if lo <= tc < hi: geom.append(f)
+        ge = list({e for f in geom for e in f.edges}); gv = list({v for f in geom for v in f.verts})
+        dk = Cp[k + 1] - Cp[k]; nk = np.array([-dk[1], dk[0]]); nk = nk / np.linalg.norm(nk); nk = nk if nk @ n > 0 else -nk
+        co = Vector(tuple(inv[:3, :3] @ np.array([Cp[k][0], 0, Cp[k][1]]) + inv[:3, 3])); no = Vector((nk[0], 0, nk[1]))
+        r = bmesh.ops.bisect_plane(bm, geom=geom + ge + gv, dist=1e-5, plane_co=co, plane_no=no)
+        for g in r['geom_cut']:
+            if isinstance(g, bmesh.types.BMVert): g[lay] = layer
+        bm.verts.ensure_lookup_table(); bm.faces.ensure_lookup_table()
+        W = world(); L_ = np.array([v[lay] for v in bm.verts])
     print('foldfront: front %d: roll line marked from the neck (%.2f, %.2f) to the break (%.2f, %.2f), %.1f cm' % (layer, N[0], N[1], B[0], B[1], 2.62 * ln))
 bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
 bm.verts.ensure_lookup_table(); bm.faces.ensure_lookup_table()
@@ -111,8 +127,23 @@ top, und = sides
 zx = top['N'][1] + top['u'][1] * (0 - top['N'][0]) / top['u'][0]
 # 2. what turns back: each front's own points past its line
 q = W[:, [0, 2]]
+from scipy.spatial import cKDTree
 for s in sides:
     sd = (q - s['N']) @ s['n']; tl = ((q - s['N']) @ s['u']) / s['ln']
+    if belly:                                         # distance past the CURVE, and where along it
+        td = np.linspace(0, 1, 1200)
+        Cd = s['N'][None] + (td * s['ln'])[:, None] * s['u'][None] - (belly * 6.75 * td * td * (1 - td))[:, None] * s['n'][None]
+        tg = np.gradient(Cd, axis=0); nd = np.column_stack([-tg[:, 1], tg[:, 0]]); nd /= np.linalg.norm(nd, axis=1)[:, None]
+        nd = np.where(((nd @ s['n']) > 0)[:, None], nd, -nd)
+        _, jn = cKDTree(Cd).query(q)
+        sdc = ((q - Cd[jn]) * nd[jn]).sum(1)
+        mine = (L_ == s['layer']) & (W[:, 1] < yc) & (W[:, 2] > foot - 0.5)
+        snap = mine & (np.abs(sdc) < opt.get('snap', 0.012)) & (tl > -0.02) & (tl < 1.02)
+        q[snap] -= sdc[snap][:, None] * nd[jn][snap]; W[snap, 0], W[snap, 2] = q[snap, 0], q[snap, 1]; sdc[snap] = 0.0
+        chord = tl.copy(); sd, tl = sdc, td[jn]
+        f = mine & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (chord > -0.15)
+        s.update(sd=sd, tl=tl, fold=f, crease=snap, C=Cd[jn], nl=nd[jn], Cd=Cd)
+        continue
     f = (L_ == s['layer']) & (W[:, 1] < yc) & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (tl > -0.15)
     s.update(sd=sd, tl=tl, fold=f, crease=(L_ == s['layer']) & (W[:, 1] < yc) & (np.abs(sd) <= 1e-6) & (tl > -0.02) & (tl < 1.02))
 n0 = len(W)
@@ -130,14 +161,14 @@ def caster(skip, layers=None):
     return cast
 # the line curved: the cloth by the line is drawn along its own surface so that the cut line becomes the curve
 band_w = opt.get('bow_band', 1.0)
-for s_ in sides:
+for s_ in (sides if bow else []):
     own = caster(np.zeros(len(W), bool), (s_['layer'],))
     sel = (L_ == s_['layer']) & (W[:, 1] < yc) & ~s_['fold'] & (s_['sd'] <= 1e-6) & (s_['sd'] > -band_w) & (s_['tl'] > -0.1) & (s_['tl'] < 1.1)
     jj = np.nonzero(sel)[0]
     dv = bowdev(s_['tl'][jj]) * (1 - ss01(0, band_w, -s_['sd'][jj]))
     nq = q[jj] + dv[:, None] * s_['n'][None]; ny = own(nq)
     s_['warp'] = (jj, nq, np.where(np.isfinite(ny), ny, W[jj, 1]))
-for s_ in sides:
+for s_ in (sides if bow else []):
     jj, nq, ny = s_['warp']; W[jj, 0], W[jj, 2], W[jj, 1] = nq[:, 0], nq[:, 1], ny
 out_side = opt.get('thick_out', 1.0) * th              # (how much of the cloth's thickness stands outside the mesh's own surface)
 for s in (und, top):                                  # the under front first: the upper front's lapel then lies on what is there
@@ -166,6 +197,7 @@ for s in (und, top):                                  # the under front first: t
     hh = np.where(rest > 0, np.maximum(2 * rr - Rc * (1 - np.cos(np.minimum(ph, phm))), np.minimum(lie, 2 * rr)), hh)
     P = q[ii]
     X = P - d[:, None] * n[None] + ex[:, None] * n[None]
+    if belly: X = s['C'][ii] + ex[:, None] * s['nl'][ii]            # (turned over the curve: out from its own nearest point)
     X = X + (bowdev(t) * np.exp(-((ex - d) / opt.get('bow_over', 1.5)) ** 2))[:, None] * n[None]      # (the lapel goes with its curved line)
     g_ = np.ones(len(ii))
     gy = ground(X)
@@ -201,8 +233,9 @@ if opt.get('buttons', True):
     # curved folds meet at the middle
     tt = np.linspace(0, 1, 400); cx = top['N'][0] + tt * top['ln'] * top['u'][0] + bowdev(tt) * top['n'][0]
     cz = top['N'][1] + tt * top['ln'] * top['u'][1] + bowdev(tt) * top['n'][1]
+    if belly: cx, cz = top['Cd'][:, 0], top['Cd'][:, 1]
     zcross = float(np.interp(0.0, cx * np.sign(cx[-1] - cx[0]), cz))
-    z1 = zcross - rb - opt.get('break_over', 0.12); z0 = M['z_hem_front'] + 0.55 * w
+    z1 = zcross - rb - opt.get('break_over', 0.45); z0 = M['z_hem_front'] + 0.55 * w
     nbt = max(2, int(round((z1 - z0) / step)) + 1)
     Wb = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
     fb = BVHTree.FromPolygons([Vector(p) for p in Wb], [tuple(p.vertices) for p in b.data.polygons])
