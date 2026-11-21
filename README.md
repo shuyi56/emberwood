@@ -9,6 +9,7 @@ Two pages share one sprite painter:
 | --- | --- | --- |
 | World | `index.html` | Click the ground to send the party there; drag, scroll, `Q`/`E`, `WASD` and `Space` control the camera. |
 | Sprite bench | `bench.html` | Inspect each sprite, facing, animation and ground at zoom. |
+| Cape bench | `cape-lab.html` | Tune the Warden's spring-bone cape on a stand-in body (`tools/cape-lab/README.md`). |
 
 ## Develop
 
@@ -29,6 +30,9 @@ src/world/shaders.js     GLSL chunks shared by all materials
 src/world/styles.css
 src/bench/main.js        bench UI
 src/bench/styles.css
+src/world/springbones.js spring-bone solver (capes, skirts, hair)
+src/world/cape-rig.js    the Warden's cape settings and body colliders
+src/cape-lab/            cape bench: stand-in body, walk, page
 ```
 
 Notes: three.js is pinned to r128 (the version the project was written against).
