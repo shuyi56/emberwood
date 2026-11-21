@@ -452,3 +452,43 @@ Feature branches carry code only. Keep `blender/ranger/ranger-blender.png`, `ble
 `public/models/ranger.glb` at main's version (`git checkout origin/main -- <those files>`), so a merge never
 conflicts on binaries and no one re-renders after a rebase. The daily run refreshes them on `main` through a
 pull request from the render-queue thread, which John merges.
+
+## Draft topology check (before sewing or solving)
+
+John, 2026-11-21: "Add topological diagnostics to the drafting stage". `blender/shared/drafttopo.py` (numpy, no
+Blender) reads a draft (the flat pattern pieces with their seam labels, the parts and holds of a lacing or a
+hairstyle, the buttons on a closing edge) and says pass, fail or watch for each check, why, the source of its rule,
+and whether the limit is experimental. `rq_drafttopo.py` holds the adapters (the boot's `last.PIECES` and lacing, the
+redingote bodice's closing against each lapel style's break, a bun or French twist hold test's packed npz) and the
+command line; `blender/shared/draft_topo_views.py` is the views job that builds a figure as drafted (no solver) and
+runs it. Report-only: it never stops a render. It writes `draft-topo*.json` and `draft-topo*-sheet.png`.
+
+| Check | Rule | Source |
+| --- | --- | --- |
+| euler | each cut piece one disc: chi = V - E + F = 1, one edge loop, genus 0 | Edelsbrunner & Harer 2010; Botsch et al. 2010 |
+| boundary, openings | every loop left after sewing is an opening the draft names (neck, hem, top, lacing) | same |
+| seam pairing | every seam run has exactly one partner; lapped seams (an edge stitched onto a face) take chi down by 1 | Botsch et al. 2010 |
+| mesh | no non-manifold edges, bow ties, flipped winding, degenerate faces, loose points | same |
+| singular | valence 3 and 5+ points on a visible piece away from its edge; 3-5 pairs (dislocations) counted apart; index sum = 4 chi | Bommes et al. 2013 |
+| flatten | cuts to a disc 2g + b - 1; Gauss-Bonnet holds; laid flat (LSCM, then ARAP) the edges' give p5/p95 within the cloth's limit (experimental) | Erickson & Har-Peled 2004; Crane 2018; Levy 2002; Liu 2008 |
+| connected, captured | every part has a path of holds to an anchor; a part held only by sliding holds (a cord through eyelets) must be knotted closed | Diestel (cycle rank), Menger, Tarjan |
+| redundancy | loaded parts have 2+ edge-disjoint paths to an anchor; b1 counted; bridges listed | same |
+| closure | top button 0-1 cm under the lapel break, none above it; a button on the bust and waist lines; even gaps; at most 3.5 in apart; extension >= 5/8 in; hole = button + 1/8 in; no strain peak in a gap | ASG 2019, 2025; Threads 104; NMSU C-231; Mueller und Sohn |
+
+Run it on a dumped draft (`python3 rq_drafttopo.py --draft DRAFT.pkl --out DIR`), on a hair test's npz
+(`--hair NPZ --bun-tools DIR`), or as a check-quality views job, which also gives cheap orthographic clay views:
+
+```
+python3 /mnt/project-files/render-queue/rq.py add --thread <id> --branch <branch> --outputs views --quality check \
+    --view "blender/shared/draft_topo_views.py --figure boot --mannequin --lace tucked --clay --size 360" \
+    --note "draft topology check: boot"
+```
+
+Needs numpy, scipy (the flattening, the nearest-point searches; imported only inside the functions that use them) and
+PIL for the sheet: the render machine's setup must install scipy.
+
+Self test: `python3 rq_drafttopo.py --selftest` (17 known shapes and graphs: disc, annulus, sewn tube, torus,
+spherical cap against Gauss-Bonnet and Bertrand-Diguet-Puiseux, a lace graph, closures). The flattening was checked
+against `blender/boot/pattern.py`'s own unwrap (Blender's minimum stretch) on the boot's pieces: the shafts and the
+tongue agree within 0.4 % at p5 and p95, the toe cap within 1 %; on the vamp this one finds less give (-1.1/+1.0 %
+against -3.9/+3.3 %), so it is the gentler of the two there.
