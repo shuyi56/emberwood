@@ -55,3 +55,24 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
   into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
   clashed, and forest green read badly (and vanished on the grass), so her robe and cape are a deep plum. Check the cape against the hair in the side and back views.
+
+## Hair grooms: the Face Creator's lines are the ground truth
+
+Build and check every groom (`tools/hair/`) against the creator's own hairstyle, not against a look
+or a measurement alone.
+
+1. Export the creator's style and head: `node tools/render-queue/rq_hair_export.cjs face-creator.html DIR <style>`
+   (working copy in `hair-stress/code`). It writes `DIR/<style>.json.gz` (the cap grid and the strand clumps) and
+   `DIR/head.json.gz`.
+2. Groom with the creator traced: `python3 tools/hair/groom.py HEAD OUT --trace DIR/<style>.json.gz`. Styled hair
+   (bangs, face-framing locks) is combed along the creator's strands and ends where they end. It is not solved:
+   a lone hair holds a shape over only 4.5 cm, so a solve lets styled hair fall straight. Add
+   `--reuse OLD/groom.npz` so that only the guides that changed are solved (seconds, not 20 minutes).
+3. Check against the creator after every change: `python3 tools/hair/creator_truth.py HEAD DIR/<style>.json.gz OUT
+   CHECK`. It draws the creator's outline (red) and strands (blue) over the groom from five views, marks magenta
+   where the creator has hair and the groom does not, and cyan where the groom adds hair. The numbers per view are
+   in truth.json. Fix the largest magenta area first: a hole in the creator's coverage is the worst fault.
+4. Where a cited measurement and the creator disagree, follow the creator and note the measurement it overrides.
+   Example: the bang section's depth is 60 mm from the creator, not the guides' 32 mm.
+5. Then render (`render.py`, `--size 750` keeps it inside memory), bake the cards (`cards.py`), and log each
+   rejected look with `rq_reject.py`.
