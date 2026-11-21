@@ -349,7 +349,7 @@ export function buildStrip(over = {}) {
   const span = (c) => (prof.split[c - 1] ? 2 : 1);
   const folded = creaseCols.map((c) => foldAngle(f, idx, c, 0, span(c)));
   const creases = creaseCols.map((c, k) => ({ col: c, folded: folded[k] }));
-  f.tether();
+  if (!p.noTether) f.tether();
   if (p.mount === 'skirt' && p.hipRadius == null && !onFigure(p)) {
     // (the hips just inside the pleats' inner layer at the yoke: a body cutting into the pleats as hung tears them)
     let rin = Infinity;

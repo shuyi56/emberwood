@@ -153,3 +153,26 @@ settles at 0.97% worst stretch (p99 0.52%), folds 173° / 174°, 3,784 points, a
 - The drape-on-a-ball scene in the viewer jitters at the contact (about 16% at the worst point).
 - The collar roll in the viewer reaches 70–117° of 160°.
 - Lace's bending length is an estimate (no measurement found).
+
+## Wind (the bench)
+
+The bench's wind is the solver's air drag taken against a moving air instead of still air: no flow is solved.
+Three things it took:
+
+- **Drag per face, not per point.** At a pressed fold a point's two faces point opposite ways, so their summed
+  normal turns into the cloth's own plane, and a point's drag along it pulled the folds apart. A face's push,
+  -|vn| vn n, is the same whichever way its normal points, so `_air` now works per triangle and shares the change of
+  speed to the corners by area.
+- **The body tested on every walk.** Wind keeps pressing the cloth into the body. Tested once after the walks over
+  the threads, the body's push and the threads fought every step and fed speed into the cloth (points moved twice
+  as fast as the wind). The bench sets `contact: 'iteration'` while the wind blows.
+- **A step sized to the push.** Gravity's pull is carried by the tethers to the stitching; the wind's is not. The
+  wind's push on wool is air / (mass per area) x v^2, three times gravity at 3 m/s, and more on lace's light net.
+  With a step that moves a point more than about 0.1 mm under it, the skirt's pleats crushed into the legs and tore
+  (80% at 1.5 m/s and 120 steps a second). The bench raises the steps a second until the push from the gusts' peak
+  moves a point at most 0.1 mm a step (up to 960).
+
+Measured (300 frames, gusts 0.5): the skirt on the figure at 2 m/s holds at 540 steps a second, worst thread 3–9%,
+99th percentile 1.5%, about 130 ms a frame; at 1 m/s, 300 steps, 75 ms. The lace cuff at 1 m/s takes 540 steps
+(p99 2%); at 3 m/s, 960 (p99 3–5%). Wind is the one setting that costs frame rate: a strong wind runs the skirt at
+under 10 frames a second.

@@ -77,6 +77,13 @@ canvas.sect { width: 100%; height: 190px; display: block; }
       <div class="ctl"><label for="speed">Frames per tick</label><output id="speedOut">1</output><input type="range" id="speed" min="1" max="6" step="1" value="1"></div>
     </div>
     <div class="panel" id="controls"></div>
+    <div class="panel">
+      <h2>Wind</h2>
+      <p class="note">The air's drag on each face of the cloth, taken against the wind's speed instead of still air: a face turned into the wind catches it, one edge-on lets it by. Gusts vary its strength and turn it a little. Live in every scene. A strong wind makes the solver take more, shorter steps (the readouts show how many), so the scene runs slower.</p>
+      <div class="ctl"><label for="wind-speed">Wind speed (m/s)<span class="live">live</span></label><output id="wind-speedOut">0.0</output><input type="range" id="wind-speed" min="0" max="12" step="0.1" value="0"></div>
+      <div class="ctl"><label for="wind-from">Blowing from (°, 0 front, 90 her left)<span class="live">live</span></label><output id="wind-fromOut">90</output><input type="range" id="wind-from" min="0" max="355" step="5" value="90"></div>
+      <div class="ctl"><label for="wind-gust">Gusts<span class="live">live</span></label><output id="wind-gustOut">0.50</output><input type="range" id="wind-gust" min="0" max="1" step="0.05" value="0.5"></div>
+    </div>
   </div>
 
   <div class="col mid">
@@ -367,10 +374,59 @@ for (const b of $('modes').querySelectorAll('button')) b.onclick = () => {
   legend(); updateMesh();
 };
 
+// ---------------------------------------------------------------- the wind
+// A cheap wind: no flow is solved. The solver's air drag (fabric-core.js _air: each face's speed through the air
+// along its normal, slowed by half the air's density times a sheet's drag coefficient over its mass per area) is
+// taken against the wind's speed instead of still air. Gusts: its strength swings by up to `gust` of itself on three
+// slow, unrelated waves (about 8, 3 and 1.4 s), and it turns by up to 25 degrees on two others.
+const wind = { speed: 0, from: 90, gust: 0.5, now: 0, ph: [Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28] };
+// (a scene built with no air drag gets a plain cloth's: 0.5 x 1.2 kg/m3 x a drag coefficient of 1.2, in cm)
+const STILL_AIR = 0.5 * 1.2 * 1.2 / 1e6;
+function applyWind(f, t) {
+  const p = wind.ph;
+  const g = (Math.sin(2 * Math.PI * 0.13 * t + p[0]) + 0.6 * Math.sin(2 * Math.PI * 0.31 * t + p[1]) + 0.35 * Math.sin(2 * Math.PI * 0.71 * t + p[2])) / 1.95;
+  const turn = 25 * Math.PI / 180 * wind.gust * (0.7 * Math.sin(2 * Math.PI * 0.09 * t + p[3]) + 0.3 * Math.sin(2 * Math.PI * 0.43 * t + p[4]));
+  const v = Math.max(0, wind.speed * (1 + wind.gust * g)) * 100;      // cm/s
+  wind.now = v / 100;
+  // (blowing from angle a round from her front toward her left: the air moves the other way)
+  const a = wind.from * Math.PI / 180 + turn;
+  f.settings.wind = [-v * Math.sin(a), 0, -v * Math.cos(a)];
+  if (v > 0 && !f.settings.air) f.settings.air = STILL_AIR;
+  windSteps(f);
+}
+// What the wind asks of the solve. Its push is the drag's air / (mass per area) x v^2, which at 3 m/s on wool is
+// three times gravity and on the light net of lace more; gravity's pull is carried by the tethers to the stitching,
+// the wind's is not, and with a step that moves a point more than about 0.1 mm under that push the pleats crushed
+// into the body and tore (80% stretch at 1.5 m/s on the skirt at 120 steps a second). So while it blows: the body
+// is tested on every walk over the threads, not only after them (the wind keeps pressing the cloth into it), and
+// the step shrinks so the push moves a point at most WIND_MOVE a step, from the gusts' peak, up to 960 a second.
+const WIND_MOVE = 0.01;      // cm
+function windSteps(f) {
+  const s = f.settings, w = f._windBase || (f._windBase = { sub: s.substep, contact: s.contact, set: null });
+  // (a setting changed since the wind last set the step is the scene's own: keep it as the base)
+  if (w.set != null && s.substep !== w.set) w.sub = s.substep;
+  if (f._sigma == null) {
+    const q = []; for (let i = 0; i < f.n; i++) if (f.w[i] !== 0 && f.area[i] > 0) q.push((f.kg ? f.kg[i] : 1) / f.area[i]);
+    q.sort((a, b) => a - b); f._sigma = q[Math.floor(0.05 * (q.length - 1))] || 1;
+  }
+  const peak = wind.speed * (1 + wind.gust) * 100, push = (s.air || 0) / f._sigma * peak * peak;
+  let sub = w.sub;
+  if (peak > 0 && push > 0) { const hz = Math.min(960, Math.ceil(Math.sqrt(push / WIND_MOVE) / 60) * 60); if (hz > 1 / w.sub) sub = 1 / hz; }
+  s.contact = peak > 0 ? 'iteration' : w.contact;
+  if (sub !== s.substep) { s.substep = sub; if (f.stiff) f.stiff._h = null; }
+  w.set = s.substep;
+  wind.hz = Math.round(1 / s.substep);
+}
+for (const k of ['speed', 'from', 'gust']) {
+  const inp = $('wind-' + k), out = $('wind-' + k + 'Out');
+  inp.oninput = () => { const v = parseFloat(inp.value); wind[k] = v; out.textContent = k === 'gust' ? v.toFixed(2) : k === 'from' ? v.toFixed(0) : v.toFixed(1); if (state.scene) state.hist.push({ mark: 'wind' }); };
+}
+
 // ---------------------------------------------------------------- the run
 function simFrame() {
   const sc = state.scene, f = sc.f, before = Float64Array.from(f.pos), t0 = performance.now();
   const dt = 1 / 60;
+  applyWind(f, state.simT);
   if (sc.before) sc.before(dt);
   const steps = f.advance(dt, { body: sc.body, neutral: true });
   state.ms = 0.8 * state.ms + 0.2 * (performance.now() - t0);
@@ -390,6 +446,7 @@ function simFrame() {
 
 function oneStep() {
   const sc = state.scene, f = sc.f;
+  applyWind(f, state.simT);
   if (sc.before) sc.before(f.settings.substep);
   f.step(f.settings.substep, sc.body, { neutral: true });
   state.simT += f.settings.substep;
@@ -405,6 +462,7 @@ function readouts() {
     ['Fastest point', last ? `${(last.speed * 10).toFixed(3)} mm a step` : '–'],
     ['Worst thread stretch', `${(100 * st.max).toFixed(2)}%`], ['Mean thread stretch', `${(100 * st.mean).toFixed(3)}%`],
     ['Kinetic energy', last ? `${last.ke.toExponential(2)} J` : '–'],
+    ...(wind.speed > 0 ? [['Wind now', `${wind.now.toFixed(1)} m/s`], ['Steps a second (for the wind)', `${wind.hz}`]] : []),
     ...(sc.measure ? sc.measure() : []),
   ];
   $('read').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');

@@ -496,29 +496,34 @@ export class Fabric {
       x[a] = x[b] + dx * q; x[a + 1] = x[b + 1] + dy * q; x[a + 2] = x[b + 2] + dz * q;
     }
   }
-  // the air: drag on each point's area across the flow (its speed through the air along its normal), as speed
-  // lost this step, from the previous position
+  // the air: drag on each triangle across the flow (the triangle's mean speed through the air along its own
+  // normal), shared to its corners by area, as speed lost this step, from the previous position. (Per triangle, not
+  // per point: at a pressed fold a point's two faces point opposite ways, their summed normal turns into the cloth's
+  // own plane, and a point's drag along it pulled the folds apart; a face's push, -|vn| vn n, is the same whichever
+  // way its normal points)
   _air(h) {
     const x = this.pos, pv = this.prev, t = this.tris, n = this.n, s = this.settings, wd = s.wind, w = this.w;
-    const nrm = this._nrm || (this._nrm = new Float64Array(3 * n));
-    nrm.fill(0);
+    const acc = this._airAcc || (this._airAcc = new Float64Array(3 * n)), ar = this.area, kg = this.kg;
+    acc.fill(0);
     for (let k = 0; k < t.length; k += 3) {
-      const a = 3 * t[k], b = 3 * t[k + 1], c = 3 * t[k + 2];
+      const i0 = t[k], i1 = t[k + 1], i2 = t[k + 2], a = 3 * i0, b = 3 * i1, c = 3 * i2;
       const m = cross(x[b] - x[a], x[b + 1] - x[a + 1], x[b + 2] - x[a + 2], x[c] - x[a], x[c + 1] - x[a + 1], x[c + 2] - x[a + 2]);
-      for (const p of [a, b, c]) { nrm[p] += m[0]; nrm[p + 1] += m[1]; nrm[p + 2] += m[2]; }
-    }
-    const kg = this.kg;
-    for (let i = 0; i < n; i++) {
-      if (w[i] === 0) continue;
-      const a = 3 * i, nl = Math.hypot(nrm[a], nrm[a + 1], nrm[a + 2]);
-      if (nl < 1e-12) continue;
-      const ux = nrm[a] / nl, uy = nrm[a + 1] / nl, uz = nrm[a + 2] / nl;
-      const vx = (x[a] - pv[a]) / h - wd[0], vy = (x[a + 1] - pv[a + 1]) / h - wd[1], vz = (x[a + 2] - pv[a + 2]) / h - wd[2];
+      const ml = Math.hypot(m[0], m[1], m[2]);
+      if (ml < 1e-12) continue;
+      const ux = m[0] / ml, uy = m[1] / ml, uz = m[2] / ml, A = ml / 6;
+      const vx = (x[a] + x[b] + x[c] - pv[a] - pv[b] - pv[c]) / (3 * h) - wd[0];
+      const vy = (x[a + 1] + x[b + 1] + x[c + 1] - pv[a + 1] - pv[b + 1] - pv[c + 1]) / (3 * h) - wd[1];
+      const vz = (x[a + 2] + x[b + 2] + x[c + 2] - pv[a + 2] - pv[b + 2] - pv[c + 2]) / (3 * h) - wd[2];
       const vn = vx * ux + vy * uy + vz * uz;
-      const mass = kg ? kg[i] : this.area[i];
-      // (a = air * area / mass * vn^2, across the sheet; taken off the speed, never past stopping it)
-      const dv = Math.min(Math.abs(vn), s.air * this.area[i] / (mass || 1) * vn * vn * h) * Math.sign(vn);
-      pv[a] += dv * ux * h; pv[a + 1] += dv * uy * h; pv[a + 2] += dv * uz * h;
+      // (the face's mass per area, from its corners'; a = air / that * vn^2, never past stopping the face)
+      const sig = kg ? (kg[i0] + kg[i1] + kg[i2]) / ((ar[i0] + ar[i1] + ar[i2]) || 1) : 1;
+      const dv = Math.min(Math.abs(vn), s.air / (sig || 1) * vn * vn * h) * Math.sign(vn) * A;
+      for (const p of [a, b, c]) { acc[p] += dv * ux; acc[p + 1] += dv * uy; acc[p + 2] += dv * uz; }
+    }
+    for (let i = 0; i < n; i++) {
+      if (w[i] === 0 || !ar[i]) continue;
+      const a = 3 * i, q = h / ar[i];
+      pv[a] += acc[a] * q; pv[a + 1] += acc[a + 1] * q; pv[a + 2] += acc[a + 2] * q;
     }
   }
   // the sheet against itself: points closer than `thickness` that are not tied together are pushed apart
