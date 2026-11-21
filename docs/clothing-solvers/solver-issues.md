@@ -100,7 +100,7 @@ and Blender's cloth (`blender/chemise/solver.py`).
   once with the body and print which points the body touches. Touched points beyond a collider's rim are this.
 
 On the real collar (round 11) the edge fix was not the main cause. Strain 5/95 %: skin only -14.9/+20.8 and settled;
-bodice only -20.4/+28.2 and moving; with `tangent` and the fade, bodice only -16.7/+25.8. What is left is the
+bodice only -20.4/+28.2 and moving; with one sign for the normals (below) and the fade, bodice only -16.7/+25.8. What is left is the
 pattern: surplus stand cloth pressed on the skin, and seam pins set inside the gap. A frozen strain with a still
 sheet is the room, not the solver. Two more findings from it:
 
