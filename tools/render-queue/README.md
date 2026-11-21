@@ -262,6 +262,20 @@ It is report-only and never stops a job (`RQ_LAYER_GAPS=0` turns it off). For th
 add `--gaps-only`: the job stops after the checks (a mannequin outfit build is about 2.5 minutes, the checks about
 40 s for seven poses).
 
+## Join continuity check (optional)
+
+John's ask (2026-11-21): diagnostics for joins (neck into head, the foot's top line from shin to toe, ear to head, hair
+roots to scalp, sole to upper, a lapel's roll). `--joins NAMES` on a `views.py` job runs `tools/joins` on the built
+meshes after the build, before the first render: for each named preset of `tools/joins/presets.json` whose meshes
+are in the scene, the G0 gap, G1 tangent angle and G2 curvature deviation at 24 stations along the join, with a
+cause (modelling, tuning or solver) and a contour sheet. It writes `join-NAME.json` and `join-NAME.png` and a
+`joins` block in `geometry.json`. Report-only; `RQ_PRECHECK='{"joins": true}'` makes a failing join stop the job
+before it renders. `--joins-only` stops after the checks (one build, no render). `RQ_JOINS=NAMES` turns it on for
+every job. The limits and their sources are in `tools/joins/README.md`.
+
+Until the queue's running copy of `rq_views.py` carries `--joins`, ask for `blender/base/joins_check.py` with the
+same flags: it runs the branch's own `rq_views.py`.
+
 ## Review before the queue
 
 The reviewer thread checks each final-quality, `frames`, `glb` or `ready` request without rendering anything, in about
