@@ -38,6 +38,10 @@ RECIPES = {
 }
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
+# the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
+# before it is kept as the ground truth (lapel-ground-truth/truth.npz: pass '{"truth": path}' to measure against it,
+# '{"cusp": 0}' to build it again)
+if 'cusp' not in opt and 'bow' not in opt: opt['cusp'] = [0.7, 0.7]
 bpy.ops.wm.open_mainfile(filepath=blend)
 b = bpy.data.objects['Redingote bodice']
 M = {k[7:]: b[k] for k in b.keys() if k.startswith('bodice_')}
@@ -252,6 +256,12 @@ for s in (und, top):                                  # the under front first: t
     rr = r0 * np.clip((1 - t) / 0.12, 0.15, 1) * np.clip((t + 0.05) / 0.1, 0.4, 1)
     rr = rr * (1 - 0.7 * pr)                           # (pressed: the roll itself is ironed lower, so the lapel lies flat from the fold out)
     rr = np.minimum(rr, wloc / np.pi * 0.9 + 0.01)
+    # the cusp (John: "soften the folding near the cusp, too sharp"): toward the foot the roll used to shrink to a
+    # hard crease (its radius tapered, and capped by the lapel's width). Softened, the radius keeps a floor there: a
+    # strip narrower than the half turn then only turns part of the way (its width over the radius), so the fold opens
+    # out of the flat front like a cone instead of pinching shut.
+    if opt.get('cusp'):
+        c0, fl = opt['cusp']; rr = rr + ss01(c0, min(c0 + 0.12, 1.0), t) * (np.maximum(rr, r0 * fl * (1 - 0.7 * pr)) - rr)
     arc = np.pi * rr; ang = np.minimum(d, arc) / rr
     ex = rr * np.sin(ang); hh = rr * (1 - np.cos(ang))
     rest = np.maximum(d - arc, 0)
@@ -274,6 +284,15 @@ for s in (und, top):                                  # the under front first: t
     yc_t = np.interp(t, tl[ci][np.argsort(tl[ci])], W[ci, 1][np.argsort(tl[ci])]) if len(ci) > 1 else np.nanmedian(gy)
     gy = np.where(np.isfinite(gy), gy, yc_t)
     gy = np.where((gy > yc_t + opt.get('fell', 0.15)) & (d < arc + 0.2), yc_t, gy)       # (a ray that fell past the line into the V: the lapel lies on its own front, at the line's depth)
+    if opt.get('cusp'):
+        # at the cusp the two lapels cross and the tail of one lies over the roll of the other: read point by point
+        # that ground is a row of steps (a ray hits the other lapel's edge, the next one misses it), and the tail took
+        # the steps as creases. It is laid on a smooth cover drawn over them instead.
+        from scipy.spatial import cKDTree as _KD
+        kt = _KD(X); r1, r2 = opt.get('cusp_cover', (0.22, 0.3))
+        env = np.array([gy[j].min() for j in kt.query_ball_point(X, r1)])
+        gs = np.array([env[j].mean() for j in kt.query_ball_point(X, r2)])
+        gy = gy + ss01(opt['cusp'][0] - 0.05, opt['cusp'][0] + 0.05, t) * (np.minimum(gs, gy) - gy)
     k = np.clip(d / (arc + 0.35), 0, 1); k = k * k * (3 - 2 * k)
     base = (1 - k) * yc_t + k * gy
     y = base - out_side * k - hh
@@ -292,10 +311,38 @@ for s in (und, top):                                  # the under front first: t
     # laid down onto the front, to the cloth's own thickness; the roll at the break is left as it is
     if pr:
         wp = pr * ss01(0.0, opt.get('press_over', 0.7), d - arc); Y[ii] = Y[ii] + wp * ((gy - out_side - lie) - Y[ii])
+    if opt.get('cusp'):
+        # the cloth's own reach: a point d from the line along the cloth cannot stand further off the line than d. Where
+        # the lapel's tail was laid over the other lapel's roll at the cusp it was lifted further than that (edges
+        # stretched to three times their length: the crumple beside the top button); held to its reach it lies quiet.
+        reach = np.sqrt(np.maximum(d ** 2 - ex ** 2, 0)) * opt.get('reach', 1.0)
+        over = (yc_t - Y[ii]) > reach; Y[ii] = np.maximum(Y[ii], yc_t - reach)
+        print('foldfront: front %d: %d points were lifted past the cloth\'s own reach, held back' % (s['layer'], over.sum()))
+        cz = ss01(opt['cusp'][0] - 0.05, opt['cusp'][0] + 0.05, t) * wgt          # (and the tail faired once more, so the hold leaves no kink)
+        for r_ in range(opt.get('cusp_fair', 40)):
+            A = np.array([Y[nb[int(i)]].mean() for i in ii]); Y[ii] += 0.6 * cz * (A - Y[ii])
+        Y[ii] = np.maximum(Y[ii], yc_t - reach)
+    if opt.get('dump'): np.savez(opt['dump'] + '.%d.npz' % s['layer'], t=t, d=d, ex=ex, X=X, Y=Y[ii], gy=gy, yc=yc_t, rr=rr, wloc=wloc, g=g_, C=s['C'][ii])
     far = d > arc + 0.3; gap = gy[far] - Y[ii][far]
     print('foldfront: front %d: the lapel stands %.2f off the front on average, %.2f at most (the cloth alone is %.2f)' % (s['layer'], gap.mean(), gap.max(), out_side + lie))
     new = np.column_stack([X[:, 0], Y[ii], X[:, 1]])
     W[ii] = (1 - g_)[:, None] * W[ii] + g_[:, None] * new
+    # the strain of the turned cloth: each edge's length as it lies against its length as cut (flat, on the roll line's
+    # own measure). Turning cloth over a curved line and laying it on a round chest cannot keep every length.
+    inset = s['fold'] | s['crease']
+    flat2 = (s['C'] + s['sd'][:, None] * s['nl']) if 'C' in s else q        # (a straight line: the flat cut is the front view itself)
+    ea = np.array([(e.verts[0].index, e.verts[1].index) for v_ in (bm.verts[int(i)] for i in ii) for e in v_.link_edges
+                   if inset[e.verts[0].index] and inset[e.verts[1].index]])
+    ea = np.unique(np.sort(ea, axis=1), axis=0)
+    l0 = np.linalg.norm(flat2[ea[:, 0]] - flat2[ea[:, 1]], axis=1); l1 = np.linalg.norm(W[ea[:, 0]] - W[ea[:, 1]], axis=1)
+    okl = l0 > 1e-4; st = l1[okl] / l0[okl] - 1
+    tm = 0.5 * (s['tl'][ea[:, 0]] + s['tl'][ea[:, 1]])[okl]
+    s['strain'] = dict(st=st, mid=0.5 * (W[ea[:, 0]] + W[ea[:, 1]])[okl], t=tm)
+    cusp = tm > opt.get('cusp_from', 0.8)
+    print('foldfront: front %d: strain over %d edges: mean |%.1f%%|, 95%% under |%.1f%%|, worst %+.1f%% / %+.1f%%; at the cusp (the last fifth of the fold) mean |%.1f%%|, worst %+.1f%% / %+.1f%%'
+          % (s['layer'], len(st), 100 * np.abs(st).mean(), 100 * np.percentile(np.abs(st), 95), 100 * st.min(), 100 * st.max(),
+             100 * np.abs(st[cusp]).mean(), 100 * st[cusp].min(), 100 * st[cusp].max()))
+    s['lapel_pts'] = W[ii].copy(); s['lapel_t'] = t.copy()
     print('foldfront: front %d: %d of its own points turned back on the roll line (%d on the line); the lapel %.1f cm wide, the roll %.1f cm high'
           % (s['layer'], len(ii), len(ci), 2.62 * d.max(), 2.62 * 2 * rr.max()))
 for v in bm.verts: v.co = tuple(W[v.index] @ inv[:3, :3].T + inv[:3, 3])
@@ -331,4 +378,16 @@ if opt.get('buttons', True):
     if mat: me.materials.append(mat)
     if b.parent: o.parent = b.parent; o.matrix_parent_inverse = b.parent.matrix_world.inverted()
     print('foldfront: buttoned last: %d buttons from z %.2f (the folds meet at the middle at z %.2f, the break is at %.2f) down to z %.2f, %.1f cm apart' % (nbt, z1, zcross, foot, z0, 2.62 * (z1 - z0) / (nbt - 1)))
+# the ground truth (John: "maintain this shape as ground truth"): the turned lapels' own points, kept, and any later
+# build measured against them
+if opt.get('save_truth'):
+    np.savez(opt['save_truth'], **{'pts%d' % s_['layer']: s_['lapel_pts'] for s_ in sides}, **{'t%d' % s_['layer']: s_['lapel_t'] for s_ in sides})
+    print('foldfront: ground truth saved to', opt['save_truth'])
+if opt.get('truth'):
+    T_ = np.load(opt['truth'])
+    for s_ in sides:
+        dd_, jj_ = cKDTree(T_['pts%d' % s_['layer']]).query(s_['lapel_pts']); body_ = s_['lapel_t'] < opt.get('cusp_from', 0.8)
+        print('foldfront: front %d against the ground truth: above the cusp mean %.3f, worst %.3f (%.1f mm); at the cusp mean %.3f, worst %.3f (%.1f mm)'
+              % (s_['layer'], dd_[body_].mean(), dd_[body_].max(), 26.2 * dd_[body_].max(), dd_[~body_].mean(), dd_[~body_].max(), 26.2 * dd_[~body_].max()))
+np.savez(out + '.strain.npz', **{'st%d' % s_['layer']: s_['strain']['st'] for s_ in sides}, **{'mid%d' % s_['layer']: s_['strain']['mid'] for s_ in sides})
 bpy.ops.wm.save_as_mainfile(filepath=out)
