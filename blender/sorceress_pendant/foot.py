@@ -18,6 +18,10 @@ sources (docs/heel-study.md lists them with links):
       area over the whole).
   Golding, The Manufacture of Boots and Shoes, ch. IV: the tread (ball) 4/9 inside and 5/9 outside the foot's
       centre line; the seat centred on it.
+  Limanou et al. 2026, J Foot Ankle Res 19(4):e70234 (3D scans, 20 women without hallux valgus, FL 243.2 mm): the
+      instep's highest point at 50 % FL 64.2 mm (0.264, used: it replaces a caliper dorsal height of 0.230), the top
+      of the ball girth 37.4 mm (0.154, a check: the ball here is solved from its girth), toe 1 21.6 mm (0.089) and
+      toe 5 17.1 mm (0.070) high.
   Raychoudhury, Hu & Ren 2014: the 1st-5th metatarsal line about 73 deg to the cross axis (a check on 0.728/0.658).
 
 EXPERIMENTAL (no source found yet): the toes' widths and heights, the gaps between them, how high the arch's plantar
@@ -38,8 +42,8 @@ import numpy as np
 R = dict(
     ball_len=0.728, out_ball_len=0.658, heel_w=0.254, heel_w_at=0.16, foot_w=0.38, mid_w=0.326,
     toes=(1.0, 0.98, 0.94, 0.90, 0.84), ball_girth=0.93, instep_girth=0.95, lat_mall=0.247, med_mall=0.275,
-    heel_lat_mall=0.184, heel_med_mall=0.227, dorsum50=0.230, navicular=0.162, arch_index=0.235,
-    ball_in=4.0 / 9.0,
+    heel_lat_mall=0.184, heel_med_mall=0.227, dorsum50=0.264, navicular=0.162, arch_index=0.235,
+    ball_in=4.0 / 9.0, toe1_h=0.089, toe5_h=0.070,
 )
 EXP = dict(
     toe_w=(1.55, 1.0, 0.93, 0.87, 0.82),    # the toes' widths, relative (the hallux about half as wide again)
@@ -47,14 +51,16 @@ EXP = dict(
     toe_gap=0.10,                            # the gap between toes, a share of each toe's width
     toe_root=0.07,
     knuckle_run=0.12,                        # how far the dorsum takes to ease down from a knuckle to its toe, share of FL                           # how far behind its metatarsal head a toe's root starts, share of FL
-    toe_h=0.85,                              # a toe's height over its width
     arch_peak=0.45,                          # where the arch's plantar skin stands highest (t, under the navicular)
     arch_span=0.13,                          # and how far along it the lift reaches (t, a gaussian's width)
     edge=0.40,                               # the sole's edge rounding (the bottom of the section's exponent)
 )
 MARKS = {}
+ANKLE_FRONT = 0.335          # (the shin's front at the ankle, share of FL from the heel: read off the leg, EXPERIMENTAL)
+ANKLE_ROUND = 0.14           # (the round where the shin meets the instep, share of FL: EXPERIMENTAL)
+SMOOTH = 0.05                # (the top line's smoothing length, share of FL: EXPERIMENTAL)
 FRONT = 0.84                 # (where the forefoot's body starts to round off under the toes, share of FL: EXPERIMENTAL)
-TOE_LEVEL = 0.33             # (the toes' height over the ball's, where the knuckles' slope ends: EXPERIMENTAL)
+TOE2 = 0.084                 # (the 2nd toe's top over the floor, share of FL: between Limanou 2026's 1st and 5th)
 CAP = 0.035                  # (the forefoot's rounded front under the toes, share of FL: EXPERIMENTAL)
 WEB = 1.0                    # (the toes' webs this far ahead of the heads, in units of the heads' own slant: EXPERIMENTAL)
 CONTACT = 0.08               # (model units, 2 mm: skin this near the floor is on it, pressed)
@@ -116,6 +122,42 @@ def arch_index(rows, eps):
     return float(ww[third].sum() / ww.sum())
 
 
+def dorsal(FL, ball_top):
+    """The top line of the foot along its middle, heel to toe tip, as one smooth curve: the measured heights are
+    knots of a broken line, which is smoothed (a Gaussian along the length) and its knots corrected until the smooth
+    curve passes through the measured ones (the dorsum at 50 %, the ball). No corner anywhere, so the curvature
+    changes gradually. Returns D(t) in model units over the floor."""
+    # (in front of the ankle the line keeps rising into the shin, the way the tendons carry the instep up the front of
+    # the leg, so the union with the leg meets it at a shallow angle instead of a crease)
+    kt = np.array([0.0, 0.03, 0.08, 0.20, 0.31, 0.5, R['ball_len'], FRONT + 0.02, 1.0])
+    kh = np.array([0.12 * FL, 0.17 * FL, 0.24 * FL, 0.46 * FL, 0.355 * FL, R['dorsum50'] * FL, ball_top,
+                   TOE2 * FL, TOE2 * FL])
+    target = kh.copy()
+    tg = np.linspace(-0.2, 1.2, 1401)
+    dt = tg[1] - tg[0]
+    g = np.exp(-0.5 * (np.arange(-120, 121) * dt / SMOOTH) ** 2)
+    g /= g.sum()
+    fix = np.array([5, 6])                              # (the knots the smooth curve must pass: dorsum, ball)
+    for _ in range(8):
+        line = np.interp(tg, kt, kh)
+        sm = np.convolve(np.pad(line, 120, mode='edge'), g, mode='valid')
+        got = np.interp(kt, tg, sm)
+        kh[fix] += target[fix] - got[fix]
+    # the front of the ankle: the line comes up off the instep in a round of radius ANKLE_ROUND and stands vertical
+    # where the shin's front comes down (ANKLE_FRONT), so the shin runs into the instep as one concave curve
+    r = ANKLE_ROUND * FL
+    tf = ANKLE_FRONT
+    tc = tf + r / FL
+    zc = float(np.interp(tc, tg, sm)) + r
+    arc = np.where(tg >= tc, -np.inf,
+                   np.where(tg >= tf, zc - np.sqrt(np.clip(r * r - ((tc - tg) * FL) ** 2, 0, None)), zc + 3.0 * (tf - tg) * FL))
+    arc = np.where(tg < tf - 0.08, -np.inf, arc)                 # (behind that the leg covers it)
+    sm = np.maximum(sm, arc)
+    g2 = np.exp(-0.5 * (np.arange(-60, 61) * dt / (0.3 * SMOOTH)) ** 2)
+    sm = np.convolve(np.pad(sm, 60, mode='edge'), g2 / g2.sum(), mode='valid')
+    return lambda t: np.interp(t, tg, sm)
+
+
 def profile(FL):
     """The foot's sections along its length, t = share of FL from the heel's back: (t, inner half width, outer half
     width, top, bottom, arch lift), in model units over the floor. The ball's height is solved so its girth is
@@ -135,6 +177,7 @@ def profile(FL):
         else:
             hi = m
     ball_top = 0.5 * (lo + hi)
+    D = dorsal(FL, ball_top)
     for t in ts:
         y = t * FL
         # half widths: round at the back, the heel's breadth by 16 %, the midfoot's at 50 %, the ball's at the heads
@@ -154,18 +197,13 @@ def profile(FL):
             wo = wo * (1 - recede) + (-0.35 * ball_in) * recede
         # the top: up the heel's back into the leg, over the instep (the dorsum at 50 %), down to the ball
         # (the heel's back is low and the Achilles recedes over it, so the back slopes into the leg, no shelf)
-        top = np.interp(t, [0.0, 0.03, 0.08, 0.25, 0.5, R['ball_len']],
-                        [0.12 * FL, 0.17 * FL, 0.24 * FL, 0.32 * FL, R['dorsum50'] * FL, ball_top])
-        if t > R['ball_len']:
-            # (over the knuckles the top eases down to the toes' height in an S: rounded over the heads, easing out
-            # along the toes, so there is no hollow where the toes begin)
-            top = TOE_LEVEL * ball_top + (1 - TOE_LEVEL) * ball_top * (1 - _ss(R['ball_len'], FRONT + 0.02, t))
+        top = float(D(t))                                   # (the one smooth top line)
         if t > FRONT:
             # (the forefoot's front: a rounded cap under the toes, not a cut face)
             c = math.sqrt(max(1.0 - ((t - FRONT) / CAP) ** 2, 0.0))
             wi, wo = wi * (0.3 + 0.7 * c), wo - (1 - c) * 0.4 * ball_in
             # (a nose at the toes' mid height, the bottom rising as the top falls: no plate on the floor under the toes)
-            nose = 0.9 * TOE_LEVEL * ball_top
+            nose = 0.9 * TOE2 * FL
             top = nose + (top - nose) * c
             cap_bot = nose * (1 - c)
         bot = 0.035 * FL * (1 - _ss(0.0, 0.06, t)) + 0.0          # (the heel's back curls up off the floor)
@@ -196,7 +234,7 @@ def profile(FL):
                       arch_skin=arch_peak / FL, arch_index=arch_index(rows, eps))
 
 
-def toes(FL, s, cx, y0, floor, rows):
+def toes(FL, s, cx, y0, floor, rows, D):
     """The five toes: base at each metatarsal head (on the 1st-5th line), tip at its measured length. Returns a list
     of (centre line [k, 3], widths [k], heights [k]) and their tips."""
     fw = R['foot_w'] * FL
@@ -219,7 +257,8 @@ def toes(FL, s, cx, y0, floor, rows):
     st = np.concatenate([np.linspace(0.0, 0.7, 12), 0.7 + 0.3 * np.sin(np.linspace(0, 0.5 * np.pi, 9)[1:])])
     for i in range(5):
         wi = w[i] * (1 - EXP['toe_gap'])
-        hi = EXP['toe_h'] * wi
+        hi = np.interp(i, [0, 4], [R['toe1_h'], R['toe5_h']]) * FL       # (the toe's top over the floor: measured
+        # for the 1st and 5th, Limanou 2026; between them interpolated, EXPERIMENTAL)
         t_tip = R['toes'][i]
         # (the toe starts inside the forefoot, behind its metatarsal head, and its top runs out of the forefoot's
         # top there: the dorsum flows into each toe instead of dropping into a hollow before it)
@@ -229,8 +268,14 @@ def toes(FL, s, cx, y0, floor, rows):
         # (each toe carries its own knuckle: the forefoot's height over its metatarsal head, easing down in an S to
         # the toe's own height, so the dorsum runs into every toe as a rounded ridge, whatever the forefoot's edge
         # does around it)
-        knuckle = body_h(t_mt[i], xs[i]) - 0.04 * FL / 9.86
-        top = own + max(knuckle - own[0], 0.0) * (1.0 - _ss(t_mt[i], t_mt[i] + EXP['knuckle_run'], tt))
+        # (the toe's top is the foot's one top line, taken across to the toe's place over the ball's breadth, until
+        # that line comes down to the toe's own height: a smooth maximum, so there is no corner where they meet)
+        hw = (R['ball_in'] if xs[i] >= 0 else 1 - R['ball_in']) * fw
+        across = math.sqrt(max(1 - (xs[i] / hw) ** 2, 0.0))
+        line = np.array([min(1.0, 0.5 * float(D(t))) + (float(D(t)) - min(1.0, 0.5 * float(D(t)))) * across for t in tt])
+        line -= 0.04 * FL / 9.86
+        k_ = 0.12 * hi
+        top = 0.5 * (own + line + np.sqrt((own - line) ** 2 + k_ * k_))
         span_ = t_tip - t_mt[i]
         bot = hi * np.interp(tt, [t_root, t_mt[i], t_mt[i] + 0.3 * span_, t_tip], [0.45, 0.15, 0.0, 0.08])
         ww = wi * np.interp(tt, [t_root, t_mt[i], t_mt[i] + 0.5 * EXP['knuckle_run'], t_tip], [1.15, 1.12, 1.0, 0.92])
@@ -274,7 +319,7 @@ def build(s, FL, floor, cx, y_ankle=0.0, n=40):
         X = cx + s * sec[:, 0]
         rings.append(np.stack([X, np.full(n, y0 - t * FL), floor + sec[:, 1]], 1))
     _loft(bm, rings)
-    tl, xs, t_mt = toes(FL, s, cx, y0, floor, rows)
+    tl, xs, t_mt = toes(FL, s, cx, y0, floor, rows, dorsal(FL, chk['ball_top']))
     m = 16
     for C, ww, zt, zb in tl:
         rr = []

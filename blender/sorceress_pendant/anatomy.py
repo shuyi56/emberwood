@@ -77,7 +77,9 @@ print('anatomy canon: H %.2f F %.2f floor %.2f hip joint %.2f knee %.2f crotch %
 VOXEL = float(os.environ.get('ANAT_VOXEL', '0.14'))
 ARM_SPREAD = 0.42
 K_HIP = float(os.environ.get('K_HIP', '2.0'))
-K_ANKLE = float(os.environ.get('K_ANKLE', '0.9'))
+K_ANKLE = float(os.environ.get('K_ANKLE', '1.2'))   # (the leg into the foot: a wide fillet, the front of the ankle one curve with the instep)
+ANKLE_FRONT_ITERS = int(os.environ.get('ANKLE_FRONT_ITERS', '0'))
+FOOT_SMOOTH = int(os.environ.get('FOOT_SMOOTH', '20'))
 CUT_Z = 46.0           # the upper body's skin is kept above this; the pelvis is built from here down
 KEEP_Z = 47.0          # above this the new skin is put back exactly on the upper body's
 
@@ -698,6 +700,20 @@ def fuse_lower():
         w2 = relax(w[:, None].repeat(3, 1), np.full(n, 1.0), 2)[:, 0]
         co = relax(co, 0.8 * np.clip(w2 * 1.5, 0, 1), 4)
         co = project(co, cand, steps=4)
+    # (the feet: the voxels and the fillet's projection onto the faceted parts leave ripples on the gently sloping
+    # instep, seen in its curvature; a shrink-free (Taubin) smoothing over the feet takes them out without thinning
+    # the toes)
+    if MEASURED_FOOT:
+        wf = _ssn(FLOOR_Z + 5.0, FLOOR_Z + 3.5, co[:, 2])
+        for _ in range(FOOT_SMOOTH):
+            co = relax(co, 1.0 * wf, 1)
+            co = relax(co, -1.06 * wf, 1)
+        # (the front of the ankle: where the shin comes down onto the instep the union leaves a crease; the skin
+        # there is relaxed as one patch, like the seat, so the shin runs into the instep as one concave line)
+        az, ay, ax_ = co[:, 2] - FLOOR_Z, co[:, 1], np.abs(np.abs(co[:, 0]) - 2.8 * UNIT)
+        wa = _ssn(2.2, 2.9, az) * (1.0 - _ssn(4.6, 5.4, az)) * _ssn(-0.3, -0.9, ay) * (1.0 - _ssn(-3.6, -4.3, ay)) \
+            * (1.0 - _ssn(1.1, 1.7, ax_))
+        co = relax(co, 0.9 * wa, ANKLE_FRONT_ITERS)
     # the seat smoothed as one surface: where the thigh's back comes out of the pelvis, the cleft and the fold
     # under the seat are eased by relaxing the skin over the whole back of the hips (a soft-edged patch)
     seat = _ssn(0.3, 1.8, co[:, 1]) * _ssn(CANON['crotch'] - 4.0, CANON['crotch'] - 1.0, z) * (1.0 - _ssn(34.0, 37.0, z))
