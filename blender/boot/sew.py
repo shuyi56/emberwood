@@ -592,7 +592,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     # leather by the cord's radius and thickness, so they hang and settle as a cord does on a boot. (EXPERIMENTAL
     # settings: a waxed lace's stiffness is a guess.)
     chains = []                                            # (points, pinned count at the start, at the end)
-    for sd, ang, Ll in ((-1.0, 16.0, 3.8), (1.0, 24.0, 3.3)):                           # (the loops)
+    for sd, ang, Ll in ((-1.0, -22.0, 4.6), (1.0, -16.0, 4.0)):                           # (the loops)
         ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
         ph = np.linspace(0.0, 2 * np.pi, 34)
         bx = 0.5 * Ll * (1 - np.cos(ph))
@@ -676,7 +676,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
-DRAPE = dict(bend=2e-4, friction=0.9, steps=80, g=0.2, loops=True, loop_hold=2e-6, gap=3.8, iters=200)         # the bow's settling (see lacing)
+DRAPE = dict(bend=2e-4, friction=0.9, steps=80, g=0.2, loops=False, loop_hold=1e-7, gap=3.8, iters=200)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
