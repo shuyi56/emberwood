@@ -326,6 +326,43 @@ def precheck(out):
     print('rq precheck: passed', flush=True)
 
 
+# the poses the layer gap check reads when the request names none (--poses): the joints' extremes
+GAP_POSES = ('rest', 'arms-up', 'arms-fwd', 'elbows', 'step', 'crouch', 'twist')
+
+
+def layer_gaps(out):
+    """The layer gap check (John, 2026-11-19): when two or more layers of an outfit spec (blender/shared/
+    riding_habit.json) are in the scene, how far each stands off the one beneath it in every pose, and where a lower
+    layer comes through: DIR/layer_gaps.json, and its summary in geometry.json. Report-only. --derive-ease also
+    measures the body in the poses and writes the ease the spec derives from it (DIR/ease.json). RQ_LAYER_GAPS=0
+    turns it off; --gaps-only stops the job after the checks, before any render."""
+    try:
+        import ease
+        import layer_gaps as LG
+    except ImportError:
+        return
+    spec = ease.load()
+    names = opt('--poses')
+    poses = [p for p in (names.split(',') if names and names != 'all' else GAP_POSES) if p in POSES and p not in
+             getattr(female, 'HEAD_POSES', {})]
+    if 'rest' not in poses:
+        poses.insert(0, 'rest')
+    if '--derive-ease' in argv:
+        w = (getattr(V['F'], 'MEASURES', None) or {}).get('w')
+        d = ease.derive(spec, apply=apply, w=w)
+        with open(os.path.join(out, 'ease.json'), 'w') as f:
+            json.dump(d, f, indent=1)
+        spec['derived'] = d
+    rep = LG.check(spec, poses=poses, apply=apply, out=out)
+    gp = os.path.join(out, 'geometry.json')
+    if os.path.exists(gp) and 'skipped' not in rep:
+        g = json.load(open(gp))
+        g['layer_gaps'] = {'layers': rep['layers'], 'poses': poses, 'seconds': rep['seconds'],
+                           'show_through': rep['show_through'][:20]}
+        with open(gp, 'w') as f:
+            json.dump(g, f, indent=1)
+
+
 def main():
     out = opt('--out', os.path.join(tempfile.gettempdir(), 'rq-views'))
     os.makedirs(out, exist_ok=True)
@@ -354,6 +391,19 @@ def main():
             except Exception as e:      # (a check must never fail the render)
                 print(f'rq geometry: skipped ({type(e).__name__}: {e})', flush=True)
             checked['s'] = round(time.time() - t, 1)
+        if os.environ.get('RQ_LAYER_GAPS', '1') != '0' and '--list' not in argv and not opt('--save'):
+            t = time.time()
+            try:
+                layer_gaps(out)
+            except Exception as e:      # (report-only: never fails the render)
+                import traceback
+                traceback.print_exc()
+                print(f'rq layer gaps: skipped ({type(e).__name__}: {e})', flush=True)
+            checked['gaps'] = round(time.time() - t, 1)
+            if '--gaps-only' in argv:
+                print('rq layer gaps: --gaps-only, stopping before the renders', flush=True)
+                sys.stdout.flush()
+                os._exit(0)
         return r
     V['F'].build = build_then_check
     t = time.time()
@@ -363,6 +413,8 @@ def main():
         return
     if 's' in checked:
         timing['geometry'] = checked['s']      # (inside views.py's own 'build N s', which includes it)
+    if 'gaps' in checked:
+        timing['layer_gaps'] = checked['gaps']
     for name, fn, on in (('crops', crops, bool(opt('--crop'))), ('poses', poses, '--poses' in argv)):
         if on:
             t = time.time()

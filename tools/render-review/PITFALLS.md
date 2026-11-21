@@ -134,3 +134,9 @@ repeated on more than one garment. The reviewer applies them once John merges th
   no swatch-bench result at that commit is cited.
 - **Fix:** Find the numbers on the swatch bench first (a strip of the cloth, rendered in seconds), cite the bending
   length it shows, and only then render the garment.
+
+## P015 Colours that touch but do not separate
+
+- **Seen:** 2026-11-20: a near-black lace darkened the tongue; a first linen replacement matched the brass eyelets' hue
+- **Spot:** Run tools/render-review/colorcheck.py FIGURE before a render that changes a material colour: it flags touching parts with a small lightness gap and the same hue, and a cord darker than the shadow of what it lies on
+- **Fix:** Pick the colour from the check's table, not by eye: keep dL 12+ or dE 25+, and 20 degrees of hue when the values are close; a lace over a dark opening must be lighter than the surface's shadow tone
