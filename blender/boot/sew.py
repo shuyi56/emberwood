@@ -598,11 +598,11 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
         chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 2, 2))
-    for sd, T, wig in ((-1.0, 12.5, 1.3), (1.0, 9.5, -1.0)):                          # (the tails)
-        u = np.linspace(0.0, 1.0, 34)
+    for sd, T, wig in ((-1.0, 22.0, 1.8), (1.0, 17.0, -1.4)):                          # (the tails)
+        u = np.linspace(0.0, 1.0, 56)
         aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.6 * u) * u)
         vv = -T * u
-        chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 2, 0))
+        chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 2, 0))   # free ends hang low
     if DRAPE:
         import fabric
         import time as _t
@@ -621,7 +621,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
                 pin += list(range(at0, at0 + p0)) + list(range(at0 + m - p1, at0 + m))
             at0 += m
         fb.pin(pin)
-        gap = 1.05 * rl + tl
+        gap = DRAPE['gap'] * rl + tl                             # rides over the cords it crosses
 
         def body(x):
             out, touch = x.copy(), np.zeros(len(x), dtype=bool)
@@ -661,7 +661,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
-DRAPE = dict(bend=2e-4, friction=0.5, steps=300, g=0.4, loops=False)         # the bow's settling (see lacing)
+DRAPE = dict(bend=2e-4, friction=0.25, steps=600, g=1.0, loops=False, gap=3.2)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
