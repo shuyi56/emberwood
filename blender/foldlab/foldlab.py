@@ -97,6 +97,43 @@ def _coarsen(flat, T, lap, keep_every, row_h):
     return P, tri, idx
 
 
+def chest_radius(C, S):
+    """The chest's radius of curvature across the roll, at points along it: [(t along the roll, radius)], from the
+    turn of the chest's normals between the roll and 0.6 and 1.2 out on the side the flap lands (in front view, inside
+    the lapel's outline), clipped to stitch_chest_min/max."""
+    import shapely
+    from scipy.spatial import cKDTree
+    B, N, poly = C['B'], C['N'], np.asarray(C['poly'])
+    bP, bN = C['bodyP'], C['bodyN']
+    kd = cKDTree(bP[:, [0, 2]])
+
+    def at(xz):
+        j = kd.query(xz, k=10)[1]
+        n = bN[j].mean(0)
+        return n / np.linalg.norm(n)
+    L = np.linalg.norm(N - B)
+    u = (N - B) / L
+    nn = np.array([-u[1], u[0]])
+    Pg = shapely.Polygon(poly)
+    if not Pg.contains(shapely.Point(*(B + 0.5 * (N - B) + 0.3 * nn))):
+        nn = -nn
+    rows = []
+    for q in np.linspace(0.02, 0.98, 25):
+        r = B + q * (N - B)
+        k_ = []
+        for d in (0.6, 1.2):
+            f = r + d * nn
+            if Pg.contains(shapely.Point(*f)):
+                k_.append(math.acos(np.clip(at(r) @ at(f), -1, 1)) / d)
+        if k_:
+            rows.append((q * L, 1.0 / max(np.mean(k_), 1e-6)))
+    Rt = np.array(rows)
+    Rt[:, 1] = np.clip(Rt[:, 1], S.get('stitch_chest_min', 3.0), S.get('stitch_chest_max', 20.0))
+    for _ in range(6):                                # (smoothed along the roll: the chest's sampling is noisy)
+        Rt[1:-1, 1] = 0.25 * Rt[:-2, 1] + 0.5 * Rt[1:-1, 1] + 0.25 * Rt[2:, 1]
+    return Rt
+
+
 def run(cap, S, log=print, _pre=None):
     t_start = time.time()
     C = dict(np.load(cap, allow_pickle=True))
@@ -159,6 +196,13 @@ def run(cap, S, log=print, _pre=None):
         sa = sd - s0
         on = lap & (sa > 0)
         R_, sg_ = float(S['stitch_R']), float(S.get('stitch_sign', 1))
+        if S.get('stitch_chest'):
+            # (the curl taken from the chest under the lapel, along the roll: a tailor pad-stitches the lapel rolled over
+            # the hand to the chest it will lie on, and a long roll crosses chest of very different curve. At each
+            # height the chest's turn across the roll (its normals at 0.6 and 1.2 out from the roll, where the flap
+            # lands) gives the curl's radius there; one radius for the whole lapel was the classic's 8)
+            Rt = chest_radius(C, S)
+            R_ = np.interp(t[on], Rt[:, 0], Rt[:, 1])
         ph = sa[on] / R_
         d_in = s0 + R_ * np.sin(ph) - sd[on]
         rest[on, :2] += d_in[:, None] * nperp[None]
