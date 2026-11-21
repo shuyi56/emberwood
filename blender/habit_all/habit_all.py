@@ -101,6 +101,12 @@ class Piece:
                 self._fit_over_layers()
             for k, v in SETTINGS.get(self.name, {}).items():
                 setattr(self.mod, k, v)
+            if self.name == 'skirt' and hasattr(self.mod, 'WOOL'):
+                # The skirt's 3D wool (skirt.wool_closeup) took its colour from its own WOOL, not from the dye: linear
+                # (0.012, 0.020, 0.055), two to three times the bodice wool's mean (0.0066, 0.0092, 0.0167), so the skirt
+                # read a brighter navy below the basque. A habit's bodice and skirt are cut from one length of cloth, so
+                # the skirt's 3D look takes the bodice wool's mean colour.
+                self.mod.WOOL = dict(self.mod.WOOL, colour=_wool_mean(DYE))
             for (piece, modname), vals in OVERRIDES.items():
                 if piece == self.name and modname in sys.modules:
                     for k, v in vals.items():
@@ -149,6 +155,17 @@ def _fit_over_layers(self):
 
 
 Piece._fit_over_layers = _fit_over_layers
+
+
+def _wool_mean(dye):
+    """female.wool_closeup's mean linear base colour for this dye (halfway between its two felted-patch colours)."""
+    import female
+    r = female.ramp(dye, 0.10)
+    lin = lambda c: [((v / 255 + 0.055) / 1.055) ** 2.4 if v / 255 > 0.04045 else v / 255 / 12.92 for v in c]
+    dark, mid, light = lin(r[1]), lin(r[2]), lin(r[3])
+    A = [a + (b - a) * 0.55 for a, b in zip(dark, mid)]
+    B = [a + (b - a) * 0.3 for a, b in zip(mid, light)]
+    return tuple(0.5 * (a + b) for a, b in zip(A, B))
 
 
 def _dye():

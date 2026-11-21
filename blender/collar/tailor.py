@@ -82,6 +82,20 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
     # ---------------- the right half (sg = -1), flat on the front (x, z), unfolded
     sg = -1
     X, G, X3 = gorges[sg]
+    # The collar's crease runs on as the lapel's (UKY CT-LMH.176; Fabrics-Store's notch collar draft: the collar's roll
+    # line is the lapel's roll line carried on round the neck). The lapel's crease is not at the drafted X3: turned over
+    # with the pad-stitched curl it lies as a soft loop whose edge, at X's height, is 0.23 nearer the middle and 0.38 in
+    # front of X3 (round 22). With the collar's crease ended at X3, the loop's top corner stood out past the collar's end
+    # as a tooth at each gorge. So the collar's roll line ends on the lapel's own fold edge, measured on the folded front.
+    Xr3 = X3
+    if P_.get('crease_on_lapel', False):          # (EXPERIMENTAL, off: round 2 halved the tooth but doubled the collar's worst strain)
+        mk = ((np.abs(V[:, 2] - X3[2]) < 0.06) & (sg * V[:, 0] < abs(X3[0]) + 0.02) & (sg * V[:, 0] > abs(X3[0]) - 0.45)
+              & (V[:, 1] < X3[1] + 0.05))
+        if mk.sum() >= 4:
+            Pk = V[mk]; ik = np.argmin(sg * Pk[:, 0])
+            Xr3 = Pk[ik] + np.array([0.0, -S0['gap'], 0.0])          # (on the loop's outside, the cloth's gap off it)
+            log('collar: tailor: the crease ends on the lapel\'s fold edge %s (drafted X %s: %.2f nearer the middle, %.2f in front)'
+                % (Xr3.round(3), X3.round(3), abs(X3[0]) - abs(Xr3[0]), X3[1] - Xr3[1]))
     C3 = C.side_roll(E, M, sg); Cx = C3[[0, 2]]
     rh = (Cx - X) / np.linalg.norm(Cx - X)
     nm = np.array([-rh[1], rh[0]]);  nm = -nm if nm[0] * sg > 0 else nm      # medial
@@ -199,8 +213,8 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
         out[bk] = neck3(d[bk] / Lr * LB)[1]
         Ca = neck3(np.array([LB]))[1][0]
         q = np.clip((d[~bk] - Lr) / max(rl.length - Lr, 1e-9), 0, 1)[:, None]
-        out[~bk] = Ca + q * (X3 - Ca)
-        pr, hit = skin(out.copy()); hit &= np.linalg.norm(out - X3, axis=1) > 0.4
+        out[~bk] = Ca + q * (Xr3 - Ca)
+        pr, hit = skin(out.copy()); hit &= np.linalg.norm(out - Xr3, axis=1) > 0.4
         out[hit] = pr[hit]
         return out
     def lay(q2):                                            # a point of the fall at the front: turned over in the roll line, on the cloth
@@ -349,6 +363,14 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
     on = rollv[Hh[:, 0]] & rollv[Hh[:, 1]] if P_.get('line_only') else (rollv[Hh[:, :2]].any(1))
     if P_.get('nohinge'): on = on & False
     pins0 = np.nonzero((kind == 's') & known)[0]
+    if P_.get('crease_on_lapel', False) and P_.get('crease_pin', 0.5) > 0:
+        # (the crease's last stretch held on the lapel's fold edge, as the tailor's crease line is pressed on through the
+        # gorge: a crease that is only started there springs back to the seam's corner at X)
+        Xm = np.vstack([Xr3, Xr3 * np.array([-1, 1, 1])])
+        ce_ = np.nonzero((kind == 'r') & known & (np.min(np.linalg.norm(tgt[:, None] - Xm[None], axis=2), axis=1) < P_.get('crease_pin', 0.5)))[0]
+        des[ce_] = tgt[ce_]
+        pins0 = np.concatenate([pins0, ce_])
+        log('collar: tailor: the crease held on the lapel\'s fold edge at %d points' % len(ce_))
     front_out = np.nonzero((kind == 'o') & (np.linalg.norm(des[:, [0, 2]] - np.where(des[:, :1] < 0, X, X * np.array([-1, 1])), axis=1) < 3.0) | (kind == 'e'))[0]
     def run(start, pins, stretch, bend, steps, tag, nobody=False, guide=0.0):
         fab = xf.Fabric(start.copy(), dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=P_.get('friction', 0.4)))
