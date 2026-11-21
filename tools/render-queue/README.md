@@ -406,6 +406,25 @@ the turn and the head as separate jobs, or split the turn (`--angles front,3/4,p
 Check a navy or near-black dye on a swatch first: three rejections were a navy that read slate blue under the figure's
 light.
 
+## Long jobs: let the queue own them, never a detached shell
+
+(2026-11-21, John asked after a collar build died with nobody noticing and the thread lost an hour.) A render or
+solve you start yourself with `(nohup python3 ... > log 2>&1 &)` inside a plain Bash call is not safe: the
+environment ends the call's process group when the call or the turn ends, the process vanishes with no error, and
+nothing watches it. The queue cannot see it either, because it only watches the jobs it started.
+
+- **Submit it as a request.** A check-quality request (`--quality check`) needs no reviewer. The queue owns the job,
+  runs it to the end whatever your turn does, and on a failure marks the request failed with its cause (the log
+  tail) and messages you. Ping, add, end your turn, and read the result by ping.
+- **If you must run something yourself**, start it with the Bash tool's `run_in_background` flag, never a
+  backgrounded subshell, and have the script write a `started` line, a line every minute or so, and a final
+  `finished` or the exception, so a silent stop is visible in the log. Check the log's last line and age the next
+  time you wake.
+- **How the queue reports a death:** a job it started that exits is failed at once, with `exit N after S s` and the
+  cause in the manifest (exit 137 is a memory kill). A job past 10 minutes is warned, past 30 minutes killed. A
+  pending request that waits with no serve running is the one thing it cannot report from inside, so the renderer
+  thread watches every state change and starts serve whenever a request waits.
+
 ## John's desktop (GPU worker)
 
 John's PC (RTX 4070 Super, Ryzen 3800X, 16 GB) can take **light jobs only**: mannequin and head views, which peak
