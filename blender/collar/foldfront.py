@@ -49,8 +49,8 @@ th = sol.thickness
 # to under the bust line, and it is no straight chord: it bows into the V and turns down to run INTO the front's
 # closing edge, tangent to it. So the V closes well above the fold's foot, and from there down the front is one straight
 # closed line, which the buttons hold; the top button sits just under where the V closes, on the line the fold becomes.
-foot = opt.get('foot', M['z_bust'] + opt.get('foot_over_bust', -0.6))
-belly = opt.get('belly', 0.0 if 'bow' in opt else 0.7)    # the cut line's swing out from the chord (a true curved cut)
+foot = opt.get('foot', M['z_bust'] + opt.get('foot_over_bust', -1.35))
+belly = opt.get('belly', 0.0 if 'bow' in opt else 0.25)    # the cut line's swing out from the chord (a true curved cut)
 bow = opt.get('bow', 0.0 if belly else None)           # (the earlier way: the cloth drawn along the surface; None: tangent to the edge)
 # The lapel's outline, traced off John's photo of a camp-collar shirt (2026-11-21: "trace these lines for the lapel"), in
 # the fold's own measure: (how far down the fold from the neck, how far out from it), both as shares of the fold's
@@ -248,7 +248,9 @@ for s in (und, top):                                  # the under front first: t
     if outline: wloc = np.maximum(s['Dfun'](t), 1e-3)
     # the roll: a half turn of radius rr at the break (open all the way down, tapering at the foot), then the lapel
     # bends back toward the chest on a wide arc so its edge lies on the front
+    pr = (opt.get('press') if 'press' in opt else ({} if 'bow' in opt else {'left': 0.85})).get('left' if s['layer'] == 2 else 'right', 0.0)
     rr = r0 * np.clip((1 - t) / 0.12, 0.15, 1) * np.clip((t + 0.05) / 0.1, 0.4, 1)
+    rr = rr * (1 - 0.7 * pr)                           # (pressed: the roll itself is ironed lower, so the lapel lies flat from the fold out)
     rr = np.minimum(rr, wloc / np.pi * 0.9 + 0.01)
     arc = np.pi * rr; ang = np.minimum(d, arc) / rr
     ex = rr * np.sin(ang); hh = rr * (1 - np.cos(ang))
@@ -286,6 +288,12 @@ for s in (und, top):                                  # the under front first: t
     if cover is not None:                             # under the upper front: pressed flat behind it
         cy = cover(X); under_ = np.isfinite(cy); Y[ii[under_]] = np.maximum(Y[ii[under_]], cy[under_] + opt.get('under_gap', 0.02))
         print('foldfront: %d of the under lapel\'s points lie under the upper front, pressed behind it' % under_.sum())
+    # pressed (John: "press the right lapel", the one on the right of the picture: her left): past the roll the lapel is
+    # laid down onto the front, to the cloth's own thickness; the roll at the break is left as it is
+    if pr:
+        wp = pr * ss01(0.0, opt.get('press_over', 0.7), d - arc); Y[ii] = Y[ii] + wp * ((gy - out_side - lie) - Y[ii])
+    far = d > arc + 0.3; gap = gy[far] - Y[ii][far]
+    print('foldfront: front %d: the lapel stands %.2f off the front on average, %.2f at most (the cloth alone is %.2f)' % (s['layer'], gap.mean(), gap.max(), out_side + lie))
     new = np.column_stack([X[:, 0], Y[ii], X[:, 1]])
     W[ii] = (1 - g_)[:, None] * W[ii] + g_[:, None] * new
     print('foldfront: front %d: %d of its own points turned back on the roll line (%d on the line); the lapel %.1f cm wide, the roll %.1f cm high'
