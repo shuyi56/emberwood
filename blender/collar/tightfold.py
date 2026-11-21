@@ -1,4 +1,7 @@
-"""The lapel as part of the bodice, turned back on one tight fold (John, 2026-11-21: "include the bodice as part of the
+"""EARLIER VERSION, kept for the record: it turns back the DRAFTED lapel. unbutton_fold.py turns back the buttoned
+front's own edge, which is what John asked for ("you have to unbutton first to fold the bodice").
+
+The lapel as part of the bodice, turned back on one tight fold (John, 2026-11-21: "include the bodice as part of the
 lapel dont solve for the whole bodice just a tight fold where it meets the buttons", with a camp-collar shirt: each
 front is simply folded back from the neck point to the top button; and "it should have that beautiful curve": the
 fold is no straight chord, it bows into the V and comes down onto the buttons along the front edge).
