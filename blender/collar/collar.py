@@ -203,6 +203,8 @@ LAPEL = dict(
     fold_stretch=1e-8,
     bake=dict(h=1.0 / 1920, most=3000, correct=False),
     tilt=25,               # the lapel starts this far turned off the chest (degrees); the solver folds the rest
+    stitch_R=8.0,          # pad stitching's curl: the flap past the turn rests curled on this radius toward the chest (see fold_front)
+    stitch_comp=1e-5,
     steps=1600,
 )
 # The notch lapel's own gorge and point (in w; x outward from the middle, z up): the notch G from the neck point N, and
@@ -225,6 +227,15 @@ STYLES = dict(
     turned=(dict(RATIOS), dict(LAPEL)),
     notch=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=1.00, notch=0.30, gap=1.8),
            dict(LAPEL, drop=1.35, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, **NOTCH_LAPEL)),
+    # 'modern': a modern single-breasted jacket's lapel (John, 2026-11-21: longer, showing more skin). Width 3.5 in
+    # (Gentleman's Gazette); the break 0 to 1 cm above the top button (Mueller und Sohn, women's jacket draft), with the top
+    # button at the under-bust: drop 3.6 w puts the break at z 43.1 (bust 45.25, waist 39.35). The depth of the V is a
+    # design choice (none of the four pages gives a number for it): EXPERIMENTAL.
+    modern=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=1.00, notch=0.30, gap=1.8),
+            dict(LAPEL, drop=3.6, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, lapel_width=1.73, tip_round=0.20, **NOTCH_LAPEL)),
+    # (tried 2026-11-21, round m4: tangent_end=0.35 and fold_radius=0.30 together made it worse: the outer edge came out as a flat
+    # bottom edge, not a taper (the control point stood too high), and the softer roll crumpled: lapel strain worst +83 / +132 %,
+    # bend 177 deg, the flap 0.5 off its draft. Reverted; see tangent_end in lapel_outlines for the next try, 0.75.)
 )
 STYLE = os.environ.get('COLLAR_STYLE', 'notch')
 RATIOS.update(STYLES[STYLE][0])
@@ -232,6 +243,20 @@ LAPEL.update(STYLES[STYLE][1])
 if os.environ.get('COLLAR_LAPEL'):                  # (a trial's own values, as JSON)
     import json
     LAPEL.update(json.loads(os.environ['COLLAR_LAPEL']))
+
+
+def round_tip(poly, r):
+    """The lapel's lower tip rounded: the polygon's first vertex (the break point B, the roll line's foot) replaced by a
+    quadratic fillet that starts r along the roll edge and ends r along the outer edge. A polygon that comes to a point
+    reads as sharp and triangular (CLAUDE.md, sleeve ends and hems); at the modern draft's 25 degree tip the flap's
+    last 0.5 lay wholly inside the fold's band and curled off the cloth as a spike (John: "fix the cross")."""
+    B, N = poly[0], poly[1]
+    L = poly[-1]
+    u1, u2 = (N - B) / np.linalg.norm(N - B), (L - B) / np.linalg.norm(L - B)
+    Bn, Bo = B + r * u1, B + r * u2
+    t = np.linspace(0, 1, 7)[1:-1]
+    arc = ((1 - t) ** 2)[:, None] * Bo[None] + (2 * t * (1 - t))[:, None] * B[None] + (t ** 2)[:, None] * Bn[None]
+    return np.vstack([Bn, poly[1:], Bo[None], arc])
 
 
 def lapel_outlines(E, M, D, cpos, L_=None):
@@ -256,6 +281,16 @@ def lapel_outlines(E, M, D, cpos, L_=None):
             Pp = G + np.array([sg * L_['point'][0], L_['point'][1]]) * w
             if L_.get('roll_side'):
                 N = roll_cross(E, M, B, sg, L_)[0]
+            if L_.get('lapel_width'):
+                # the lapel's width set outright: the notch point's distance from the roll line (B to N), the direction of
+                # the point's offset from the gorge kept. A modern notch lapel is 3.5 in (8 to 10 cm), Gentleman's Gazette,
+                # "The Anatomy of a Suit Jacket"; 3.5 in is 1.73 w here (1 unit 2.62 cm, w 1.964 units).
+                ru = (N - B) / np.linalg.norm(N - B)
+                rn = np.array([ru[1], -ru[0]])
+                rn *= np.sign(rn[0]) * sg
+                v_ = Pp - G
+                k_ = (L_['lapel_width'] * w - (G - B) @ rn) / (v_ @ rn)
+                Pp = G + k_ * v_
             if L_.get('from_front', False):     # (tried and dropped: John wants the wide lapel)
                 # The lapel is the buttoned front's own top corner turned back (John, 2026-11-20, on the 1890s habit
                 # photo: the front edge is one line from the hem to the neck, and the lapel is what lies above the top
@@ -289,7 +324,17 @@ def lapel_outlines(E, M, D, cpos, L_=None):
         bulge = np.array([chord[1], -chord[0]]) / np.linalg.norm(chord) * (0.0 if L_.get('gorge') and L_.get('from_front', False) else L_['belly']) * w   # (the buttoned edge is straight)
         bulge *= np.sign(bulge[0]) * sg
         outer = Pp[None] + q[:, None] * chord[None] + (4 * q * (1 - q))[:, None] * bulge[None]
+        if L_.get('tangent_end'):
+            # The lapel's outer edge runs into the front's own edge at the break, tangent to it: a tailor's lapel narrows to
+            # nothing at the break point and the front edge carries on down from it. Cut with a straight line to a tip,
+            # the modern draft's lapel ended in a spike about 25 degrees wide that curled off the cloth (John: "fix the
+            # cross"). A quadratic curve from the notch point whose control point stands over the break on the front's
+            # edge, so it arrives there vertical.
+            Cq = np.array([B[0], Pp[1] + L_['tangent_end'] * (B[1] - Pp[1])])
+            outer = ((1 - q) ** 2)[:, None] * Pp[None] + (2 * q * (1 - q))[:, None] * Cq[None] + (q ** 2)[:, None] * B[None]
         poly = np.vstack([B, N, G, Pp, outer])
+        if L_.get('tip_round'):
+            poly = round_tip(poly, L_['tip_round'] * w)
         outlines.append((B, N, poly))
     return outlines
 
@@ -594,7 +639,22 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
         fab = xf.Fabric(start, dict(FOLD_FABRIC))
         fab.pin(np.arange(ns))                                           # (the bodice's own cloth: the strip and the roll's points)
         crease = fo.Crease(roll, ang, L_['fold_radius'])
-        fab.mesh([tuple(int(i) for i in t_) for t_ in T2], stretch=L_['fold_stretch'], rest_pos=np.column_stack([P2, np.zeros(len(P2))]),
+        rest2 = np.column_stack([P2, np.zeros(len(P2))])
+        curl_on = np.zeros(len(P2), bool)
+        if L_.get('stitch_R'):
+            # Pad stitching (UKY CT-LMH.176): the lapel is stitched while held rolled the way it rolls when worn, so
+            # its own rest shape is curled toward the chest. The flap past the turn is wrapped onto a cylinder of
+            # radius stitch_R about an axis along the roll (lengths kept: a cylinder is developable). Found in the fold
+            # lab (blender/foldlab): radius 8, about the chest's own curve (bust half width 7.85 on this figure), took
+            # the folds from 153 and 137 degrees to 179 and 175 of 176, strain 5/95 within 1.7 %.
+            s_all = ts(P2)[1]
+            s0 = turn + row
+            curl_on = (np.arange(len(P2)) >= ns) & (s_all > s0)
+            R_ = float(L_['stitch_R'])
+            ph = (s_all[curl_on] - s0) / R_
+            rest2[curl_on, :2] += (s0 + R_ * np.sin(ph) - s_all[curl_on])[:, None] * nperp[None]
+            rest2[curl_on, 2] = R_ * (1 - np.cos(ph))
+        fab.mesh([tuple(int(i) for i in t_) for t_ in T2], stretch=L_['fold_stretch'], rest_pos=rest2,
                  bend=L_.get('fold_bend', 1e-6), flat=L_.get('fold_bend', 1e-6), bend_at=fo.soft_at(P2, T2, [crease]))
         # (the cloth right beside the roll is what the lapel turns round: it is not in the lapel's way. Left in, it
         # pushes the turn's own rows a full gap off and the fold is strained apart.)
@@ -618,6 +678,18 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             body = None
         F = fo.Folds(fab, P2, T2)
         F.add(roll, ang, radius=L_['fold_radius'])
+        curl = None
+        if L_.get('stitch_R'):
+            # (the cloth's bend ties are unsigned lengths: they keep a curve but not which way it curls; the stitching's
+            # curl is given as signed hinges on the flap, the same way round as the fold, as the fold itself is)
+            Hc = F.H_all[curl_on[F.H_all].all(1)]
+            rc = np.abs(fo.dihedral(rest2, Hc)) * np.sign(F._rest[0].mean())
+            kc = np.abs(rc) > 1e-4
+            curl = (Hc[kc], rc[kc], np.full(int(kc.sum()), float(L_.get('stitch_comp', 1e-5))))
+            F._H.append(curl[0])
+            F._rest.append(curl[1])
+            F._comp.append(curl[2])
+            F._owner.append(np.zeros(int(kc.sum()), int))
         # The gorge is sewn to the collar, which is sewn to the neck: on the notch lapel's steep roll the lapel's top
         # reaches up past the roll's end at X, and left free that corner hangs from nothing and flops over (a second
         # crease across the lapel, its fold 25 to 40 degrees short). Its gorge edge past the turn is held where the
@@ -670,7 +742,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
         for arr in (P2, T2, start, bodyP[use], bodyN[use]):
             hh.update(np.ascontiguousarray(np.round(np.asarray(arr, float), 5)).tobytes())
         hh.update(b'floor past the band')
-        hh.update(_json.dumps([{k_: v_ for k_, v_ in L_.items() if k_.startswith('fold_') or k_ in ('bake', 'tilt')},
+        hh.update(_json.dumps([{k_: v_ for k_, v_ in L_.items() if k_.startswith('fold_') or k_.startswith('stitch_') or k_ in ('bake', 'tilt')},
                               FOLD_FABRIC], sort_keys=True, default=str).encode())
         cfile = os.path.join(fo.cache_dir(), 'lapel-%s.npz' % hh.hexdigest()[:20])
         if os.path.exists(cfile) and not os.environ.get('COLLAR_NO_CACHE'):
@@ -685,7 +757,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             % (k, len(ext), nl, arc[-1], t[line[-1]] - t0, str(rep).replace(chr(10), '; ')))
         X = fab.pos.copy()
         made.append((line, X[ns:], tri))
-        parts.append(dict(st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use, past=past[ns:], sewn=sewn[ns:]))
+        parts.append(dict(rest2=rest2.copy(), curl=curl, st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use, past=past[ns:], sewn=sewn[ns:]))
         FOLDED.append(dict(flat=P2, pos=X, T=T2.copy(), lap=lap, roll=roll, report=str(rep), body=(bodyP[use], bodyN[use])))
         moved += len(ext)
     if L_.get('whole', True):
@@ -787,11 +859,21 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
         Tk = full[pt['T2']]
         ext_t = Tk[(pt['T2'] >= ns).any(1)]
         crease = fo.Crease(pt['roll'], ang, L_['fold_radius'])
+        rest3 = np.column_stack([flat, np.zeros(len(flat))])
+        if pt.get('rest2') is not None:
+            rest3[full] = pt['rest2']                  # (the lapel's own rest: flat, its flap curled by the pad stitching)
         fab.mesh([tuple(int(i) for i in t) for t in ext_t], stretch=L_['fold_stretch'],
-                 rest_pos=np.column_stack([flat, np.zeros(len(flat))]), bend=L_.get('fold_bend', 1e-6), flat=L_.get('fold_bend', 1e-6),
+                 rest_pos=rest3, bend=L_.get('fold_bend', 1e-6), flat=L_.get('fold_bend', 1e-6),
                  bend_at=fo.soft_at(flat, Tk, [crease]))
         F = fo.Folds(fab, flat, Tk)
         F.add(pt['roll'], ang, radius=L_['fold_radius'])
+        if pt.get('curl') is not None:
+            # (the pad stitching's curl kept through this solve too: without it the folds fell from 176.7 and 175.0 to
+            # 125 and 132 here, the front let go and the flaps springing back flat)
+            F._H.append(full[pt['curl'][0]])
+            F._rest.append(pt['curl'][1])
+            F._comp.append(pt['curl'][2])
+            F._owner.append(np.zeros(len(pt['curl'][1]), int))
         Hs.append(np.concatenate(F._H))
         rests.append(np.concatenate(F._rest))
         comps.append(np.concatenate(F._comp))
@@ -820,11 +902,28 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
 
     lp = nR + np.nonzero(np.concatenate([pt['past'] for pt in parts]))[0]     # (the lapels' cloth past their turns)
 
+    # The right front laps over the left, so its lapel lies over the left lapel where they meet at the V's point. They are
+    # solved as one cloth each, with no knowledge of each other: at the modern draft's V the two overlapped over 242 points,
+    # 73 of them through one another and 106 with the right lapel behind the left (John: "fix the cross"). The right
+    # lapel's points over the left's are held 0.09 (a cloth's thickness and a hair) in front of it.
+    from scipy.spatial import cKDTree as _KT
+    l0 = offs[0] + np.nonzero(parts[0]['past'])[0] + 0 if len(parts) > 1 else np.zeros(0, int)
+    l1 = offs[1] + np.nonzero(parts[1]['past'])[0] if len(parts) > 1 else np.zeros(0, int)
+    l0, l1 = l0 + 0, l1 + 0
+
     def body(x):
         p = x.copy()
         t = np.zeros(len(x), bool)
         p[:nR], t[:nR] = skin(x[:nR])
         p[lp], t[lp] = cloth(x[lp])
+        if L_.get('lapel_layers', True) and len(l0) and len(l1):
+            near = _KT(x[l1][:, [0, 2]]).query_ball_point(x[l0][:, [0, 2]], 0.09)
+            for a_, nb_ in zip(l0, near):
+                if nb_:
+                    top_ = x[l1[nb_], 1].min() - 0.09
+                    if p[a_, 1] > top_:
+                        p[a_, 1] = top_
+                        t[a_] = True
         return p, t
     h = L_['bake']['h']
     was = fab.settings['damping']
@@ -1025,7 +1124,12 @@ def front_cut(V, faces, M):
 
     def opening(Bq, Nq, xe):
         top = Bq + 1.05 * (Nq - Bq)
-        poly = shapely.Polygon([Bq, top, np.array([xe, top[1]]), np.array([xe, Bq[1]])]).buffer(0)
+        # (the V is cut to the front neck edge, not only to 5 % past the roll's top: the roll ends where it meets the neck
+        # edge, at z 50.13, and the front neckline stands at 50.29 across the middle, so the quad stopping at 50.24 left a
+        # strip of cloth 0.05 to 0.15 high across the top of the V, a thin bar with a knot in the middle that John took for the
+        # necklace (the necklace was hidden, and the bar is in the bodice's mesh: hiding the bodice removes it)
+        zt = max(top[1], M['z_neck_front'] + 0.4)
+        poly = shapely.Polygon([Bq, top, np.array([top[0], zt]), np.array([xe, zt]), np.array([xe, Bq[1]])]).buffer(0)
         lo, hi = np.array(poly.bounds[:2]) - 0.5, np.array(poly.bounds[2:]) + 0.5
 
         def f(p):
@@ -1102,6 +1206,22 @@ def build():
     import bodice as _bodice
     pieces = bool(os.environ.get('COLLAR_LAPEL_PIECES')) or STYLE == 'turned'
     _bodice.FRONT = None if pieces else front_cut
+    if os.environ.get('SHOW_BOTTOMS'):
+        # The bottoms (John, 2026-11-21: "add the bottoms"): the hose, the petticoat and the riding skirt of habit_all, built
+        # over the body BEFORE the bodice, as habit_all orders them (the bodice's basque lies over the skirt, and the corset
+        # the petticoat's module builds is what the bodice fits over; built after, the skirt covered the basque and the
+        # corset's top stood through the bodice in two holes at the bust). Boots stay out; the skirt is shown as drafted.
+        import habit_all as HA
+        import sorceress_pendant as SP
+        res0 = SP.build()
+        SP.build = lambda: res0                                     # (the body is built once)
+        for nm_ in ('hose', 'petticoat', 'skirt'):
+            ent_ = [e_ for e_ in HA.ORDER if e_[0] == nm_][0]
+            before = set(bpy.data.objects)
+            pc_ = HA.Piece(*ent_)
+            HA._dye()                                               # (after the piece's import: its own module sets its wool at import, and the skirt read a brighter blue)
+            pc_.run()
+            print('collar: %s added (%d objects)' % (nm_, len(set(bpy.data.objects) - before)), flush=True)
     res = RB.build()
     b = bpy.data.objects['Redingote bodice']
     if DRAFTED:
@@ -1206,8 +1326,8 @@ def build():
                 c.hide_render = True
                 c.visible_camera = c.visible_shadow = c.visible_diffuse = c.visible_glossy = False
     zc = M['z_neck_side']
-    os.environ['HEAD_CZ'] = '%.2f' % (zc + 0.5)
-    os.environ['HEAD_H'] = '%.2f' % (8.0 * M['w'])
+    os.environ['HEAD_CZ'] = os.environ.get('COLLAR_HEAD_CZ') or '%.2f' % (zc + 0.5)           # (COLLAR_HEAD_CZ / COLLAR_HEAD_H: the head view's centre and height, for a close-up lower down)
+    os.environ['HEAD_H'] = os.environ.get('COLLAR_HEAD_H') or '%.2f' % (8.0 * M['w'])
     for c_ in bpy.data.objects:                         # (the necklace's chain was a thin wire across the V in the render: John, "rods": hidden)
         if c_.name.startswith('Necklace'):
             c_.hide_render = True
