@@ -25,8 +25,17 @@ a = sys.argv
 has = a[-1].lstrip().startswith('{')
 opt = json.loads(a[-1]) if has else {}
 blend, fold, out, outf = a[-5:-1] if has else a[-4:]
-t0, t1, tw = opt.get('t0', 0.03), opt.get('t1', 0.12), opt.get('t_over', 0.8)
+t0, t1, tw = opt.get('t0', 0.03), opt.get('t1', 0.16), opt.get('t_over', 0.8)
 ew, bow, band = opt.get('edge', 0.08), opt.get('bow', 0.3), opt.get('band', 0.36)
+# the roll (John: "it's flat it should curve outwards proper ply"): the fold is no pressed crease, the cloth turns over on
+# a radius. Its height is `roll` at the neck end and nothing at the button; across the lapel it rises on a quarter
+# circle of radius roll_r from the crease and settles back onto the chest over roll_over.
+roll, roll_r, roll_over, roll_p = opt.get('roll', 0.4), opt.get('roll_r', 0.35), opt.get('roll_over', 1.3), opt.get('roll_p', 0.8)
+def rollh(t):
+    return roll * np.clip(1 - t, 0, 1) ** roll_p * np.clip(t / 0.08, 0, 1)        # (down to nothing at N too: the collar takes over there)
+def rollprof(d):
+    d = np.maximum(d, 0); up = np.sqrt(np.clip(1 - (1 - np.minimum(d, roll_r) / roll_r) ** 2, 0, 1))
+    return np.where(d < roll_r, 0.5 + 0.5 * up, np.exp(-((d - roll_r) / roll_over) ** 2))
 F = pickle.load(open(fold, 'rb'))
 bpy.ops.wm.open_mainfile(filepath=blend)
 b = bpy.data.objects['Redingote bodice']; mw = np.array(b.matrix_world); inv = np.linalg.inv(mw)
@@ -88,11 +97,12 @@ for k, L in enumerate(F['folded']):
     wf = np.clip(1 + sd[fr] / band, 0, 1); wf = wf * wf * (3 - 2 * wf)
     yf = yfront(X[fr]); yf = np.where(np.isfinite(yf), yf, pos[fr, 1])
     new[fr, 0], new[fr, 2] = X[fr, 0], X[fr, 1]
-    new[fr, 1] = (1 - wf) * pos[fr, 1] + wf * yf
-    yo = yfront(X[on]); new[on, 0], new[on, 2], new[on, 1] = X[on, 0], X[on, 1], np.where(np.isfinite(yo), yo, pos[on, 1]) - 0.5 * t0
+    tl = ((X - N) @ u) / ln; H = rollh(tl)
+    new[fr, 1] = (1 - wf) * pos[fr, 1] + wf * yf - 0.5 * H[fr] * wf ** 2
+    yo = yfront(X[on]); new[on, 0], new[on, 2], new[on, 1] = X[on, 0], X[on, 1], np.where(np.isfinite(yo), yo, pos[on, 1]) - 0.5 * t0 - 0.5 * H[on]
     W[j[ok & (fr | on)]] = new[ok & (fr | on)]
     lapv[j[ok & out_]] = True
-    geo.append((flat, pos, lap, sd, on, out_, X, new, j, ok, N, B))
+    geo.append((flat, pos, lap, sd, on, out_, X, new, j, ok, N, B, H))
     print('tightfold: lapel %d: fold from (%.2f, %.2f) to (%.2f, %.2f), bowed %.2f into the V; %d points on the crease, %d of the front laid back'
           % (k, N[0], N[1], B[0], B[1], bow, on.sum(), fr.sum()))
 # what the lapels lie on: the bodice without its lapels (the fronts up to their creases), and the body
@@ -102,13 +112,13 @@ polys += [tuple(i + n0 for i in p) for p in SP]
 bvh = BVHTree.FromPolygons([Vector(p) for p in allV], polys)
 V_ = np.asarray(F['V'], float); kv = cKDTree(V_)
 for k, L in enumerate(F['folded']):
-    flat, pos, lap, sd, on, out_, X, new, j, ok, N, B = geo[k]
+    flat, pos, lap, sd, on, out_, X, new, j, ok, N, B, H = geo[k]
     miss = 0
     ya_all = yfront(X[out_]); ia = dict(zip(np.nonzero(out_)[0], ya_all))
     for i in np.nonzero(out_)[0]:
         hit = bvh.ray_cast(Vector((X[i, 0], -40.0, X[i, 1])), Vector((0, 1, 0)))
         r = np.clip(sd[i] / tw, 0, 1); r = r * r * (3 - 2 * r)
-        off = t0 + (t1 - t0) * r
+        off = t0 + (t1 - t0) * r + H[i] * float(rollprof(np.array([sd[i]]))[0])
         ya = (ia[i] if np.isfinite(ia[i]) else pos[i, 1]) - off
         if hit[0] is None:
             miss += 1; new[i] = (X[i, 0], ya, X[i, 1]); continue
@@ -120,9 +130,9 @@ for k, L in enumerate(F['folded']):
     nb = [set() for _ in range(len(pos))]
     for t_ in np.asarray(L['T']):
         for q_ in range(3): nb[t_[q_]].add(int(t_[(q_ + 1) % 3])); nb[t_[q_]].add(int(t_[(q_ + 2) % 3]))
-    w = out_ * np.clip(sd / 0.3, 0, 1); idx = np.nonzero(w > 1e-3)[0]
-    for r in range(opt.get('fair', 6)):
-        A = np.array([new[list(nb[i])][:, 1].mean() for i in idx]); new[idx, 1] += 0.5 * w[idx] * (A - new[idx, 1])
+    w = out_ * np.clip(sd / 0.12, 0, 1); idx = np.nonzero(w > 1e-3)[0]
+    for r in range(opt.get('fair', 40)):               # (the roll's surface is one smooth sweep: the ground's small steps go)
+        A = np.array([new[list(nb[i])][:, 1].mean() for i in idx]); new[idx, 1] += 0.6 * w[idx] * (A - new[idx, 1])
     mv = np.linalg.norm(new - pos, axis=1)
     print('tightfold: lapel %d: %d points laid (%d without ground); moved up to %.2f (mean %.2f)' % (k, out_.sum(), miss, mv[lap].max(), mv[lap].mean()))
     for i in np.nonzero(ok)[0]:
