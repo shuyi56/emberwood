@@ -71,7 +71,9 @@ zfoot = opt.get('foot') if opt.get('foot') is not None else float(M['z_hem_front
 full = opt.get('foot') is None
 Ns = []
 for L in F['folded']:
-    N, B = np.asarray(L['roll'], float); Ns.append(N if N[1] > B[1] else B)
+    N, B = np.asarray(L['roll'], float); N = N if N[1] > B[1] else B
+    if opt.get('neck'): N = np.array([np.sign(N[0]) * opt['neck'][0], opt['neck'][1]])     # (the neck point given: where the fold starts on the neckline)
+    Ns.append(N)
 sides = []
 for N in Ns:
     sgn = 1.0 if N[0] < 0 else -1.0                   # (her right front, N at x < 0, laps to +x and lies on top)
@@ -105,6 +107,7 @@ for s_, sd_, mine in ((top, sT, frontz & (sU > -1e9)), (und, sU, frontz & (W[:, 
     sel = mine & ~kill & (sd_ > -band) & (sd_ < 0.3) & (W[:, 2] < N[1] + 0.3)
     if s_ is und: sel &= sT > -0.05                   # (her left front only: not her right front's cloth)
     else: sel &= (sU > -0.05) | (W[:, 2] < zx)
+    sel &= sd_ < opt.get('past', 0.02)                # (cloth past the fold that stays, the other front's under the foot, is left alone)
     on = sel & edge_ & (np.abs(sd_) < 0.3)
     # (the front's cut edge is tucked just behind the crease and under it: the lapel's own first row, a clean line of
     # the new mesh, is the edge that shows; the cut's staircase is hidden by it)
@@ -124,11 +127,11 @@ for v in bm.verts: v.co = tuple(W[v.index] @ inv[:3, :3].T + inv[:3, 3])
 bmesh.ops.delete(bm, geom=[v for v in bm.verts if kill[v.index]], context='VERTS')
 bm.to_mesh(b.data); bm.free(); b.data.update()
 print('unbutton_fold: %d drafted lapel points and %d points in the V taken out' % (lapv.sum(), inV.sum()))
-if full:                                              # undone, the front buttons sit on the turned-back side: off
+if True:                                              # the front buttons above the fold's foot are undone: off (all of them, fully unbuttoned)
     for o in bpy.data.objects:
         if o.name.startswith('Redingote bodice') and o.name.endswith('buttons'):
             bb = bmesh.new(); bb.from_mesh(o.data); ow = np.array(o.matrix_world)
-            dead = [v for v in bb.verts if (np.array(v.co[:]) @ ow[:3, :3].T + ow[:3, 3])[1] < M['yc']]
+            dead = [v for v in bb.verts if (lambda c: c[1] < M['yc'] and (full or c[2] > zfoot - 0.15))(np.array(v.co[:]) @ ow[:3, :3].T + ow[:3, 3])]
             bmesh.ops.delete(bb, geom=dead, context='VERTS'); bb.to_mesh(o.data); bb.free(); o.data.update()
 W2 = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
 allV = np.vstack([W2, SV]); n0 = len(W2)
@@ -148,10 +151,11 @@ def grid(A, Bq, Cq, n):
 newV, newF = [], []
 for k, s_ in enumerate((top, und)):
     N, Bf, u, nrm, ln, sgn, crease3 = s_['N'], s_['B'], s_['u'], s_['n'], s_['ln'], s_['sgn'], s_['crease3']
-    Tp = np.array([sgn * lapw, N[1]])
+    Tp = np.array([sgn * lapw, opt.get('top_z', N[1])])      # (the front edge's top, on the neckline)
     P, T = grid(N, Tp, Bf, nsub)
     if s_ is und:                                     # the under front: cut off where the upper front crosses its fold
-        P = np.where((P[:, 1] >= zx)[:, None], P, np.column_stack([P[:, 0], np.full(len(P), zx)]))
+        zc = zx + opt.get('under_clip', 0.0)             # (a little above the crossing: thick cloth has no room to end under it)
+        P = np.where((P[:, 1] >= zc)[:, None], P, np.column_stack([P[:, 0], np.full(len(P), zc)]))
         e1, e2 = P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]
         T = T[np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) > 1e-7]
     sd = np.maximum((P - N) @ nrm, 0)
@@ -224,4 +228,14 @@ bmesh.ops.remove_doubles(bm, verts=vs, dist=1e-5)
 bm.to_mesh(b.data); bm.free()
 for p in b.data.polygons: p.use_smooth = True
 b.data.update()
+if opt.get('thick'):                                  # the cloth's thickness (a habit is a firm wool, faced and interlined)
+    for o in bpy.data.objects:
+        if o.name.startswith('Redingote') or o.name == 'Collar':
+            for m in o.modifiers:
+                if m.type == 'SOLIDIFY':
+                    if o.name.endswith('bodice'): grow = opt['thick'] - m.thickness
+                    m.thickness = opt['thick']
+    for o in bpy.data.objects:                        # the buttons come out with the cloth's face
+        if o.name.startswith('Redingote bodice') and o.name.endswith('buttons'):
+            for v in o.data.vertices: v.co.y += grow * (-1 if v.co.y < M['yc'] else 1)
 bpy.ops.wm.save_as_mainfile(filepath=out)
