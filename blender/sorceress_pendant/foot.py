@@ -44,8 +44,8 @@ R = dict(
 EXP = dict(
     toe_w=(1.55, 1.0, 0.93, 0.87, 0.82),    # the toes' widths, relative (the hallux about half as wide again)
     toes_span=0.94,                          # the toes together, a share of the foot's breadth
-    toe_gap=0.05,                            # the gap between toes, a share of each toe's width
-    toe_h=0.78,                              # a toe's height over its width
+    toe_gap=0.10,                            # the gap between toes, a share of each toe's width
+    toe_h=0.85,                              # a toe's height over its width
     arch_peak=0.45,                          # where the arch's plantar skin stands highest (t, under the navicular)
     arch_span=0.13,                          # and how far along it the lift reaches (t, a gaussian's width)
     edge=0.30,                               # the sole's edge rounding (the bottom of the section's exponent)
@@ -155,8 +155,14 @@ def profile(FL):
         if t > 0.80:
             # (the forefoot's front: a rounded cap under the toes' bases, not a cut face)
             c = math.sqrt(max(1.0 - ((t - 0.80) / CAP) ** 2, 0.0))
-            wi, wo, top = wi * (0.4 + 0.6 * c), wo - (1 - c) * 0.3 * ball_in, 0.25 * ball_top + (top - 0.25 * ball_top) * c
+            wi, wo = wi * (0.3 + 0.7 * c), wo - (1 - c) * 0.4 * ball_in
+            # (a nose at the toes' mid height, the bottom rising as the top falls: no plate on the floor under the toes)
+            nose = 0.30 * ball_top
+            top = nose + (top - nose) * c
+            cap_bot = nose * (1 - c)
         bot = 0.035 * FL * (1 - _ss(0.0, 0.06, t)) + 0.0          # (the heel's back curls up off the floor)
+        if t > 0.80:
+            bot = max(bot, cap_bot)
         arch = math.exp(-((t - EXP['arch_peak']) / EXP['arch_span']) ** 2)
         rows.append((t, wi, wo, top, bot, arch))
     rows = np.array(rows)
@@ -199,7 +205,7 @@ def toes(FL, s, cx, y0, floor):
         u = np.linspace(-0.25, 1.0, 14)                                 # (from inside the forefoot to the tip)
         yy = y0 - (t_mt[i] * FL + u * L)
         # the toe's centre: down from the forefoot's top to its pad on the floor, the tip curling down a little
-        zc = floor + np.interp(u, [-0.25, 0.0, 0.55, 1.0], [0.55 * hi + 0.25 * FL * 0.1, 0.62 * hi, 0.52 * hi, 0.42 * hi])
+        zc = floor + np.interp(u, [-0.25, 0.0, 0.55, 1.0], [0.55 * hi + 0.25 * FL * 0.1, 0.56 * hi, 0.46 * hi, 0.40 * hi])
         xc = cx + s * xs[i]
         # (the toes lean a little toward the 2nd's line as they go: the hallux in, the small toes in)
         lean = np.interp(u, [0, 1], [0, 0.04 * FL]) * np.sign(xs[i] - xs[1]) * (i != 1)
