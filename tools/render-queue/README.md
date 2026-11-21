@@ -450,6 +450,24 @@ waive for a job he asks for himself; a 1.5 GB memory stop, the 10-minute warning
 apply. A busy or failed job there simply runs in the cloud. The head memo is only saved by a build that exits
 normally, so it fills on the first full-figure job that finishes there.
 
+### How the queue uses it (2026-11-21, on John's word: "split some rendering tasks to my local")
+
+The worker polls `jobs.jsonl` on the `render-jobs` branch of origin and renders what it finds, pushing `<key>/` to
+`render-results`. `rq.py serve` now writes to it. A job goes to the PC when all of these hold: the file
+`desktop.on` exists next to `rq.py`; it is a **check-quality views** job from one branch; its build is light (a
+mannequin or head view, about 2 GB: `job_gb` at most 2.5); the PC's `worker/status.json` says `READY` with nothing
+queued; and either the cloud is already busy with another job (the PC is overflow, as it is slower on the build)
+or a request says `--where desktop`. A request that says `--where cloud` never goes. The queue pushes a commit of
+exactly the tree the cloud would render (the merged commit plus its own `rq_views.py`) as a second parent of the
+`render-jobs` tip, so the worker's fetch brings it, and puts its job line in `jobs.jsonl`.
+
+If the PC has not started the job in 4 minutes, reports it failed, killed or aborted, or has not finished it in
+12 minutes, the job line is removed and the job runs in the cloud instead. A job the PC did not start also turns the
+PC off for an hour. Full figures, outfits, finals, frames and sheets always run in the cloud.
+The PC reads `BUSY` while free memory is under 9 GB or a game is running; that rule is in `idle.ps1` on the PC and
+is John's to change. The worker still uses the older `rq_run.py` (no `--keep-scene` or `--adaptive`); that is fine
+for these jobs.
+
 ## What comes back
 
 **Your result is not sent to you as a message.** When a request finishes, it appears in `rq.py ping --thread <your id>`

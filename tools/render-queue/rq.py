@@ -1105,6 +1105,215 @@ def job_gb(job):
     return 7.6 if "warden" in p else 4.0
 
 
+# ------------------------------------------------------------------ John's PC as a second render machine
+# (John, 2026-11-21: "split some rendering tasks to my local".) A pull worker on his PC (Task Scheduler, every minute)
+# renders the jobs listed in jobs.jsonl on the render-jobs branch and pushes <key>/ folders to render-results; it
+# answers READY or BUSY in worker/status.json (free memory under 9 GB or a game running is BUSY). Only light jobs go
+# (a mannequin build peaks at 2 GB), only while the cloud is busy or when a request says --where desktop, and a job
+# the PC does not start or finish in time runs in the cloud instead. Off unless DATA/desktop.on exists.
+DESK_ON = os.path.join(DATA, "desktop.on")
+DESK_BACKOFF = os.path.join(WORK, "desk.backoff")
+DESK_PICKUP_S = 4 * 60      # the PC has not started a job by then: run it in the cloud
+DESK_WAIT_S = 12 * 60       # it has not finished by then: run it in the cloud
+DESK_ENV = dict(os.environ, GIT_AUTHOR_NAME="Claude", GIT_AUTHOR_EMAIL="noreply@anthropic.com",
+                GIT_COMMITTER_NAME="Claude", GIT_COMMITTER_EMAIL="noreply@anthropic.com")
+
+
+def _gitenv(*a, env=None, inp=None, check=True):
+    r = subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True, env=env or DESK_ENV, input=inp)
+    if check and r.returncode:
+        raise RuntimeError(f"git {' '.join(a)}: {r.stderr.strip()[:300]}")
+    return r
+
+
+def desk_fetch():
+    return git("fetch", "--quiet", "origin", "render-results", "render-jobs", check=False).returncode == 0
+
+
+def desk_status():
+    r = git("show", "origin/render-results:worker/status.json", check=False)
+    if r.returncode:
+        return None
+    try:
+        return json.loads(r.stdout.lstrip("﻿"))
+    except ValueError:
+        return None
+
+
+def desk_words(job):
+    """The script and arguments the PC worker takes (it adds --out itself), or None when it cannot run this job."""
+    try:
+        cmd = command(job, "/OUT")
+        if cmd.startswith("env ") or " -- " not in cmd:
+            return None
+        w = shlex.split(cmd.split(" -- ", 1)[1])
+        if w[-2:] != ["--out", "/OUT"]:
+            return None
+        w = w[:-2]
+    except (ValueError, KeyError):
+        return None
+    if not w or not re.match(r"^blender/[\w/-]+\.py$", w[0]):
+        return None
+    for t in w[1:]:
+        if not re.match(r"^[\w.,=:/+-]+$", t) or ".." in t or t == "--out":
+            return None
+    return w
+
+
+def desk_eligible(job, s, busy):
+    if not os.path.exists(DESK_ON) or job["kind"] != "views" or job.get("pieces"):
+        return None
+    p = job.get("param") or ""
+    if not p.endswith(CHECK) or job_gb(job) > 2.5 or len({c["branch"] for c in job["combines"]}) != 1:
+        return None
+    reqs = [r for r in s["requests"] if r["id"] in job["requests"]]
+    if any(r.get("where") == "cloud" for r in reqs):
+        return None
+    if not (busy or any(r.get("where") == "desktop" for r in reqs)):
+        return None                                           # overflow only, unless a request asks for the PC
+    try:
+        if time.time() < float(open(DESK_BACKOFF).read()):
+            return None
+    except (OSError, ValueError):
+        pass
+    if not desk_fetch():
+        return None
+    st = desk_status()
+    if not st or not str(st.get("state", "")).startswith("READY") or st.get("pending") or st.get("job"):
+        return None
+    return desk_words(job)
+
+
+def desk_prepare(job):
+    """A commit of the exact tree the cloud would render (the merged commit plus the queue's own helper scripts)."""
+    idx = os.path.join(WORK, "index.desk")
+    if os.path.exists(idx):
+        os.remove(idx)
+    env = dict(DESK_ENV, GIT_INDEX_FILE=idx)
+    _gitenv("read-tree", job["commit"], env=env)
+    if job["kind"] == "views" and (RQ_VIEWS in (job["param"] or "") or VIEWS_PY in (job["param"] or "")):
+        blob = _gitenv("hash-object", "-w", RQ_VIEWS_SRC).stdout.strip()
+        _gitenv("update-index", "--add", "--cacheinfo", f"100644,{blob},{RQ_VIEWS}", env=env)
+    tree = _gitenv("write-tree", env=env).stdout.strip()
+    return _gitenv("commit-tree", tree, "-p", job["commit"], "-m", f"rq: {job['key']} prepared for the PC",
+                   check=True).stdout.strip()
+
+
+def desk_jobs():
+    r = git("show", "origin/render-jobs:jobs.jsonl", check=False)
+    return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+
+
+def desk_push(lines, extra_parent=None):
+    """The new jobs.jsonl on the render-jobs branch; a prepared commit rides along as a second parent so the PC's
+    fetch of the branch brings its objects."""
+    tip = _gitenv("rev-parse", "origin/render-jobs").stdout.strip()
+    blob = _gitenv("hash-object", "-w", "--stdin", inp="".join(l + "\n" for l in lines)).stdout.strip()
+    tree = _gitenv("mktree", inp=f"100644 blob {blob}\tjobs.jsonl\n").stdout.strip()
+    ps = ["-p", tip] + (["-p", extra_parent] if extra_parent else [])
+    c = _gitenv("commit-tree", tree, *ps, "-m", "render-jobs: job list for the PC worker (never merged)").stdout.strip()
+    r = _gitenv("push", "--quiet", "origin", f"{c}:refs/heads/render-jobs", check=False)
+    if r.returncode:
+        raise RuntimeError("push render-jobs: " + r.stderr.strip()[:300])
+    git("fetch", "--quiet", "origin", "render-jobs", check=False)
+
+
+class RemoteProc:
+    """Stands in for the subprocess of a job that runs on the PC: poll() is None while it waits, 0 when its pictures
+    are copied in, and a job the PC cannot finish is started in the cloud in its place (the run dict is swapped)."""
+    pid = None
+
+    def __init__(self, run, prepared, line):
+        self.run, self.prepared, self.line = run, prepared, line
+        self.t = time.time(); self.last = 0; self.started = None; self.returncode = None
+
+    def _log(self, msg):
+        self.run["log"].write(f"[pc] {msg}\n"); self.run["log"].flush()
+        print(f"{now()} pc {self.run['job']['key']}: {msg}", flush=True)
+
+    def _drop_line(self):
+        try:
+            desk_fetch()
+            desk_push([l for l in desk_jobs() if json.loads(l).get("key") != self.run["job"]["key"]])
+        except Exception as e:
+            self._log(f"could not clear the job line: {e}")
+
+    def _fallback(self, why, backoff=False):
+        self._log(f"{why}: running it in the cloud")
+        if backoff:
+            open(DESK_BACKOFF, "w").write(str(time.time() + 3600))
+        self._drop_line()
+        job = self.run["job"]
+        self.run["log"].close()
+        local = start(job)
+        t0 = self.run["t0"]
+        self.run.clear(); self.run.update(local); self.run["t0"] = t0
+        event("desktop_fallback", job["key"], why=why)
+        return None
+
+    def poll(self):
+        if self.returncode is not None:
+            return self.returncode
+        key, age = self.run["job"]["key"], time.time() - self.t
+        if time.time() - self.last >= 20:
+            self.last = time.time()
+            if not desk_fetch():
+                return None
+            ls = git("ls-tree", "-r", "--name-only", "origin/render-results", f"{key}/", check=False).stdout.split()
+            if ls:
+                for f in ls:
+                    rel = f[len(key) + 1:]
+                    data = subprocess.run(["git", "-C", REPO, "show", f"origin/render-results:{f}"], capture_output=True).stdout
+                    if rel == "render.log":
+                        self.run["log"].write(data.decode("utf-8", "replace")); self.run["log"].flush()
+                    else:
+                        dst = os.path.join(self.run["out"], rel); os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        open(dst, "wb").write(data)
+                self._log(f"done on the PC in {age:.0f}s, {len(ls)} files")
+                self.returncode = 0
+                self._drop_line()
+                return 0
+            st = desk_status() or {}
+            for rec in st.get("recent") or []:
+                if rec.get("key") == key and rec.get("sha", "")[:7] == self.prepared[:7] and rec.get("outcome") in (
+                        "failed", "killed", "aborted"):
+                    return self._fallback(f"the PC reports {rec.get('outcome')}: {rec.get('reason')}", backoff=False)
+            if str(st.get("state", "")).startswith("RUNNING " + key) and not self.started:
+                self.started = time.time(); self._log("the PC started it")
+        if not self.started and age > DESK_PICKUP_S:
+            return self._fallback("the PC did not start it in time", backoff=True)
+        if age > DESK_WAIT_S:
+            return self._fallback("the PC took too long")
+        return None
+
+    def wait(self, *a):
+        return self.returncode
+
+
+def desk_or_start(job, s, busy):
+    """Start a job where it runs: on John's PC when it is eligible and the PC is READY, else in the cloud."""
+    try:
+        words = desk_eligible(job, s, busy)
+        if words:
+            prepared = desk_prepare(job)
+            line = json.dumps({"key": job["key"], "branch": "render-jobs", "sha": prepared, "quality": "check",
+                               "command": words}, separators=(",", ":"))
+            desk_push(desk_jobs() + [line], prepared)
+            tmp_out = os.path.join(WORK, "out-" + job["key"])
+            shutil.rmtree(tmp_out, ignore_errors=True); os.makedirs(tmp_out)
+            log = open(os.path.join(tmp_out, "render.log"), "w")
+            log.write(f"$ (on John's PC) {' '.join(words)}\n"); log.flush()
+            run = {"log": log, "wt": os.path.join(WORK, "wt-none"), "out": tmp_out, "t0": time.time(), "job": job}
+            run["proc"] = RemoteProc(run, prepared, line)
+            print(f"{now()} pc {job['key']}: sent to John's PC ({prepared[:10]})", flush=True)
+            event("desktop", job["key"], sha=prepared[:12])
+            return run
+    except Exception as e:
+        print(f"{now()} pc: not used ({e})", flush=True)
+    return start(job)
+
+
+
 def cmd_serve(a):
     """Run jobs in priority order until a request (or a sheet) finishes, then exit so the thread can deliver."""
     global SERVING
@@ -1173,7 +1382,7 @@ def cmd_serve(a):
                         r["batch_commit"] = job["commit"]      # (its batch is closed: see plan)
                 save(s)
                 print(f"{now()} start {job['key']} for {[c['branch'] for c in job['combines']]}", flush=True)
-                running[job["key"]] = start(job)
+                running[job["key"]] = desk_or_start(job, s, bool(running))
                 event("start", job["key"], requests=job["requests"], param=job["param"],
                       parallel=len(running), waiting=len(todo))
                 if job["kind"] != "sheet":
@@ -1415,7 +1624,7 @@ def cmd_add(a):
     tentative = max([s["next"]] + [o["id"] + 1 for o in s["requests"]])
     r = {"id": tentative, "token": uuid.uuid4().hex[:12], "thread": a.thread, "branch": a.branch, "sha": a.sha,
          "outputs": outs, "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending",
-         "created": now(), "quality": a.quality}
+         "created": now(), "quality": a.quality, "where": a.where}
     r["repeat"] = repeat_count(s, a.thread, r["views"], r["quality"], time.time()) if r["views"] else 0
     for w in hog_warnings(s, thread=a.thread):     # (the requesting thread hears it in the add's answer)
         print(f"rq warning: {w['text']}", flush=True)
@@ -1924,6 +2133,9 @@ def main():
     q.add_argument("--mode", choices=("combined", "isolated"), default="combined"); q.add_argument("--note")
     q.add_argument("--quality", choices=("final", "check"), default=None, help="default: check for crops and pose strips alone, final otherwise")
     q.add_argument("--reviewed", action="store_true", help="the reviewer thread passed this request (needed for final quality)")
+    q.add_argument("--where", choices=("auto", "cloud", "desktop"), default="auto",
+                   help="light check renders may go to John's PC when it is free (auto: only while the cloud is busy; "
+                        "desktop: prefer the PC; cloud: never)")
     q = sub.add_parser("intent")
     q.add_argument("--thread", required=True); q.add_argument("--branch", required=True)
     q.add_argument("--piece", help="the figure module (blender/<piece>/<piece>.py) the render will be of")
