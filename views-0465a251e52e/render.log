@@ -1,0 +1,168 @@
+rq quality: check (8 samples, denoised)
+00:04.531  cycles           | WARNING HIPEW initialization failed: Error opening HIP dynamic library
+rq gpu: OPTIX on NVIDIA GeForce RTX 4070 SUPER
+anatomy canon: H 9.39 F 7.83 floor 0.00 hip joint 31.00 knee 12.22 crotch 26.20
+necklace 'Necklace': front at z 49.67, back at z 51.60, lowest 49.67, highest 51.65
+rest_on: turned 1 deg, clearance +0.049
+anatomy canon: H 9.37 F 7.81 floor 0.00 hip joint 31.00 knee 12.26 crotch 26.20
+anatomy: back line, old skin to new 43.0:2.85>2.96 43.5:2.91>3.06 44.0:2.97>3.16 44.5:2.99>3.25 45.0:3.00>3.33 45.5:3.02>3.39 46.0:3.05>3.43 46.5:3.07>3.44 47.0:3.08>3.44 47.5:3.09>3.41 48.0:3.09>3.35 48.5:3.09>3.28 49.0:3.08>3.19 49.5:3.06>3.09 50.0:2.98>2.97
+anatomy: cut 35014 of 120164 armw hist [94467, 1736, 634, 625, 22702]
+anatomy: low outer points 138 [[-4.9, -6.03, 0.4], [-4.91, -6.04, 0.48], [-4.9, -6.03, 0.57], [-4.93, -5.94, 0.39], [-4.94, -5.94, 0.49]] their spread co [[-4.9, -6.03, 0.4], [-4.91, -6.04, 0.48], [-4.9, -6.03, 0.57], [-4.93, -5.94, 0.39], [-4.94, -5.94, 0.49]] [{'Toe.R': 1.0}, {'Toe.R': 1.0}, {'Toe.R': 1.0}]
+anatomy: shoulders rounded, arc r 3.07 about (4.90, 46.67), 1948 points
+anatomy: wrist Hand.R hand root at the joint was 0.92 thick, 1.71 wide; now 1.58 by 2.44; palm 1.51 by 3.16
+anatomy: wrist Hand.L hand root at the joint was 0.92 thick, 1.71 wide; now 1.58 by 2.44; palm 1.51 by 3.16
+anatomy: wrist Fist.R hand root at the joint was 0.92 thick, 1.71 wide; now 1.58 by 2.44; palm 1.51 by 3.17
+anatomy: wrist Fist.L hand root at the joint was 0.92 thick, 1.71 wide; now 1.58 by 2.44; palm 1.51 by 3.17
+anatomy: long edges 0 []
+anatomy: front/back y at x=1 by z [(44.0, -4.0, 3.13), (44.25, -4.03, 3.19), (44.5, -4.03, 3.24), (44.75, -4.01, 3.27), (45.0, -3.96, 3.35), (45.25, -3.91, 3.39), (45.5, -3.83, 3.42), (45.75, -3.71, 3.43), (46.0, -3.57, 3.41), (46.25, -3.46, 3.39), (46.5, -3.33, 3.39), (46.75, -3.2, 3.39), (47.0, -3.13, 3.38), (47.25, -3.08, 3.37), (47.5, -2.99, 3.36), (47.75, -2.95, 3.34), (48.0, -2.91, 3.31), (48.25, -2.86, 3.28), (48.5, -2.82, 3.24), (48.75, -2.8, 3.21), (49.0, -2.78, 3.16), (49.25, -2.75, 3.11), (49.5, -2.71, 3.03)]
+anatomy: half width by z [(45.0, 7.38), (45.5, 7.5), (46.0, 7.69), (46.5, 7.82), (47.0, 7.85), (47.5, 7.83), (48.0, 7.7), (48.5, 7.41), (49.0, 6.98), (49.5, 6.26), (50.0, 5.08), (50.5, 4.0), (51.0, 2.98), (51.5, 2.39), (52.0, 2.06)] top z by x [(4.0, 50.4), (4.4, 50.23), (4.8, 50.06), (5.2, 49.89), (5.6, 49.71), (6.0, 49.53), (6.4, 49.3), (6.8, 49.1), (7.2, 48.76), (7.6, 48.28), (8.0, None), (8.4, None)]
+anatomy: skin 120164 -> 135106 points, 15918 on the fillets, modifiers before [('rig', 'ARMATURE')]
+accessories col 0: deepest +0.004 (Necklace)
+accessories col 1: deepest +0.004 (Necklace)
+accessories col 2: deepest +0.004 (Necklace)
+accessories col 3: deepest +0.004 (Necklace)
+accessories col 4: deepest +0.004 (Necklace)
+accessories col 5: deepest +0.004 (Necklace)
+accessories col 6: deepest +0.004 (Necklace)
+accessories col 7: deepest +0.004 (Necklace)
+accessories col 8: deepest +0.004 (Necklace)
+accessories col 9: deepest +0.004 (Necklace)
+NO_DRESS: left ['Fist.L', 'Fist.R', 'Hand.L', 'Hand.R', 'Head shape', 'Neck', 'Necklace', 'Necklace pendant garnet', 'Necklace pendant jewel gold', 'Skin body']
+seat_head: chin was 54.27 now 53.42
+heel: the bed 2262 kPa per unit, the weight line 4.25 cm in front of the ankle; barefoot shares {'heel': 0.599, 'midfoot': 0.083, 'forefoot': 0.233, 'toes': 0.085}
+heel R: heel 1.7 cm at the seat (2.3 at the breast), pitch 8 deg; seat 7.5 cm wide over a heel of 7.1 (room 3.9 mm); tread 6.3 x 5.3 cm; loads heel 42% midfoot 31% forefoot 21% toes 6%; peak 50 kPa; rear load 0.0 mm off the tread middle; tips at 48 deg; forward push 40 N, vamp 0 N (walking 0 N, 0.00 N/mm); waist moment 3466 N mm walking, shank safety 4.1, sag 0.96 mm (needs S 279, has 346 kN mm2)
+heel L: heel 1.7 cm at the seat (2.3 at the breast), pitch 8 deg; seat 7.5 cm wide over a heel of 7.1 (room 3.9 mm); tread 6.3 x 5.3 cm; loads heel 42% midfoot 31% forefoot 21% toes 6%; peak 50 kPa; rear load 0.0 mm off the tread middle; tips at 48 deg; forward push 40 N, vamp 0 N (walking 0 N, 0.00 N/mm); waist moment 3467 N mm walking, shank safety 4.1, sag 0.96 mm (needs S 280, has 346 kN mm2)
+heel walk: pitch 7.7 deg, raised 0.46, 160 contact points
+hose measures: waist 2.22 H (55 cm), hips 3.77 H (93 cm), thigh 1.93 H (47 cm), knee 1.27 H (31 cm), calf 1.31 H (32 cm), ankle 0.85 H (21 cm)
+hose heights: waist_z 39.60, hips_z 29.05, seat_z 29.45, hip_z 31.00, crotch_z 25.35, knee_z 17.00, calf_z 12.05, ankle_min_z 5.14, ankle_z 2.57, foot 9.63 long (25 cm)
+hose: the shell, 82738 points; bridged 3410 of them over hollows, by 0.174 at most
+hose: 625 points put back out to the ease
+hose: 109 points put back out to the ease
+hose: 62 points put back out to the ease
+hose: cut the top line, 82101 faces left
+hose: 82188 points, 82101 faces; 81138 skin points under it
+boot: the shaft at the ankle (z 5.12) is 29 cm round, over a leg of 21 cm: it stands off 0.47 on average
+boot: the shaft at the calf (z 12.02) is 40 cm round, over a leg of 32 cm: it stands off 0.46 on average
+boot: the shaft at the top (z 15.17) is 30 cm round, over a leg of 29 cm: it stands off 0.06 on average
+boot: the last's foot, 31292 points; 1740 bridged over hollows (by 0.138 at most), 9702 put out to the gap
+boot: the tongue was 2 islands; kept the main one (3762 faces), dropped 117 faces
+boot: the eyelet rows paired by height: 18 a side, the first row lost its lowest 5, the second its lowest 0 (rows 0.14 apart in height on average)
+boot: Boot.R, 18145 points: vamp 1272, toe cap 1193, inner shaft 5724, outer shaft 6049, tongue 3907
+boot: the tongue was 2 islands; kept the main one (3762 faces), dropped 117 faces
+boot: the eyelet rows paired by height: 18 a side, the first row lost its lowest 5, the second its lowest 0 (rows 0.14 apart in height on average)
+boot: Boot.L, 18146 points: vamp 1272, toe cap 1193, inner shaft 5725, outer shaft 6049, tongue 3907
+boot: the sole 0.33 thick, its under face at z -0.45 (0.44 under the foot)
+boot sewing: toe cap over vamp at G, 126 points sewn
+boot sewing: tongue over vamp at C, 82 points sewn
+boot sewing: inner shaft over vamp at A, 75 points sewn
+boot sewing: outer shaft over vamp at A, 81 points sewn
+boot sewing: outer shaft over inner shaft at D, 268 points sewn
+boot sewing: inner shaft over tongue at H, 359 points sewn
+boot sewing: outer shaft over tongue at H, 355 points sewn
+boot sewing: inner shaft cut flat (flat lengths 97%..104% of its lengths on the last)
+boot sewing: outer shaft cut flat (flat lengths 96%..104% of its lengths on the last)
+boot sewing: tongue cut flat (flat lengths 95%..105% of its lengths on the last)
+boot sewing Boot.R: settled by the fabric solver in 200 steps (97 s): 35648 threads, 34122 diagonals, 34203 bend ties, 1346 seam ties
+boot sewing Boot.R: the seams close to 0.055 on average (0.352 at most); its lengths 97%..108% of the cut (5th to 95th percentile)
+boot sewing Boot.R: vamp moved 0.023 on average (0.083 at most; down -0.003, out along its face -0.011)
+boot sewing Boot.R: toe cap moved 0.009 on average (0.026 at most; down -0.004, out along its face -0.002)
+boot sewing Boot.R: inner shaft moved 0.069 on average (0.146 at most; down -0.007, out along its face 0.049)
+boot sewing Boot.R: outer shaft moved 0.075 on average (0.170 at most; down 0.003, out along its face 0.056)
+boot sewing Boot.R: tongue moved 0.041 on average (0.200 at most; down 0.001, out along its face 0.006)
+boot crease Boot.R: the ankle bent 16 deg; the toe goes +2.59 up
+boot crease Boot.R: folded by the solver in 360 steps (132 s): the leather moved 0.100 on average, 0.778 at most (0.533 at most out from the leg)
+boot crease Boot.R: the folds kept over the front of the ankle: 0.008 on average, 0.248 at most
+boot tongue Boot.R: the pattern faces out on the boot; folding to side +1
+folds: step 200, nan/28.0, fastest point 0.00034
+folds: step 400, nan/28.0, fastest point 0.00017
+folds: step 600, nan/28.0, fastest point 0.00004
+folds: step 800, nan/28.0, fastest point 0.00002
+folds: step 1000, nan/28.0, fastest point 0.00002
+folds: step 1200, nan/28.0, fastest point 0.00005
+folds: step 1400, nan/28.0, fastest point 0.00001
+folds: step 1600, nan/28.0, fastest point 0.00001
+folds: step 1800, nan/28.0, fastest point 0.00002
+folds: step 2000, nan/28.0, fastest point 0.00002
+folds: step 2200, nan/28.0, fastest point 0.00000
+folds: step 2400, nan/28.0, fastest point 0.00000
+folds: step 2600, nan/28.0, fastest point 0.00000
+folds: step 2800, nan/28.0, fastest point 0.00000
+folds: step 3000, nan/28.0, fastest point 0.00000
+folds: step 3200, nan/28.0, fastest point 0.00000
+folds: step 3400, nan/28.0, fastest point 0.00000
+folds: step 3600, nan/28.0, fastest point 0.00000
+folds: step 3800, nan/28.0, fastest point 0.00000
+folds: step 4000, nan/28.0, fastest point 0.00000
+folds: STOPPED SHORT (tongue top nan deg off after 4000 steps) in 4000 steps (376 corrections)
+  tongue top: nan of 28.0 deg (worst along the line nan), 56 hinges over a band 0.220 wide
+folds: boot-tongue-R not cached (it stopped short)
+boot tongue Boot.R: its free top moved -0.007 along the outer normal (BACK, toward the leg)
+boot tongue Boot.R: its top turned forward over a 0.45 roll: nan of 28.0 deg (solved, stopped short: tongue top nan deg off after 4000 steps); contour sheet None
+boot stitches Boot.R: 459 stitches in 7 rows, 11934 points
+boot lacing Boot.R: the bow let fall by the cloth solver in 80 steps (2.8 s): the tails and loops moved 0.60 cm on average, 1.14 at most
+boot lacing Boot.R: free end 1: 13.6 cm laid, 14.1 cm after the solve (reach down 13.5 cm)
+boot lacing Boot.R: free end 1: 3.3 cm out from its start laid, 3.2 after the solve
+boot lacing Boot.R: free end 2: 12.6 cm laid, 13.1 cm after the solve (reach down 12.1 cm)
+boot lacing Boot.R: free end 2: 3.0 cm out from its start laid, 2.9 after the solve
+boot lacing Boot.R: 18 eyelets a side, 34 crossings of the lace
+boot sewing: toe cap over vamp at G, 127 points sewn
+boot sewing: tongue over vamp at C, 83 points sewn
+boot sewing: inner shaft over vamp at A, 75 points sewn
+boot sewing: outer shaft over vamp at A, 81 points sewn
+boot sewing: outer shaft over inner shaft at D, 268 points sewn
+boot sewing: inner shaft over tongue at H, 359 points sewn
+boot sewing: outer shaft over tongue at H, 354 points sewn
+boot sewing: inner shaft cut flat (flat lengths 97%..104% of its lengths on the last)
+boot sewing: outer shaft cut flat (flat lengths 96%..104% of its lengths on the last)
+boot sewing: tongue cut flat (flat lengths 95%..105% of its lengths on the last)
+boot sewing Boot.L: settled by the fabric solver in 200 steps (97 s): 35649 threads, 34120 diagonals, 34203 bend ties, 1347 seam ties
+boot sewing Boot.L: the seams close to 0.056 on average (0.353 at most); its lengths 97%..108% of the cut (5th to 95th percentile)
+boot sewing Boot.L: vamp moved 0.020 on average (0.075 at most; down -0.004, out along its face -0.010)
+boot sewing Boot.L: toe cap moved 0.008 on average (0.024 at most; down -0.004, out along its face -0.001)
+boot sewing Boot.L: inner shaft moved 0.068 on average (0.178 at most; down 0.002, out along its face 0.049)
+boot sewing Boot.L: outer shaft moved 0.074 on average (0.189 at most; down -0.006, out along its face 0.055)
+boot sewing Boot.L: tongue moved 0.041 on average (0.191 at most; down 0.002, out along its face 0.006)
+boot crease Boot.L: the ankle bent 16 deg; the toe goes +2.81 up
+boot crease Boot.L: folded by the solver in 360 steps (132 s): the leather moved 0.112 on average, 0.648 at most (0.449 at most out from the leg)
+boot crease Boot.L: the folds kept over the front of the ankle: 0.010 on average, 0.257 at most
+boot tongue Boot.L: the pattern faces out on the boot; folding to side +1
+folds: step 200, nan/28.0, fastest point 0.00022
+folds: step 400, nan/28.0, fastest point 0.00006
+folds: step 600, nan/28.0, fastest point 0.00005
+folds: step 800, nan/28.0, fastest point 0.00001
+folds: step 1000, nan/28.0, fastest point 0.00001
+folds: step 1200, nan/28.0, fastest point 0.00001
+folds: step 1400, nan/28.0, fastest point 0.00001
+folds: step 1600, nan/28.0, fastest point 0.00000
+folds: step 1800, nan/28.0, fastest point 0.00001
+folds: step 2000, nan/28.0, fastest point 0.00000
+folds: step 2200, nan/28.0, fastest point 0.00000
+folds: step 2400, nan/28.0, fastest point 0.00000
+folds: step 2600, nan/28.0, fastest point 0.00000
+folds: step 2800, nan/28.0, fastest point 0.00000
+folds: step 3000, nan/28.0, fastest point 0.00000
+folds: step 3200, nan/28.0, fastest point 0.00000
+folds: step 3400, nan/28.0, fastest point 0.00000
+folds: step 3600, nan/28.0, fastest point 0.00000
+folds: step 3800, nan/28.0, fastest point 0.00000
+folds: step 4000, nan/28.0, fastest point 0.00000
+folds: STOPPED SHORT (tongue top nan deg off after 4000 steps) in 4000 steps (379 corrections)
+  tongue top: nan of 28.0 deg (worst along the line nan), 66 hinges over a band 0.220 wide
+folds: boot-tongue-L not cached (it stopped short)
+boot tongue Boot.L: its free top moved -0.026 along the outer normal (BACK, toward the leg)
+boot tongue Boot.L: its top turned forward over a 0.45 roll: nan of 28.0 deg (solved, stopped short: tongue top nan deg off after 4000 steps); contour sheet None
+boot stitches Boot.L: 459 stitches in 7 rows, 11934 points
+boot lacing Boot.L: the bow let fall by the cloth solver in 80 steps (2.8 s): the tails and loops moved 0.58 cm on average, 1.05 at most
+boot lacing Boot.L: free end 1: 13.1 cm laid, 13.7 cm after the solve (reach down 13.1 cm)
+boot lacing Boot.L: free end 1: 2.6 cm out from its start laid, 2.5 after the solve
+boot lacing Boot.L: free end 2: 11.9 cm laid, 12.4 cm after the solve (reach down 12.0 cm)
+boot lacing Boot.L: free end 2: 2.2 cm out from its start laid, 2.2 after the solve
+boot lacing Boot.L: 18 eyelets a side, 34 crossings of the lace
+heelboot R: the heel let out to the sole: 0.75 longer at the back, 27% wider
+heelboot L: the heel let out to the sole: 0.76 longer at the back, 27% wider
+heelboot: 139 contact points, raised 0.46
+rq geometry: Hose 0.73% inside, stretch p99 -; Boot eyelets.L 0.0% inside, stretch p99 1.696; Boot eyelets.R 0.0% inside, stretch p99 1.052
+build 870 s (mannequin)
+Blender 5.3.0 (hash 02f0899d78e3 built 2026-11-10 01:33:43)
+
+Blender quit

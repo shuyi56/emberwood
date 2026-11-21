@@ -1,0 +1,189 @@
+{
+ "body": {
+  "height": 25.712,
+  "shoulder_width": 15.849,
+  "hip_width": 17.121,
+  "hip_depth": 4.602
+ },
+ "garments": {
+  "Boot eyelets.L": {
+   "verts": 4896,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.696,
+   "squash_p1": 0.926,
+   "over_25pct": 270,
+   "under_25pct": 25
+  },
+  "Boot eyelets.R": {
+   "verts": 4896,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.052,
+   "squash_p1": 0.824,
+   "over_25pct": 19,
+   "under_25pct": 67
+  },
+  "Boot lace.L": {
+   "verts": 5602,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.296,
+   "squash_p1": 0.935,
+   "over_25pct": 136,
+   "under_25pct": 20
+  },
+  "Boot lace.R": {
+   "verts": 5602,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.078,
+   "squash_p1": 0.96,
+   "over_25pct": 14,
+   "under_25pct": 20
+  },
+  "Boot sole.L": {
+   "verts": 722,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Boot sole.R": {
+   "verts": 722,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Boot stitches.L": {
+   "verts": 11934,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 2.128,
+   "squash_p1": 0.875,
+   "over_25pct": 627,
+   "under_25pct": 163
+  },
+  "Boot stitches.R": {
+   "verts": 11934,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.08,
+   "squash_p1": 0.913,
+   "over_25pct": 119,
+   "under_25pct": 100
+  },
+  "Boot.L": {
+   "verts": 36292,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0
+  },
+  "Boot.R": {
+   "verts": 36290,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0
+  },
+  "Heel lift a 1.L": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel lift a 1.R": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel lift b 2.L": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel lift b 2.R": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel top lift 0.L": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel top lift 0.R": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel wedge 3.L": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Heel wedge 3.R": {
+   "verts": 440,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Hose": {
+   "verts": 164376,
+   "inside": 1198,
+   "inside_pct": 0.73,
+   "max_depth": 0.497
+  }
+ },
+ "seconds": 0.79
+}
