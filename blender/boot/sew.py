@@ -458,6 +458,9 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         rows[q] = (X[g] + Nv[g] * tl, Nv[g])
     # hand-punched, not stepped off by a machine: each eyelet sits a little off its place along the edge and in from
     # it, and the rings differ a little in size
+    # (the two panels' rows pair up from the bottom: an eyelet with none to cross to would stand empty at the top)
+    n_pair = min(len(rows['inner'][0]), len(rows['outer'][0]))
+    rows = {q: (rows[q][0][:n_pair], rows[q][1][:n_pair]) for q in rows}
     side_ = o.name.rsplit('.', 1)[-1]
     rng = np.random.default_rng(sum(map(ord, side_)) + 17)
     pitch = r['eyelet_pitch']
