@@ -364,7 +364,40 @@ for s in (und, top):                                  # the under front first: t
     ea = np.array([(e.verts[0].index, e.verts[1].index) for v_ in (bm.verts[int(i)] for i in ii) for e in v_.link_edges
                    if inset[e.verts[0].index] and inset[e.verts[1].index]])
     ea = np.unique(np.sort(ea, axis=1), axis=0)
-    l0 = np.linalg.norm(flat2[ea[:, 0]] - flat2[ea[:, 1]], axis=1); l1 = np.linalg.norm(W[ea[:, 0]] - W[ea[:, 1]], axis=1)
+    l0 = np.linalg.norm(flat2[ea[:, 0]] - flat2[ea[:, 1]], axis=1)
+    # the cloth relaxed (John: "do the cloth relaxation"). The rules above place the lapel; they do not keep its lengths.
+    # Here every edge of the turned cloth is drawn back toward its length as cut, all at once and over and over, the
+    # way cloth settles: stretch is resisted hard, compression less (cloth gives by easing), the fold line is held, the
+    # cloth may not sink into what it lies on, and a light hold on where it was placed keeps the traced shape.
+    rx = opt.get('relax', None if 'bow' in opt else {})
+    if rx is not None and 'C' in s:
+        it_, anch, kc_, ks_ = rx.get('iters', 1500), rx.get('anchor', 0.0005), rx.get('comp', 0.7), rx.get('stretch', 1.0)
+        l1_ = np.linalg.norm(W[ea[:, 0]] - W[ea[:, 1]], axis=1); okr = l0 > 1e-4
+        print('foldfront: front %d before relaxing: strain mean |%.1f%%|, 95%% under |%.1f%%|' % (s['layer'], 100 * np.abs(l1_[okr] / l0[okr] - 1).mean(), 100 * np.percentile(np.abs(l1_[okr] / l0[okr] - 1), 95)))
+        A_, B_ = ea[okr, 0], ea[okr, 1]; L0 = l0[okr]
+        free = np.zeros(len(W)); free[ii] = 1.0
+        if cover is not None: free[ii[under_]] = 0.0          # (the part hidden behind the upper front stays pressed there)
+        P0 = W.copy(); Pr = W.copy()
+        kk_ = np.clip(d / (arc + 0.35), 0, 1); kk_ = kk_ * kk_ * (3 - 2 * kk_); clear = (out_side + lie) * kk_
+        mob = free[ii] > 0
+        nbi = [np.array(nb[int(i)]) for i in ii]
+        for r_ in range(it_):
+            dv = Pr[B_] - Pr[A_]; ln_ = np.maximum(np.linalg.norm(dv, axis=1), 1e-9); Cn = ln_ - L0
+            kq = np.where(Cn > 0, ks_, kc_); wa, wb = free[A_], free[B_]; ws = np.maximum(wa + wb, 1e-9)
+            cor = (kq * Cn / ln_ / ws)[:, None] * dv
+            dP = np.zeros_like(Pr); cnt = np.zeros(len(Pr))
+            np.add.at(dP, A_, wa[:, None] * cor); np.add.at(dP, B_, -wb[:, None] * cor); np.add.at(cnt, A_, 1); np.add.at(cnt, B_, 1)
+            Pr += rx.get('omega', 1.3) * dP / np.maximum(cnt, 1)[:, None]
+            Pr[ii] += anch * free[ii][:, None] * (P0[ii] - Pr[ii])
+            if r_ % 4 == 3:                                   # (bending: the move itself is kept smooth, so the cloth eases and does not crinkle)
+                dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbi]); Pr[ii] += rx.get('bend', 0.25) * free[ii][:, None] * (av - dl[ii])
+            if r_ % 10 == 9 or r_ == it_ - 1:                 # (and it may not sink into what it lies on)
+                g2 = ground(Pr[ii][:, [0, 2]]); okg = np.isfinite(g2) & mob & (g2 < yc_t + opt.get('fell', 0.15))
+                Pr[ii[okg], 1] = np.minimum(Pr[ii[okg], 1], g2[okg] - clear[okg])
+        mv = np.linalg.norm(Pr[ii] - P0[ii], axis=1)
+        print('foldfront: front %d relaxed over %d rounds: its points moved %.1f mm on average, %.1f mm at most' % (s['layer'], it_, 26.2 * mv.mean(), 26.2 * mv.max()))
+        W[:] = Pr
+    l1 = np.linalg.norm(W[ea[:, 0]] - W[ea[:, 1]], axis=1)
     okl = l0 > 1e-4; st = l1[okl] / l0[okl] - 1
     tm = 0.5 * (s['tl'][ea[:, 0]] + s['tl'][ea[:, 1]])[okl]
     s['strain'] = dict(st=st, mid=0.5 * (W[ea[:, 0]] + W[ea[:, 1]])[okl], t=tm)
