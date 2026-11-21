@@ -586,19 +586,73 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         pts = [onto((1 - u) * E + u * K0, 1.05 * rl) for u in t_]
         run(pts, rl * np.minimum(1.0, 0.6 + 5 * t_))
     run([at(-0.35 + 0.7 * u, 0.0, 1.25) for u in np.linspace(0, 1, 5)], 1.35 * rl)       # (the knot)
+    # the loops and tails are laid out by hand (a bow's shape), then let fall: the local cloth solver (fabric.py) runs
+    # each as a chain of ties (the cord's length kept, a soft bend) pinned at the knot, under gravity, held off the
+    # leather by the cord's radius and thickness, so they hang and settle as a cord does on a boot. (EXPERIMENTAL
+    # settings: a waxed lace's stiffness is a guess.)
+    chains = []                                            # (points, pinned count at the start, at the end)
     for sd, ang, Ll in ((-1.0, 16.0, 2.9), (1.0, 24.0, 2.5)):                           # (the loops)
         ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
         ph = np.linspace(0.0, 2 * np.pi, 26)
         bx = 0.5 * Ll * (1 - np.cos(ph))
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
-        pts = [at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_)) for x, y, p_ in zip(bx, by, ph)]
-        strand(np.array(pts), rl)
+        chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
+                                 for x, y, p_ in zip(bx, by, ph)]), 2, 2))
     for sd, T, wig in ((-1.0, 12.5, 1.3), (1.0, 9.5, -1.0)):                          # (the tails)
         u = np.linspace(0.0, 1.0, 34)
         aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.6 * u) * u)
-        vv = -T * u + 1.1 * np.sin(np.pi * u) * 0.0
-        pts = [at(a, v, 1.1 + 0.2 * uu) for a, v, uu in zip(aa, vv, u)]
-        run(pts, rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((u - 0.9) / 0.1, 0, 1)))
+        vv = -T * u
+        chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 2, 0))
+    if DRAPE:
+        import fabric
+        import time as _t
+        t0 = _t.time()
+        pts = np.concatenate([c[0] for c in chains])
+        fb = fabric.Fabric(pts, dict(bend=DRAPE['bend'], stretch=0.0, friction=DRAPE['friction'], iterations=16,
+                                          gravity=(0.0, 0.0, -375.0 * DRAPE['g'])))
+        at0, pin = 0, []
+        for c, p0, p1 in chains:
+            m = len(c)
+            fb.tie(np.arange(at0, at0 + m - 1), np.arange(at0 + 1, at0 + m))
+            fb.tie(np.arange(at0, at0 + m - 2), np.arange(at0 + 2, at0 + m), DRAPE['bend'])
+            if p1 == 2 and not DRAPE['loops']:
+                pin += list(range(at0, at0 + m))                     # a loop keeps its hand-laid shape
+            else:
+                pin += list(range(at0, at0 + p0)) + list(range(at0 + m - p1, at0 + m))
+            at0 += m
+        fb.pin(pin)
+        gap = 1.05 * rl + tl
+
+        def body(x):
+            out, touch = x.copy(), np.zeros(len(x), dtype=bool)
+            for i in range(len(x)):
+                hit = tree.find_nearest(tuple(x[i]), 6.0 * gap + 0.5)
+                if hit[0] is None:
+                    continue
+                nrm = np.array(hit[1])
+                if nrm @ Nv[list(o.data.polygons[hit[2]].vertices)].mean(axis=0) < 0:
+                    nrm = -nrm
+                sd_ = (x[i] - np.array(hit[0])) @ nrm
+                if sd_ < gap:
+                    out[i] = x[i] + nrm * (gap - sd_)
+                    touch[i] = True
+            return out, touch
+        moved0 = fb.pos.copy()
+        steps = fb.settle(body, h=1.0 / 120.0, most=DRAPE['steps'], tol=2e-4, damping=0.4)
+        d = np.linalg.norm(fb.pos - moved0, axis=1)
+        log('boot lacing %s: the bow let fall by the cloth solver in %d steps (%.1f s): the tails and loops moved %.2f cm on average, %.2f at most'
+            % (o.name, steps, _t.time() - t0, d.mean() * 2.619, d.max() * 2.619))
+        at0 = 0
+        out = []
+        for c, p0, p1 in chains:
+            out.append(fb.pos[at0:at0 + len(c)].copy())
+            at0 += len(c)
+        chains = [(q, c[1], c[2]) for q, c in zip(out, chains)]
+    for k_, (c, p0, p1) in enumerate(chains):
+        if k_ < 2:
+            strand(c, rl)
+        else:
+            run(c, rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((np.linspace(0, 1, len(c)) - 0.9) / 0.1, 0, 1)))
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
@@ -607,6 +661,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
+DRAPE = dict(bend=2e-4, friction=0.5, steps=300, g=0.4, loops=False)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
