@@ -231,6 +231,9 @@ def ranger_cut_z(th):
 
 PART_BACK_Z = 0.97        # STYLE: the centre part runs from the trichion back to the top of the head
 PART_HALF = 0.004         # STYLE: the part's half-width, HH (about 1 mm), as the knotted bun's pe(z) at the hairline
+PART_END_Y = 0.02          # HH: where the side combing away from the part ends: the top of the head. The creator
+                          # (wavyFull depth) thins its cap for the part only on the face side, up to the vertex (y 0);
+                          # PART_BACK_Z alone ran it on to y 0.18, over the crown
 
 
 # ---------------------------------------------------------------------------------------------------- curtain bangs
@@ -338,6 +341,7 @@ TRACE_PULL = 0.5                   # how far each combed step is drawn onto the 
 TRACE_K = 8
 FRAME_TH = 0.9                     # rad: the face-framing hair combed with the creator's framing locks (in front of the
                                    # temples, |theta| under about 52 deg)
+FRAME_OUTER = 0.4                  # the outer share of the creator's bangs the Warden's framing hair is laid along
 FRAME_PULL = 0.3
 FRAME_ON_Z = 0.15                  # HH: the framing hair is laid on the face down to the jaw, then falls
 
@@ -363,14 +367,14 @@ def creator_bangs(style_path):
 
 
 def resample(p, seg_hh, n):
-    """A polyline at the rod's segment length, n nodes, carried on straight past its end; and its length (HH)."""
+    """A polyline at the rod's segment length, n nodes, carried on straight down past its end (as it would fall: a
+    strand that ends turning out, carried on along its last tangent, shot out sideways); and its length (HH)."""
     s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(p, axis=0), axis=1))]
     u = np.arange(n) * seg_hh
     q = np.stack([np.interp(u, s, p[:, k]) for k in range(3)], 1)
     past = u > s[-1]
     if past.any():
-        t = p[-1] - p[-2]; t /= np.linalg.norm(t)
-        q[past] = p[-1] + (u[past] - s[-1])[:, None] * t
+        q[past] = p[-1] + (u[past] - s[-1])[:, None] * np.array([0.0, 0.0, -1.0])
     return q, s[-1]
 
 
@@ -664,7 +668,9 @@ def comb_ranger(F, roots_idx):
     away /= np.linalg.norm(away, axis=1, keepdims=True)
     front = P[:, 1] < 0.25                                               # ahead of the crown
     top = SF.sm(0.6, 0.85, P[:, 2])
-    w = top * front * (1 - SF.sm(0.15, 0.35, np.abs(P[:, 0])) * 0.6)
+    # (only in front of the part's end: behind the vertex the hair is brushed back, so the part does not run on over
+    # the crown and open a bare patch there, John's "no bald spots")
+    w = top * front * (1 - SF.sm(0.15, 0.35, np.abs(P[:, 0])) * 0.6) * (1 - SF.sm(PART_END_Y - 0.06, PART_END_Y + 0.04, P[:, 1]))
     out = v * (1 - w)[:, None] + away * w[:, None]
     # tuck behind the ear: hair rooted between the face-framing front and the ear is combed back and down over it
     th = SF.theta(P)
@@ -675,13 +681,13 @@ def comb_ranger(F, roots_idx):
     out = out * (1 - tuck)[:, None] + back * tuck[:, None]
     # behind the crown the whorl's flow turns forward on one side; a long fall is brushed back there, so no hair
     # rooted behind the crown crosses it and drops over the face (two guides did before this)
-    fwd = ~front & (out[:, 1] < 0.1)
+    fwd = (~front | (P[:, 1] > PART_END_Y - 0.06)) & (out[:, 1] < 0.1)     # (and behind the part's end)
     out[fwd, 1] = 0.1
     out[fwd] += back[fwd] * 0.3
     out -= N * (N * out).sum(1, keepdims=True)
     out /= np.linalg.norm(out, axis=1, keepdims=True)
     # roots inside the part itself are bare scalp
-    keep = ~((np.abs(P[:, 0]) < PART_HALF) & (P[:, 2] > F['landmarks']['trichion'][2] - 0.01) & (P[:, 2] < PART_BACK_Z) & front)
+    keep = ~((np.abs(P[:, 0]) < PART_HALF) & (P[:, 2] > F['landmarks']['trichion'][2] - 0.01) & (P[:, 2] < PART_BACK_Z) & front & (P[:, 1] < PART_END_Y + 0.04))
     return out, keep
 
 
@@ -959,6 +965,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         if same:                          # guides matched by their roots (the bang section may have grown or shrunk)
             dist, j = cKDTree(P0['roots']).query(roots)
             hit = dist < 1e-9
+            if 'combed' in P0.files:      # (a guide combed in that groom was placed, not settled: never copy it)
+                hit &= P0['combed'][j] == 0
             solve = bang | ~hit
             P = {k: np.zeros((len(idx),) + P0[k].shape[1:], P0[k].dtype) for k in ('X_uncut', 'X', 'lengths')}
             for k in P:
@@ -999,8 +1007,18 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         frame = ~bang & (np.abs(thr) < FRAME_TH) & (roots[:, 2] > 0.55)
         down = np.tile([0.0, 0.0, -1.0], (frame.sum(), 1))
         lie_f = np.clip(layer.root_cum[frame], 1.0 / SF.HH_MM, 10.0 / SF.HH_MM)
-        Xf, _ = comb_bangs(surf, col, roots[frame], d0[frame], np.c_[np.sign(roots[frame, 0]) * 1e-3, down[:, 1:]],
-                       comb[frame], seg_hh, S, field, out=down, pull=FRAME_PULL, lie_hh=lie_f)
+        if wavy:
+            # the Warden's framing hair continues the curtain outward: laid in rank order (by its angle round the
+            # head) along the outer part of the creator's bangs, which run down the edge of the face to the cheek.
+            # Combed on its own it lay out over the side of the head and left the face's edge bare and sheer.
+            cb = creator_bangs(trace)
+            outer = {k: v[int(len(v) * (1 - FRAME_OUTER)):] for k, v in cb.items()}
+            fside = np.where(roots[frame, 0] >= SF.AXIS[0], 1.0, -1.0)
+            Xf, _ = trace_bangs(roots[frame], np.abs(thr[frame]), fside, outer, seg_hh, S)
+            Xf = push_out(col, Xf, layer.subset(frame))
+        else:
+            Xf, _ = comb_bangs(surf, col, roots[frame], d0[frame], np.c_[np.sign(roots[frame, 0]) * 1e-3, down[:, 1:]],
+                           comb[frame], seg_hh, S, field, out=down, pull=FRAME_PULL, lie_hh=lie_f)
         solve &= ~frame
         P['X_uncut'][frame] = Xf
     t0 = time.time()
@@ -1065,7 +1083,7 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
-    return dict(roots=roots, idx=idx, X=X2, lock=lock, clump=clump, bang=bang.astype(np.int8), X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
+    return dict(roots=roots, idx=idx, X=X2, lock=lock, clump=clump, combed=(bang | frame).astype(np.int8), bang=bang.astype(np.int8), X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
                 layer_max_mm=layer.max_mm(), seg_hh=seg_hh, d0=d0, comb=comb, times=(t1 - t0, t2 - t1))
 
 

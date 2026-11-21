@@ -33,7 +33,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scalp_field as SF  # noqa: E402
-from groom import SPLIT  # noqa: E402
+from groom import SPLIT, PART_HALF as PART_HALF_HH  # noqa: E402
 
 ETA = 1.55                         # [PBR4]
 ALPHA_DEG = 2.0                    # [PBR4] cuticle scale tilt
@@ -174,17 +174,33 @@ class Canvas:
         return i, j, z, ok
 
 
-def clay_backdrop(cv, surf, body):
-    """The head and the body as grey clay (Lambert, z-buffered splats)."""
+SCALP_F = None                     # the scalp field (set in main): where hair grows, the skin is drawn in the root colour
+SCALP_SHADE = 0.35                 # the root colour against the hair's fill: the scalp under the hair is in its shade
+
+
+def clay_backdrop(cv, surf, body, mode='clay'):
+    """The head and the body as grey clay (Lambert, z-buffered splats). The hair-bearing scalp is drawn in the hair's
+    root colour, as the game's scalp cap (cards.py): a real head has about 76,000 hairs over it, the render far fewer,
+    wider children, so between them it would show bare skin where a real head shows only more hair. The part line
+    itself stays skin."""
     Ph, Nh, _ = surf.sample(260000)
     m = Ph[:, 2] > 0.18
     Ph, Nh = Ph[m], Nh[m]
+    hairy = np.zeros(len(Ph), bool)
+    if SCALP_F is not None:
+        from scipy.spatial import cKDTree
+        F = SCALP_F
+        hairy = F['mask'][cKDTree(F['P']).query(Ph)[1]] > 0.5
+        tr = F['landmarks']['trichion']
+        part = (np.abs(Ph[:, 0]) < PART_HALF_HH) & (Ph[:, 1] < 0.25) & (Ph[:, 2] > tr[2] - 0.01)
+        hairy &= ~part
     # the neck and the jaw's underside from the export itself (the radius-by-direction surface only covers the head)
     if HEAD_CLOUD is not None:
         q = HEAD_CLOUD[HEAD_CLOUD[:, 2] <= 0.2]
         nq = unit(np.c_[q[:, 0] - SF.AXIS[0], q[:, 1] - SF.AXIS[1], np.zeros(len(q))])
         Ph = np.r_[Ph, q]; Nh = np.r_[Nh, nq]
     Pb, Nb = body_points(body)
+    hairy = np.r_[hairy, np.zeros(len(Ph) - len(hairy) + len(Pb), bool)]
     P = np.r_[Ph, Pb]; N = np.r_[Nh, Nb]
     i, j, z, ok = cv.project(P)
     L = unit(LIGHT)
@@ -200,6 +216,9 @@ def clay_backdrop(cv, surf, body):
             ii, jj = np.clip(i + di, 0, cv.W - 1), np.clip(j + dj, 0, cv.H - 1)
             win = ok & (z <= zb[jj, ii] + 1e-9)
             col[jj[win], ii[win]] = (np.array([0.72, 0.70, 0.68]) * sh[win, None])
+            hw = win & hairy
+            root = (np.array(FILL_SRGB) / 255.0) ** 2.2 * SCALP_SHADE if mode == 'full' else np.array([0.3, 0.29, 0.28])
+            col[jj[hw], ii[hw]] = root * sh[hw, None]
     return col, zb
 
 
@@ -393,6 +412,8 @@ def main():
     HEAD_CLOUD = SF.load_head(head)
     surf = SF.Surface(HEAD_CLOUD)
     F = SF.build(surf)
+    global SCALP_F
+    SCALP_F = F
     body = json.load(gzip.open(head))['bodies']['mannequin']
     Gm = dict(np.load(os.path.join(gdir, 'groom.npz')))
     paths, share = grow_children(F, Gm, nch)
@@ -406,7 +427,7 @@ def main():
         row = []
         for az in (0, 45, 90, 135, 180):
             cv = Canvas(size, az)
-            bg, zb = clay_backdrop(cv, surf, body)
+            bg, zb = clay_backdrop(cv, surf, body, mode)
             img = render_hair(cv, paths, mode, bg, zb, hpc)
             row.append((to_srgb(img) * 255).astype(np.uint8))
         Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'turn-%s.png' % mode))
@@ -416,7 +437,7 @@ def main():
         imgs = []
         for mode in ('clay', 'full'):
             cv = Canvas(size, az, box)
-            bg, zb = clay_backdrop(cv, surf, body)
+            bg, zb = clay_backdrop(cv, surf, body, mode)
             imgs.append((to_srgb(render_hair(cv, paths, mode, bg, zb, hpc)) * 255).astype(np.uint8))
         Image.fromarray(np.concatenate(imgs, 1)).save(os.path.join(out, name + '.png'))
     rep['contours'] = contours(paths, os.path.join(out, 'contours.png'), os.path.join(out, 'contours.json'))
