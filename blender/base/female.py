@@ -1329,6 +1329,15 @@ HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
 # The toes' joint (the metatarsophalangeal axis) of a foot with a toe bone: (how far ahead of the ankle, how high), or None
 # for the feet whose toes are part of the foot (the boots' lasts, the painted sheets). anatomy.patch sets it.
 TOE_JOINT = None
+# A heel under the foot (the heel study's walk): how far the foot is held pitched toes-down in the walk, radians. 0 for a bare
+# foot or a flat sole. heel.build sets it, with the figure raised by the sole's thickness.
+HEEL_PITCH = 0.0
+# and the points of its sole that meet the floor, (forward of the ankle, height over it) in the foot's own frame: the
+# heel's rear tread edge and the ball under the sole. HEEL_UP is how far the figure is raised on the sole. With these
+# set, locked_foot stands the ankle at the height that puts the lowest of those points on the floor at the foot's pitch.
+HEEL_CONTACT = None
+HEEL_AXIS = None      # the toe joint (forward of the ankle, height over it) and how far the sole's bottom hangs under it
+HEEL_UP = 0.0
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
 LEG_X, SH_X = 3.3, 5.75
@@ -4405,14 +4414,29 @@ def locked_foot(t):
     lifted most early on, as the toes leave the ground."""
     t %= 1.0
     a = AHEAD * STANCE_L * STRIDE
-    pitch = math.radians(cyclic(L_GAIT_FOOT, t))
+    pitch = math.radians(cyclic(L_GAIT_FOOT, t)) - HEEL_PITCH
     if t < STANCE_L:
-        return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+        return a - STRIDE * t + toe_roll(pitch), heel_ankle_z(pitch), pitch, True
     u = (t - STANCE_L) / (1 - STANCE_L)
     span = STRIDE * (1 - STANCE_L)
-    off = toe_roll(math.radians(cyclic(L_GAIT_FOOT, STANCE_L)))
+    off = toe_roll(math.radians(cyclic(L_GAIT_FOOT, STANCE_L)) - HEEL_PITCH)
     fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
-    return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+    return fwd, heel_ankle_z(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+
+
+def heel_ankle_z(pitch):
+    """The ankle's height with the foot at this pitch (toes up positive) standing on the ground: ANKLE_Z over a bare foot's
+    heel or ball (foot_lift); over a heeled sole, the height that puts the lowest of HEEL_CONTACT on the floor."""
+    if HEEL_CONTACT is None:
+        return ANKLE_Z + foot_lift(pitch)
+    c, s = math.cos(pitch), math.sin(pitch)
+    low = max(-(b * c + a * s) for a, b in HEEL_CONTACT)
+    if HEEL_AXIS:
+        # (rolling onto the toes the toe bone turns the forefoot flat: the sole hangs its full depth under the toe joint;
+        # with the toes up it turns with the foot)
+        a, b, depth = HEEL_AXIS
+        low = max(low, -(b * c + a * s) + depth * (1.0 if pitch < 0 else c))
+    return -HEEL_UP + low
 
 
 def toe_roll(pitch):
@@ -4438,7 +4462,7 @@ def locked_hips(tr):
     lowered all round the cycle leaves every standing knee bent, a crouch.) The trailing leg, rolling up onto its
     ball to push off, carries no weight then and does not hold the body up."""
     key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_SOFT, BOB_BLUR, BOB_JOIN, L_PELVIS_TURN, PELVIS_LIST, FOOT_BALL,
-           tuple(L_GAIT_FOOT))
+           tuple(L_GAIT_FOOT), HEEL_PITCH, HEEL_UP, tuple(HEEL_CONTACT or ()), tuple(HEEL_AXIS or ()))
     if key not in _LOCKED_HIPS:
         n = 192
         reach = np.zeros(n)
