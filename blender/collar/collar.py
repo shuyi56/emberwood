@@ -200,9 +200,16 @@ LAPEL = dict(
     # correction scales the turn's hinges up when the lapel rests a few degrees open on the chest, and crumples the rows.
     fold_stretch=1e-8,
     bake=dict(h=1.0 / 1920, most=3000, correct=False),
-    tilt=25,               # the lapel starts this far turned off the chest (degrees), unfolded; the solver folds the rest
+    tilt=25,               # the lapel starts this far turned off the chest (degrees); the solver folds the rest
     steps=1600,
 )
+# The notch lapel's own gorge and point (in w; x outward from the middle, z up): the notch G from the neck point N, and
+# the lapel's point from G. These are the approved lapels' values (they were first read off the turned-down collar's
+# solved ends; kept here the lapels no longer depend on a collar's solve, and the collar is drafted to them).
+# roll_side: the roll line is aimed one side-stand up the neck from the neck point at the shoulder (the tailor's draft:
+# 1 inch, which at her scale is 0.49 w), so it runs on as the collar's roll; it ends on the neck edge where it crosses
+# it (roll_cross). The gorge and point stay where they were approved, measured from the neck edge's point at 'gap'.
+NOTCH_LAPEL = dict(gorge=(0.157, -0.474), point=(0.572, -0.403), roll_side=0.49)
 
 
 # The styles. 'turned': the first one (kept as it was approved): a turned-down collar all round, its short points over
@@ -213,7 +220,7 @@ LAPEL = dict(
 STYLES = dict(
     turned=(dict(RATIOS), dict(LAPEL)),
     notch=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=1.00, notch=0.30, gap=1.8),
-           dict(LAPEL, drop=1.35, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, belly=0.10)),
+           dict(LAPEL, **NOTCH_LAPEL, drop=1.35, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, belly=0.10)),
 )
 STYLE = os.environ.get('COLLAR_STYLE', 'notch')
 RATIOS.update(STYLES[STYLE][0])
@@ -240,19 +247,25 @@ def lapel_outlines(E, M, D, cpos, L_=None):
         # in harmony with the collar: the notch G sits on the collar's own front edge (as solved), part way from the
         # roll down to the collar's point C, and the lapel's point mirrors C across the notch: the same length, turned
         # down by the notch's angle
-        UVc = D['UV']
-        side = np.sign(cpos[:, 0]) == sg
-        endpts = np.nonzero(side & (np.abs(UVc[:, 0]) > D['smax'](UVc[:, 1]) - 0.6 * L_['spacing'] * w) & (UVc[:, 1] >= D['st_pt']))[0]
-        C3 = cpos[endpts[np.argmax(UVc[endpts, 1])]]
-        R3 = cpos[endpts[np.argmin(UVc[endpts, 1])]]
-        C = C3[[0, 2]]
-        G = R3[[0, 2]] + L_['notch_at'] * (C - R3[[0, 2]])
-        v = (C - G) * L_['point_len']
-        if L_.get('point_w'):                                           # (or a set length, in w, the direction kept)
-            v = v / max(np.linalg.norm(v), 1e-9) * L_['point_w'] * w
-        a = math.radians(L_['notch_angle'])
-        cands = [np.array([v[0] * math.cos(t) - v[1] * math.sin(t), v[0] * math.sin(t) + v[1] * math.cos(t)]) for t in (a, -a)]
-        Pp = G + max(cands, key=lambda u: sg * u[0])                       # (the turn that takes it outward, the notch opening sideways)
+        if L_.get('gorge'):                                              # (set outright: see NOTCH_LAPEL)
+            G = N + np.array([sg * L_['gorge'][0], L_['gorge'][1]]) * w
+            Pp = G + np.array([sg * L_['point'][0], L_['point'][1]]) * w
+            if L_.get('roll_side'):
+                N = roll_cross(E, M, B, sg, L_)[0]
+        else:
+            UVc = D['UV']
+            side = np.sign(cpos[:, 0]) == sg
+            endpts = np.nonzero(side & (np.abs(UVc[:, 0]) > D['smax'](UVc[:, 1]) - 0.6 * L_['spacing'] * w) & (UVc[:, 1] >= D['st_pt']))[0]
+            C3 = cpos[endpts[np.argmax(UVc[endpts, 1])]]
+            R3 = cpos[endpts[np.argmin(UVc[endpts, 1])]]
+            C = C3[[0, 2]]
+            G = R3[[0, 2]] + L_['notch_at'] * (C - R3[[0, 2]])
+            v = (C - G) * L_['point_len']
+            if L_.get('point_w'):                                           # (or a set length, in w, the direction kept)
+                v = v / max(np.linalg.norm(v), 1e-9) * L_['point_w'] * w
+            a = math.radians(L_['notch_angle'])
+            cands = [np.array([v[0] * math.cos(t) - v[1] * math.sin(t), v[0] * math.sin(t) + v[1] * math.cos(t)]) for t in (a, -a)]
+            Pp = G + max(cands, key=lambda u: sg * u[0])                       # (the turn that takes it outward, the notch opening sideways)
         q = np.linspace(0, 1, 24)[1:-1]
         chord = B - Pp
         bulge = np.array([chord[1], -chord[0]]) / np.linalg.norm(chord) * L_['belly'] * w
@@ -579,10 +592,39 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             body = None
         F = fo.Folds(fab, P2, T2)
         F.add(roll, ang, radius=L_['fold_radius'])
+        # The gorge is sewn to the collar, which is sewn to the neck: on the notch lapel's steep roll the lapel's top
+        # reaches up past the roll's end at X, and left free that corner hangs from nothing and flops over (a second
+        # crease across the lapel, its fold 25 to 40 degrees short). Its gorge edge past the turn is held where the
+        # fold as drafted lays it; the collar's seam row is set on it in turn (notch_collar).
+        sewn = np.zeros(len(P2), bool)
+        if L_.get('gorge') and L_.get('gorge_sewn', True):
+            i0 = int(np.argmin(np.linalg.norm(poly - N, axis=1)))
+            rd = (B - N) / np.linalg.norm(B - N)
+            G = min((poly[i0 - 1], poly[(i0 + 1) % len(poly)]), key=lambda q_: abs((q_ - N) @ rd) / max(np.linalg.norm(q_ - N), 1e-9))
+            # (the pattern carries the turn's own cloth, so the gorge is found where the fold lays it: the outline's
+            # points that land on the drafted gorge, N to G, in front view)
+            e2 = np.sort(np.concatenate([T2[:, [0, 1]], T2[:, [1, 2]], T2[:, [2, 0]]]), 1)
+            e2, c2 = np.unique(e2, axis=0, return_counts=True)
+            rimv = np.zeros(len(P2), bool)
+            rimv[np.unique(e2[c2 == 1])] = True
+            gv = G - N
+            sd_, up_ = F._sides()
+            for _, mv_, tg_, _, _ in list(F._targets(fab.pos, sd_, up_, 1.0)):
+                mv_ = np.asarray(mv_)
+                mv_ = np.nonzero(mv_)[0] if mv_.dtype == bool else mv_
+                dq_ = tg_[:, [0, 2]] - N
+                tq_ = np.clip(dq_ @ gv / (gv @ gv), 0, 1)
+                hit_ = (np.linalg.norm(dq_ - tq_[:, None] * gv[None], axis=1) < 0.08) & rimv[mv_] & past[mv_]
+                sewn[mv_[hit_]] = True
+                fab.pos[mv_[hit_]] = tg_[hit_]
+            log('collar: front %d: %d points of the gorge held as sewn to the collar' % (k, int(sewn.sum())))
+            fab.prev[:] = fab.pos
+            fab.pin(np.nonzero(sewn)[0])
         # (a fold solved before with the same cloth, body and settings is read back: the standing rule for solved folds)
         import hashlib
         import json as _json
         hh = hashlib.sha1()
+        hh.update(np.packbits(sewn).tobytes())
         for arr in (P2, T2, start, bodyP[use], bodyN[use]):
             hh.update(np.ascontiguousarray(np.round(np.asarray(arr, float), 5)).tobytes())
         hh.update(b'floor past the band')
@@ -601,7 +643,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             % (k, len(ext), nl, arc[-1], t[line[-1]] - t0, str(rep).replace(chr(10), '; ')))
         X = fab.pos.copy()
         made.append((line, X[ns:], tri))
-        parts.append(dict(st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use, past=past[ns:]))
+        parts.append(dict(st_v=st_v, P2=P2, T2=T2.copy(), ns=ns, roll=roll, line=line, ext=X[ns:].copy(), use=use, past=past[ns:], sewn=sewn[ns:]))
         FOLDED.append(dict(flat=P2, pos=X, T=T2.copy(), lap=lap, roll=roll, report=str(rep), body=(bodyP[use], bodyN[use])))
         moved += len(ext)
     if L_.get('whole', True):
@@ -667,7 +709,7 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
     offs = np.cumsum([nR] + [len(pt['ext']) for pt in parts])
     pos = np.vstack([W[R]] + [pt['ext'] for pt in parts])
     fab = xf.Fabric(pos.copy(), dict(FOLD_FABRIC))
-    fab.pin(np.nonzero(held)[0])
+    fab.pin(np.concatenate([np.nonzero(held)[0]] + [offs[k] + np.nonzero(pt['sewn'])[0] for k, pt in enumerate(parts)]))   # (and each lapel's gorge: sewn to the collar)
     Tr = np.array([(loc[f[0]], loc[f[j]], loc[f[j + 1]]) for k in reg for f in [fv[k]] for j in range(1, len(f) - 1)])
     fab.mesh([tuple(int(i) for i in t) for t in Tr], stretch=L_['fold_stretch'], rest_pos=pos.copy(), bend=1e-6, flat=1e-6)
     Hs, rests, comps, Fs = [], [], [], []
@@ -758,6 +800,384 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
     return Wn
 
 
+# The notch collar's own draft and solve, the tailor's way (Fabrics-Store's notched collar draft; U. of Kentucky
+# CT-LMH.176): the roll line is ONE straight line from the break point to a point one side-stand (1 inch) up the neck
+# from the neck point at the shoulder. Where that line crosses the bodice's neck edge (X) the lapel's roll ends and the
+# collar's begins. The collar is sewn round the neck edge from X to X and down each gorge (X to the notch G); its
+# stand is the cloth between the neck edge and the roll line, nothing at X and growing to the side stand at the
+# shoulder and the full stand at the back; past the roll it is turned over as the fall, and on the gorge it is all fall.
+NOTCH = dict(
+    fold=1.25,             # the fall folded over at the back and sides, below the horizontal (radians)
+    lean=0.18,             # the stand leans in to the neck
+    lie=1.6,               # the fronts are set out flat in the front's plane from this far (along the seam) behind X ...
+    front_over=1.6,        # ... going over from the round-the-neck shape across this length before that
+    corner=1.5,            # the band's lines turn the seam's corner at X over this length
+    roll_off=0.20,         # the roll line stands this far off the neck's skin
+    even=40,               # rounds of evening the fronts as laid on the shoulder
+    band=(0.15, 0.40),     # the roll's band of hinges: this far below and above the roll line, in w
+    roll_min=0.35,         # no roll hinges where the stand is under this share of its full height
+    rate=960,
+    drape=dict(stretch=1e-5, bend=1e-8, steps=1500),   # first the collar finds its lie, loosely, the outer front edge held
+    sewn=dict(stretch=1e-8, bend=1e-9, steps=2000),    # then the pattern is taken from that lie and the collar solved as cut
+)
+
+
+def side_roll(E, M, sg, L_=None, S0=SETTINGS, S=NOTCH):
+    """The point the roll line is aimed at: one side-stand (LAPEL['roll_side'], 1 inch at her scale) up the neck from
+    the neck point at the shoulder, leaning in as the stand does. sg: +1 her left (+x), -1 her right."""
+    L_ = LAPEL if L_ is None else L_
+    n = len(E)
+    A = E[n // 4 if sg < 0 else 3 * n // 4]
+    out = np.array([A[0], A[1] - M['yc'], 0.0])
+    out /= np.linalg.norm(out)
+    return A + L_['roll_side'] * M['w'] * (np.array([0, 0, 1.0]) * math.cos(S0['flare']) - out * math.sin(S['lean']))
+
+
+def roll_cross(E, M, B, sg, L_=None):
+    """X: where the roll line (the break point B, in (x, z), to side_roll's point) crosses the neck edge's front.
+    Returns (X in (x, z), X in space)."""
+    C = side_roll(E, M, sg, L_)[[0, 2]]
+    n = len(E)
+    ks = range(0, n // 4) if sg < 0 else range(n - 1, 3 * n // 4, -1)
+    d = C - B
+    for k in ks:
+        P, Q = E[k % n], E[(k + (1 if sg < 0 else -1)) % n]
+        e = (Q - P)[[0, 2]]
+        den = d[0] * e[1] - d[1] * e[0]
+        if abs(den) < 1e-12:
+            continue
+        r = P[[0, 2]] - B
+        u = (r[0] * e[1] - r[1] * e[0]) / den
+        v = (r[0] * d[1] - r[1] * d[0]) / den
+        if 0 <= v <= 1 and u > 0:
+            X3 = P + v * (Q - P)
+            return X3[[0, 2]], X3
+    raise ValueError('the roll line does not cross the neck edge')
+
+
+def _flatten(X3, UV0, ed):
+    """The flat pattern whose edge lengths are nearest the shape's own (least squares, from UV0)."""
+    from scipy.optimize import least_squares
+    from scipy.sparse import lil_matrix
+    L = np.linalg.norm(X3[ed[:, 0]] - X3[ed[:, 1]], axis=1)
+    J = lil_matrix((len(ed), 2 * len(UV0)))
+    for k, (a, b) in enumerate(ed):
+        J[k, [2 * a, 2 * a + 1, 2 * b, 2 * b + 1]] = 1
+
+    def res(q):
+        Q = q.reshape(-1, 2)
+        return np.linalg.norm(Q[ed[:, 0]] - Q[ed[:, 1]], axis=1) - L
+    Q = least_squares(res, UV0.ravel(), jac_sparsity=J, method='trf', max_nfev=200).x.reshape(-1, 2)
+    return Q - Q.mean(0)
+
+
+def notch_draft(arc, st_tab, M, R=RATIOS):
+    """The collar's mesh on its seam laid straight (s along it from the middle of the back, t up from it): st_tab is
+    the stand's height at each of the seam's points (arc). The pattern itself is taken from the shape (see _flatten)."""
+    from scipy.spatial import Delaunay
+    w = M['w']
+    L = arc[-1]
+    fb, ff = R['fall_back'] * w, R['fall_front'] * w
+
+    def st_of(s):
+        return np.interp(np.asarray(s, float) + 0.5 * L, arc, st_tab)
+    h = R['spacing'] * w
+
+    def top(s):
+        return st_of(s) + fb + (ff - fb) * np.clip(np.abs(s) / (0.5 * L), 0, 1) ** 2.0
+    t_end = float(top(0.5 * L))
+    ss = np.arange(-0.5 * L, 0.5 * L + 1e-9, h * 0.7)
+    bnd = [(s, 0.0) for s in ss] + [(s, float(top(s))) for s in ss]
+    for sgn in (-1, 1):
+        for t in np.arange(0, t_end + 1e-9, h * 0.7):
+            bnd.append((sgn * 0.5 * L, t))
+    gs = np.arange(-0.5 * L + h, 0.5 * L - h * 0.5, h)
+    gt = np.arange(h, float(top(0.0)) + t_end, h)
+    grid = [(s, t) for s in gs for t in gt if 0.4 * h < t < top(s) - 0.4 * h]
+    pts = np.unique(np.round(np.array(bnd + grid), 6), axis=0)
+    tri = Delaunay(pts)
+    mid = pts[tri.simplices].mean(1)
+    T = tri.simplices[(mid[:, 1] > 0) & (mid[:, 1] < top(mid[:, 0])) & (np.abs(mid[:, 0]) < 0.5 * L)]
+    A = pts[T]
+    area = 0.5 * np.abs((A[:, 1, 0] - A[:, 0, 0]) * (A[:, 2, 1] - A[:, 0, 1]) - (A[:, 2, 0] - A[:, 0, 0]) * (A[:, 1, 1] - A[:, 0, 1]))
+    T = T[area > 0.01 * h * h]
+    used = np.unique(T)
+    remap = -np.ones(len(pts), int)
+    remap[used] = np.arange(len(used))
+    pts, T = pts[used], remap[T]
+    return dict(UV=pts, T=T, L=L, stand=float(st_tab.max()), st_pt=st_of(pts[:, 0]), arc=arc, s0=-0.5 * L)
+
+
+def notch_collar(E, M, V, F, BV, BF, gorges, R=None, S=None, S0=SETTINGS, L_=None, log=print):
+    """The notch collar, drafted to the lapels as they lie on the bodice (V, F: the bodice with its lapels turned back;
+    BV, BF: the body; gorges: {side: (X in (x, z), the notch G in (x, z), X in space)}). Its seam is measured on the
+    cloth: up one gorge, round the neck edge from X to X, down the other. The roll line is set out in space (straight
+    from each X to side_roll's point, then round the neck at the stand's height), the stand is the cloth from the seam
+    to it, and the fall is turned over from it; at the fronts the fall is laid on the front and the shoulder. It is
+    draped loosely, its pattern taken from that lie, and then solved as cut, sewn by its seam rows, the roll's hinges
+    resting at the set shape's own angles (the pad-stitched, pressed roll). Returns the mesh with 'pos' (solved),
+    'des', 'flat' (the pattern) and 'strain' (% per edge against the pattern)."""
+    import hashlib
+    import json as _json
+    import fabric as xf
+    import folds as fo
+    from scipy.spatial import cKDTree
+    R = RATIOS if R is None else R
+    S = NOTCH if S is None else S
+    L_ = LAPEL if L_ is None else L_
+    w = M['w']
+    V = np.asarray(V, float)
+    BV = np.asarray(BV, float)
+    BN = xf.vertex_normals(BV, BF)
+    n = len(E)
+    up = np.array([0, 0, 1.0])
+    # the seam: the neck edge between the two X, and each gorge on the cloth's front face
+    k0 = int(np.floor(n * math.atan2(abs(gorges[-1][2][0]), -(gorges[-1][2][1] - M['yc'])) / (2 * np.pi))) + 1
+    k1 = n - int(np.floor(n * math.atan2(abs(gorges[1][2][0]), -(gorges[1][2][1] - M['yc'])) / (2 * np.pi))) - 1
+    seg0 = np.vstack([gorges[-1][2], E[k0:k1 + 1], gorges[1][2]])
+    vt = cKDTree(V[:, [0, 2]])
+
+    def gorge(X_, G_, m=13):
+        out = []
+        for q in np.linspace(0, 1, m)[1:]:
+            xz = X_ + q * (G_ - X_)
+            out.append([xz[0], V[vt.query_ball_point(xz, 0.14), 1].min() - S0['gap'] - 0.02, xz[1]])
+        return np.array(out)
+    g0, g1 = gorge(*gorges[-1][:2]), gorge(*gorges[1][:2])
+    seg = np.vstack([g0[::-1], seg0, g1])
+    a_ = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(seg, axis=0), axis=1))])
+    Lg = float(np.mean([a_[len(g0)], a_[-1] - a_[len(g0) + len(seg0) - 1]]))
+    ns = 200
+    arc = np.linspace(0, a_[-1], ns)
+    seg = np.column_stack([np.interp(arc, a_, seg[:, k]) for k in range(3)])
+    for _ in range(2):                                 # (the corner at X eased a little)
+        seg[1:-1] = 0.25 * seg[:-2] + 0.5 * seg[1:-1] + 0.25 * seg[2:]
+    L = arc[-1]
+    s = arc - 0.5 * L
+    sN = 0.5 * L - Lg                                  # (X)
+    sA = float(np.mean([abs(s[np.argmin(np.linalg.norm(seg - E[k], axis=1))]) for k in (n // 4, 3 * n // 4)]))   # (the neck point at the shoulder)
+    # the roll line in space
+    st, ss_ = R['stand'] * w, L_['roll_side'] * w
+    out = np.array([seg[:, 0], seg[:, 1] - M['yc'], np.zeros(ns)]).T
+    out /= np.linalg.norm(out, axis=1, keepdims=True)
+    d1 = up[None] * math.cos(S0['flare']) - out * math.sin(S['lean'])
+    roll = seg + (ss_ + (st - ss_) * (1 - np.clip(np.abs(s) / sA, 0, 1) ** 2))[:, None] * d1
+    for sg in (-1, 1):
+        iA = np.argmin(np.abs(s - sg * sA))
+        iX = np.argmin(np.abs(s - sg * sN))
+        m = (s * sg > sA) & (s * sg <= sN)
+        q = ((sN - s[m] * sg) / (sN - sA))[:, None]
+        roll[m] = seg[iX] + q * (roll[iA] - seg[iX])
+        roll[s * sg > sN] = seg[s * sg > sN]
+    off = roll - seg
+    for _ in range(4):                                 # (the line's turn at the shoulder rounded)
+        off[1:-1] = 0.25 * off[:-2] + 0.5 * off[1:-1] + 0.25 * off[2:]
+    off[np.abs(s) >= sN] = 0
+    roll = seg + off
+    skin = xf.MeshBody(BV, BN, gap=S['roll_off'], reach=1.0)
+    pr, hit = skin(roll.copy())
+    hit &= np.abs(s) < sN - 0.3
+    roll[hit] = pr[hit]
+    st_tab = np.linalg.norm(roll - seg, axis=1)
+    # The fronts are set out as the tailor draws them: flat on the front (the front view's plane), unfolded, the collar
+    # a band on its seam (the neck edge, and the gorge as it lies before the lapel is turned: mirrored in the roll
+    # line), and then whatever of it lies past the roll line turned over in it. pl[sg]: per seam point, its place in
+    # that plane, the direction of its line across the band, and how far up that line the roll line is.
+    wfs = np.clip((np.abs(s) - (sN - S['lie'] - S['front_over'])) / S['front_over'], 0, 1)
+    wfs = wfs * wfs * (3 - 2 * wfs)
+    pl = {}
+    P2 = seg[:, [0, 2]].copy()
+    U2 = np.zeros((ns, 2))
+    tc = np.zeros(ns)
+    for sg in (-1, 1):
+        side = 1 if (seg[-1, 0] > 0) == (sg > 0) else -1          # (which end of the seam this side is)
+        X_ = gorges[sg][0]
+        C3 = side_roll(E, M, sg, L_, S0, S)
+        C_ = C3[[0, 2]]
+        rh = (C_ - X_) / np.linalg.norm(C_ - X_)
+        nm = np.array([-rh[1], rh[0]])
+        if nm[0] * sg > 0:
+            nm = -nm                                           # (toward the middle: the side the lapel lies on unfolded)
+        m = s * side > 0
+        g = m & (np.abs(s) > sN)
+        d_ = P2[g] - X_
+        P2[g] = P2[g] - 2 * (d_ @ nm)[:, None] * nm[None] + 2 * ((d_ @ nm) * 0)[:, None] * nm[None]
+        P2[g] = X_ + (d_ @ rh)[:, None] * rh[None] - (d_ @ nm)[:, None] * nm[None]
+        idx = np.nonzero(m)[0]
+        idx = idx[np.argsort(np.abs(s[idx]))]                  # (from the back toward the notch)
+        Q = P2[idx]
+        tg = np.gradient(Q, axis=0)
+        th = np.unwrap(np.arctan2(tg[:, 1], tg[:, 0]))
+        kw = max(3, int(round(S['corner'] / (L / ns))) | 1)
+        for _ in range(2):                                     # (the lines turn the corner at X over this length, so they do not cross)
+            th = np.convolve(np.pad(th, kw // 2, mode='edge'), np.ones(kw) / kw, mode='valid')
+        u = np.column_stack([-np.sin(th), np.cos(th)])
+        iA = np.argmin(np.abs(np.abs(s[idx]) - 0.5 * (sA + sN)))
+        if u[iA] @ nm < 0:
+            u = -u                                             # (the band lies on the neck's side of its seam)
+        U2[idx] = u
+        d0 = (Q - X_) @ nm
+        un = u @ nm
+        tc[idx] = np.where((d0 < 0) & (un > 1e-3), -d0 / np.maximum(un, 1e-3), 0.0)
+        pl[sg] = dict(side=side, X=X_, rh=rh, nm=nm, X3=gorges[sg][2], C3=C3, len=float(np.linalg.norm(C_ - X_)))
+    tc[np.abs(s) >= sN] = 0
+    st_tab = (1 - wfs) * st_tab + wfs * np.minimum(tc, 1.5 * st)
+    D = notch_draft(arc, st_tab, M, R)
+    UV, T = D['UV'], np.asarray(D['T'])
+    D.update(sN=sN, sA=sA, Lg=Lg, seg=seg, roll=roll)
+    ed = np.unique(np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1), axis=0)
+    D['ed'] = ed
+
+    def strain(X, ref):
+        return 100 * (np.linalg.norm(X[ed[:, 0]] - X[ed[:, 1]], axis=1) / np.linalg.norm(ref[ed[:, 0]] - ref[ed[:, 1]], axis=1) - 1)
+    # the set shape: the stand from the seam to the roll, the fall turned over from it
+    sv, t = UV[:, 0] + 0.5 * L, UV[:, 1]
+    Eo = np.column_stack([np.interp(sv, arc, seg[:, k]) for k in range(3)])
+    Ro = np.column_stack([np.interp(sv, arc, roll[:, k]) for k in range(3)])
+    stp = D['st_pt']
+    wf = np.interp(sv, arc, wfs)
+    outv = np.array([Eo[:, 0], Eo[:, 1] - M['yc'], np.zeros(len(Eo))]).T
+    outv /= np.linalg.norm(outv, axis=1, keepdims=True)
+    back = outv * math.cos(S['fold']) - up[None] * math.sin(S['fold'])
+    frac = np.clip(t / np.maximum(stp, 1e-6), 0, 1)[:, None]
+    dd = np.maximum(t - stp, 0)[:, None]
+    lift = (S0['lift'] * np.clip(stp / st, 0, 1))[:, None]
+    turn = np.minimum(dd / (0.35 * w), 1.0) ** 0.5
+    des = Eo + frac * (Ro - Eo) + dd * back + turn * (outv * lift + up[None] * 0.6 * lift)
+    # the fronts, set out flat and turned over in the roll line
+    sel = BV[:, 2] > 44
+    st_ = cKDTree(BV[sel][:, [0, 2]])
+    over = np.zeros(len(UV), bool)                    # (past the roll line: turned over)
+    for sg in (-1, 1):
+        q_ = pl[sg]
+        mv = (UV[:, 0] * q_['side'] > 0) & (wf > 0)
+        iv = np.nonzero(mv)[0]
+        p0 = np.column_stack([np.interp(sv[iv], arc, P2[:, k]) for k in range(2)])
+        u0 = np.column_stack([np.interp(sv[iv], arc, U2[:, k]) for k in range(2)])
+        u0 /= np.linalg.norm(u0, axis=1, keepdims=True)
+        t0 = np.interp(sv[iv], arc, tc)
+        ys = np.interp(sv[iv], arc, seg[:, 1])
+        q = p0 + t[iv][:, None] * u0
+        dm = (q - q_['X']) @ q_['nm']
+        ov = dm > 0
+        q = np.where(ov[:, None], q - 2 * dm[:, None] * q_['nm'][None], q)
+        lam = np.clip(((p0 + t0[:, None] * u0 - q_['X']) @ q_['rh']) / q_['len'], 0, 1.3)
+        yr = q_['X3'][1] + lam * (q_['C3'][1] - q_['X3'][1])       # (the roll line where this point's line crosses it)
+        y = np.where(ov, yr, ys + np.clip(t[iv] / np.maximum(t0, 1e-6), 0, 1) * (yr - ys))
+        # the turned-over cloth lies in front of whatever is under it: the stand, the bodice, the lapel's seam, the body
+        if (~ov).sum() > 3:
+            ks = cKDTree(q[~ov])
+            dn, jn = ks.query(q[ov])
+            y_st = np.where(dn < 0.25, y[~ov][jn] - 0.15, 1e9)
+        else:
+            y_st = np.full(int(ov.sum()), 1e9)
+        y_cl = np.full(int(ov.sum()), 1e9)
+        for a, xz in enumerate(q[ov]):
+            near = vt.query_ball_point(xz, 0.14)
+            if near:
+                y_cl[a] = V[near, 1].min() - S0['gap'] - 0.05
+            else:
+                near = st_.query_ball_point(xz, 0.2)
+                if near:
+                    y_cl[a] = BV[sel][near, 1].min() - S0['gap'] - 0.05
+        yo = np.minimum(y_st, y_cl)
+        seam_row = t[iv][ov] < 1e-6                       # (the gorge itself stays on its seam)
+        y[ov] = np.where(seam_row | (yo > 1e8), y[ov], yo)
+        dp = np.column_stack([q[:, 0], y, q[:, 1]])
+        des[iv] = des[iv] + wf[iv][:, None] * (dp - des[iv])
+        over[iv] = ov
+    # what it lies on: the bodice with its lapels, and the body
+    N = xf.vertex_normals(V, F)
+    rad = np.array([V[:, 0], V[:, 1] - M['yc']]).T
+    N = N * np.where(((N[:, :2] * rad).sum(1) < 0)[:, None], -1, 1)
+    sel = BV[:, 2] > 44
+    bodyP, bodyN = np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]])
+    box = (bodyP[:, 2] > des[:, 2].min() - 2.5) & (bodyP[:, 2] < des[:, 2].max() + 1.5)
+    bodyP, bodyN = bodyP[box], bodyN[box]
+    hh = hashlib.sha1()
+    for arr in (seg, roll, UV, T, bodyP, bodyN):
+        hh.update(np.ascontiguousarray(np.round(np.asarray(arr, float), 5)).tobytes())
+    hh.update(_json.dumps([S, S0, dict(R), L_['roll_side']], sort_keys=True, default=str).encode())
+    cfile = os.path.join(fo.cache_dir(), 'notch-collar-%s.npz' % hh.hexdigest()[:20])
+    if os.path.exists(cfile) and not os.environ.get('COLLAR_NO_CACHE'):
+        got = np.load(cfile, allow_pickle=True)
+        D.update(pos=got['pos'], des=got['des'], flat=got['flat'], strain=got['strain'], draped=got['draped'])
+        log('collar: notch collar: %s (from the fold cache)' % str(got['report']))
+        return D
+    body = xf.MeshBody(bodyP, bodyN, gap=S0['gap'], reach=1.0)
+    # the fall at the fronts set down on the cloth under it, then evened out over its neighbours (set down point by
+    # point the cloth takes every step of the surface under it)
+    ws = wf * over
+    nbr = [[] for _ in range(len(UV))]
+    for a, b in ed:
+        nbr[a].append(b)
+        nbr[b].append(a)
+    h_sp = R['spacing'] * w
+    fixed = t < 0.3 * h_sp
+    des0 = des.copy()
+    for _ in range(S['even']):
+        avg = np.array([des[n_].mean(0) for n_ in nbr])
+        des = des + np.where(fixed, 0.0, 0.5 * ws)[:, None] * (avg - des)
+        pq, tq = body(des.copy())
+        des = np.where((tq & (ws > 0))[:, None], pq, des)
+    # (evening shrinks a free edge inward: the outline's lengths are kept by flattening the laid shape before it first)
+    flat = _flatten(des, _flatten(des0, UV, ed), ed)
+    flat3 = np.column_stack([flat, np.zeros(len(flat))])
+    sd = strain(des, flat3)
+    a2, b2_, c2 = flat[T[:, 0]], flat[T[:, 1]], flat[T[:, 2]]
+    cr = (b2_[:, 0] - a2[:, 0]) * (c2[:, 1] - a2[:, 1]) - (b2_[:, 1] - a2[:, 1]) * (c2[:, 0] - a2[:, 0])
+    log('collar: notch collar: seam %.2f (each gorge %.2f; X at %.2f, the shoulder at %.2f from the back), stand %.2f at the back, %.2f at the shoulder; the set shape against its flattened pattern: strain 5/95 %% %.1f %.1f, worst %.1f %.1f; %d of %d triangles flipped in the pattern'
+        % (L, Lg, sN, sA, st_tab[ns // 2], float(np.interp(0.5 * L + sA, arc, st_tab)), *np.percentile(sd, [5, 95]), sd.min(), sd.max(), int((cr * np.sign(np.median(cr)) < 0).sum()), len(T)))
+    H = fo.hinges(T)
+    mid_t = 0.5 * (t[H[:, 2]] + t[H[:, 3]])
+    mid_st = 0.5 * (stp[H[:, 2]] + stp[H[:, 3]])
+    on = (mid_t > mid_st - S['band'][0] * w) & (mid_t < mid_st + S['band'][1] * w) & (mid_st > S['roll_min'] * st)
+    tops = {}
+    for i in range(len(UV)):
+        k = round(float(UV[i, 0]), 3)
+        if k not in tops or t[i] > t[tops[k]]:
+            tops[k] = i
+    edge_front = np.array([i for i in tops.values() if wf[i] > 0.3 and t[i] > stp[i] + 3 * h_sp])
+    pins0 = np.nonzero(t < 1.05 * h_sp)[0]             # (sewn: the seam's row and the one above it)
+
+    def run(start, flat3, pins, stretch, bend, steps):
+        fab = xf.Fabric(start.copy(), dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4))
+        fab.prev[:] = fab.pos
+        fab.pin(pins)
+        Hc = H[on & (fab.w[H] > 0).any(1)]
+        rest = fo.dihedral(des, Hc)
+        comp = np.zeros(len(Hc))
+        soft = np.zeros(len(UV))
+        soft[np.unique(Hc)] = 1e-2
+        fab.mesh([tuple(int(i) for i in tr) for tr in T], stretch=stretch, rest_pos=flat3, bend=bend, flat=bend, bend_at=soft)
+        Fh = fo.Folds(fab, flat3, T)
+        batches = fo._colour(Hc, fab.w == 0)
+        h = 1.0 / S['rate']
+        fab.settings['damping'] = 0.35
+        for _ in range(steps):
+            fab.step(h, body, neutral=True)
+            lam = np.zeros(len(Hc))
+            for _ in range(4):
+                Fh._walk(Hc, rest, comp, h, batches, lam)
+            p, hit_ = body(fab.pos.copy())
+            live = hit_ & (fab.w > 0)
+            fab.pos[live] = p[live]
+        return fab.pos.copy(), float(np.abs(fab.pos - fab.prev).max())
+    A, _ = run(des, flat3, np.union1d(pins0, edge_front), **S['drape'])
+    flat = _flatten(A, flat, ed)
+    flat3 = np.column_stack([flat, np.zeros(len(flat))])
+    pos, far = run(A, flat3, pins0, **S['sewn'])
+    sn = strain(pos, flat3)
+    j = cKDTree(UV).query(UV * np.array([-1, 1]))[1]
+    asym = np.linalg.norm(pos - pos[j] * np.array([-1, 1, 1]), axis=1)
+    rep = ('%d points; solved strain against its pattern 5/95 %% %.1f %.1f, worst %.1f %.1f; fastest point at the end %.4f; left/right difference median %.3f, max %.3f'
+           % (len(UV), *np.percentile(sn, [5, 95]), sn.min(), sn.max(), far, np.median(asym), asym.max()))
+    np.savez(cfile, pos=pos, des=des, flat=flat, strain=sn, draped=A, report=rep)
+    D.update(pos=pos, des=des, flat=flat, strain=sn, draped=A)
+    log('collar: notch collar: %s' % rep)
+    return D
+
+
 def over_lapels(pos, D, laps, M, gap=0.09):
     """The collar's fall lies over the lapels (the lapel's gorge is sewn under it): any of the collar's points behind
     a lapel, or nearer it than gap, set out in front of it, and the move eased into the cloth around."""
@@ -837,7 +1257,7 @@ def front_cut(V, faces, M):
     BN = np.array([v.normal[:] for v in body.data.vertices]) @ bm[:3, :3].T
     sel = BV[:, 2] > 44
     bodyP, bodyN = np.vstack([Vu, BV[sel]]), np.vstack([Nn, BN[sel]])
-    pos, _ = solve(D, E, M, bodyP, bodyN)
+    pos = None if LAPEL.get('gorge') else solve(D, E, M, bodyP, bodyN)[0]
     # each front's lapel starts at its own edge at the top button: the right front's edge lies lap past the middle
     # on her left, the left front's (under it) lap past it on her right, so the two roll lines cross above the top
     # button (the V's point) and below it the fronts lie one on the other
@@ -866,7 +1286,8 @@ def front_cut(V, faces, M):
     outlines = [(r_[0], r_[1], r_[2]), (A, l_[1], pl)]
     cuts = [shapely.Polygon(_mirror(poly, Bk, Nk)).buffer(0) for Bk, Nk, poly in outlines]
     DRAFTED.update(E=E, D=D, pos=pos, outlines=outlines, bodyP=bodyP, bodyN=bodyN, cuts=cuts, lap=lapw,
-                   layers=[1, 2], breaks=(r_[0], l_[0]))
+                   layers=[1, 2], breaks=(r_[0], l_[0]),
+                   gorges={sg_: (o_[1], o_[2][2], roll_cross(E, M, o_[0], sg_)[1]) for o_ in outs for sg_ in [1 if o_[1][0] > 0 else -1]})
     yc = M['yc']
 
     def opening(Bq, Nq, xe):
@@ -986,8 +1407,14 @@ def build():
             with open(os.environ['COLLAR_FOLD_OUT'], 'wb') as fh:
                 pickle.dump(dict(V=Vf, F=[list(p.vertices) for p in b.data.polygons], skinP=BV, M=M, folded=FOLDED,
                                  skinF=[list(p.vertices) for p in body.data.polygons], outlines=DRAFTED['outlines'],
-                                 front=dict(FRONT_SOLVE)), fh)
-        pos = over_lapels(pos, D, folded, M)
+                                 front=dict(FRONT_SOLVE), E=E, gorges=DRAFTED.get('gorges')), fh)
+        if pos is None:                                # (the notch collar: drafted to the lapels as they lie, and folded)
+            Vf = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
+            D = notch_collar(E, M, Vf, [list(p.vertices) for p in b.data.polygons], BV,
+                             [list(p.vertices) for p in body.data.polygons], DRAFTED['gorges'])
+            pos = D['pos']
+        else:
+            pos = over_lapels(pos, D, folded, M)
     else:
         pos, _ = solve(D, E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]))
         laps = lapels(E, M, np.vstack([V, BV[sel]]), np.vstack([N, BN[sel]]), D, pos)
@@ -996,8 +1423,9 @@ def build():
     if os.environ.get('COLLAR_OUT'):                   # (the collar as solved and as shown, for its contour check)
         import pickle
         with open(os.environ['COLLAR_OUT'], 'wb') as fh:
-            pickle.dump(dict(pos=pos, solved=DRAFTED.get('pos'), UV=D['UV'], T=D['T'], st_pt=D['st_pt'], E=E, M=M,
-                             design=design(D, E, M)[0], V=V, F=Fq, skinP=BV), fh)
+            pickle.dump(dict(pos=pos, solved=D.get('pos', DRAFTED.get('pos')), UV=D['UV'], T=D['T'], st_pt=D['st_pt'], E=E, M=M,
+                             design=D['des'] if 'des' in D else design(D, E, M)[0], flat=D.get('flat'), V=V, F=Fq, skinP=BV,
+                             skinF=[list(p.vertices) for p in body.data.polygons]), fh)
     me = bpy.data.meshes.new('Collar')
     me.from_pydata([tuple(p) for p in pos], [], [tuple(int(i) for i in t) for t in D['T']])
     me.update()
@@ -1019,7 +1447,7 @@ def build():
     sol.offset = 0
     for c in bpy.data.objects:                       # (the buttons above the break: the front is open there)
         if c.name.startswith('Redingote bodice') and c.name.endswith('buttons'):
-            open_front([c], M, E, D)
+            open_front([c], M, E, DRAFTED.get('D', D))
     if not DRAFTED:                                  # (the earlier way, a lapel laid on as its own piece)
         for i, (lp, lt) in enumerate(laps):
             lme = bpy.data.meshes.new('Lapel %d' % i)
