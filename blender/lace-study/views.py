@@ -124,7 +124,7 @@ def build(d, look):
     elif o['mount'] == 'jabot':
         bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0.05, -o['finished'] / 2))
         pl = bpy.context.object
-        pl.scale = (o['depth'] * 2.5, 1, o['finished'] + 4)
+        pl.scale = (o['depth'] * 2.5, o['finished'] + 4, 1)   # (local y is the height once turned upright)
         pl.rotation_euler = (math.pi / 2, 0, 0)
         pl.data.materials.append(material('body', BODY))
     return ob, verts
