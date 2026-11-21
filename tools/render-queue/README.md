@@ -136,7 +136,7 @@ the combined render shows where the layers meet.
 that job for up to **5 minutes** (`READY_CUTOFF_S`) while another piece of the set or another view of the same
 figure is announced and not yet sent. When the window ends, the batch renders with whichever pieces are ready.
 A slower piece goes in the next batch, and its thread is not held up either. Once every announced piece has
-come, the job starts at once. A job nothing is announced for waits only 45 s (`WINDOW_S`) after its newest
+come, the job starts at once. A job nothing is announced for waits only 22 s (`WINDOW_S`) after its newest
 request, to catch requests sent together, and never longer.
 
 **Other batching rules:**

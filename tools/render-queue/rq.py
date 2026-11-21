@@ -43,7 +43,7 @@ Batching rules (John, 2026-11-19)
     open intent could join (same figure, or a piece of the same set) is held for it: the collation window, 5 minutes
     (READY_CUTOFF_S) from the first piece ready (its request). When it ends the batch renders with whichever pieces
     are ready; a slower piece goes in the next batch. When every announced piece has come, it starts at once.
-  * Without an intent a job still waits WINDOW_S (45 s) after its newest request for a related one, never longer.
+  * Without an intent a job still waits WINDOW_S (22 s) after its newest request for a related one, never longer.
   * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
     job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
@@ -70,7 +70,7 @@ PRIORITY = {"frames": 0, "views": 0, "glb": 1, "sheet": 9}
 PEN = {"quiet_s": 2700, "max": 3, "age_s": 600}
 MAX_BATCH = int(os.environ.get("RQ_MAX_BATCH", "4"))      # branches merged into one commit
 MAX_MERGE = int(os.environ.get("RQ_MAX_MERGE", "6"))      # requests in one combined views.py job
-WINDOW_S = int(os.environ.get("RQ_WINDOW", "45"))         # a job waits this long after its newest request
+WINDOW_S = int(os.environ.get("RQ_WINDOW", "22"))         # a job waits this long after its newest request
 READY_CUTOFF_S = int(os.environ.get("RQ_READY_CUTOFF", "300"))   # John: a 5-minute collation window from the first piece ready
 INTENT_TTL_S = 1800                                       # an intent nobody followed lapses after its ETA + this
 VIEWS_PY = "blender/base/views.py"

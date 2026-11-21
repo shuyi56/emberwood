@@ -134,3 +134,41 @@ repeated on more than one garment. The reviewer applies them once John merges th
   no swatch-bench result at that commit is cited.
 - **Fix:** Find the numbers on the swatch bench first (a strip of the cloth, rendered in seconds), cite the bending
   length it shows, and only then render the garment.
+
+## R004 Foot and toe meshes with inward normals or a melted forefoot
+
+- **Seen:** 3 rejections on the foot thread (2026-11-21, 06:56 to 07:47Z): toes flat and melted into a plate, a dark
+  notch at the toes' base in profile and 3/4, and a sheet of skin between the shins with inward normals on folded
+  forefoot sections.
+- **Spot:** The diff rebuilds or smooths the forefoot, toes or heel (SDF fillet, section lofts) and no normals or
+  toe-separation check is in the build output.
+- **Fix:** Check that every section loft has outward normals and no folded sections before the fillet, and render
+  the profile and 3/4 crop of the toes (the notch and the plate show there first).
+
+## R005 Render framing that does not match the request
+
+- **Seen:** 3 rejections in the day: `--zoom` read as closeness when it is the view's width (the lips came out about
+  100 px across), a body left unparented so every angle showed one side, and a figure rebuilt with the wrong parts
+  because a module-level set was lost when the worker reused the module.
+- **Spot:** A view or crop request that sets `--zoom`, takes a part off the rig, or relies on a module-level setting
+  made at import.
+- **Fix:** State the visible width in the request and check the first frame's size; keep the body parented to the
+  rig; set per-figure parts inside the build, not at import.
+
+## R006 Free lace ends longer than the reference line
+
+- **Seen:** 2 rejections on the boot thread (2026-11-21, 02:25 and 02:38Z): free ends of 22/17 cm ran past the sole
+  and hung in the air, and after the first fix 15/12 cm still ran below the mid-shin line John drew on the front view.
+- **Spot:** The diff sets a free end length (bow tails, tie ends) as a fixed number, or sets it without a line to
+  compare against on the garment.
+- **Fix:** Derive the length from a landmark on the garment (mid-shin, hem, knee), put that line on the clay view,
+  and check the ends against it in the first round, not after John's circle.
+
+## R007 Lapels and collars laid on, not cut from the front
+
+- **Seen:** 2 rejections from John on the redingote (2026-11-20, 14:37 and 15:47Z): lapels added as ready-shaped
+  triangles laid on the chest, and a bodice front fold that came out as a flat striped flap with ragged cut edges.
+- **Spot:** The diff adds a lapel, collar or revers as its own flat piece placed over the chest instead of
+  drafting it as part of the front panel with a fold line.
+- **Fix:** Draft the lapel as the folded-back part of the front panel (roll line, break point, return), solve the
+  fold, and check the 3/4 view for a flap standing off the chest before sending it.
