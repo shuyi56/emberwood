@@ -103,7 +103,28 @@ class Bed:
                 m = np.argsort(np.abs(self.P[:, 1] - y))[:4]
             xl.append(self.P[m, 0].min() - grow)
             xr.append(self.P[m, 0].max() + grow)
-        return np.array(xl), np.array(xr)
+        xl, xr = np.array(xl), np.array(xr)
+        # (ahead of the ball the sole holds the ball's breadth: the toes' pads touch in patches, but the sole runs
+        # under all of them; the toe is rounded below)
+        if ys[-1] < ys[0]:
+            ib = int(np.argmax(xr - xl))
+            xl[ib:] = np.minimum.accumulate(xl[ib:])
+            xr[ib:] = np.maximum.accumulate(xr[ib:])
+        # (the cells' edges step by a cell; smoothed along the length so the outline is a curve, not a staircase)
+        k = np.array([1.0, 2.0, 3.0, 2.0, 1.0]) / 9.0
+        for _ in range(3):
+            xl = np.convolve(np.pad(xl, 2, mode='edge'), k, mode='valid')
+            xr = np.convolve(np.pad(xr, 2, mode='edge'), k, mode='valid')
+        # (the back and the toe rounded in plan: the width eases to a round over the last half of a heel's breadth)
+        s_ = np.abs(ys - ys[0]), np.abs(ys - ys[-1])
+        r = 0.5 * float(np.median(xr - xl))
+        for dist in s_:
+            near = dist < r
+            c = 0.5 * (xl + xr)
+            f = np.sqrt(np.clip(1 - ((r - dist) / r) ** 2, 0.0, 1.0))
+            f = np.where(near, np.maximum(f, 0.25), 1.0)
+            xl, xr = c - (c - xl) * f, c + (xr - c) * f
+        return xl, xr
 
 
 def build_heel(side, f, d, out, H, nv=11):
@@ -111,7 +132,7 @@ def build_heel(side, f, d, out, H, nv=11):
     Pf, zb = out['Pf'], out['zb']
     bed = Bed(Pf, zb)
     welt = 0.022 * H                                     # (the boot's own welt: last.RATIOS['welt'])
-    back, toe = Pf[:, 1].max() + 0.5 * bed.step, Pf[:, 1].min() - 0.5 * bed.step
+    back, toe = Pf[:, 1].max() + 0.5 * bed.step, Pf[:, 1].min() - 0.5 * bed.step - 0.25   # (past the toes' tips)
     ys = np.linspace(back, toe, 46)
     xl, xr = bed.outline(ys, 0.5 * bed.step)
     v = np.linspace(0, 1, nv)
