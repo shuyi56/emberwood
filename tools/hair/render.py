@@ -90,13 +90,17 @@ def grow_children(F, Gm, n, seed=5):
     gl, cl = lock(R), lock(root)
     if 'lock' in Gm:                      # the groom's own locks (with the bangs): a child takes its nearest guide's
         gl = Gm['lock'].astype(int)
+        if 'clump' in Gm and Gm['clump'].max() > 0:      # the wave locks: a child blended across two waves' phases
+            gl = gl * 1000 + Gm['clump'].astype(int)    # would hang half as wavy, so it blends within its own
         cl = gl[cKDTree(R).query(root)[1]]
     d = np.zeros((n, 3)); nb = np.zeros((n, 3), int)
     for g in np.unique(gl):
         gi = np.where(gl == g)[0]; ci = np.where(cl == g)[0]
         if len(ci):
-            dd, kk = cKDTree(R[gi]).query(root[ci], k=3)
-            d[ci], nb[ci] = dd, gi[kk]
+            kq = min(3, len(gi))                 # (a lock of one or two guides: its nearest repeated)
+            dd, kk = cKDTree(R[gi]).query(root[ci], k=kq)
+            dd, kk = np.atleast_2d(dd.T).T if kq == 1 else dd, np.atleast_2d(kk.T).T if kq == 1 else kk
+            d[ci], nb[ci] = dd[:, [0, min(1, kq - 1), kq - 1]], gi[kk[:, [0, min(1, kq - 1), kq - 1]]]
     w = 1.0 / np.maximum(d, 1e-4) ** 2
     w /= w.sum(1, keepdims=True)
     G, S1 = X.shape[:2]
@@ -205,12 +209,15 @@ def hair_samples(paths, px):
     ok = ~(np.isnan(A[..., 0]) | np.isnan(B[..., 0]))
     A, B = A[ok], B[ok]
     seg = np.linalg.norm(B - A, axis=1)
-    k = max(1, int(math.ceil(seg.max() / px)))
-    f = (np.arange(k) + 0.5) / k
-    P = (A[:, None] * (1 - f)[None, :, None] + B[:, None] * f[None, :, None]).reshape(-1, 3)
-    T = np.repeat(unit(B - A), k, 0)
-    along = np.repeat(np.nonzero(ok)[1], k) + np.tile(f, len(A))
-    child = np.repeat(np.nonzero(ok)[0], k)
+    # one point per pixel of each segment's own length (one long segment must not set the count for all of them)
+    k = np.maximum(1, np.ceil(seg / px).astype(int))
+    rep = np.repeat(np.arange(len(A)), k)
+    first = np.cumsum(k) - k
+    f = (np.arange(len(rep)) - first[rep] + 0.5) / k[rep]
+    P = A[rep] * (1 - f)[:, None] + B[rep] * f[:, None]
+    T = unit(B - A)[rep]
+    along = np.nonzero(ok)[1][rep] + f
+    child = np.nonzero(ok)[0][rep]
     return P, T, along, child
 
 
@@ -377,7 +384,12 @@ def main():
     nch = int(a[a.index('--children') + 1]) if '--children' in a else 24000
     size = int(a[a.index('--size') + 1]) if '--size' in a else 900
     os.makedirs(out, exist_ok=True)
-    global HEAD_CLOUD
+    global HEAD_CLOUD, FILL_SRGB, CE, CP
+    if '--tone' in a:                      # the character's hairTone in the creator, e.g. 36251c (the Warden)
+        h = a[a.index('--tone') + 1].lstrip('#')
+        FILL_SRGB = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    if '--melanin' in a:                   # eumelanin, pheomelanin [PBR4], e.g. 2.4,0.4 for a dark brown
+        CE, CP = (float(v) for v in a[a.index('--melanin') + 1].split(','))
     HEAD_CLOUD = SF.load_head(head)
     surf = SF.Surface(HEAD_CLOUD)
     F = SF.build(surf)

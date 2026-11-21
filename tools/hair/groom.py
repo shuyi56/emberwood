@@ -1,7 +1,8 @@
 """The groom (hair rebuild, foundations 3 to 6): real strands on the measured scalp, settled under their own weight by
 a rod model, with a mass and volume budget, and a style written as operations on the natural fall.
 
-    python3 tools/hair/groom.py HEAD.json.gz OUT_DIR [--guides 2400] [--style ranger] [--reuse OLD/groom.npz]
+    python3 tools/hair/groom.py HEAD.json.gz OUT_DIR [--guides 2400] [--style ranger|warden] [--reuse OLD/groom.npz]
+        [--trace CREATOR_STYLE.json.gz]      (warden: the natural wave, cut on the creator's length line; needs --trace)
     python3 tools/hair/groom.py --selftest OUT_DIR         the cantilever check of the rod model
 
 Units: head heights (HH) for geometry, as scalp_field.py; SI inside the energy (1 HH = 0.219 m).
@@ -13,7 +14,8 @@ Foundation 3, the strand (one hair):
   [DLM07] curl: the geometric classification into eight groups (De la Mettrie et al. 2007, Hum Biol 79:265; method
          in PMC5453415): groups I-IV by the curve diameter of a 6 cm length, V-VIII by a 0.98 cm curl meter and the
          number of waves. The Ranger's hair is straight (group I): no intrinsic curvature. The CD cut-offs of groups
-         I-IV are not in the open text, so curly groups wait for them.
+         I-IV are not in the open text, so curly groups wait for them. The Warden's wave is taken from the creator
+         instead (see "natural waves" below): a rest curvature solved under gravity.
   Cross-section taken round (ellipticity is what makes hair curl; group I is near round).
 Foundation 4, the mechanics: a Kirchhoff rod, inextensible, bending energy EI/2 * integral of curvature squared,
   gravity, the head and the body as colliders, solved for rest (static equilibrium) by minimising the total energy.
@@ -426,6 +428,163 @@ def bang_set(X, bang):
     return kb0
 
 
+# ---------------------------------------------------------------------------------------------------- natural waves
+# The Warden's waves (the creator's wavyFull, main.js wavyMass) as the hair's own shape: a natural wave is in the fibre
+# (its rest curvature), not set by a brush, so unlike the bangs it is kept in the rod and solved under gravity.
+# The weight of the hair below a point pulls the wave out there. For a small wave of wavenumber k = 2 pi / lambda
+# under tension T, the rod's balance B (y - y0)'''' = T y'' gives the settled amplitude
+#     A = A0 / (1 + T / (B k^2)),  T = w h   (h: the length of hair hanging below)
+# so a wave is half pulled out where h = Lg^3 k^2 (Lg the elastogravity length, 4.48 cm): 17.6 cm for a 142 mm wave.
+# The root of a long wavy fall hangs straighter and the ends wave, as the creator draws it (its wave grows in below
+# z 0.3, sm(0.3, -0.05, z)). Checked on a free-hanging rod: 2.4 / 3.5 / 5.2 mm settled against 2.6 / 3.7 / 5.4 mm
+# from the formula at 50 / 30 / 15 cm of hang (10 mm rest wave).
+# The solver: L-BFGS crawls from either the rest shape or the straight fall (both stall well above the minimum: the
+# tension mode is stiff), so it starts from the formula's shape, the lowest energy of the three by far.
+WAVE_LAM0, WAVE_LAM_STEP = 0.5, 0.08   # HH: the creator's wavelength by section round the head (wavyMass: 0.5 + 0.08 sec)
+WAVE_PHASE = (0.0, 1.9, 3.6, 5.1, 0.8)  # rad: the creator's phase by section (+0.6 on its left side), wavyMass
+WAVE_SEC = 0.75                    # rad: the creator's section width round the head, sec = floor((|th| + 0.2) / 0.75)
+WAVE_LOOSE = 0.6                   # rad: each lock's own phase jitter within its section (the creator's 0.6 r)
+WAVE_RADIAL = 0.85                 # the wave's out-of-scalp axis against its sideways axis (the creator's 0.034 / 0.04)
+WAVE_Z_ON = 0.3                    # HH: the wave's phase counted from where the hair crosses this height (the creator's
+                                   # depth = 0.3 - z), so its crests fall where the creator's do
+WAVE_Z_RAMP = (0.3, -0.05)         # HH: the rest wave grows in down the fall between these heights, the creator's
+                                   # W = sm(0.3, -0.05, z) (its top is sleek: the crown and the sides above the jaw lie
+                                   # combed flat). Laid by the straight fall's height, so it is fixed along each hair.
+WAVE_A_MM = 30.0                   # the rest wave's amplitude, CALIBRATED: the settled wave below the shoulders matches
+                                   # the creator's (about 11 mm, measured on its strands as on the groom's)
+WAVE_END_JIT = 0.2                 # HH: the wave locks' ends spread up from the creator's longest (its lock tips, measured:
+                                   # 0.2 HH between its longest and its median ends over the back)
+WAVE_ITERS = 300                   # L-BFGS steps per contact stage for the wave settle
+WAVE_LOCKS = 88                    # the wave locks (one phase each, their children blended only within them): the
+                                   # creator's wavyFull has 88 strand locks
+
+
+def wave_locks(roots, group, n=WAVE_LOCKS, seed=4):
+    """The locks a wave is shared in: k-means on the roots within each group (the front each side and the back), so
+    neighbouring guides wave together and the children, blended within a lock, keep the wave instead of averaging
+    two phases flat."""
+    from scipy.cluster.vq import kmeans2
+    lock = np.zeros(len(roots), int); nxt = 0
+    for g in np.unique(group):
+        gi = np.where(group == g)[0]
+        k = max(1, int(round(n * len(gi) / len(roots))))
+        _, lab = kmeans2(roots[gi], k, minit='++', seed=seed)
+        lock[gi] = nxt + lab; nxt += k
+    return lock
+
+
+def wave_frame(X):
+    """Along each path: the tangent, the out-of-scalp axis (horizontal, away from the head's axis, normal to the
+    tangent), and the sideways axis (round the head)."""
+    T = np.gradient(X, axis=1); T /= np.maximum(np.linalg.norm(T, axis=-1, keepdims=True), 1e-12)
+    r = X.copy(); r[..., 2] = 0; r[..., 0] -= SF.AXIS[0]; r[..., 1] -= SF.AXIS[1]
+    r -= T * (r * T).sum(-1, keepdims=True); r /= np.maximum(np.linalg.norm(r, axis=-1, keepdims=True), 1e-12)
+    return T, r, np.cross(T, r)
+
+
+def wave_params(roots, lock):
+    """Wavelength (HH) and phase per guide: the creator's section by the root's angle, one phase per lock."""
+    th = SF.theta(roots)
+    sec = np.minimum(4, np.floor((np.abs(th) + 0.2) / WAVE_SEC)).astype(int)
+    lam = WAVE_LAM0 + WAVE_LAM_STEP * sec
+    jit = np.random.default_rng(9).random(lock.max() + 1)[lock]
+    ph = np.array(WAVE_PHASE)[sec] + np.where(th > 0, 0.6, 0.0) + WAVE_LOOSE * jit
+    return lam, ph
+
+
+def wave_paths(X, lam, ph, A_hh, seg_hh):
+    """The straight fall X (G, S+1, 3) with a wave of amplitude A_hh (G, S+1) laid along it; returns the nodes (at the
+    rod's exact segment length) and the segment directions."""
+    G, S1 = X.shape[:2]
+    s = np.arange(S1) * seg_hh
+    T, r, b = wave_frame(X)
+    side = np.where(X[:, :1, 0] >= SF.AXIS[0], 1.0, -1.0)
+    cross = np.argmax(X[..., 2] < WAVE_Z_ON, axis=1)          # (0 for hair rooted below it: counted from the root)
+    phi = 2 * np.pi * (s[None] - cross[:, None] * seg_hh) / lam[:, None] + ph[:, None]
+    off = A_hh[..., None] * (WAVE_RADIAL * np.sin(phi)[..., None] * r + side[..., None] * np.cos(phi)[..., None] * b)
+    dd = np.diff(X + off, axis=1); dd /= np.maximum(np.linalg.norm(dd, axis=-1, keepdims=True), 1e-12)
+    return np.concatenate([X[:, :1], X[:, :1] + np.cumsum(dd * seg_hh, 1)], 1), dd
+
+
+def wave_rest(X, lengths, lam, ph, seg_hh):
+    """The natural wave on the straight falls X: rest curvature binormals [BER08] of the rest wave, and the
+    formula's settled shape (each node's amplitude cut by the hair hanging below it) to start the solve from."""
+    G, S1 = X.shape[:2]
+    s = np.arange(S1) * seg_hh
+    A0 = WAVE_A_MM / SF.HH_MM * SF.sm(WAVE_Z_RAMP[0], WAVE_Z_RAMP[1], X[..., 2])
+    Y, _ = wave_paths(X, lam, ph, A0, seg_hh)
+    T = np.diff(Y, axis=1); T /= np.linalg.norm(T, axis=-1, keepdims=True)
+    c = (T[:, :-1] * T[:, 1:]).sum(-1)
+    kb0 = 2 * np.cross(T[:, :-1], T[:, 1:]) / (1 + c)[..., None]
+    kb0[np.linalg.norm(kb0, axis=-1) < 1e-9] = 1e-9                    # (marks the guide as shaped where it is straight)
+    hang_m = np.maximum(lengths[:, None] - np.arange(S1)[None], 0) * SEG_M
+    k = 2 * np.pi / (lam * HH_M)
+    f = 1.0 / (1.0 + hang_m / (ELASTOGRAVITY_M ** 3 * k[:, None] ** 2))
+    Ys, ds = wave_paths(X, lam, ph, A0 * f, seg_hh)
+    return kb0, Ys, ds
+
+
+def push_out(col, X, layer=None, margin_hh=1.0 / SF.HH_MM, steps=8):
+    """Nodes of a placed (combed, not solved) path moved out of the head and the body along the depth's gradient,
+    to the hair's layer off them plus a margin; the root stays."""
+    import torch
+    G, S1 = X.shape[:2]
+    X = X.copy()
+    for _ in range(steps):
+        moved = False
+        for fn in (col.head_depth, col.body_depth):
+            P = torch.tensor(X[:, 1:].reshape(-1, 3), dtype=torch.float64, requires_grad=True)
+            d = fn(P)
+            d.sum().backward()
+            n = P.grad.numpy(); n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+            o = layer(torch.tensor(X[:, 1:], dtype=torch.float64)).numpy().reshape(-1) if layer is not None else 0.0
+            pen = np.maximum(d.detach().numpy() + o + margin_hh, 0)
+            if (pen > 0).any():
+                moved = True
+                X[:, 1:] -= (n * pen[:, None]).reshape(G, S1 - 1, 3)       # (the depth grows inward)
+        if not moved:
+            break
+    return X
+
+
+def creator_cut(style_path, nb=48):
+    """The end height by angle round the head from the creator's own hair: in each bin of angle (where the hair
+    hangs), how low its strands and its cap's hem reach (CUT_PCT percentile of their lowest points), smoothed round
+    the head. Returns a function of the angle."""
+    import gzip
+    d = json.load(gzip.open(style_path))
+    pts = []
+    for st in d['strands']:
+        p = np.array(st['p'], float).reshape(-1, 3)
+        pts.append(p[np.argmin(p[:, 2])])
+    c = d['cap']
+    P = np.array(c['p'], float).reshape(c['cols'], c['rows'], 3)      # (the cap's points run down each column)
+    A = np.array(c['a'], float).reshape(c['cols'], c['rows'])
+    for j in range(c['cols']):
+        ok = np.where(A[j] > 0.5)[0]
+        if len(ok):
+            pts.append(P[j, ok[-1]])
+    pts = np.array(pts)
+    b = ((SF.theta(pts) + np.pi) / (2 * np.pi) * nb).astype(int) % nb
+    z = np.array([-np.percentile(-pts[b == i, 2], CUT_PCT) if (b == i).any() else np.nan for i in range(nb)])
+    ctr = -np.pi + (np.arange(nb) + 0.5) * 2 * np.pi / nb
+    # made even, the longer side kept (the creator's two sides differ by a lock or two), and in front of the face,
+    # where no hair hangs (the points there are the cap's top and the bangs), held at the framing locks' length
+    # beside it, before the smoothing, so the face does not shorten the framing locks
+    z = np.fmin(z, z[::-1])
+    front = np.abs(ctr) < CUT_FRONT_TH
+    z[front] = np.nan
+    edge = np.argmin(np.where(front, 9, np.abs(np.abs(ctr) - CUT_FRONT_TH)))
+    z[front] = z[edge]
+    z = np.where(np.isnan(z), np.nanmean(z), z)
+    z = np.convolve(np.r_[z[-1:], z, z[:1]], np.ones(3) / 3, 'valid')
+    return lambda q: np.interp(np.asarray(q), ctr, z, period=2 * np.pi)
+
+
+CUT_FRONT_TH = 0.6                 # rad: in front of this the creator's cut is held at its value here
+CUT_PCT = 99                       # the creator's longest ends make its outline (its tips are cut uneven, not on one line)
+
+
 def comb_ranger(F, roots_idx):
     """part + comb: hair on the top and front is combed away from a centre part at right angles, then down; the rest
     keeps its natural growth direction (the back of the head and the nape fall as they grow)."""
@@ -531,7 +690,10 @@ def ear_depth_np(X):
 
 
 LOOKAHEAD = 0.35                   # HH: the first guess moves hair to its side of the shoulder this far above it
-SPLIT = 1.0                        # STYLE (Ranger): hair rooted in front of this angle frames the face and falls in front
+RANGER_SPLIT = 1.0                        # STYLE (Ranger): hair rooted in front of this angle frames the face and falls in front
+WARDEN_SPLIT = 1.25                # rad: the creator's Warden: its strands that fall in front of the shoulder are rooted
+                                   # up to 1.21 rad round (90th percentile), so more of her hair frames the face
+SPLIT = RANGER_SPLIT
                                    # of the shoulder; the rest is tucked behind the ears (the creator's Ranger)
 
 
@@ -661,9 +823,16 @@ class Layers:
 
 
 def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=None, bangs=True, reuse=None, trace=None):
-    """reuse: a previous groom.npz. The guides do not act on each other (no hair-hair contact; the layer is a fixed
+    """style: "ranger" (straight, curtain bangs, the approved length line) or "warden" (the natural wave, no bangs,
+    cut on the creator's own length line, which needs trace). reuse: a previous groom.npz. The guides do not act on each other (no hair-hair contact; the layer is a fixed
     function of the roots), so a guide with the same root and the same style as in that groom settles to the same
     place: it is copied, and only the rest (here the bangs, while they are being styled) are solved."""
+    wavy = style == "warden"
+    global SPLIT
+    SPLIT = WARDEN_SPLIT if wavy else RANGER_SPLIT
+    if wavy:
+        assert trace, "the Warden is cut on the creator's length line: pass --trace"
+    cut_z = creator_cut(trace) if wavy else ranger_cut_z
     idx, total = pick_roots(F, n_guides)
     comb, keep = comb_ranger(F, idx)
     keep &= ear_depth_np(F["P"][idx]) < -0.025          # no hair grows on the ear or the bare skin right round it
@@ -695,7 +864,7 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     seg_hh = SEG_M / HH_M
     layer = Layers(roots, n_hairs)
     # grow everything long enough for the cut, settle, cut on the settled hair, settle again
-    need = roots[:, 2] - ranger_cut_z(SF.theta(roots)) + 0.6
+    need = roots[:, 2] - cut_z(SF.theta(roots)) + 0.6
     S = int(math.ceil(need.max() / seg_hh)) + 1
     lift0 = np.array([float(np.interp(z, np.linspace(layer.Z0, layer.Z1, layer.NZ), layer.cum[c])) for z, c in
                       zip(roots[:, 2], layer.col)])
@@ -727,40 +896,41 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
                 P[k][hit] = P0[k][j[hit]]
         print('reuse: %d of %d guides copied' % ((~solve).sum(), len(idx)) if same else 'reuse: groom differs, full solve')
 
-    def settle_some(D, mask=None):
+    def settle_some(D, mask=None, its=None):
         X = np.zeros((len(idx), S + 1, 3)); Dn = D.copy()
         if (~solve).any():
             X[~solve] = P['X_uncut'][~solve] if mask is None else np.nan_to_num(P['X'][~solve])
         if not solve.any():
             return X, Dn
         m = None if mask is None else mask[solve]
-        Xs, Ds = settle(roots[solve], d0[solve], D[solve], n_hairs[solve], seg_hh, col, iters=iters, layer=layer.subset(solve),
+        Xs, Ds = settle(roots[solve], d0[solve], D[solve], n_hairs[solve], seg_hh, col, iters=its or iters, layer=layer.subset(solve),
                         log=log, kb0=None if kb0 is None else kb0[solve], mask=m)
         X[solve] = Xs; Dn[solve] = Ds
         return X, Dn
-    if bangs:
-        # the bangs are combed, not solved: their paths come from the combing pass and are never settled
-        field = creator_field(trace) if trace else None
-        Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S, field)
-        if field is not None:
-            Xb, bang_len = Xb
-        solve &= ~bang
+    field = creator_field(trace) if trace else None
+    if bangs or field is not None:
         if not same:
             P = {'X_uncut': np.zeros((len(idx), S + 1, 3)), 'X': np.zeros((len(idx), S + 1, 3)),
                  'lengths': np.zeros(len(idx), int)}
         P = {k: np.array(P[k]) for k in ('X_uncut', 'X', 'lengths')}
-        P['X_uncut'][bang] = Xb
+    if bangs:
+        # the bangs are combed, not solved: their paths come from the combing pass and are never settled
+        Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S, field)
         if field is not None:
-            # the face-framing hair (in front of the temples) is combed too, along the creator's framing locks onto
-            # the cheek, then straight down in front of the shoulder; cut by the style's line like the rest
-            thr = SF.theta(roots)
-            frame = ~bang & (np.abs(thr) < FRAME_TH) & (roots[:, 2] > 0.55)
-            down = np.tile([0.0, 0.0, -1.0], (frame.sum(), 1))
-            lie_f = np.clip(layer.root_cum[frame], 1.0 / SF.HH_MM, 10.0 / SF.HH_MM)
-            Xf, _ = comb_bangs(surf, col, roots[frame], d0[frame], np.c_[np.sign(roots[frame, 0]) * 1e-3, down[:, 1:]],
-                           comb[frame], seg_hh, S, field, out=down, pull=FRAME_PULL, lie_hh=lie_f)
-            solve &= ~frame
-            P['X_uncut'][frame] = Xf
+            Xb, bang_len = Xb
+        solve &= ~bang
+        P['X_uncut'][bang] = Xb
+    if field is not None:
+        # the face-framing hair (in front of the temples) is combed too, along the creator's framing locks onto
+        # the cheek, then straight down in front of the shoulder; cut by the style's line like the rest
+        thr = SF.theta(roots)
+        frame = ~bang & (np.abs(thr) < FRAME_TH) & (roots[:, 2] > 0.55)
+        down = np.tile([0.0, 0.0, -1.0], (frame.sum(), 1))
+        lie_f = np.clip(layer.root_cum[frame], 1.0 / SF.HH_MM, 10.0 / SF.HH_MM)
+        Xf, _ = comb_bangs(surf, col, roots[frame], d0[frame], np.c_[np.sign(roots[frame, 0]) * 1e-3, down[:, 1:]],
+                       comb[frame], seg_hh, S, field, out=down, pull=FRAME_PULL, lie_hh=lie_f)
+        solve &= ~frame
+        P['X_uncut'][frame] = Xf
     t0 = time.time()
     X, D = settle_some(D)
     if (~solve).any():
@@ -768,7 +938,15 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         dd = np.diff(Xu[:, 1:], axis=1)
         D[~solve] = dd / np.linalg.norm(dd, axis=-1, keepdims=True)
     t1 = time.time()
-    endz = ranger_cut_z(SF.theta(X[:, -1]))
+    endz = cut_z(SF.theta(X[:, -1]))
+    th = SF.theta(roots)
+    lock = np.where(np.abs(th) < SPLIT, np.where(roots[:, 0] < SF.AXIS[0], 1, 2), 0)
+    clump = np.zeros(len(idx), int)
+    if wavy:
+        # the ends: each wave lock ends at its own length, up to WAVE_END_JIT above the creator's longest, so the hem is
+        # the creator's uneven, pointed lock ends instead of one blunt line
+        clump = wave_locks(roots, lock)
+        endz = endz + WAVE_END_JIT * np.random.default_rng(13).random(clump.max() + 1)[clump]
     if bangs:
         endz[bang] = bang_cut_z(bt[bang])
     trace_len = None
@@ -779,8 +957,17 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         below = np.where(X[g, 1:, 2] < endz[g])[0]
         if len(below):
             lengths[g] = max(3, below[0])
+    if wavy:
+        # cut as wavy hair is cut, dry: the wave takes up length, so each guide is cut where its waved shape (the
+        # formula's, for its hang) reaches the line, not where the straight fall does (twice: the hang moves with it)
+        lam, ph = wave_params(roots, clump)
+        for _ in range(2):
+            Yw = wave_rest(X, lengths, lam, ph, seg_hh)[1]
+            for g in range(len(idx)):
+                below = np.where(Yw[g, 1:, 2] < endz[g])[0]
+                lengths[g] = max(3, below[0]) if len(below) else S
     mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
-    if (~solve).any():
+    if (~solve).any() and not wavy:        # (the wavy cut is recomputed: every wavy guide is solved again anyway)
         reused = ~solve & ~bang & ~frame
         lengths[reused] = P['lengths'][reused]
         mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
@@ -789,17 +976,24 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
     if bangs:
         P['X'][bang] = Xb                 # (the combed bangs, cut below by the mask)
+    if frame.any():
+        P['X'][frame] = P['X_uncut'][frame]
+    if wavy:
+        # the natural wave: every guide not combed is solved again with its rest wave (none is copied: the wave is
+        # new to each), started from the formula's settled shape; the combed framing hair gets that shape laid on
+        kb0, Ys, ds = wave_rest(X, lengths, lam, ph, seg_hh)
+        solve = ~bang & ~frame
+        D = ds[:, 1:].copy()
         if frame.any():
-            P['X'][frame] = P['X_uncut'][frame]
-    X2, D = settle_some(D, mask)
+            P['X'][frame] = push_out(col, Ys[frame], layer.subset(frame))
+    # (the wave starts at the formula's equilibrium, so its solve only polishes it and clears the contacts)
+    X2, D = settle_some(D, mask, its=WAVE_ITERS if wavy else None)
     t2 = time.time()
     X2[:, 1:][mask == 0] = np.nan
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
-    th = SF.theta(roots)
-    lock = np.where(np.abs(th) < SPLIT, np.where(roots[:, 0] < SF.AXIS[0], 1, 2), 0)
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
-    return dict(roots=roots, idx=idx, X=X2, lock=lock, bang=bang.astype(np.int8), X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
+    return dict(roots=roots, idx=idx, X=X2, lock=lock, clump=clump, bang=bang.astype(np.int8), X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
                 layer_max_mm=layer.max_mm(), seg_hh=seg_hh, d0=d0, comb=comb, times=(t1 - t0, t2 - t1))
 
 
@@ -818,7 +1012,8 @@ def main():
     log = []
     reuse = a[a.index('--reuse') + 1] if '--reuse' in a else None
     trace = a[a.index('--trace') + 1] if '--trace' in a else None
-    Gm = build_groom(surf, F, body, n_guides=n, log=log, reuse=reuse, trace=trace)
+    style = a[a.index('--style') + 1] if '--style' in a else 'ranger'
+    Gm = build_groom(surf, F, body, n_guides=n, style=style, log=log, reuse=reuse, trace=trace)
     np.savez_compressed(os.path.join(out, 'groom.npz'), **{k: v for k, v in Gm.items() if isinstance(v, np.ndarray)})
     rep = dict(guides=int(len(Gm['idx'])), hairs=int(Gm['total']), hairs_per_guide=round(float(Gm['n_hairs'][0]), 1),
                elastogravity_cm=round(ELASTOGRAVITY_M * 100, 2), layer_max_mm=round(Gm['layer_max_mm'], 2),
