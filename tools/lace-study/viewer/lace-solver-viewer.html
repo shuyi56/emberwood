@@ -1,0 +1,2386 @@
+<title>Lace Solver Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a workbench. Controls on the left, the cloth in the middle, the run's instruments (readouts, the
+   convergence curve, the sections) on the right; stacked on a phone. */
+:root {
+  --bg: #eef0f2; --panel: #f9fafb; --ink: #1c232b; --muted: #5d6874; --line: #d5dae0;
+  --accent: #3d5a99; --accent-ink: #ffffff; --warn: #b5462e; --good: #2f6b4f; --stage: #dfe3e8;
+  --f-ui: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15191e; --panel: #1c2128; --ink: #e3e7ec; --muted: #98a3ae; --line: #2e353e;
+  --accent: #8ea7e0; --accent-ink: #10151c; --warn: #e2876e; --good: #7cc4a0; --stage: #20262e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #15191e; --panel: #1c2128; --ink: #e3e7ec; --muted: #98a3ae; --line: #2e353e;
+  --accent: #8ea7e0; --accent-ink: #10151c; --warn: #e2876e; --good: #7cc4a0; --stage: #20262e; color-scheme: dark }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); font-size: 14px; }
+.app { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 12px; height: 100%; box-sizing: border-box;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.col { min-width: 0; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: 0.01em; text-wrap: balance; }
+h2 { font-size: 11px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+p.note { margin: 0; color: var(--muted); line-height: 1.45; font-size: 13px; }
+select, button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+.ctl label { font-size: 13px; }
+.ctl output { font-family: var(--f-data); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.ctl select { grid-column: 1 / -1; }
+.live { font-size: 10px; color: var(--good); letter-spacing: 0.06em; text-transform: uppercase; margin-left: 4px; }
+.stage { position: relative; background: var(--stage); border: 1px solid var(--line); border-radius: 8px; min-height: 360px; flex: 1; overflow: hidden; }
+.stage canvas { display: block; width: 100%; height: 100%; }
+.hud { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-family: var(--f-data); font-size: 11px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-variant-numeric: tabular-nums; }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.legend { position: absolute; left: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+.legend span.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.ramp { width: 140px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, #2c4f9e, #3fa7a0, #e8d35a, #d9532f, #7d1020); }
+.modes { display: flex; gap: 4px; flex-wrap: wrap; }
+.modes button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+table.read { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.read td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+table.read td:last-child { text-align: right; font-family: var(--f-data); font-size: 12px; font-variant-numeric: tabular-nums; }
+canvas.chart { width: 100%; height: 150px; display: block; }
+canvas.sect { width: 100%; height: 190px; display: block; }
+.flags { font-size: 12px; color: var(--warn); margin: 0; padding-left: 16px; }
+.flags.ok { color: var(--good); list-style: none; padding-left: 0; }
+.key { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.key i { display: inline-block; width: 14px; height: 2px; vertical-align: 3px; margin-right: 4px; }
+@media (max-width: 1100px) { .app { grid-template-columns: 280px minmax(0, 1fr); } .col.right { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .app { grid-template-columns: minmax(0, 1fr); height: auto; } .stage { min-height: 70vw; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="app">
+  <div class="col left">
+    <div class="panel">
+      <h1>Lace Solver Bench</h1>
+      <p class="note">The project's fabric solver, stepped live. Pick a scene, move a setting and watch the cloth settle. Settings marked <span class="live">live</span> change the running solve; the rest rebuild it.</p>
+      <div class="ctl"><label for="preset">Scene</label><span></span><select id="preset"></select></div>
+      <p class="note" id="presetNote"></p>
+      <div class="row">
+        <button class="primary" id="play">Pause</button>
+        <button id="step">Step a frame</button>
+        <button id="sub">Step once</button>
+        <button id="reset">Rebuild</button>
+      </div>
+      <div class="ctl"><label for="speed">Frames per tick</label><output id="speedOut">1</output><input type="range" id="speed" min="1" max="6" step="1" value="1"></div>
+    </div>
+    <div class="panel" id="controls"></div>
+  </div>
+
+  <div class="col mid">
+    <div class="stage" id="stage">
+      <div class="hud" id="hud"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content: space-between">
+        <h2>Show</h2>
+        <div class="modes" id="modes">
+          <button data-mode="lace" aria-pressed="true">Lace</button>
+          <button data-mode="parts" aria-pressed="false">Colour code</button>
+          <button data-mode="strain" aria-pressed="false">Strain</button>
+          <button data-mode="clay" aria-pressed="false">Clay</button>
+        </div>
+      </div>
+      <div class="row">
+        <button id="v-front">Front</button><button id="v-side">Side</button><button id="v-back">Back</button><button id="v-q">3/4</button><button id="v-top">Top</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col right">
+    <div class="panel">
+      <h2>Readouts</h2>
+      <table class="read" id="read"></table>
+    </div>
+    <div class="panel">
+      <h2>Convergence</h2>
+      <canvas class="chart" id="chart"></canvas>
+      <div class="key"><span><i style="background:#3d78c9"></i>fastest point (cm a step, log)</span><span><i style="background:#d9532f"></i>worst thread stretch (%)</span><span><i style="background:#3f9d72"></i>kinetic energy (log)</span></div>
+    </div>
+    <div class="panel">
+      <h2>Sections and contour check</h2>
+      <canvas class="sect" id="sect"></canvas>
+      <ul class="flags" id="flags"></ul>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const __m = {};
+__m['fabric-stiff'] = (() => {
+// Stiff cloth: bending solved implicitly, as one linear solve a step (fabric-core.js `stiffen`).
+//
+// Position-based constraints carry a bend one row at a time per walk over them, so a stiff cloth (leather, a
+// boot shaft, heavy felt) sags as if it were soft unless it is walked tens of times a step: measured on the
+// bench's cantilever, hinges and ties two along both stopped at a bending length of about 2 cm, the stiffness of
+// linen, however stiff they were set. The bend is a property of the whole sheet, so here it is solved over the
+// whole sheet at once:
+//
+//  - the bending energy is the discrete Willmore energy of a nearly isometric surface (Bergou, Wardetzky,
+//    Harmon, Zorin and Grinspun 2006, "A quadratic bending model for inextensible surfaces"): E = B/2 sum_i
+//    |(L x)_i - b_i|^2 / A_i, with L the cotangent Laplacian of the rest mesh, A_i each point's area, and b_i its
+//    rest curvature (the rest's L x, turned with the cloth round the point, as Projective Dynamics does: Bouaziz,
+//    Martin, Liu, Kavan and Pauly 2014);
+//  - a step minimises the inertia plus that energy: (M / h^2 + B L A^-1 L) x = M x~ / h^2 + B L A^-1 b. The
+//    matrix only changes with h and the pins, so it is factored once (banded Cholesky after a reverse Cuthill-McKee
+//    ordering) and each step is two triangular solves for x, y and z;
+//  - B is the cloth's flexural rigidity, from its bending length c (Peirce 1930): B = weight per area x g x c^3,
+//    so a material is set by what a cantilever test of it measures, not by a tuned number;
+//  - a set (leather that creases where it keeps folding): a point bent past its rest by more than the curvature
+//    of `setRadius` moves its rest curvature toward the bend at `creep` a second.
+//
+// With `stretchK` the edges are held at their length inside the same solve (Projective Dynamics' springs, solved
+// with the bend in `passes` local and global steps), which a stiff, heavy sheet needs: leather solved for its bend
+// alone, with its stretch left to the constraints after, folded up at 240 steps a second (a boot shaft laid on its
+// side sagged 20 units; with the edges in the solve, 0.4). Open pieces are better without: on the bench, linen
+// with the edges in the solve shrink-wrapped the ball and fell off it in a wad, and a belted leather panel bunched
+// up at the belt (an open question, left for later: the springs and the body's pushes after the solve fight);
+// with them left to the constraints both hang as they should. The shear, the hinges, the tethers and the body stay
+// with the position-based solve that follows.
+
+const EPS = 1e-12;
+
+class StiffBend {
+  // f: the Fabric (its tris, rest positions now, kg, w); B: flexural rigidity (kg unit^2 / s^2); o: { scale: per
+  // point share of B (Float64Array), setRadius (units), creep (1/s) }
+  constructor(f, B, o = {}) {
+    this.f = f; this.B = B; this.o = o;
+    const n = f.n, x = f.pos, t = f.tris;
+    // the cotangent Laplacian (as rows of neighbour, weight) and each point's area
+    const W = Array.from({ length: n }, () => new Map()), area = new Float64Array(n);
+    for (let k = 0; k < t.length; k += 3) {
+      const v = [t[k], t[k + 1], t[k + 2]];
+      const P = v.map((i) => [x[3 * i], x[3 * i + 1], x[3 * i + 2]]);
+      const cr = cross(sub(P[1], P[0]), sub(P[2], P[0])), A2 = Math.hypot(...cr);
+      if (A2 < EPS) continue;
+      for (let e = 0; e < 3; e++) {
+        // the angle at corner e faces the edge between the other two
+        const a = P[e], b = P[(e + 1) % 3], c = P[(e + 2) % 3];
+        const cot = dot(sub(b, a), sub(c, a)) / A2;
+        const i = v[(e + 1) % 3], j = v[(e + 2) % 3];
+        W[i].set(j, (W[i].get(j) || 0) + cot / 2); W[j].set(i, (W[j].get(i) || 0) + cot / 2);
+        area[v[e]] += A2 / 6;
+      }
+    }
+    this.W = W; this.area = area;
+    // the edges, held at their rest length in the same solve (so the bend and the stretch are solved together)
+    const seen = new Set(), ea = [], eb = [], el = [];
+    for (let k = 0; k < t.length; k += 3) for (let e = 0; e < 3; e++) {
+      const i = t[k + e], j = t[k + (e + 1) % 3], key = i < j ? i * n + j : j * n + i;
+      if (seen.has(key)) continue;
+      seen.add(key); ea.push(i); eb.push(j);
+      el.push(Math.hypot(x[3 * i] - x[3 * j], x[3 * i + 1] - x[3 * j + 1], x[3 * i + 2] - x[3 * j + 2]));
+    }
+    this.ea = Int32Array.from(ea); this.eb = Int32Array.from(eb); this.el = Float64Array.from(el);
+    // the rest curvature, in each point's own frame (the rest frame: identity)
+    this.nb = W.map((m) => Int32Array.from(m.keys()));
+    this.wt = W.map((m) => Float64Array.from(m.values()));
+    this.b0 = this._lap(x);
+    this.rest = Float64Array.from(x);
+    this.q = new Float64Array(4 * n); for (let i = 0; i < n; i++) this.q[4 * i + 3] = 1;
+    this.scale = o.scale || new Float64Array(n).fill(1);
+    this._h = null;
+  }
+  // (L x)_i = sum_j w_ij (x_j - x_i), into a 3n array
+  _lap(x, out = new Float64Array(x.length)) {
+    const n = this.f.n;
+    for (let i = 0; i < n; i++) {
+      let sx = 0, sy = 0, sz = 0;
+      const nb = this.nb[i], wt = this.wt[i];
+      for (let k = 0; k < nb.length; k++) { const j = nb[k], w = wt[k]; sx += w * (x[3 * j] - x[3 * i]); sy += w * (x[3 * j + 1] - x[3 * i + 1]); sz += w * (x[3 * j + 2] - x[3 * i + 2]); }
+      out[3 * i] = sx; out[3 * i + 1] = sy; out[3 * i + 2] = sz;
+    }
+    return out;
+  }
+  // the system for a step h: the free points (the pins are given), in an order that keeps the band narrow
+  _factor(h) {
+    const f = this.f, n = f.n, w = f.w, kg = f.kg, B = this.B, area = this.area, sc = this.scale;
+    const free = [], slot = new Int32Array(n).fill(-1);
+    for (let i = 0; i < n; i++) if (w[i] !== 0) free.push(i);
+    // K = M / h^2 + B L A^-1 L (with the point's share of B on its own row of A^-1: sum_k L_ik s_k / A_k L_kj)
+    const rows = Array.from({ length: n }, () => new Map());
+    const Lrow = (k) => { const m = new Map([[k, 0]]); this.nb[k].forEach((j, q) => { m.set(j, this.wt[k][q]); m.set(k, m.get(k) - this.wt[k][q]); }); return m; };
+    const L = Array.from({ length: n }, (_, k) => Lrow(k));
+    for (let k = 0; k < n; k++) {
+      if (area[k] < EPS) continue;
+      const c = B * sc[k] / area[k];
+      for (const [i, li] of L[k]) for (const [j, lj] of L[k]) rows[i].set(j, (rows[i].get(j) || 0) + c * li * lj);
+    }
+    const mass = new Float64Array(n);
+    for (let i = 0; i < n; i++) mass[i] = kg ? kg[i] : 1;
+    for (const i of free) rows[i].set(i, (rows[i].get(i) || 0) + mass[i] / (h * h));
+    // the edges' springs: ks (x_j - x_i - d)^2 / 2, with ks a share `stretchK` over each edge's two masses / h^2
+    let mm = 0; for (const i of free) mm += mass[i]; mm /= Math.max(1, free.length);
+    const ks = (this.o.stretchK ?? 0) * mm / (h * h);
+    this.ks = ks;
+    for (let e = 0; ks && e < this.ea.length; e++) {
+      const i = this.ea[e], j = this.eb[e];
+      rows[i].set(i, (rows[i].get(i) || 0) + ks); rows[j].set(j, (rows[j].get(j) || 0) + ks);
+      rows[i].set(j, (rows[i].get(j) || 0) - ks); rows[j].set(i, (rows[j].get(i) || 0) - ks);
+    }
+    // reverse Cuthill-McKee over the free points
+    const deg = (i) => rows[i].size, order = [], seen = new Uint8Array(n);
+    const byDeg = free.slice().sort((a, b) => deg(a) - deg(b));
+    for (const s of byDeg) {
+      if (seen[s]) continue;
+      seen[s] = 1; order.push(s);
+      for (let q = order.length - 1; q < order.length; q++) {
+        const nbr = [...rows[order[q]].keys()].filter((j) => w[j] !== 0 && !seen[j]).sort((a, b) => deg(a) - deg(b));
+        for (const j of nbr) { seen[j] = 1; order.push(j); }
+      }
+    }
+    order.reverse();
+    // (the points' own order, row by row for a sheet, is often narrower still: keep whichever band is narrower)
+    const band = (ord) => { const sl = new Int32Array(n).fill(-1); ord.forEach((i, k) => { sl[i] = k; }); let b = 0; for (const i of ord) for (const j of rows[i].keys()) if (sl[j] >= 0) b = Math.max(b, Math.abs(sl[i] - sl[j])); return b; };
+    if (band(free) < band(order)) order.splice(0, order.length, ...free);
+    order.forEach((i, k) => { slot[i] = k; });
+    const m = order.length;
+    const bw = band(order);
+    // banded Cholesky: G (lower, m x (bw + 1)), G[i][i - j] for j in i-bw..i
+    const S = bw + 1, G = new Float64Array(m * S);
+    for (const i of order) for (const [j, v] of rows[i]) { const a = slot[i], b = slot[j]; if (b >= 0 && b <= a) G[a * S + (a - b)] = v; }
+    for (let i = 0; i < m; i++) {
+      const j0 = Math.max(0, i - bw);
+      for (let j = j0; j <= i; j++) {
+        let s = G[i * S + (i - j)];
+        const k0 = Math.max(j0, j - bw);
+        for (let k = k0; k < j; k++) s -= G[i * S + (i - k)] * G[j * S + (j - k)];
+        if (i === j) G[i * S] = Math.sqrt(Math.max(s, EPS));
+        else G[i * S + (i - j)] = s / G[j * S];
+      }
+    }
+    // the pins' part of each free row (moved to the right-hand side every step)
+    const pinCols = order.map((i) => [...rows[i]].filter(([j]) => w[j] === 0));
+    Object.assign(this, { _h: h, order, slot, G, S, bw, m, pinCols, mass, rhs: new Float64Array(3 * m), _pinsAt: f.w.reduce((s, v, i) => s + (v === 0 ? i + 1 : 0), 0) });
+  }
+  // the bend for one step: x (f.pos) holds the predicted positions; it is replaced by the solve. The rest
+  // curvature is turned by each point's turn, which depends on the answer, so the solve is repeated from it
+  // (Projective Dynamics' local and global steps): `passes` times, 2 by default
+  step(h) {
+    const f = this.f, n = f.n, x = f.pos;
+    const pinsAt = f.w.reduce((s, v, i) => s + (v === 0 ? i + 1 : 0), 0);
+    if (this._h !== h || this._pinsAt !== pinsAt) this._factor(h);
+    const pred = this._pred || (this._pred = new Float64Array(3 * n));
+    pred.set(x);
+    const passes = this.o.passes ?? 2;
+    for (let q = 0; q < passes; q++) this._solve(h, pred);
+  }
+  _solve(h, pred) {
+    const f = this.f, n = f.n, x = f.pos;
+    const { order, G, S, bw, m, pinCols, mass, rhs } = this, B = this.B, area = this.area, sc = this.scale;
+    // each point's turn from its rest one-ring to now, and its rest curvature turned with it: b_i = R_i b0_i
+    const b = this._b || (this._b = new Float64Array(3 * n));
+    this._rotations();
+    const R = this._R;
+    for (let i = 0; i < n; i++) {
+      const r = 9 * i, a = 3 * i, b0 = this.b0;
+      b[a] = R[r] * b0[a] + R[r + 1] * b0[a + 1] + R[r + 2] * b0[a + 2];
+      b[a + 1] = R[r + 3] * b0[a] + R[r + 4] * b0[a + 1] + R[r + 5] * b0[a + 2];
+      b[a + 2] = R[r + 6] * b0[a] + R[r + 7] * b0[a + 1] + R[r + 8] * b0[a + 2];
+    }
+    // v = B s A^-1 b, then L v
+    const v = this._v || (this._v = new Float64Array(3 * n));
+    for (let i = 0; i < n; i++) { const c = area[i] > EPS ? B * sc[i] / area[i] : 0; v[3 * i] = c * b[3 * i]; v[3 * i + 1] = c * b[3 * i + 1]; v[3 * i + 2] = c * b[3 * i + 2]; }
+    const Lv = this._lap(v, this._Lv || (this._Lv = new Float64Array(3 * n)));
+    const ks = this.ks, ea = this.ea, eb = this.eb, el = this.el;
+    for (let e = 0; ks && e < ea.length; e++) {
+      const i = ea[e], j = eb[e], a = 3 * i, c = 3 * j;
+      const dx = x[c] - x[a], dy = x[c + 1] - x[a + 1], dz = x[c + 2] - x[a + 2], l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1, q = ks * el[e] / l;
+      Lv[a] -= q * dx; Lv[a + 1] -= q * dy; Lv[a + 2] -= q * dz; Lv[c] += q * dx; Lv[c + 1] += q * dy; Lv[c + 2] += q * dz;
+    }
+    const h2 = h * h;
+    for (let k = 0; k < m; k++) {
+      const i = order[k];
+      let rx = mass[i] / h2 * pred[3 * i] + Lv[3 * i], ry = mass[i] / h2 * pred[3 * i + 1] + Lv[3 * i + 1], rz = mass[i] / h2 * pred[3 * i + 2] + Lv[3 * i + 2];
+      for (const [j, kv] of pinCols[k]) { rx -= kv * x[3 * j]; ry -= kv * x[3 * j + 1]; rz -= kv * x[3 * j + 2]; }
+      rhs[3 * k] = rx; rhs[3 * k + 1] = ry; rhs[3 * k + 2] = rz;
+    }
+    // G G^T y = rhs: forward, then back
+    for (let i = 0; i < m; i++) {
+      let sx = rhs[3 * i], sy = rhs[3 * i + 1], sz = rhs[3 * i + 2];
+      for (let j = Math.max(0, i - bw); j < i; j++) { const g = G[i * S + (i - j)]; sx -= g * rhs[3 * j]; sy -= g * rhs[3 * j + 1]; sz -= g * rhs[3 * j + 2]; }
+      const d = G[i * S]; rhs[3 * i] = sx / d; rhs[3 * i + 1] = sy / d; rhs[3 * i + 2] = sz / d;
+    }
+    for (let i = m - 1; i >= 0; i--) {
+      let sx = rhs[3 * i], sy = rhs[3 * i + 1], sz = rhs[3 * i + 2];
+      for (let j = i + 1; j <= Math.min(m - 1, i + bw); j++) { const g = G[j * S + (j - i)]; sx -= g * rhs[3 * j]; sy -= g * rhs[3 * j + 1]; sz -= g * rhs[3 * j + 2]; }
+      const d = G[i * S]; rhs[3 * i] = sx / d; rhs[3 * i + 1] = sy / d; rhs[3 * i + 2] = sz / d;
+    }
+    for (let k = 0; k < m; k++) { const i = order[k]; x[3 * i] = rhs[3 * k]; x[3 * i + 1] = rhs[3 * k + 1]; x[3 * i + 2] = rhs[3 * k + 2]; }
+  }
+  // the set, after the step's constraints: where the cloth is bent past its rest by more than setRadius's
+  // curvature, the rest curvature creeps toward the bend
+  set(h) {
+    const o = this.o;
+    if (!(o.creep > 0) || !(o.setRadius > 0)) return;
+    const f = this.f, n = f.n, R = this._R, Lx = this._lap(f.pos, this._Lx), b0 = this.b0, area = this.area, kc = Math.min(1, o.creep * h);
+    for (let i = 0; i < n; i++) {
+      if (f.w[i] === 0) continue;
+      const r = 9 * i, a = 3 * i;
+      // R^T (L x)_i - b0_i: how far the bend is from its rest, in the rest frame
+      const lx = R[r] * Lx[a] + R[r + 3] * Lx[a + 1] + R[r + 6] * Lx[a + 2], ly = R[r + 1] * Lx[a] + R[r + 4] * Lx[a + 1] + R[r + 7] * Lx[a + 2], lz = R[r + 2] * Lx[a] + R[r + 5] * Lx[a + 1] + R[r + 8] * Lx[a + 2];
+      const dx = lx - b0[a], dy = ly - b0[a + 1], dz = lz - b0[a + 2], d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      // (|L x| is twice the area times the mean curvature: a bend of radius r is 2 A / r)
+      const y = 2 * area[i] / o.setRadius;
+      if (d <= y) continue;
+      const t = kc * (1 - y / d);
+      b0[a] += t * dx; b0[a + 1] += t * dy; b0[a + 2] += t * dz;
+    }
+  }
+  // the turn of each point's one-ring from rest (Mueller, Bender, Chentanez and Macklin 2016), from the last step's
+  _rotations() {
+    const f = this.f, n = f.n, x = f.pos, x0 = this.rest, Q = this.q, R = this._R || (this._R = new Float64Array(9 * n));
+    for (let i = 0; i < n; i++) {
+      const nb = this.nb[i];
+      let a00 = 0, a01 = 0, a02 = 0, a10 = 0, a11 = 0, a12 = 0, a20 = 0, a21 = 0, a22 = 0;
+      for (let k = 0; k < nb.length; k++) {
+        const j = nb[k];
+        const px = x[3 * j] - x[3 * i], py = x[3 * j + 1] - x[3 * i + 1], pz = x[3 * j + 2] - x[3 * i + 2];
+        const rx = x0[3 * j] - x0[3 * i], ry = x0[3 * j + 1] - x0[3 * i + 1], rz = x0[3 * j + 2] - x0[3 * i + 2];
+        a00 += px * rx; a01 += px * ry; a02 += px * rz; a10 += py * rx; a11 += py * ry; a12 += py * rz; a20 += pz * rx; a21 += pz * ry; a22 += pz * rz;
+      }
+      let qx = Q[4 * i], qy = Q[4 * i + 1], qz = Q[4 * i + 2], qw = Q[4 * i + 3];
+      for (let it = 0; it < (this.o.turnIterations ?? 3); it++) {
+        const r00 = 1 - 2 * (qy * qy + qz * qz), r01 = 2 * (qx * qy - qz * qw), r02 = 2 * (qx * qz + qy * qw);
+        const r10 = 2 * (qx * qy + qz * qw), r11 = 1 - 2 * (qx * qx + qz * qz), r12 = 2 * (qy * qz - qx * qw);
+        const r20 = 2 * (qx * qz - qy * qw), r21 = 2 * (qy * qz + qx * qw), r22 = 1 - 2 * (qx * qx + qy * qy);
+        const ox = (r10 * a20 - r20 * a10) + (r11 * a21 - r21 * a11) + (r12 * a22 - r22 * a12);
+        const oy = (r20 * a00 - r00 * a20) + (r21 * a01 - r01 * a21) + (r22 * a02 - r02 * a22);
+        const oz = (r00 * a10 - r10 * a00) + (r01 * a11 - r11 * a01) + (r02 * a12 - r12 * a02);
+        const dd = Math.abs(r00 * a00 + r10 * a10 + r20 * a20 + r01 * a01 + r11 * a11 + r21 * a21 + r02 * a02 + r12 * a12 + r22 * a22) + 1e-12;
+        const wx = ox / dd, wy = oy / dd, wz = oz / dd, ang = Math.sqrt(wx * wx + wy * wy + wz * wz);
+        if (ang < 1e-9) break;
+        const sh = Math.sin(ang / 2) / ang, dx = wx * sh, dy = wy * sh, dz = wz * sh, dw = Math.cos(ang / 2);
+        const nx = dw * qx + dx * qw + dy * qz - dz * qy, ny = dw * qy - dx * qz + dy * qw + dz * qx;
+        const nz = dw * qz + dx * qy - dy * qx + dz * qw, nw = dw * qw - dx * qx - dy * qy - dz * qz;
+        const ql = Math.hypot(nx, ny, nz, nw);
+        qx = nx / ql; qy = ny / ql; qz = nz / ql; qw = nw / ql;
+      }
+      Q[4 * i] = qx; Q[4 * i + 1] = qy; Q[4 * i + 2] = qz; Q[4 * i + 3] = qw;
+      const r = 9 * i;
+      R[r] = 1 - 2 * (qy * qy + qz * qz); R[r + 1] = 2 * (qx * qy - qz * qw); R[r + 2] = 2 * (qx * qz + qy * qw);
+      R[r + 3] = 2 * (qx * qy + qz * qw); R[r + 4] = 1 - 2 * (qx * qx + qz * qz); R[r + 5] = 2 * (qy * qz - qx * qw);
+      R[r + 6] = 2 * (qx * qz - qy * qw); R[r + 7] = 2 * (qy * qz + qx * qw); R[r + 8] = 1 - 2 * (qx * qx + qy * qy);
+    }
+  }
+  // how far each point has set (|b0 - its first rest curvature|, over 2 A: as a curvature, 1/units)
+  setCurvature() {
+    const n = this.f.n, out = new Float64Array(n), first = this._first || this._lap(this.rest);
+    this._first = first;
+    for (let i = 0; i < n; i++) { const a = 3 * i; out[i] = this.area[i] > EPS ? Math.hypot(this.b0[a] - first[a], this.b0[a + 1] - first[a + 1], this.b0[a + 2] - first[a + 2]) / (2 * this.area[i]) : 0; }
+    return out;
+  }
+}
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+return { StiffBend };
+})();
+__m['fabric-core'] = (() => {
+// Fabric: a particle solver for cloth and for hair that hangs as a sheet.
+//
+// Spring bones (springbones.js) swing each bone about its parent and pull it back to the way it was modelled, so a
+// cape keeps the shape it was given. Fabric has no modelled shape to return to. It is a sheet of points held
+// together by its own weave, and its shape is whatever gravity and the body make of it:
+//
+//  - warp and weft threads keep their length (`stretch`): the sheet does not grow where it is pulled;
+//  - the diagonals keep theirs, less firmly (`shear`): cloth leans on the bias before it stretches;
+//  - a thread resists folding (`bend`): each point is tied to the point two along, so the sheet rolls over an edge
+//    in a curve and gathers into a few folds instead of creasing at every row;
+//  - a thread may also be `slack`: free to change length by that share before it resists. Hair's weft is slack
+//    (strands slide past each other and part), cloth's is not.
+//
+// For cloth that must hold a fold, the sheet can bend at hinges instead (`hinge`): each pair of triangles that
+// share an edge keeps the angle between them (Bridson, Marino and Fedkiw 2003, "Simulation of clothing with folds
+// and wrinkles"; as a constraint, Mueller et al. 2007, "Position based dynamics"). A hinge has a rest angle, so a
+// crease can be authored (`crease`, `fold`), and a stiff cloth can take a set (`yield`, `creep`): bent past its
+// rest by more than `yield` it slowly settles toward the bend it is held in, as leather creases at the ankle of a
+// boot that keeps flexing there. A distance tie two points along cannot do either: it smooths every fold out.
+//
+// The cloth has a weight. `weigh(density)` gives each point the mass of the cloth round it (its share of each
+// triangle's area); heavy points move light ones more than they are moved. The air's drag (`air`, `wind`) acts on
+// each point's area across the flow and is divided by that mass, so linen flies where leather of the same size
+// only lifts. Masses are kept relative (the free points' mean is 1), so the compliances mean the same on any
+// cloth and any units.
+//
+// The method is XPBD (Macklin, Mueller and Chentanez 2016, "XPBD: position-based simulation of compliant
+// constrained dynamics"), stepped in small fixed steps (Macklin et al. 2019, "Small steps in physics simulation"):
+// each step moves every point by its speed and by gravity, then walks the constraints once or a few times,
+// moving the points of each toward its rest. A constraint's `compliance` (how soft it is) is divided by the step
+// squared, so the cloth is as stiff at 120 steps a second as at 600: stiffness is a property of the fabric, not of
+// the step. After the constraints each point is pushed out of the body, and the body's hold on it takes away its
+// slide along it (`friction`), so cloth and hair stay where they are laid on a shoulder instead of pouring off.
+// With `contact: 'iteration'` the body is tested after every walk over the constraints, not only after the
+// last, so a fast limb cannot carry the cloth through itself between two tests.
+//
+// Stiff cloth needs many walks over the constraints to stop stretching under its own weight. Tethers (`tether`;
+// Kim, Chentanez and Mueller 2012, "Long range attachments") tie each point to the pins it hangs from at its
+// distance along the cloth, and only stop it going further: one walk then does what tens would.
+//
+// Known limit: friction and held chains (`hold`) work against each other. With much friction a held sheet that lies
+// on a body keeps creeping instead of coming to rest; hair is draped with 0.05, the cape runs with 0.2.
+//
+// Nothing here knows about three.js, bones or a page: positions are a flat array of x, y, z, the body is a
+// function, and the units are the caller's. The cape and the hair in the game run it through fabric.js (on the
+// same bones, colliders and bench as the spring bones); the Face Creator runs it once, to rest, to drape a
+// hairstyle on the figure that will wear it. tools/fabric-bench measures it.
+
+const { StiffBend } = __m['fabric-stiff'];
+const FABRIC_DEFAULTS = {
+  gravity: [0, -450, 0],     // units / s^2
+  damping: 0.02,             // share of each point's speed lost per 1/60 s
+  iterations: 2,             // walks over the constraints per step
+  stretch: 0,                // compliance of the threads (0: they keep their length)
+  shear: 2e-5,               // compliance of the diagonals
+  bend: 2e-4,                // compliance of the ties two points along
+  friction: 0.5,             // how well the body holds what lies on it: the slide it stops, as a share of its push
+  lead: 0.9,                 // held chains: the share of a point's correction the point above takes the other way
+  // (the rest are off unless asked for)
+  air: 0,                    // the air's drag: half its density times the drag coefficient (kg / unit^3, with
+                             // weigh's density in kg / unit^2); see material()
+  wind: [0, 0, 0],           // the air's speed (units / s): minus her speed, when the body is held in place
+  yield: Infinity,           // a hinge bent past its rest by more than this (radians) takes a set...
+  creep: 0,                  // ...this share of the excess a second
+  setMax: 2.6,               // the largest rest angle a set can reach (radians)
+  thickness: 0,              // points of the sheet keep this far apart from points they are not tied to (0: off)
+  contact: 'step',           // 'step': the body after the constraints; 'iteration': after every walk over them
+  edgeContact: false,        // test the middle of every edge against the body too (body(p, -1, ref))
+  tetherSlack: 0.01,         // a tether lets a point go this share further than its distance along the cloth
+  substep: 1 / 240,          // advance(): the fixed step (s)
+  order: 'build',            // 'root': walk the constraints from the pins out (see _orderFromPins)
+};
+
+// Cloth by what it is made of, in SI: weight (kg/m2), bending length (m, the cantilever test's, Peirce 1930: how
+// far a strip reaches over an edge before it droops), for leather the radius it takes a set at, for boot leather
+// `stretchK` (its length held inside the bend's solve too: a closed, stiff, heavy shaft otherwise folds up between
+// the solve and the constraints at 240 steps a second; open pieces do better without it, see fabric-stiff.js);
+// the rest as FABRIC_DEFAULTS. Bend every one of them with stiffen(). tools/fabric-bench --cantilever checks that the
+// solver gives each its bending length.
+const MATERIALS = {
+  silk:        { weight: 0.07, bendingLength: 0.012, hinge: 3e-1, shear: 4e-5, friction: 0.3, damping: 0.03 },
+  linen:       { weight: 0.18, bendingLength: 0.025, hinge: 4e-2, shear: 2e-5, friction: 0.5, damping: 0.03 },
+  wool:        { weight: 0.55, bendingLength: 0.04,  hinge: 1e-2, shear: 1e-5, friction: 0.6, damping: 0.03 },
+  // garment leather (about 1 mm): a jerkin, a belted skirt panel, a pouch
+  leather:     { weight: 1.0,  bendingLength: 0.07,  hinge: 4e-3, shear: 0,    friction: 0.7, damping: 0.05, setRadius: 0.025, creep: 0.15 },
+  // boot leather (2 to 2.5 mm, vegetable tanned): a riding boot's shaft, a scabbard
+  bootLeather: { weight: 2.2,  bendingLength: 0.14,  hinge: 4e-3, shear: 0,    friction: 0.7, damping: 0.05, setRadius: 0.025, creep: 0.15, stretchK: 30 },
+};
+
+// A material's settings in the caller's units (unitsPerMetre: 39.4 for the figures): `density` for weigh(), `air`
+// for the drag, and the material's own. cd: the air's drag coefficient across a sheet
+function material(name, unitsPerMetre = 1, { cd = 1.2, airDensity = 1.2 } = {}) {
+  const m = MATERIALS[name];
+  if (!m) throw new Error(`fabric: no material ${name}`);
+  const { weight, bendingLength, setRadius, ...rest } = m;
+  const u = unitsPerMetre;
+  return { ...rest, density: weight / (u * u), bendingLength: bendingLength * u, setRadius: setRadius ? setRadius * u : 0, air: 0.5 * airDensity * cd / (u * u * u), gravity: [0, -9.81 * u, 0] };
+}
+
+const wrapAngle = (a) => (a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a);
+
+class Fabric {
+  // n: the number of points; pos: Float64Array of 3n (taken over, not copied)
+  constructor(pos, settings = {}) {
+    this.n = pos.length / 3;
+    this.pos = pos;
+    this.prev = Float64Array.from(pos);
+    this.w = new Float64Array(this.n).fill(1);       // inverse mass, relative: 0 pins a point
+    this.kg = null;                                  // each point's mass (weigh), for the air's drag
+    this.area = new Float64Array(this.n);            // each point's share of the cloth's area
+    this.settings = { ...FABRIC_DEFAULTS, ...settings };
+    this.ci = []; this.cj = []; this.rest = []; this.comp = []; this.slack = []; this.lambda = null;
+    this.tris = [];          // triangles (point indices, three a triangle): the cloth's area, the air, the hinges
+    this.hinges = { a: [], b: [], c: [], d: [], rest: [], comp: [], plastic: [] };   // (see hinge())
+    this._edgeHinge = new Map();
+    this.tethers = null;
+    this.chains = [];        // lists of point indices whose segments keep their length exactly (see `hold`)
+    this.touch = new Uint8Array(this.n);
+    this._packed = null;
+    this._acc = 0;
+  }
+  pin(i) { this.w[i] = 0; }
+  // tie points i and j at the distance they are at now (or `rest`); compliance 0 is rigid; slack: the share of
+  // the rest length the distance may change freely
+  tie(i, j, compliance = 0, slack = 0, rest = null) {
+    if (this.w[i] === 0 && this.w[j] === 0) return;
+    const p = this.pos;
+    this.ci.push(i); this.cj.push(j); this.comp.push(compliance); this.slack.push(slack);
+    this.rest.push(rest ?? Math.hypot(p[3 * i] - p[3 * j], p[3 * i + 1] - p[3 * j + 1], p[3 * i + 2] - p[3 * j + 2]));
+    this.lambda = null; this._packed = null;
+  }
+  // a triangle of the cloth (for its area, the air and the hinges)
+  triangle(a, b, c) { this.tris.push(a, b, c); this._packed = null; }
+  // A hinge on the edge c-d between the triangles (a, c, d) and (b, d, c): keeps the angle between them at `rest`
+  // (radians, 0 flat; the angle they are at now if not given). plastic: it may take a set (yield, creep)
+  hinge(a, b, c, d, compliance, rest = null, plastic = true) {
+    const H = this.hinges;
+    H.a.push(a); H.b.push(b); H.c.push(c); H.d.push(d); H.comp.push(compliance); H.plastic.push(plastic ? 1 : 0);
+    H.rest.push(rest ?? this._angle(a, b, c, d));
+    this._edgeHinge.set(this._key(c, d), H.a.length - 1);
+    this._packed = null;
+    return H.a.length - 1;
+  }
+  _key(i, j) { return i < j ? i * this.n + j : j * this.n + i; }
+  // hinges over every inner edge of the triangles given since the last call (from `first`, in tris)
+  _hingeTriangles(first, compliance, flat) {
+    const t = this.tris, opp = new Map();
+    for (let k = first; k < t.length; k += 3) {
+      for (let e = 0; e < 3; e++) {
+        const c = t[k + e], d = t[k + (e + 1) % 3], a = t[k + (e + 2) % 3], key = this._key(c, d);
+        const o = opp.get(key);
+        // (the second triangle on an edge walks it the other way: (b, d, c))
+        if (o) { if (o.length === 3) this.hinge(o[0], a, o[1], o[2], compliance, flat ? 0 : null); o.push(a); }
+        else opp.set(key, [a, c, d]);
+      }
+    }
+  }
+  // A cloth from a mesh: tris, a flat list of point indices (three a triangle, wound alike). Ties every edge
+  // (compliance `stretch`), and bends at a hinge on every inner edge (compliance `hinge`; flat: rest flat, else as
+  // the mesh lies now). A pattern piece cut flat and sewn is a mesh: tie its seams with tie().
+  mesh(tris, o = {}) {
+    const s = this.settings, first = this.tris.length, seen = new Set();
+    for (let k = 0; k < tris.length; k += 3) {
+      this.triangle(tris[k], tris[k + 1], tris[k + 2]);
+      for (let e = 0; e < 3; e++) {
+        const i = tris[k + e], j = tris[k + (e + 1) % 3], key = this._key(i, j);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        this.tie(i, j, o.stretch ?? s.stretch, 0);
+      }
+    }
+    this._hingeTriangles(first, o.hinge ?? s.hinge ?? 1e-2, o.flat);
+  }
+  // A sheet from a grid of point indices, at(c, r) for column c (a thread from the top down) and row r, giving -1
+  // where there is no point. Ties the warp (down each column), the weft (across), the diagonals and the bend
+  // ties, with the settings' compliances; o: { weftSlack, wrap (the last column meets the first), weft, shear,
+  // bend, warpBend, hold (keep each column's segments at their exact length after every step: bones, hair),
+  // hinge (bend at hinges with this compliance instead of the ties two along), flat (the hinges' rest is flat) }
+  sheet(cols, rows, at, o = {}) {
+    const s = this.settings, ok = (c, r) => (r >= 0 && r < rows && (o.wrap || (c >= 0 && c < cols)) ? at(((c % cols) + cols) % cols, r) : -1);
+    const link = (a, b, k, slack) => { if (a >= 0 && b >= 0 && k != null) this.tie(a, b, k, slack); };
+    const weft = o.weft === undefined ? s.stretch : o.weft, shear = o.shear === undefined ? s.shear : o.shear;
+    const hinged = o.hinge != null;
+    const bend = o.bend === undefined ? (hinged ? null : s.bend) : o.bend, warpBend = o.warpBend === undefined ? bend : o.warpBend;
+    const first = this.tris.length;
+    for (let c = 0; c < cols; c++) {
+      const chain = [];
+      for (let r = 0; r < rows; r++) {
+        const p = ok(c, r);
+        if (p < 0) continue;
+        chain.push(p);
+        link(p, ok(c, r + 1), s.stretch, 0);
+        link(p, ok(c + 1, r), weft, o.weftSlack || 0);
+        link(p, ok(c + 1, r + 1), shear, o.weftSlack || 0);
+        link(ok(c + 1, r), ok(c, r + 1), shear, o.weftSlack || 0);
+        link(p, ok(c, r + 2), warpBend, 0);
+        link(p, ok(c + 2, r), bend, o.weftSlack || 0);
+        // the quad's two triangles, split on alternate diagonals so the cloth has no grain to fold along
+        const q = ok(c + 1, r), u = ok(c, r + 1), v = ok(c + 1, r + 1);
+        if (q >= 0 && u >= 0 && v >= 0) {
+          if ((c + r) & 1) { this.triangle(p, u, v); this.triangle(p, v, q); }
+          else { this.triangle(p, u, q); this.triangle(q, u, v); }
+        }
+      }
+      if (o.hold && chain.length > 1) {
+        const x = this.pos;
+        chain.len = chain.slice(1).map((i, k) => Math.hypot(x[3 * i] - x[3 * chain[k]], x[3 * i + 1] - x[3 * chain[k] + 1], x[3 * i + 2] - x[3 * chain[k] + 2]));
+        this.chains.push(chain);
+      }
+    }
+    if (hinged) this._hingeTriangles(first, o.hinge, o.flat);
+  }
+  // An authored crease: the hinge on the edge i-j rests at `angle` (radians; the sign is the side it folds to).
+  // o.compliance: how firmly it holds the angle (1e-4); o.soften: that times this; o.set: false keeps it from
+  // creeping; o.stiffAt: the share of stiffen()'s bend its two points keep (0.02), so the cloth folds there
+  crease(i, j, angle, o = {}) {
+    const k = this._edgeHinge.get(this._key(i, j));
+    if (k === undefined) return false;
+    const H = this.hinges;
+    // (the patches of stiff cloth stop at the crease's points: see _patches)
+    const cp = this._creasePoints || (this._creasePoints = new Set());
+    cp.add(i); cp.add(j);
+    if (this.stiff) { this.stiff.scale[i] = this.stiff.scale[j] = o.stiffAt ?? 0.02; this.stiff._h = null; }
+    H.rest[k] = angle;
+    // (a pressed crease is firm: its hinge's compliance is o.compliance, 1e-4 unless given; o.soften scales it)
+    H.comp[k] = o.compliance ?? 1e-4;
+    if (o.soften) H.comp[k] *= o.soften;
+    if (o.set === false) H.plastic[k] = 0;
+    if (this._packed) { this._packed.hRest[k] = H.rest[k]; this._packed.hComp[k] = H.comp[k]; this._packed.hPlastic[k] = H.plastic[k]; }
+    return true;
+  }
+  // a crease along a line of points (each edge of it in turn); returns how many edges it found
+  fold(line, angle, o = {}) {
+    let k = 0;
+    for (let q = 1; q < line.length; q++) k += this.crease(line[q - 1], line[q], angle, o) ? 1 : 0;
+    return k;
+  }
+  // the angle at a hinge (0 flat, signed)
+  _angle(a, b, c, d, x = this.pos) {
+    const A = 3 * a, B = 3 * b, C = 3 * c, D = 3 * d;
+    const ex = x[D] - x[C], ey = x[D + 1] - x[C + 1], ez = x[D + 2] - x[C + 2];
+    const n1 = cross(x[A] - x[C], x[A + 1] - x[C + 1], x[A + 2] - x[C + 2], x[A] - x[D], x[A + 1] - x[D + 1], x[A + 2] - x[D + 2]);
+    const n2 = cross(x[B] - x[D], x[B + 1] - x[D + 1], x[B + 2] - x[D + 2], x[B] - x[C], x[B + 1] - x[C + 1], x[B + 2] - x[C + 2]);
+    const el = Math.hypot(ex, ey, ez) || 1;
+    const m = cross(n1[0], n1[1], n1[2], n2[0], n2[1], n2[2]);
+    return Math.atan2((m[0] * ex + m[1] * ey + m[2] * ez) / el, n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2]);
+  }
+  // Stiffness: the cloth's bend solved as one implicit solve a step over the whole sheet (fabric-stiff.js), for
+  // cloth too stiff for the constraints' walks to hold up (leather, felt, a boot shaft). Call after the triangles
+  // (sheet or mesh), the pins and weigh(). o: { bendingLength (units: the cantilever's, Peirce 1930) or B (the
+  // flexural rigidity), density (as weigh's; else the cloth's mean), setRadius (units: bent tighter than this it
+  // takes a set), creep (1/s), scale (Float64Array: each point's share of the stiffness, for a piece of two
+  // weights of leather), passes (solves a step, 2), stretchK (the edges' hold in the solve; 0, or 30 for leather) }. Points of creases made before or after keep only o.stiffAt of the stiffness.
+  stiffen(o = {}) {
+    this._areas();
+    let sigma = o.density;
+    if (!sigma) { let m = 0, a = 0; for (let i = 0; i < this.n; i++) { m += this.kg ? this.kg[i] : 1; a += this.area[i]; } sigma = m / (a || 1); }
+    const g = Math.hypot(...this.settings.gravity);
+    const B = o.B ?? sigma * g * Math.pow(o.bendingLength, 3);
+    this.stiff = new StiffBend(this, B, { setRadius: o.setRadius ?? this.settings.setRadius, creep: o.creep ?? this.settings.creep, scale: o.scale, passes: o.passes, stretchK: o.stretchK ?? this.settings.stretchK ?? 0 });
+    if (this._creasePoints) for (const i of this._creasePoints) this.stiff.scale[i] = o.stiffAt ?? 0.02;
+    return B;
+  }
+  // Weight: each point weighs the cloth round it, density (mass per square unit) times a third of each triangle it
+  // is a corner of; o.extra: [point, mass] pairs added on (a buckle, a hem weight). Pins stay pinned.
+  weigh(density, o = {}) {
+    this._areas();
+    const n = this.n, kg = new Float64Array(n);
+    for (let i = 0; i < n; i++) kg[i] = density * this.area[i];
+    for (const [i, m] of o.extra || []) kg[i] += m;
+    this.massKg(kg);
+  }
+  // each point's mass, given (kg, or any unit the air's `air` is in)
+  massKg(kg) {
+    const n = this.n, w = this.w;
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < n; i++) if (w[i] !== 0 && kg[i] > 0) { sum += kg[i]; cnt++; }
+    const mean = cnt ? sum / cnt : 1;
+    for (let i = 0; i < n; i++) if (w[i] !== 0) w[i] = kg[i] > 0 ? mean / kg[i] : 1;
+    this.kg = kg;
+  }
+  _areas() {
+    const x = this.pos, t = this.tris, ar = this.area.fill(0);
+    for (let k = 0; k < t.length; k += 3) {
+      const a = 3 * t[k], b = 3 * t[k + 1], c = 3 * t[k + 2];
+      const m = cross(x[b] - x[a], x[b + 1] - x[a + 1], x[b + 2] - x[a + 2], x[c] - x[a], x[c + 1] - x[a + 1], x[c + 2] - x[a + 2]);
+      const A = Math.hypot(m[0], m[1], m[2]) / 6;
+      ar[t[k]] += A; ar[t[k + 1]] += A; ar[t[k + 2]] += A;
+    }
+  }
+  // Tethers: each free point to the nearest pin along the cloth (through its ties of no slack), at that distance;
+  // it may come closer, never go further. Call after pinning and tying.
+  tether() {
+    const n = this.n, w = this.w, adj = Array.from({ length: n }, () => []);
+    for (let k = 0; k < this.ci.length; k++) {
+      if (this.slack[k]) continue;
+      adj[this.ci[k]].push(this.cj[k], this.rest[k]); adj[this.cj[k]].push(this.ci[k], this.rest[k]);
+    }
+    const dist = new Float64Array(n).fill(Infinity), from = new Int32Array(n).fill(-1), done = new Uint8Array(n);
+    // (Dijkstra from every pin at once; n is a few thousand at most, so a plain scan for the nearest will do...
+    // but a binary heap keeps a big garment quick)
+    const heap = [];
+    const push = (d, i) => { heap.push([d, i]); let k = heap.length - 1; while (k) { const p = (k - 1) >> 1; if (heap[p][0] <= heap[k][0]) break; [heap[p], heap[k]] = [heap[k], heap[p]]; k = p; } };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; k = m; } } return top; };
+    for (let i = 0; i < n; i++) if (w[i] === 0) { dist[i] = 0; from[i] = i; push(0, i); }
+    while (heap.length) {
+      const [d, i] = pop();
+      if (done[i]) continue;
+      done[i] = 1;
+      const a = adj[i];
+      for (let q = 0; q < a.length; q += 2) {
+        const j = a[q], nd = d + a[q + 1];
+        if (nd < dist[j]) { dist[j] = nd; from[j] = from[i]; push(nd, j); }
+      }
+    }
+    const ti = [], tp = [], tl = [];
+    for (let i = 0; i < n; i++) if (w[i] !== 0 && from[i] >= 0) { ti.push(i); tp.push(from[i]); tl.push(dist[i]); }
+    this.tethers = { i: Int32Array.from(ti), p: Int32Array.from(tp), len: Float64Array.from(tl) };
+  }
+  // Put the constraints in order from the pins out (each by its point nearer a pin, along the ties), so that one
+  // walk over them carries the pins' hold from the root to the free edge, as a stiff cloth needs: walked in the
+  // order they were made, a hold travels one row a walk, and leather or a boot shaft sags as if it were soft.
+  _orderFromPins() {
+    const n = this.n, w = this.w, adj = Array.from({ length: n }, () => []);
+    for (let k = 0; k < this.ci.length; k++) { adj[this.ci[k]].push(this.cj[k]); adj[this.cj[k]].push(this.ci[k]); }
+    const depth = new Int32Array(n).fill(n), queue = [];
+    for (let i = 0; i < n; i++) if (w[i] === 0) { depth[i] = 0; queue.push(i); }
+    if (!queue.length) return;
+    for (let q = 0; q < queue.length; q++) for (const j of adj[queue[q]]) if (depth[j] > depth[queue[q]] + 1) { depth[j] = depth[queue[q]] + 1; queue.push(j); }
+    const permute = (lists, key) => {
+      const idx = key.map((v, k) => k).sort((a, b) => key[a] - key[b] || a - b);
+      for (const L of lists) { const c = L.slice(); idx.forEach((from, to) => { L[to] = c[from]; }); }
+    };
+    permute([this.ci, this.cj, this.rest, this.comp, this.slack], this.ci.map((i, k) => Math.min(depth[i], depth[this.cj[k]]) * 2 + Math.max(depth[i], depth[this.cj[k]])));
+    const H = this.hinges;
+    permute([H.a, H.b, H.c, H.d, H.rest, H.comp, H.plastic], H.c.map((c, k) => Math.min(depth[c], depth[H.d[k]]) * 2 + Math.max(depth[H.a[k]], depth[H.b[k]])));
+    this._edgeHinge.clear();
+    H.c.forEach((c, k) => this._edgeHinge.set(this._key(c, H.d[k]), k));
+    this.lambda = null;
+  }
+  // the constraints in typed arrays, for the step's loops (built again when any is added)
+  _pack() {
+    if (this.settings.order === 'root') this._orderFromPins();
+    const H = this.hinges, n = this.n;
+    const P = {
+      ci: Int32Array.from(this.ci), cj: Int32Array.from(this.cj), rest: Float64Array.from(this.rest),
+      comp: Float64Array.from(this.comp), slack: Float64Array.from(this.slack),
+      ha: Int32Array.from(H.a), hb: Int32Array.from(H.b), hc: Int32Array.from(H.c), hd: Int32Array.from(H.d),
+      hRest: Float64Array.from(H.rest), hComp: Float64Array.from(H.comp), hPlastic: Uint8Array.from(H.plastic),
+      hScale: new Float64Array(H.a.length), hLam: new Float64Array(H.a.length), hAngle: new Float64Array(H.a.length),
+    };
+    // (a hinge's stiffness grows with its edge's length over its triangles' area, as the bending energy of a
+    // discrete shell does, so a crease costs the same on a fine mesh as on a coarse one)
+    const x = this.pos;
+    for (let k = 0; k < P.ha.length; k++) {
+      const a = 3 * P.ha[k], b = 3 * P.hb[k], c = 3 * P.hc[k], d = 3 * P.hd[k];
+      const el2 = (x[d] - x[c]) ** 2 + (x[d + 1] - x[c + 1]) ** 2 + (x[d + 2] - x[c + 2]) ** 2;
+      const n1 = cross(x[a] - x[c], x[a + 1] - x[c + 1], x[a + 2] - x[c + 2], x[a] - x[d], x[a + 1] - x[d + 1], x[a + 2] - x[d + 2]);
+      const n2 = cross(x[b] - x[d], x[b + 1] - x[d + 1], x[b + 2] - x[d + 2], x[b] - x[c], x[b + 1] - x[c + 1], x[b + 2] - x[c + 2]);
+      const area = (Math.hypot(...n1) + Math.hypot(...n2)) / 2;
+      P.hScale[k] = el2 > 1e-12 ? area / (3 * el2) : 1;
+    }
+    if (this.settings.thickness > 0) {
+      P.near = new Set();
+      for (let k = 0; k < P.ci.length; k++) P.near.add(this._key(P.ci[k], P.cj[k]));
+      const t = this.tris;
+      for (let k = 0; k < t.length; k += 3) { P.near.add(this._key(t[k], t[k + 1])); P.near.add(this._key(t[k + 1], t[k + 2])); P.near.add(this._key(t[k], t[k + 2])); }
+      P.hashSize = 2 * n + 1; P.cellStart = new Int32Array(P.hashSize + 1); P.cellEntry = new Int32Array(n);
+    }
+    if (this.tris.length) this._areas();
+    this.lambda = new Float64Array(P.ci.length);
+    this._packed = P;
+  }
+  // One step of h seconds. body(p, i): pushes the point p ([x, y, z], changed in place) out of whatever it must
+  // stay out of and returns true if it moved it; o.neutral: a push by the body is not kept as speed (the cloth
+  // comes to rest on the body instead of bouncing off it)
+  step(h, body = null, o = {}) {
+    if (!this._packed) this._pack();
+    const P = this._packed, s = this.settings, n = this.n, x = this.pos, pv = this.prev, w = this.w, g = s.gravity;
+    const keep = Math.pow(1 - s.damping, h * 60), m = P.ci.length;
+    if (s.air && this.tris.length) this._air(h);
+    for (let i = 0; i < n; i++) {
+      if (w[i] === 0) continue;
+      const a = 3 * i;
+      for (let c = 0; c < 3; c++) {
+        const v = (x[a + c] - pv[a + c]) * keep;
+        pv[a + c] = x[a + c];
+        x[a + c] += v + g[c] * h * h;
+      }
+    }
+    if (this.stiff) this.stiff.step(h);
+    if (!this.lambda || this.lambda.length !== m) this.lambda = new Float64Array(m);
+    const lam = this.lambda.fill(0), ci = P.ci, cj = P.cj, rest = P.rest, comp = P.comp, slack = P.slack, h2 = h * h;
+    if (P.ha.length) P.hLam.fill(0);
+    const each = body && s.contact === 'iteration';
+    // (the walk runs forward one time and backward the next: always the same way, the points solved last get the
+    // last word, and the whole sheet creeps that way. Every step walks in the same order, though: two steps that
+    // walk differently come to two different answers, and the sheet flickers between them)
+    for (let it = 0; it < s.iterations; it++) {
+      const back = it & 1;
+      for (let kk = 0; kk < m; kk++) {
+        const k = back ? m - 1 - kk : kk;
+        const i = ci[k], j = cj[k], a = 3 * i, b = 3 * j, wi = w[i], wj = w[j];
+        const dx = x[b] - x[a], dy = x[b + 1] - x[a + 1], dz = x[b + 2] - x[a + 2], len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (len < 1e-9) continue;
+        let target = rest[k];
+        if (slack[k]) { target = Math.min(rest[k] * (1 + slack[k]), Math.max(rest[k] * (1 - slack[k]), len)); if (target === len) continue; }
+        const alpha = comp[k] / h2, C = len - target;
+        const dl = (-C - alpha * lam[k]) / (wi + wj + alpha);
+        lam[k] += dl;
+        const q = dl / len;
+        x[a] -= wi * q * dx; x[a + 1] -= wi * q * dy; x[a + 2] -= wi * q * dz;
+        x[b] += wj * q * dx; x[b + 1] += wj * q * dy; x[b + 2] += wj * q * dz;
+      }
+      if (P.ha.length) this._bend(h2, back);
+      if (this.tethers) this._tether();
+      if (each && it < s.iterations - 1) this._contact(body, o, false);
+    }
+    if (P.ha.length && s.creep > 0) this._set(h);
+    if (this.stiff) this.stiff.set(h);
+    if (s.thickness > 0) this._self();
+    this.hold();
+    if (body) {
+      this._contact(body, o, true);
+      if (this.chains.length) this.hold(body, o.neutral);
+    }
+  }
+  // the hinges, walked once: C = angle - rest, moved along the angle's gradient at each of the four points
+  _bend(h2, back) {
+    const P = this._packed, x = this.pos, w = this.w, ha = P.ha, hb = P.hb, hc = P.hc, hd = P.hd, mh = ha.length;
+    for (let kk = 0; kk < mh; kk++) {
+      const k = back ? mh - 1 - kk : kk;
+      const ia = ha[k], ib = hb[k], ic = hc[k], id = hd[k], wa = w[ia], wb = w[ib], wc = w[ic], wd = w[id];
+      if (wa + wb + wc + wd === 0) continue;
+      const A = 3 * ia, B = 3 * ib, C = 3 * ic, D = 3 * id;
+      const ex = x[D] - x[C], ey = x[D + 1] - x[C + 1], ez = x[D + 2] - x[C + 2], el = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      if (el < 1e-9) continue;
+      // n1 = (a - c) x (a - d), n2 = (b - d) x (b - c)
+      const acx = x[A] - x[C], acy = x[A + 1] - x[C + 1], acz = x[A + 2] - x[C + 2];
+      const adx = x[A] - x[D], ady = x[A + 1] - x[D + 1], adz = x[A + 2] - x[D + 2];
+      const bcx = x[B] - x[C], bcy = x[B + 1] - x[C + 1], bcz = x[B + 2] - x[C + 2];
+      const bdx = x[B] - x[D], bdy = x[B + 1] - x[D + 1], bdz = x[B + 2] - x[D + 2];
+      const n1x = acy * adz - acz * ady, n1y = acz * adx - acx * adz, n1z = acx * ady - acy * adx;
+      const n2x = bdy * bcz - bdz * bcy, n2y = bdz * bcx - bdx * bcz, n2z = bdx * bcy - bdy * bcx;
+      const l1 = n1x * n1x + n1y * n1y + n1z * n1z, l2 = n2x * n2x + n2y * n2y + n2z * n2z;
+      // (a triangle squashed to a sliver has no plane to turn: its gradient runs off to infinity)
+      const e4 = 1e-6 * el * el * el * el;
+      if (l1 < e4 || l2 < e4) continue;
+      const mx = n1y * n2z - n1z * n2y, my = n1z * n2x - n1x * n2z, mz = n1x * n2y - n1y * n2x;
+      const theta = Math.atan2((mx * ex + my * ey + mz * ez) / el, n1x * n2x + n1y * n2y + n1z * n2z);
+      P.hAngle[k] = theta;
+      const Cv = wrapAngle(theta - P.hRest[k]);
+      // the gradients (Bridson et al. 2003)
+      const f1 = el / l1, f2 = el / l2;
+      const s3a = (adx * ex + ady * ey + adz * ez) / el, s3b = (bdx * ex + bdy * ey + bdz * ez) / el;
+      const s4a = (acx * ex + acy * ey + acz * ez) / el, s4b = (bcx * ex + bcy * ey + bcz * ez) / el;
+      const u1x = f1 * n1x, u1y = f1 * n1y, u1z = f1 * n1z;
+      const u2x = f2 * n2x, u2y = f2 * n2y, u2z = f2 * n2z;
+      const g1 = s3a / el, g2 = s3b / el, g3 = s4a / el, g4 = s4b / el;
+      const u3x = g1 * u1x + g2 * u2x, u3y = g1 * u1y + g2 * u2y, u3z = g1 * u1z + g2 * u2z;
+      const u4x = -g3 * u1x - g4 * u2x, u4y = -g3 * u1y - g4 * u2y, u4z = -g3 * u1z - g4 * u2z;
+      const sum = wa * (u1x * u1x + u1y * u1y + u1z * u1z) + wb * (u2x * u2x + u2y * u2y + u2z * u2z)
+        + wc * (u3x * u3x + u3y * u3y + u3z * u3z) + wd * (u4x * u4x + u4y * u4y + u4z * u4z);
+      const alpha = P.hComp[k] * P.hScale[k] / h2;
+      if (sum < 1e-18) continue;
+      const dl = (-Cv - alpha * P.hLam[k]) / (sum + alpha);
+      P.hLam[k] += dl;
+      // (the angle as atan2 above measures it falls along u)
+      const q = -dl;
+      x[A] += wa * q * u1x; x[A + 1] += wa * q * u1y; x[A + 2] += wa * q * u1z;
+      x[B] += wb * q * u2x; x[B + 1] += wb * q * u2y; x[B + 2] += wb * q * u2z;
+      x[C] += wc * q * u3x; x[C + 1] += wc * q * u3y; x[C + 2] += wc * q * u3z;
+      x[D] += wd * q * u4x; x[D + 1] += wd * q * u4y; x[D + 2] += wd * q * u4z;
+    }
+  }
+  // the set: a hinge held past its rest by more than `yield` moves its rest toward where it is held
+  _set(h) {
+    const P = this._packed, s = this.settings, k0 = Math.min(1, s.creep * h), y = s.yield, mx = s.setMax;
+    for (let k = 0; k < P.ha.length; k++) {
+      if (!P.hPlastic[k]) continue;
+      const e = wrapAngle(P.hAngle[k] - P.hRest[k]), over = Math.abs(e) - y;
+      if (over <= 0) continue;
+      const r = P.hRest[k] + Math.sign(e) * over * k0;
+      P.hRest[k] = Math.max(-mx, Math.min(mx, r));
+    }
+  }
+  // the tethers: a point further from its pin than its distance along the cloth is put back on that distance
+  _tether() {
+    const T = this.tethers, x = this.pos, sl = 1 + this.settings.tetherSlack;
+    for (let k = 0; k < T.i.length; k++) {
+      const a = 3 * T.i[k], b = 3 * T.p[k];
+      const dx = x[a] - x[b], dy = x[a + 1] - x[b + 1], dz = x[a + 2] - x[b + 2], d = Math.sqrt(dx * dx + dy * dy + dz * dz), L = T.len[k] * sl;
+      if (d <= L) continue;
+      const q = L / d;
+      x[a] = x[b] + dx * q; x[a + 1] = x[b + 1] + dy * q; x[a + 2] = x[b + 2] + dz * q;
+    }
+  }
+  // the air: drag on each point's area across the flow (its speed through the air along its normal), as speed
+  // lost this step, from the previous position
+  _air(h) {
+    const x = this.pos, pv = this.prev, t = this.tris, n = this.n, s = this.settings, wd = s.wind, w = this.w;
+    const nrm = this._nrm || (this._nrm = new Float64Array(3 * n));
+    nrm.fill(0);
+    for (let k = 0; k < t.length; k += 3) {
+      const a = 3 * t[k], b = 3 * t[k + 1], c = 3 * t[k + 2];
+      const m = cross(x[b] - x[a], x[b + 1] - x[a + 1], x[b + 2] - x[a + 2], x[c] - x[a], x[c + 1] - x[a + 1], x[c + 2] - x[a + 2]);
+      for (const p of [a, b, c]) { nrm[p] += m[0]; nrm[p + 1] += m[1]; nrm[p + 2] += m[2]; }
+    }
+    const kg = this.kg;
+    for (let i = 0; i < n; i++) {
+      if (w[i] === 0) continue;
+      const a = 3 * i, nl = Math.hypot(nrm[a], nrm[a + 1], nrm[a + 2]);
+      if (nl < 1e-12) continue;
+      const ux = nrm[a] / nl, uy = nrm[a + 1] / nl, uz = nrm[a + 2] / nl;
+      const vx = (x[a] - pv[a]) / h - wd[0], vy = (x[a + 1] - pv[a + 1]) / h - wd[1], vz = (x[a + 2] - pv[a + 2]) / h - wd[2];
+      const vn = vx * ux + vy * uy + vz * uz;
+      const mass = kg ? kg[i] : this.area[i];
+      // (a = air * area / mass * vn^2, across the sheet; taken off the speed, never past stopping it)
+      const dv = Math.min(Math.abs(vn), s.air * this.area[i] / (mass || 1) * vn * vn * h) * Math.sign(vn);
+      pv[a] += dv * ux * h; pv[a + 1] += dv * uy * h; pv[a + 2] += dv * uz * h;
+    }
+  }
+  // the sheet against itself: points closer than `thickness` that are not tied together are pushed apart
+  // (a spatial hash, Teschner et al. 2003, of cells the thickness across)
+  _self() {
+    const P = this._packed, x = this.pos, w = this.w, n = this.n, t = this.settings.thickness, size = P.hashSize;
+    const start = P.cellStart.fill(0), entry = P.cellEntry, inv = 1 / t;
+    const hash = (xi, yi, zi) => Math.abs((xi * 92837111) ^ (yi * 689287499) ^ (zi * 283923481)) % size;
+    const cell = new Int32Array(n);
+    for (let i = 0; i < n; i++) { const a = 3 * i; cell[i] = hash(Math.floor(x[a] * inv), Math.floor(x[a + 1] * inv), Math.floor(x[a + 2] * inv)); start[cell[i]]++; }
+    for (let c = 1; c <= size; c++) start[c] += start[c - 1];
+    for (let i = 0; i < n; i++) entry[--start[cell[i]]] = i;
+    const t2 = t * t;
+    for (let i = 0; i < n; i++) {
+      const a = 3 * i, xi = Math.floor(x[a] * inv), yi = Math.floor(x[a + 1] * inv), zi = Math.floor(x[a + 2] * inv);
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+        const hc = hash(xi + ox, yi + oy, zi + oz);
+        for (let e = start[hc]; e < start[hc + 1]; e++) {
+          const j = entry[e];
+          if (j <= i) continue;
+          const b = 3 * j, dx = x[b] - x[a], dy = x[b + 1] - x[a + 1], dz = x[b + 2] - x[a + 2], d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= t2 || d2 < 1e-18) continue;
+          if (P.near.has(this._key(i, j))) continue;
+          const ws = w[i] + w[j];
+          if (!ws) continue;
+          const d = Math.sqrt(d2), q = (t - d) / d / ws;
+          x[a] -= w[i] * q * dx; x[a + 1] -= w[i] * q * dy; x[a + 2] -= w[i] * q * dz;
+          x[b] += w[j] * q * dx; x[b + 1] += w[j] * q * dy; x[b + 2] += w[j] * q * dz;
+        }
+      }
+    }
+  }
+  // the body against the middle of each edge of the cloth, so a limb cannot pass between two points by pushing
+  // them apart; the push is shared by the edge's two ends (more to the lighter), and not kept as speed. An edge
+  // whose two ends both lie on the body is left alone: its middle is inside any curved body by the chord's sag,
+  // and pushing it out every step slid a sheet clean off the bench's ball
+  _edgeContact(body, o) {
+    const P = this._packed;
+    if (!P.ea) {
+      const t = this.tris, seen = new Set(), ea = [], eb = [];
+      for (let k = 0; k < t.length; k += 3) for (let e = 0; e < 3; e++) {
+        const i = t[k + e], j = t[k + (e + 1) % 3], key = this._key(i, j);
+        if (!seen.has(key)) { seen.add(key); ea.push(i); eb.push(j); }
+      }
+      P.ea = Int32Array.from(ea); P.eb = Int32Array.from(eb);
+    }
+    const x = this.pos, pv = this.prev, w = this.w, p = [0, 0, 0], ref = [0, 0, 0];
+    for (let k = 0; k < P.ea.length; k++) {
+      const i = P.ea[k], j = P.eb[k], a = 3 * i, b = 3 * j, wi = w[i], wj = w[j], ws = wi + wj;
+      if (!ws || (this.touch[i] && this.touch[j])) continue;
+      for (let c = 0; c < 3; c++) { p[c] = 0.5 * (x[a + c] + x[b + c]); ref[c] = 0.5 * (pv[a + c] + pv[b + c]); }
+      const m0 = p[0], m1 = p[1], m2 = p[2];
+      if (!body(p, -1, ref)) continue;
+      // (moving the ends by d * 2 w / ws moves the middle by d)
+      const dx = p[0] - m0, dy = p[1] - m1, dz = p[2] - m2, ki = 2 * wi / ws, kj = 2 * wj / ws;
+      x[a] += ki * dx; x[a + 1] += ki * dy; x[a + 2] += ki * dz; x[b] += kj * dx; x[b + 1] += kj * dy; x[b + 2] += kj * dz;
+      if (o.neutral) { pv[a] += ki * dx; pv[a + 1] += ki * dy; pv[a + 2] += ki * dz; pv[b] += kj * dx; pv[b + 1] += kj * dy; pv[b + 2] += kj * dz; }
+    }
+  }
+  // the body: each point pushed out, and (on the last test of a step) its slide along the body held back
+  _contact(body, o, last) {
+    const n = this.n, x = this.pos, pv = this.prev, w = this.w, p = this._p || (this._p = [0, 0, 0]), mu = this.settings.friction, touch = this.touch;
+    const ref = this._ref || (this._ref = [0, 0, 0]);
+    for (let i = 0; i < n; i++) {
+      if (w[i] === 0) continue;
+      const a = 3 * i;
+      p[0] = x[a]; p[1] = x[a + 1]; p[2] = x[a + 2];
+      ref[0] = pv[a]; ref[1] = pv[a + 1]; ref[2] = pv[a + 2];
+      const hit = body(p, i, ref) ? 1 : 0;
+      if (last) touch[i] = hit;
+      if (!hit) continue;
+      // the push, and along the body the slide this step: part of the slide is lost
+      const nx = p[0] - x[a], ny = p[1] - x[a + 1], nz = p[2] - x[a + 2], nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (o.neutral) { pv[a] += nx; pv[a + 1] += ny; pv[a + 2] += nz; }
+      if (last && mu && nl > 1e-12) {
+        const ux = nx / nl, uy = ny / nl, uz = nz / nl;
+        let sx = p[0] - pv[a], sy = p[1] - pv[a + 1], sz = p[2] - pv[a + 2];
+        const sn = sx * ux + sy * uy + sz * uz;
+        sx -= sn * ux; sy -= sn * uy; sz -= sn * uz;
+        // (Coulomb: a slide smaller than the push times the friction is stopped outright, so cloth lies still on
+        // a slope; a larger one loses that much)
+        const hold = mu * nl;
+        const sl = Math.sqrt(sx * sx + sy * sy + sz * sz), k = sl <= hold ? 1 : hold / sl;
+        p[0] -= k * sx; p[1] -= k * sy; p[2] -= k * sz;
+      }
+      x[a] = p[0]; x[a + 1] = p[1]; x[a + 2] = p[2];
+    }
+    if (last && this.settings.edgeContact) this._edgeContact(body, o);
+  }
+  // put every held chain's points back at their segment lengths, from the top down (follow the leader), so a
+  // bone or a strand is exactly its length whatever the constraints left; where the body is given, out of it again;
+  // still: the moves are not kept as speed (after the caller has moved points itself)
+  hold(body = null, neutral = false, still = false) {
+    const x = this.pos, pv = this.prev, w = this.w, p = [0, 0, 0], lead = this.settings.lead;
+    for (const ch of this.chains) {
+      for (let k = 1; k < ch.length; k++) {
+        const i = ch[k], a = 3 * i, b = 3 * ch[k - 1];
+        if (w[i] === 0) continue;
+        const dx = x[a] - x[b], dy = x[a + 1] - x[b + 1], dz = x[a + 2] - x[b + 2], len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1, q = ch.len[k - 1] / len;
+        p[0] = x[b] + dx * q; p[1] = x[b + 1] + dy * q; p[2] = x[b + 2] + dz * q;
+        // (the move becomes this point's speed, as any constraint's does, and the point above takes most of it
+        // the other way: follow the leader alone moves only the lower point, as if the upper one had no end of
+        // mass, and that feeds the chain energy. Mueller et al. 2012, "Fast simulation of inextensible hair and fur")
+        if (still) { pv[a] += p[0] - x[a]; pv[a + 1] += p[1] - x[a + 1]; pv[a + 2] += p[2] - x[a + 2]; }
+        else if (w[ch[k - 1]] !== 0) { pv[b] += lead * (p[0] - x[a]); pv[b + 1] += lead * (p[1] - x[a + 1]); pv[b + 2] += lead * (p[2] - x[a + 2]); }
+        if (body) { const bx = p[0], by = p[1], bz = p[2]; if (body(p, i) && neutral) { pv[a] += p[0] - bx; pv[a + 1] += p[1] - by; pv[a + 2] += p[2] - bz; } }
+        x[a] = p[0]; x[a + 1] = p[1]; x[a + 2] = p[2];
+      }
+    }
+  }
+  // A frame of dt seconds in fixed steps of settings.substep (the rest carried to the next frame).
+  // o.before(t): called before each step with the time it ends at, as a share of the frame (0..1], so the caller
+  // can move the pins and the body there; o.body, o.neutral as step's. Returns the steps taken.
+  advance(dt, o = {}) {
+    const h = this.settings.substep, owed = this._acc;
+    this._acc += dt;
+    let k = 0;
+    const steps = Math.floor(this._acc / h + 1e-9);
+    for (; k < steps; k++) {
+      if (o.before) o.before(dt > 0 ? ((k + 1) * h - owed) / dt : 1, h);
+      this.step(h, o.body || null, o);
+    }
+    this._acc -= steps * h;
+    return k;
+  }
+  // Drape: run to rest. Steps until the fastest point moves less than `tol` a step (or `max` steps), with the
+  // speed damped hard so it settles instead of swinging. Returns the steps taken.
+  settle(body, o = {}) {
+    const h = o.h || 1 / 120, max = o.max || 600, tol = o.tol || 1e-4, s = this.settings, was = s.damping;
+    s.damping = o.damping ?? 0.35;
+    let k = 0;
+    for (; k < max; k++) {
+      this.step(h, body, { neutral: true });
+      if (k % 10 === 9) {
+        let far = 0;
+        const x = this.pos, pv = this.prev;
+        for (let a = 0; a < x.length; a++) far = Math.max(far, Math.abs(x[a] - pv[a]));
+        if (far < tol) break;
+      }
+    }
+    s.damping = was;
+    this.prev.set(this.pos);
+    return k;
+  }
+  // The cloth's state (positions, speeds and the sets its hinges have taken), to keep a drape and start from it
+  // again without solving it again (restore). JSON-safe with Array.from on each.
+  snapshot() {
+    if (!this._packed) this._pack();
+    return { pos: Float64Array.from(this.pos), prev: Float64Array.from(this.prev), hRest: Float64Array.from(this._packed.hRest) };
+  }
+  restore(st) {
+    this.pos.set(st.pos); this.prev.set(st.prev ?? st.pos);
+    if (!this._packed) this._pack();
+    if (st.hRest && st.hRest.length === this._packed.hRest.length) { this._packed.hRest.set(st.hRest); this.hinges.rest = Array.from(st.hRest); }
+  }
+  // the angle each hinge is at now and rests at (for creases: where the cloth has taken a set)
+  hingeAngles() {
+    if (!this._packed) this._pack();
+    const P = this._packed, out = new Float64Array(P.ha.length), rest = Float64Array.from(P.hRest);
+    for (let k = 0; k < P.ha.length; k++) out[k] = this._angle(P.ha[k], P.hb[k], P.hc[k], P.hd[k]);
+    return { angle: out, rest };
+  }
+  // move a point without giving it speed
+  shift(i, dx, dy, dz) {
+    const a = 3 * i;
+    this.pos[a] += dx; this.pos[a + 1] += dy; this.pos[a + 2] += dz;
+    this.prev[a] += dx; this.prev[a + 1] += dy; this.prev[a + 2] += dz;
+  }
+}
+
+function cross(ax, ay, az, bx, by, bz) { return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]; }
+
+return { FABRIC_DEFAULTS, MATERIALS, material, Fabric };
+})();
+__m['lace'] = (() => {
+// Lace and pleating study: a lace material, flat strips cut for each kind of pleat or gather, folded, stitched
+// and hung on the project's fabric solver (fabric-core.js, fabric-stiff.js: copied unchanged from the fabric
+// bench branch, claude/project-thread-e9qu6c, so the study runs on the game's own solver).
+//
+// Everything here is in centimetres (U = 100 units a metre), y up. It runs in node (study.mjs) and in the
+// browser viewer (viewer/build.mjs inlines it), so it knows nothing about files or pages.
+//
+// How a strip is made, as a dressmaker makes it:
+//  1. cut: a flat strip, u along its length (the cut length, ratio x the finished length) and v down its depth,
+//     from the stitched edge (v = 0) to the scalloped lace edge (v = depth). The columns of points run down the
+//     strip at the fold lines, so every fold falls on a row of edges;
+//  2. fold: the pleat's cross-section, as a list of turns along u (pleatProfile): pressed folds turn at one
+//     column, rolled ones (flutes) over the columns of their arc. The strip is laid in that shape;
+//  3. stitch: the top row is held where the stitching holds it (on a band, round a cuff, down a jabot's line);
+//  4. press: the lace's rest curvature becomes `press` times the curvature it was folded to (1 a hard press or a
+//     heat set, 0 only stitched at the top);
+//  5. hang: gravity, the lace's weight and its bending stiffness (from its bending length) do the rest.
+
+const { Fabric } = __m['fabric-core'];
+const U = 100;                      // units a metre: centimetres
+
+// The solver's settings for the study: small steps (Macklin et al. 2019, "Small steps in physics simulation"), two
+// walks a step. Lace bends at hinges (Bridson et al. 2003, as XPBD), and a hinge's hold only reaches lace's bending
+// length when the walks converge: at 240 steps a second and 4 walks even rigid hinges stop at 0.6 cm on a 3 mm
+// mesh; at 960 and 2 they reach 1.5 cm (calibrate.mjs).
+const SOLVER = { substep: 1 / 960, iterations: 2 };
+const DEG = Math.PI / 180;
+
+// ------------------------------------------------------------------ the lace
+//
+// Fine cotton or silk lace of the 1870s to 1890s, the kind engageantes, jabots and collar frills were made of: a
+// net ground with denser motifs outlined in a heavier thread (the cordonnet) and a scalloped edge. The numbers and
+// where they come from (see docs/clothing-solvers/lace-and-pleating.md):
+//  - weight 50 g/m2: Chantilly 45 to 65 g/m2 (TextilePulse), 40 to 90 (Fabric Atlas), 30 to 180 (Tissura);
+//  - thickness 0.3 mm: Chantilly 0.2 to 0.5 mm (Fabric Atlas);
+//  - bending length 1.0 cm (cantilever, Peirce 1930; ASTM D1388 B = W g c^3): no measured value for lace was found.
+//    Ordinary fabrics run 1.6 to 6.35 cm (Peirce's flexometer, in Sanad and Cassidy 2016), and the project's silk
+//    is 1.2 cm, measured on the bench; a net ground is limper than the silk it is made of, so 1.0 is an estimate
+//    (marked experimental) to be swept, not a measurement. Starched lace (period laundering starched lace frills
+//    before fluting: Every Woman's Encyclopaedia, Saffron Walden Museum) is the `starched` variant, 2.5 cm;
+//  - the air's drag on a sheet (cd 1.2) times the lace's fill: the net is about half holes.
+const LACE = {
+  cotton:   { weight: 0.050, thickness: 0.0003, bendingLength: 0.010, fill: 0.55, shear: 4e-5, hinge: 3e-1, damping: 0.03, friction: 0.3 },
+  silk:     { weight: 0.040, thickness: 0.00025, bendingLength: 0.009, fill: 0.5, shear: 4e-5, hinge: 3e-1, damping: 0.03, friction: 0.25 },
+  starched: { weight: 0.058, thickness: 0.0003, bendingLength: 0.025, fill: 0.55, shear: 2e-5, hinge: 4e-2, damping: 0.04, friction: 0.4 },
+};
+
+// The pattern of the lace on the flat strip: 0 net, 1 motif, 2 cordonnet (the outline thread and the scalloped
+// edge). The motif repeats with the scallop: a ring of six petals over each scallop, a line of cordonnet just
+// inside the edge, and a narrow stitched heading at the top (a plain tape the gathering or the band is sewn
+// through). Each part weighs and bends by its own share (partWeight, partStiff), kept so the whole strip's mean is
+// the material's, so a cantilever of the whole lace still gives its bending length.
+const PART = { net: 0, motif: 1, cord: 2, heading: 3 };
+const partWeight = [0.7, 1.35, 1.8, 1.4];
+const partStiff = [0.6, 1.5, 3.0, 2.0];
+
+function scallopEdge(u, depth, scW, scD) {
+  // the edge's v at u: arcs a scallop wide, scD deep, bulging out (down)
+  const t = ((u / scW) % 1 + 1) % 1;
+  return depth - scD + scD * Math.sin(Math.PI * t);
+}
+
+function lacePart(u, v, depth, scW, scD) {
+  const edge = scallopEdge(u, depth, scW, scD);
+  if (v < 0.35) return PART.heading;
+  if (edge - v < 0.18) return PART.cord;
+  // the motif: a flower centred over each scallop, its ring of petals outlined
+  const cu = (Math.floor(u / scW) + 0.5) * scW, cv = depth - scD - 0.55 * Math.min(depth * 0.45, scW * 0.7);
+  const du = u - cu, dv = v - cv, r = Math.hypot(du, dv), a = Math.atan2(dv, du);
+  const R = 0.42 * scW * (0.8 + 0.2 * Math.cos(6 * a));
+  if (Math.abs(r - R) < 0.08 * scW) return PART.cord;
+  if (r < R) return r < 0.12 * scW ? PART.cord : PART.motif;
+  // a band of small leaves between the heading and the flowers
+  const lv = 0.35 + 0.18 * depth, lu = ((u / (scW / 2)) % 1 + 1) % 1;
+  if (Math.abs(v - lv) < 0.12 * depth * Math.sin(Math.PI * lu)) return PART.motif;
+  return PART.net;
+}
+
+// ------------------------------------------------------------------ the pleats
+//
+// A pleat's cross-section as the turns along the cut strip. From the pleating references:
+//  - knife: per repeat, the face, folded under by the depth, and out again: cut = pitch + 2 x depth, so a pleat
+//    whose depth is its pitch takes 3 x its finished length (Wikipedia "Pleat": 3:1; Minerva Patterns: "twice the
+//    pleat depth" behind each fold; Sewing With Numbers: B = 3A edge to edge);
+//  - box: two knife pleats turned away from each other: cut = pitch + 4 x depth, 3 x when the underlays meet
+//    (depth = pitch / 2: Wikipedia, same 3:1 as knife);
+//  - accordion: a zigzag of equal faces, each turn the same angle the other way: ratio = 1 / cos(turn / 2); 3 x at
+//    141 degrees (Wikipedia: a tighter variation of the knife pleat);
+//  - flute (goffered): rolled, not pressed: arcs of `arc` degrees of radius r, turning each way in turn (a fluting
+//    iron's rollers: Saffron Walden Museum, Quintessential Clothes Pen): ratio = (arc / 2) / sin(arc / 2),
+//    1.57 x for half circles;
+//  - gather: no folds pressed: the heading is drawn up on its thread to 1 / ratio of the cut, in a small wave a
+//    gathering stitch long; period ruffles 1.25 to 1.75 x (Rosbrugh, historicalsewing.com), sheers up to 2.5 x,
+//    modern frills 1.5 to 3 x (The Shapes of Fabric). The lace then finds its own folds below the stitching.
+// Pressed folds turn by 175 degrees, not 180: the cloth's thickness keeps the layers apart (blender/shared/folds.py).
+const PLEATS = ['knife', 'box', 'accordion', 'flute', 'gather'];
+
+// Lay out the columns: returns { du (column spacing), cols, turn (per column, radians: the heading turns there),
+// ratio (cut / finished), finished, cut, crease (per column: true where a fold is pressed) }.
+const accTurn = (p) => 2 * Math.acos(Math.min(0.999, 1 / Math.max(1.0001, p.ratio || 2.5)));
+
+function pleatProfile(p) {
+  const kind = p.kind, F = p.finished;
+  const step = p.res || 0.3;
+  let unit, seq = null;                              // seq: [{ n: columns straight, turn, arc }] for one repeat
+  const pressed = (p.pressAngle ?? 175) * DEG;
+  let rep = null, segStart = null, h0 = 0;
+  if (kind === 'knife' || kind === 'box') {
+    const D = p.depth, P = p.pitch;
+    unit = step;
+    // (a box repeat begins at the middle of a face, so it ends on a straight run and no fold wraps round it)
+    const segs = kind === 'knife'
+      ? [{ L: P, turn: -pressed }, { L: D, turn: +pressed }, { L: D, turn: 0 }]
+      : [{ L: P / 2, turn: -pressed }, { L: D, turn: +pressed }, { L: 2 * D, turn: +pressed }, { L: D, turn: -pressed }, { L: P / 2, turn: 0 }];
+    ({ rep, segStart } = pressedColumns(segs, step, Math.min(step, p.bridge ?? step)));
+  } else if (kind === 'accordion') {
+    // each face of the zigzag is a = pitch / 2; the repeat starts mid-face so no fold wraps round it, and its
+    // folds turn over two columns as the knife's do (at 132 degrees, ratio 2.5, a fold turned at one column tore
+    // the strip 35% in the first run)
+    const a = p.pitch / 2;
+    unit = step;
+    // The bridge is a flat run at each fold, so the turn that gives the ratio is wider than 2 acos(1 / ratio): found
+    // by bisection on the laid-out repeat
+    const build = (T) => { h0 = -T / 2; return pressedColumns([{ L: a / 2, turn: +T }, { L: a, turn: -T }, { L: a / 2, turn: 0 }], step, step, 90 * DEG).rep; };
+    const ratioAt = (T) => { const r = build(T); let x = 0, h = -T / 2, L = 0; for (const c of r) { x += c.w * Math.cos(h); L += c.w; h += c.t; } return L / x; };
+    const want = Math.max(1.05, p.ratio || 2.5);
+    let lo = accTurn({ ratio: 1.0001 }), hi = 176 * DEG;
+    for (let it = 0; it < 50; it++) { const mid = (lo + hi) / 2; if (ratioAt(mid) < want) lo = mid; else hi = mid; }
+    rep = build((lo + hi) / 2);
+  } else if (kind === 'flute') {
+    const r = p.radius, arc = (p.arc ?? 180) * DEG, len = r * arc;
+    const n = Math.max(3, Math.round(len / step));
+    unit = len / n;
+    seq = [{ n, arc: +arc }, { n, arc: -arc }];
+  } else {
+    // gather: a sine wave a stitch long (each stitch takes up one fold) at the ratio, laid out to be found below
+    const n = Math.max(p.gatherCols ?? 4, Math.round(p.stitch / step));
+    unit = p.stitch / n;
+    seq = [{ n, wave: true }];
+  }
+  // one repeat's columns, then as many repeats as fill the finished length
+  if (!rep) rep = [];
+  for (const s of seq || []) {
+    for (let k = 0; k < s.n; k++) {
+      let t = 0, crease = false;
+      if (s.arc) { t = s.arc / s.n; crease = true; }
+      else if (k === s.n - 1 && s.turn) { t = s.turn; crease = true; }
+      rep.push({ t, crease, wave: !!s.wave, arc: !!s.arc });
+    }
+  }
+  // the finished length of one repeat, from the shape laid out (the turns integrated), so the ratio is measured
+  // on the folded strip, not assumed
+  let tilt = 0;
+  const lay = (cols) => {
+    const xs = [[0, 0]];
+    let h = kind === 'accordion' ? h0 : kind === 'flute' ? -seq[0].arc / 2 : tilt;
+    for (let c = 0; c < cols.length; c++) {
+      const [x, z] = xs[xs.length - 1];
+      const w = cols[c].w ?? unit;
+      xs.push([x + w * Math.cos(h), z + w * Math.sin(h)]);
+      h += cols[c].t;
+    }
+    return xs;
+  };
+  if (kind === 'knife') {
+    // a knife pleat's three layers lie as tiles (Minerva Patterns: "each fold laid over the next like tiles"): the
+    // under layer becomes the next pleat's face without a turn, so every layer leans by the same small angle, the
+    // one at which a repeat ends where it began (no drift out of the band's line). Found by bisection.
+    const drift = (phi) => { tilt = phi; const xs = lay(rep); return xs[xs.length - 1][1] - xs[0][1]; };
+    let lo = -0.6, hi = 0.6;
+    const dlo = drift(lo);
+    for (let it = 0; it < 60; it++) { const mid = (lo + hi) / 2, dm = drift(mid); if ((dm > 0) === (dlo > 0)) lo = mid; else hi = mid; }
+    tilt = (lo + hi) / 2;
+  }
+  let finishedRep, turns;
+  if (kind === 'gather') {
+    const R = Math.max(1.05, p.ratio || 1.5);
+    finishedRep = p.stitch / R;
+    turns = rep;
+  } else {
+    const xs = lay(rep);
+    finishedRep = xs[xs.length - 1][0] - xs[0][0];
+    turns = rep;
+  }
+  const reps = Math.max(1, Math.round(F / finishedRep));
+  const cols = [];
+  for (let k = 0; k < reps; k++) cols.push(...turns.map((c) => ({ ...c })));
+  cols.push({ t: 0, crease: false, wave: kind === 'gather' });
+  // the points of the top edge, laid in the pleat's shape: x along the finished length, z out of it
+  let xz;
+  if (kind === 'gather') {
+    // a sine of the stitch's pitch, its amplitude found so each wave's arc is the stitch
+    const R = Math.max(1.05, p.ratio || 1.5), pitch = finishedRep, n = turns.length;
+    let A = 0;
+    const arcLen = (amp) => { let L = 0; for (let k = 0; k < 64; k++) { const a = 2 * Math.PI * k / 64, b = 2 * Math.PI * (k + 1) / 64; L += Math.hypot(pitch / 64, amp * (Math.sin(b) - Math.sin(a))); } return L; };
+    let lo = 0, hi = p.stitch;
+    for (let it = 0; it < 50; it++) { A = (lo + hi) / 2; if (arcLen(A) < p.stitch) lo = A; else hi = A; }
+    // points spaced evenly along the arc (by arc length), so each edge keeps its cut length
+    const tab = [[0, 0, 0]];
+    for (let k = 1; k <= 512; k++) { const s = k / 512, ps = tab[k - 1]; const x = s * pitch, z = A * Math.sin(2 * Math.PI * s); tab.push([x, z, ps[2] + Math.hypot(x - ps[0], z - ps[1])]); }
+    const total = tab[tab.length - 1][2];
+    const at = (s) => { const L = s * total; let k = 1; while (k < tab.length - 1 && tab[k][2] < L) k++; const a = tab[k - 1], b = tab[k], f = (L - a[2]) / ((b[2] - a[2]) || 1); return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; };
+    xz = [];
+    for (let c = 0; c < cols.length; c++) { const q = Math.floor(c / n), s = (c % n) / n; const [x, z] = at(s); xz.push([q * pitch + x, z]); }
+    void R;
+  } else {
+    xz = lay(cols.slice(0, -1));
+  }
+  // (centred on the line the stitching runs along)
+  {
+    let m = 0; for (const q of xz) m += q[1]; m /= xz.length;
+    for (const q of xz) q[1] -= m;
+  }
+  const finished = xz[xz.length - 1][0] - xz[0][0];
+  // each column's place along the cut strip (the fold's bridges are narrower than the rest)
+  const uAt = [0];
+  for (let c = 0; c < cols.length - 1; c++) uAt.push(uAt[c] + (cols[c].w ?? unit));
+  const cut = uAt[uAt.length - 1];
+  return { du: unit, uAt, cols: cols.length, turn: cols.map((c) => c.t), crease: cols.map((c) => c.crease && !c.second && !c.arc), split: cols.map((c) => !!c.split && !c.second), xz, finished, cut, ratio: cut / finished, repeats: reps, repeatCols: turns.length };
+}
+
+// A pressed pleat's columns from its segments ({ L: length, turn at its end }). A pressed fold turns over two
+// columns, half its angle at each, with a column between (`bridge`): turned at one column, a fold of 175 degrees
+// folds a point's ring of neighbours in half, and the bend's rotation of it (fabric-stiff.js) has no answer there
+// (in the trials the strip tore itself 12 to 18%). The bridge is the fold's round edge, and its width is the gap
+// between the pleat's layers. It is a full column wide by default: at 1 mm (a pressed lace fold is nearer 0.3 mm)
+// the cotangent weights of so thin a column made a pressed knife strip creep to 14% stretch; at 2 mm, 4 to 6%; at a
+// full 3 mm column it rests at 0.6%. The price is the gap: the knife's layers lean (pleatProfile) to take it up.
+// Returns the columns ({ w, t, crease, split, second }) and where each
+// segment starts.
+function pressedColumns(segs, step, bridge, splitAbove = 150 * DEG) {
+  const rep = [], segStart = [];
+  let carry = 0;
+  for (const s of segs) {
+    segStart.push(rep.length);
+    let L = s.L;
+    if (carry) { rep.push({ w: bridge, t: carry, split: true, second: true }); L -= bridge; carry = 0; }
+    const k = Math.max(1, Math.round(L / step)), w = L / k;
+    for (let j = 0; j < k; j++) rep.push({ w, t: 0 });
+    const last = rep[rep.length - 1];
+    if (s.turn) {
+      last.crease = true;
+      if (Math.abs(s.turn) > splitAbove) { last.t += s.turn / 2; last.split = true; carry = s.turn / 2; }
+      else last.t += s.turn;
+    }
+  }
+  return { rep, segStart };
+}
+
+// ------------------------------------------------------------------ the strip, built and hung
+//
+// p: { kind, finished (cm), depth (cm, the frill's depth), pitch, depth of pleat (pleatDepth), radius, arc,
+//      ratio, stitch, res (column spacing aimed at), rows, mount ('band' | 'cuff' | 'collar' | 'jabot'),
+//      lace ('cotton' | 'silk' | 'starched'), bendingLength (cm, overrides), weight (kg/m2, overrides),
+//      press (0..1), creaseCompliance, gravity (cm/s2), scallop (cm wide), scallopDepth, iterations, substep }
+const DEFAULTS = {
+  kind: 'knife', finished: 24, depth: 7, pitch: 1.2, pleatDepth: 1.2, radius: 0.35, arc: 180, ratio: 2.5,
+  stitch: 2.0, res: 0.3, rows: 18, mount: 'band', lace: 'cotton', press: 0.6, creaseCompliance: 1e-3,
+  gravity: 981, scallop: 2.4, scallopDepth: 0.45, iterations: 4, substep: 1 / 240, damping: null, cuffRadius: 4.8,
+  // the bend's solve holds the threads' lengths too (Projective Dynamics' springs, stretchK) in `passes` rounds: with
+  // the threads left to the constraints alone a hanging lace strip stretched 13% (mean 2%); with 300 and 4, 3%
+  // (0.3%). The fabric bench left this off for open pieces on a body (contact fights it); these strips hang free.
+  stretchK: 300, passes: 4,
+};
+
+function buildStrip(over = {}) {
+  const p = { ...DEFAULTS, ...over };
+  const mat = { ...LACE[p.lace] };
+  if (p.bendingLength != null) mat.bendingLength = p.bendingLength / 100;
+  if (p.weight != null) mat.weight = p.weight;
+  const kind = p.kind;
+  const prof = pleatProfile({ ...p, depth: p.pleatDepth });
+  const cols = prof.cols, rows = p.rows, du = prof.du;
+  // the cut: column c at u = c du, its rows from the heading to the scallop at that u (so the scallop is the edge
+  // exactly), indexed column by column so the bend's banded solve stays narrow
+  const idx = (c, r) => c * rows + r;
+  const n = cols * rows, flat = new Float64Array(2 * n), part = new Uint8Array(n);
+  for (let c = 0; c < cols; c++) {
+    const u = prof.uAt[c], edge = scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
+    for (let r = 0; r < rows; r++) {
+      const v = edge * r / (rows - 1), i = idx(c, r);
+      flat[2 * i] = u; flat[2 * i + 1] = v;
+      part[i] = lacePart(u, v, p.depth, p.scallop, p.scallopDepth);
+    }
+  }
+  // the flat sheet first: the threads' lengths, the hinges and the bend's rest are the pattern's, as cut
+  const pos = new Float64Array(3 * n);
+  for (let i = 0; i < n; i++) { pos[3 * i] = flat[2 * i]; pos[3 * i + 1] = -flat[2 * i + 1]; pos[3 * i + 2] = 0; }
+  const g = p.gravity;
+  const settings = {
+    gravity: [0, -g, 0], damping: p.damping ?? mat.damping, iterations: p.iterations, substep: p.substep,
+    shear: mat.shear, friction: mat.friction, stretch: 0, order: 'root',
+    air: 0.5 * 1.2 * 1.2 * mat.fill / (U * U * U),
+  };
+  const f = new Fabric(pos, settings);
+  const pins = [];
+  // the stitching: the heading's top row (`heldRows` holds more; two rows for a gather, as gathers are drawn up on
+  // two rows of running stitches, made no difference to the stretch in the trials: 4.6 against 4.3%)
+  const held = p.heldRows ?? 1;
+  for (let c = 0; c < cols; c++) for (let r = 0; r < Math.min(held, rows - 1); r++) pins.push(idx(c, r));
+  for (const i of pins) f.pin(i);
+  // the sheet: threads that keep their length and diagonals that give a little on the bias; no ties two along and
+  // no hinges: the bend is the implicit one of fabric-stiff.js, at the lace's flexural rigidity from its bending
+  // length (B = W g c^3). (Hinges were tried first and cap out below lace's bending length on a fine mesh, and their
+  // stiffness changes with the mesh: calibrate.mjs, the study's notes.)
+  f.sheet(cols, rows, idx, { bend: null, hinge: null, shear: mat.shear });
+  // weight: the material's, each part by its share (normalised so the strip's mean is the material's)
+  const density = mat.weight / (U * U);
+  const meanW = mean(Array.from(part, (k) => partWeight[k])), meanS = mean(Array.from(part, (k) => partStiff[k]));
+  f._areas();
+  const kg = new Float64Array(n);
+  for (let i = 0; i < n; i++) kg[i] = density * f.area[i] * partWeight[part[i]] / meanW;
+  f.massKg(kg);
+  const scale = Float64Array.from(part, (k) => partStiff[k] / meanS);
+  const B = f.stiffen({ bendingLength: mat.bendingLength * U, density, scale, passes: p.passes ?? 1, stretchK: p.stretchK ?? 0 });
+  f._pack();
+  // fold: the strip laid in its pleat's shape, the top edge where the stitching holds it (mount), each row below
+  // it hanging straight down from it at its cut depth
+  const place = mountFn(p, prof);
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+    const i = idx(c, r), P = place(prof.xz[c][0], prof.xz[c][1], flat[2 * i + 1]);
+    f.pos[3 * i] = P[0]; f.pos[3 * i + 1] = P[1]; f.pos[3 * i + 2] = P[2];
+  }
+  f.prev.set(f.pos);
+  f.stiff._h = null;
+  // press: a pleat pressed (or a flute set with a hot iron, starch and damp) keeps the shape it was pressed in as
+  // its rest, so the lace's rest curvature becomes `press` times the curvature it has folded (in each point's rest
+  // frame: R^T L x, as the solver's own set does for leather). 1 a hard press that holds, 0 only stitched at the top.
+  // A gather is never pressed: its folds are the lace's own.
+  setPress(f, kind === 'gather' ? 0 : p.press);
+  const creaseCols = [];
+  for (let c = 0; c < cols - 3; c++) if (prof.crease[c]) creaseCols.push(c + 1);
+  const span = (c) => (prof.split[c - 1] ? 2 : 1);
+  const folded = creaseCols.map((c) => foldAngle(f, idx, c, 0, span(c)));
+  const creases = creaseCols.map((c, k) => ({ col: c, folded: folded[k] }));
+  f.tether();
+  return { f, p, mat, prof, cols, rows, idx, flat, part, pins, creases, creaseCols, span, B, body: bodyFn(p) };
+}
+
+// set the bend's rest curvature to `press` times the cloth's curvature as it lies now (see buildStrip)
+function setPress(f, press) {
+  const st = f.stiff, n = f.n;
+  for (let k = 0; k < 8; k++) st._rotations();            // (the turns found from rest, from scratch: a few rounds)
+  const Lx = st._lap(f.pos), R = st._R;
+  if (!st._b0flat) st._b0flat = Float64Array.from(st.b0);
+  for (let i = 0; i < n; i++) {
+    const r = 9 * i, a = 3 * i;
+    const lx = R[r] * Lx[a] + R[r + 3] * Lx[a + 1] + R[r + 6] * Lx[a + 2], ly = R[r + 1] * Lx[a] + R[r + 4] * Lx[a + 1] + R[r + 7] * Lx[a + 2], lz = R[r + 2] * Lx[a] + R[r + 5] * Lx[a + 1] + R[r + 8] * Lx[a + 2];
+    st.b0[a] = st._b0flat[a] + press * (lx - st._b0flat[a]); st.b0[a + 1] = st._b0flat[a + 1] + press * (ly - st._b0flat[a + 1]); st.b0[a + 2] = st._b0flat[a + 2] + press * (lz - st._b0flat[a + 2]);
+  }
+  st._pressedLx = { Lx, R: Float64Array.from(R) };
+}
+
+// a column's fold angle at a row (degrees): how far the strip turns there, across the strip, between the columns
+// either side (0 flat, 180 folded back on itself)
+function foldAngle(f, idx, c, r, span = 1) {
+  // the turn between the segment into column c and the segment out of column c + span - 1 (span 2: a pressed
+  // fold turned over two columns), measured across the strip (less any part along the column's own line)
+  const x = f.pos, p = (cc, rr) => { const i = 3 * idx(cc, rr); return [x[i], x[i + 1], x[i + 2]]; };
+  const A = p(c - 1, r), Bq = p(c, r), C = p(c + span - 1, r), D = p(c + span, r), E = p(c, r + 1);
+  const e = sub(E, Bq), el = Math.hypot(...e) || 1;
+  const across = (q) => { const t = dot(q, e) / (el * el); return [q[0] - t * e[0], q[1] - t * e[1], q[2] - t * e[2]]; };
+  const uu = across(sub(Bq, A)), vv = across(sub(D, C));
+  const cs = dot(uu, vv) / ((Math.hypot(...uu) * Math.hypot(...vv)) || 1);
+  return Math.acos(Math.max(-1, Math.min(1, cs))) / DEG;
+}
+
+function mean(a) { let s = 0; for (const v of a) s += v; return s / (a.length || 1); }
+
+// Where the stitching holds the top edge, and how the strip hangs from it as laid out: (x, z) the edge's point in
+// its pleat's shape, v how far down the strip
+function mountFn(p, prof) {
+  const F = prof.finished;
+  if (p.mount === 'cuff' || p.mount === 'collar') {
+    // round a circle the finished length round (an engageante sewn into a sleeve's end; a frill on a neckband),
+    // z outward; the cuff hangs down, the collar stands up
+    // (each step along the edge turns the angle by its run over the radius it lies at, so the threads keep their
+    // cut lengths at every radius; the heading's radius is found so the edge closes round once)
+    const xz = prof.xz, up = p.mount === 'collar' ? 1 : -1;
+    const angles = (R) => { const a = [0]; for (let c = 1; c < xz.length; c++) a.push(a[c - 1] + (xz[c][0] - xz[c - 1][0]) / (R + 0.5 * (xz[c][1] + xz[c - 1][1]))); return a; };
+    let R = F / (2 * Math.PI);
+    for (let it = 0; it < 30; it++) { const a = angles(R); R *= a[a.length - 1] / (2 * Math.PI); }
+    const A = angles(R), byX = new Map(xz.map((q, c) => [q, c]));
+    void byX;
+    let col = 0;
+    return (x, z, v) => {
+      // (called column by column, row by row: find this column's angle by its top point)
+      while (col < xz.length - 1 && xz[col][0] !== x) col++;
+      if (xz[col][0] !== x) col = xz.findIndex((q) => q[0] === x);
+      const a = A[Math.max(0, col)], rr = R + z;
+      return [rr * Math.cos(a), up * v, -rr * Math.sin(a)];
+    };
+  }
+  if (p.mount === 'jabot') {
+    // down the centre front: the stitched edge is a vertical line (y), the frill stands forward of it (+z) and its
+    // pleats fold it from side to side (x)
+    return (x, z, v) => [z, -x, v];
+  }
+  return (x, z, v) => [x - F / 2, -v, z];
+}
+
+// What the strip must stay out of: the forearm in a cuff (a cylinder a little inside the frill's top), the neck in a
+// collar, the chest in a jabot (a plane behind the stitched line)
+function bodyFn(p) {
+  if (p.mount === 'cuff') {
+    const R = p.cuffRadius * 0.7;
+    return (q) => { const r = Math.hypot(q[0], q[2]); if (r >= R + 0.05 || r < 1e-6) return false; const k = (R + 0.05) / r; q[0] *= k; q[2] *= k; return true; };
+  }
+  if (p.mount === 'jabot') {
+    return (q) => { if (q[2] > -0.1 + 0.1 * 0 && q[2] >= 0) return false; if (q[2] >= 0) return false; q[2] = 0; return true; };
+  }
+  return null;
+}
+
+// ------------------------------------------------------------------ the solve, watched
+
+// one frame of dt seconds; returns { steps, speed (largest point move a step, cm), strain (largest edge stretch) }
+function frame(S, dt = 1 / 60) {
+  const f = S.f, before = Float64Array.from(f.pos);
+  const steps = f.advance(dt, { body: S.body, neutral: true });
+  let far = 0;
+  for (let a = 0; a < f.pos.length; a++) far = Math.max(far, Math.abs(f.pos[a] - before[a]));
+  return { steps, speed: far / Math.max(1, steps) };
+}
+
+// the edge strains: for every thread (warp, weft) of the grid, its length now over its cut length, minus one
+function strains(S) {
+  const { f, cols, rows, idx, flat } = S, x = f.pos, out = new Float64Array(f.n);
+  let max = 0, sum = 0, cnt = 0;
+  const all = [];
+  const edge = (i, j) => {
+    if (f.w[i] === 0 && f.w[j] === 0) return;          // (a thread between two held points is the stitching's)
+    const r = Math.hypot(flat[2 * i] - flat[2 * j], flat[2 * i + 1] - flat[2 * j + 1]);
+    const l = Math.hypot(x[3 * i] - x[3 * j], x[3 * i + 1] - x[3 * j + 1], x[3 * i + 2] - x[3 * j + 2]);
+    const e = Math.abs(l / r - 1);
+    out[i] = Math.max(out[i], e); out[j] = Math.max(out[j], e);
+    max = Math.max(max, e); sum += e; cnt++; all.push(e);
+  };
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+    if (c + 1 < cols) edge(idx(c, r), idx(c + 1, r));
+    if (r + 1 < rows) edge(idx(c, r), idx(c, r + 1));
+  }
+  all.sort((a, b) => a - b);
+  return { perPoint: out, max, mean: sum / (cnt || 1), p99: all[Math.floor(0.99 * (all.length - 1))] || 0 };
+}
+
+// the energies (relative; for the convergence curve): kinetic from the last step's moves, and the height of the
+// cloth's centre of mass under the stitching
+function energies(S) {
+  const f = S.f, h = f.settings.substep, kg = f.kg;
+  let ke = 0, pe = 0, m = 0;
+  for (let i = 0; i < f.n; i++) {
+    const mi = kg ? kg[i] : 1;
+    const vx = (f.pos[3 * i] - f.prev[3 * i]) / h, vy = (f.pos[3 * i + 1] - f.prev[3 * i + 1]) / h, vz = (f.pos[3 * i + 2] - f.prev[3 * i + 2]) / h;
+    ke += 0.5 * mi * (vx * vx + vy * vy + vz * vz) / 1e4;       // J (cm to m)
+    pe += mi * f.pos[3 * i + 1] / 100 * 9.81;
+    m += mi;
+  }
+  return { kinetic: ke, potential: pe, mass: m };
+}
+
+// how far each crease is from the angle it was folded to, top and bottom (degrees): a pressed pleat holds near the
+// stitching and opens below as much as the press lets it
+function creaseHold(S) {
+  const { f, rows, idx } = S;
+  let top = 0, bot = 0, nt = 0, nb = 0;
+  for (const c of S.creaseCols) for (let r = 0; r < rows - 1; r++) {
+    const ang = foldAngle(f, idx, c, r, S.span(c));
+    if (r < rows / 3) { top += ang; nt++; } else if (r > 2 * rows / 3) { bot += ang; nb++; }
+  }
+  return { topDeg: nt ? top / nt : 0, bottomDeg: nb ? bot / nb : 0 };
+}
+
+// Sections: the strip cut across at shares of its depth (0 at the stitching, 1 at the scallop's crest), each a
+// polyline of the points at that row in order along the strip, and the numbers that say what shape it is:
+// spread (how far the row reaches round or along), ripple (how far it swings in and out of its mean line), lobes
+// (the waves it makes), kink (the sharpest turn between two segments that is not an authored crease)
+function sections(S, shares = [0, 0.25, 0.5, 0.75, 1]) {
+  const { f, cols, rows, idx, p } = S, x = f.pos, round = p.mount === 'cuff' || p.mount === 'collar';
+  const out = [];
+  for (const s of shares) {
+    const r = Math.min(rows - 1, Math.round(s * (rows - 1)));
+    const pts = [];
+    for (let c = 0; c < cols; c++) { const i = idx(c, r); pts.push([x[3 * i], x[3 * i + 1], x[3 * i + 2]]); }
+    let radial;
+    if (round) radial = pts.map((q) => Math.hypot(q[0], q[2]));
+    else radial = pts.map((q) => q[2]);
+    const m = mean(radial);
+    const sd = Math.sqrt(mean(radial.map((v) => (v - m) ** 2)));
+    // lobes: the swings of the smoothed radial line about its mean, over the pleat repeat's scale
+    const win = Math.max(1, Math.floor(S.prof.repeatCols / 2));
+    const sm = radial.map((v, k) => { let a = 0, nn = 0; for (let q = Math.max(0, k - win); q <= Math.min(radial.length - 1, k + win); q++) { a += radial[q]; nn++; } return a / nn; });
+    let lobes = 0;
+    for (let k = 1; k < sm.length; k++) if ((sm[k - 1] - m) * (sm[k] - m) < 0) lobes++;
+    let kink = 0;
+    for (let k = 1; k < pts.length - 1; k++) {
+      if (S.creaseCols.includes(k) || S.creaseCols.includes(k - 1) || S.p.kind === 'flute' || S.p.kind === 'accordion') continue;
+      // (in the section's own plane: across the strip, so the scallop's rise and fall is not taken for a kink)
+      const a = sub(pts[k], pts[k - 1]), b = sub(pts[k + 1], pts[k]);
+      a[1] = 0; b[1] = 0;
+      const cs = dot(a, b) / ((Math.hypot(...a) * Math.hypot(...b)) || 1);
+      kink = Math.max(kink, Math.acos(Math.max(-1, Math.min(1, cs))) / DEG);
+    }
+    const ys = pts.map((q) => q[1]);
+    out.push({ share: s, row: r, pts, mean: m, ripple: sd, rippleRel: sd / (Math.abs(m) || 1), lobes: Math.round(lobes / 2), kinkDeg: kink, yMean: mean(ys), ySpread: Math.max(...ys) - Math.min(...ys),
+      spread: round ? 2 * m : Math.max(...pts.map((q) => q[0])) - Math.min(...pts.map((q) => q[0])) });
+  }
+  return out;
+}
+
+// The flags the contour check raises: a section that is perfectly round or flat where lace should ripple, a kink,
+// a thread stretched, the cloth through the body
+function contourFlags(S, sec, st) {
+  const flags = [];
+  for (const s of sec) {
+    if (s.share > 0.2 && s.rippleRel < 0.01 && (S.p.mount === 'cuff' || S.p.mount === 'collar')) flags.push(`section ${s.share}: perfectly round (ripple ${(100 * s.rippleRel).toFixed(2)}%)`);
+    if (s.share > 0.2 && s.ripple < 0.02 && S.p.mount === 'band') flags.push(`section ${s.share}: flat, no ripple`);
+    if (s.kinkDeg > 60) flags.push(`section ${s.share}: kink ${s.kinkDeg.toFixed(0)} deg off a crease`);
+  }
+  if (st.max > 0.05) flags.push(`thread stretched ${(100 * st.max).toFixed(1)}%`);
+  const nan = Array.from(S.f.pos).some((v) => !Number.isFinite(v));
+  if (nan) flags.push('blew up (non-finite positions)');
+  return flags;
+}
+
+// the key the fold cache files a solved strip under: its shape and the solver's settings
+function cacheKey(S) {
+  const p = { ...S.p };
+  delete p.frames;
+  const held = S.pins.length / S.cols;
+  return JSON.stringify({ v: 1, p, mat: S.mat, n: S.f.n, ...(held !== 1 ? { held } : {}) });
+}
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+return { U, SOLVER, LACE, PART, partWeight, partStiff, scallopEdge, lacePart, PLEATS, pleatProfile, DEFAULTS, buildStrip, setPress, foldAngle, mountFn, bodyFn, frame, strains, energies, creaseHold, sections, contourFlags, cacheKey };
+})();
+__m['presets'] = (() => {
+// The solver viewer's scenes. Each preset builds a cloth on the project's fabric solver and says which of its
+// settings can be moved while it runs (live) and which rebuild it. The lace strip is the study's own; the other three
+// are the fabric bench's kinds of test (a drape on a ball, a pressed fold, a collar's roll held at its gorge).
+//
+// A scene: { f, tris, uv, parts, partNames, partColors, body, bodies (to draw), measure(), sections(), live(key, v),
+// flat (the cut pattern, for the strain), edges (the threads, for the strain) }
+const { Fabric, MATERIALS } = __m['fabric-core'];
+const L = __m['lace'];
+const DEG = Math.PI / 180;
+
+// the colour-coded draft's parts: flat, distinct, readable in grey too (values spread from dark to light)
+const LACE_PARTS = {
+  names: ['net ground', 'motif', 'cordonnet and scallop', 'heading (stitched)', 'pressed fold'],
+  colors: ['#8fb3d9', '#e0b35a', '#5e3070', '#2f6b4f', '#d2523a'],
+};
+
+function threadsOf(cols, rows, idx) {
+  const e = [];
+  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+    if (c + 1 < cols) e.push(idx(c, r), idx(c + 1, r));
+    if (r + 1 < rows) e.push(idx(c, r), idx(c, r + 1));
+  }
+  return Int32Array.from(e);
+}
+
+// ------------------------------------------------------------------ the lace strip
+const lace = {
+  id: 'lace', name: 'Pleated lace strip',
+  note: 'A lace frill cut flat at the pleat\'s length ratio, folded, stitched along its heading and hung. Move the press to see pressed pleats hold or open; the bend sets how far the lace flares.',
+  params: [
+    { key: 'kind', label: 'Pleat', type: 'select', options: [['knife', 'Knife'], ['box', 'Box'], ['accordion', 'Accordion'], ['flute', 'Fluted (goffered)'], ['gather', 'Gathered']], value: 'knife' },
+    { key: 'mount', label: 'Sewn to', type: 'select', options: [['band', 'Straight band'], ['cuff', 'Cuff (engageante)'], ['collar', 'Standing collar'], ['jabot', 'Jabot (down the front)']], value: 'cuff' },
+    { key: 'lace', label: 'Lace', type: 'select', options: [['cotton', 'Fine cotton'], ['silk', 'Silk'], ['starched', 'Starched cotton']], value: 'cotton' },
+    { key: 'press', label: 'Press (heat set)', min: 0, max: 1, step: 0.05, value: 0.6, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.3, max: 3, step: 0.05, value: null, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, scale: 100, fmt: (v) => v.toFixed(1) },
+    { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
+    { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 0.6, max: 3, step: 0.1, value: 1.5, fmt: (v) => v.toFixed(1), show: (v) => v.kind !== 'gather' && v.kind !== 'flute' },
+    { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 0.3, max: 3, step: 0.1, value: 1.5, fmt: (v) => v.toFixed(1), show: (v) => v.kind === 'knife' || v.kind === 'box' },
+    { key: 'ratio', label: 'Length ratio', unit: '×', min: 1.1, max: 3.5, step: 0.05, value: 2.5, fmt: (v) => v.toFixed(2), show: (v) => v.kind === 'accordion' || v.kind === 'gather' },
+    { key: 'radius', label: 'Flute radius', unit: 'cm', min: 0.2, max: 1, step: 0.05, value: 0.35, fmt: (v) => v.toFixed(2), show: (v) => v.kind === 'flute' },
+    { key: 'stitch', label: 'Gathering stitch', unit: 'cm', min: 0.8, max: 3, step: 0.1, value: 2.0, fmt: (v) => v.toFixed(1), show: (v) => v.kind === 'gather' },
+    { key: 'finished', label: 'Finished length', unit: 'cm', min: 8, max: 40, step: 1, value: 24, fmt: (v) => v.toFixed(0) },
+    { key: 'depth', label: 'Frill depth', unit: 'cm', min: 3, max: 14, step: 0.5, value: 6, fmt: (v) => v.toFixed(1) },
+    { key: 'res', label: 'Mesh spacing', unit: 'cm', min: 0.2, max: 0.6, step: 0.05, value: 0.4, fmt: (v) => v.toFixed(2) },
+    { key: 'stretchK', label: 'Threads held in the bend solve', min: 0, max: 600, step: 10, value: 300, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'passes', label: 'Bend solve passes', min: 1, max: 6, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'substepHz', label: 'Steps a second', min: 120, max: 960, step: 60, value: 240, live: true, fmt: (v) => v.toFixed(0) },
+  ],
+  build(v) {
+    const o = { ...v, gravity: v.gravity * 100, substep: 1 / v.substepHz, cuffRadius: v.finished / (2 * Math.PI) };
+    if (v.bendingLength == null) delete o.bendingLength;
+    if (v.kind === 'box' && v.pleatDepth > v.pitch / 2 + 1e-6) o.pleatDepth = v.pitch / 2;
+    o.rows = Math.max(8, Math.round(v.depth / v.res) + 1);
+    delete o.substepHz;
+    const S = L.buildStrip(o), f = S.f, n = f.n;
+    const parts = Uint8Array.from(S.part);
+    for (const c of S.creaseCols) for (let r = 0; r < S.rows; r++) { parts[S.idx(c, r)] = 4; if (S.span(c) === 2) parts[S.idx(c + 1, r)] = 4; }
+    const uv = new Float32Array(2 * n);
+    for (let i = 0; i < n; i++) { uv[2 * i] = S.flat[2 * i]; uv[2 * i + 1] = S.flat[2 * i + 1]; }
+    const bodies = [];
+    if (v.mount === 'cuff') bodies.push({ type: 'cylinder', r: S.p.cuffRadius * 0.7, y0: -v.depth - 6, y1: 4 });
+    if (v.mount === 'collar') bodies.push({ type: 'cylinder', r: S.p.cuffRadius * 0.82, y0: -6, y1: v.depth * 0.3 });
+    if (v.mount === 'jabot') bodies.push({ type: 'plane', z: 0, w: v.depth * 2.5, h: v.finished + 4, y: -v.finished / 2 });
+    const scene = {
+      S, f, tris: Uint32Array.from(f.tris), uv, parts, partNames: LACE_PARTS.names, partColors: LACE_PARTS.colors,
+      body: S.body, bodies, flat: S.flat, edges: threadsOf(S.cols, S.rows, S.idx), uvScale: [S.prof.cut, v.depth],
+      info: [
+        ['Cut length', `${S.prof.cut.toFixed(1)} cm`], ['Finished', `${S.prof.finished.toFixed(1)} cm`],
+        ['Cut ÷ finished', `${S.prof.ratio.toFixed(2)}×`], ['Points', `${n}`],
+        ['Bending length', `${(S.mat.bendingLength * 100).toFixed(2)} cm`], ['Weight', `${(S.mat.weight * 1000).toFixed(0)} g/m²`],
+      ],
+      measure() {
+        const ch = L.creaseHold(S);
+        const out = [];
+        if (S.creaseCols.length) out.push(['Folds near the heading', `${ch.topDeg.toFixed(0)}°`], ['Folds at the scallop', `${ch.bottomDeg.toFixed(0)}°`]);
+        const sec = L.sections(S, [0.5, 1]);
+        const round = v.mount === 'cuff' || v.mount === 'collar';
+        out.push([round ? 'Flare at the scallop' : 'Spread at the scallop', round ? `${(sec[1].mean / S.p.cuffRadius).toFixed(2)}× the heading` : `${sec[1].spread.toFixed(1)} cm`]);
+        out.push(['Ripple at the scallop', `${sec[1].ripple.toFixed(2)} cm`], ['Waves at the scallop', `${sec[1].lobes}`]);
+        return out;
+      },
+      sections() {
+        const sec = L.sections(S, [0, 0.25, 0.5, 0.75, 1]);
+        return { round: v.mount === 'cuff' || v.mount === 'collar', jabot: v.mount === 'jabot', lines: sec.map((s) => ({ label: `${Math.round(s.share * 100)}%`, pts: s.pts })) };
+      },
+      flags(st) { return L.contourFlags(S, L.sections(S), st); },
+      live(key, val) {
+        const s = f.settings;
+        if (key === 'press') L.setPress(f, v.kind === 'gather' ? 0 : val);
+        else if (key === 'bendingLength') {
+          const dens = S.mat.weight / 1e4;
+          f.stiff.B = dens * Math.hypot(...s.gravity) * Math.pow(val, 3);
+          f.stiff._h = null;
+        } else if (key === 'gravity') s.gravity = [0, -val * 100, 0];
+        else if (key === 'damping') s.damping = val;
+        else if (key === 'stretchK') { f.stiff.o.stretchK = val; f.stiff._h = null; }
+        else if (key === 'passes') f.stiff.o.passes = val;
+        else if (key === 'iterations') s.iterations = val;
+        else if (key === 'substepHz') { s.substep = 1 / val; f.stiff._h = null; }
+      },
+    };
+    return scene;
+  },
+};
+
+// ------------------------------------------------------------------ common grid sheets
+function gridSheet(cols, rows, at3, o) {
+  const n = cols * rows, pos = new Float64Array(3 * n), idx = (c, r) => r * cols + c;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) pos.set(at3(c, r), 3 * idx(c, r));
+  const flat = new Float64Array(2 * n);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { flat[2 * idx(c, r)] = c * o.du; flat[2 * idx(c, r) + 1] = r * o.dv; }
+  return { pos, idx, flat, n };
+}
+
+function materialSettings(name) {
+  const m = MATERIALS[name];
+  return { m, density: m.weight / 1e4 };
+}
+
+const sphere = (c, r, pad) => (p) => {
+  const dx = p[0] - c[0], dy = p[1] - c[1], dz = p[2] - c[2], d = Math.hypot(dx, dy, dz), R = r + pad;
+  if (d >= R) return false;
+  const k = d > 1e-9 ? R / d : 0;
+  p[0] = c[0] + dx * k; p[1] = c[1] + (d > 1e-9 ? dy * k : R); p[2] = c[2] + dz * k;
+  return true;
+};
+
+// ------------------------------------------------------------------ a sheet dropped on a ball
+const drape = {
+  id: 'drape', name: 'Sheet on a ball',
+  note: 'After the drape tester (Cusick: a 30 cm specimen over an 18 cm support): a square of cloth dropped centred on a ball. The bend decides how many folds it falls into.',
+  params: [
+    { key: 'material', label: 'Cloth', type: 'select', options: [['silk', 'Silk'], ['linen', 'Linen'], ['wool', 'Wool']], value: 'linen' },
+    { key: 'size', label: 'Sheet', unit: 'cm', min: 20, max: 60, step: 2, value: 30, fmt: (v) => v.toFixed(0) },
+    { key: 'res', label: 'Mesh spacing', unit: 'cm', min: 0.75, max: 3, step: 0.25, value: 1.25, fmt: (v) => v.toFixed(2) },
+    { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.5, max: 8, step: 0.1, value: null, live: true, fmt: (v) => v.toFixed(1) },
+    { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, fmt: (v) => v.toFixed(1) },
+    { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
+    { key: 'friction', label: 'Friction', min: 0, max: 1, step: 0.05, value: 0.5, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'substepHz', label: 'Steps a second', min: 120, max: 960, step: 60, value: 960, live: true, fmt: (v) => v.toFixed(0) },
+  ],
+  build(v) {
+    const { m, density } = materialSettings(v.material);
+    const cols = Math.round(v.size / v.res) + 1, d = v.size / (cols - 1);
+    const G = gridSheet(cols, cols, (c, r) => [(c - (cols - 1) / 2) * d, 30, (r - (cols - 1) / 2) * d], { du: d, dv: d });
+    // (laid on the ball's top and clamped there over a small disc, as the tester clamps the specimen's centre
+    // between its discs: left free, the sheet creeps off the ball one way, the walk's order deciding which)
+    const top = 15 + 9 + 0.3;
+    for (let i = 0; i < G.n; i++) G.pos[3 * i + 1] = top;
+    const f = new Fabric(G.pos, { gravity: [0, -v.gravity * 100, 0], damping: v.damping, iterations: v.iterations, substep: 1 / v.substepHz, shear: m.shear, friction: v.friction, contact: 'iteration', edgeContact: true });
+    for (let i = 0; i < G.n; i++) if (Math.hypot(G.pos[3 * i], G.pos[3 * i + 2]) < 3.01) f.pin(i);
+    const c = v.bendingLength ?? m.bendingLength * 100;
+    f.sheet(cols, cols, G.idx, v.bend === 'hinge' ? { bend: null, hinge: m.hinge, shear: m.shear, flat: true } : { bend: null, hinge: null, shear: m.shear });
+    f.weigh(density);
+    if (v.bend !== 'hinge') f.stiffen({ bendingLength: c, density, passes: v.passes ?? 1, stretchK: v.stretchK ?? 0 });
+    const ball = sphere([0, 15, 0], 9, 0.3), body = ball;
+    const n = G.n, uv = new Float32Array(2 * n);
+    for (let i = 0; i < n; i++) { uv[2 * i] = G.flat[2 * i]; uv[2 * i + 1] = G.flat[2 * i + 1]; }
+    const parts = new Uint8Array(n);
+    return {
+      f, tris: Uint32Array.from(f.tris), uv, parts, partNames: ['sheet'], partColors: ['#8fb3d9'], body,
+      bodies: [{ type: 'sphere', c: [0, 15, 0], r: 9 }],
+      flat: G.flat, edges: threadsOf(cols, cols, G.idx), uvScale: [v.size, v.size],
+      info: [['Points', `${n}`], ['Bending length', `${c.toFixed(2)} cm`], ['Weight', `${(m.weight * 1000).toFixed(0)} g/m²`]],
+      measure() {
+        // the drape coefficient's stand-in: the share of the sheet's outline circle the hem still covers
+        const x = f.pos;
+        let r = 0, k = 0;
+        for (let i = 0; i < cols; i++) for (const j of [G.idx(i, 0), G.idx(i, cols - 1), G.idx(0, i), G.idx(cols - 1, i)]) { r += Math.hypot(x[3 * j], x[3 * j + 2]); k++; }
+        return [['Hem radius (mean)', `${(r / k).toFixed(1)} cm`], ['Flat half-width', `${(v.size / 2).toFixed(1)} cm`]];
+      },
+      live(key, val) {
+        const s = f.settings;
+        if (key === 'bendingLength') { if (f.stiff) { f.stiff.B = density * Math.hypot(...s.gravity) * Math.pow(val, 3); f.stiff._h = null; } }
+        else if (key === 'gravity') s.gravity = [0, -val * 100, 0];
+        else if (key === 'damping') s.damping = val;
+        else if (key === 'friction') s.friction = val;
+        else if (key === 'iterations') s.iterations = val;
+        else if (key === 'substepHz') { s.substep = 1 / val; f.stiff._h = null; }
+      },
+    };
+  },
+};
+
+// ------------------------------------------------------------------ a pressed fold (authored hinges)
+const fold = {
+  id: 'fold', name: 'Pressed fold',
+  note: 'A wool panel held along its top with one fold pressed down its middle (a box pleat\'s edge). The fold is a line of hinges resting at the angle asked; it eases in so you can watch it form.',
+  params: [
+    { key: 'angle', label: 'Fold angle', unit: '°', min: 0, max: 175, step: 1, value: 70, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'firm', label: 'Fold firmness', unit: 'log', min: -7, max: -1, step: 0.25, value: -4, live: true, fmt: (v) => `1e${v.toFixed(2)}` },
+    { key: 'material', label: 'Cloth', type: 'select', options: [['silk', 'Silk'], ['linen', 'Linen'], ['wool', 'Wool']], value: 'wool' },
+    { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.5, max: 8, step: 0.1, value: null, live: true, fmt: (v) => v.toFixed(1) },
+    { key: 'ease', label: 'Ease in over', unit: 's', min: 0, max: 3, step: 0.1, value: 1, fmt: (v) => v.toFixed(1) },
+    { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, fmt: (v) => v.toFixed(1) },
+    { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
+    { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+  ],
+  build(v) {
+    const { m, density } = materialSettings(v.material);
+    const cols = 25, rows = 15, w = 50, hgt = 30, d = w / (cols - 1), dv = hgt / (rows - 1);
+    const G = gridSheet(cols, rows, (c, r) => [(c - (cols - 1) / 2) * d, 35 - r * dv, 0], { du: d, dv });
+    const f = new Fabric(G.pos, { gravity: [0, -v.gravity * 100, 0], damping: v.damping, iterations: v.iterations, substep: 1 / 240, shear: m.shear, friction: 0.5 });
+    for (let c = 0; c < cols; c++) f.pin(G.idx(c, 0));
+    f.sheet(cols, rows, G.idx, { bend: null, hinge: m.hinge, shear: m.shear, flat: true });
+    f.weigh(density);
+    f.stiffen({ bendingLength: v.bendingLength ?? m.bendingLength * 100, density, passes: 1 });
+    f.tether();
+    const mid = (cols - 1) / 2, line = [];
+    for (let r = 0; r < rows; r++) line.push(G.idx(mid, r));
+    f.fold(line, 0, { compliance: 10 ** v.firm, set: false });
+    f._pack();
+    const hk = [];
+    for (let q = 1; q < line.length; q++) hk.push(f._edgeHinge.get(f._key(line[q - 1], line[q])));
+    let target = v.angle * DEG, t = 0;
+    const n = G.n, uv = new Float32Array(2 * n), parts = new Uint8Array(n);
+    for (let i = 0; i < n; i++) { uv[2 * i] = G.flat[2 * i]; uv[2 * i + 1] = G.flat[2 * i + 1]; }
+    for (const i of line) parts[i] = 1;
+    for (let c = 0; c < cols; c++) parts[G.idx(c, 0)] = 2;
+    const setRest = () => { const k = v.ease > 0 ? Math.min(1, t / v.ease) : 1; for (const h of hk) f._packed.hRest[h] = target * k; };
+    return {
+      f, tris: Uint32Array.from(f.tris), uv, parts, partNames: ['panel', 'pressed fold', 'held edge'], partColors: ['#8fb3d9', '#d2523a', '#2f6b4f'],
+      body: null, bodies: [], flat: G.flat, edges: threadsOf(cols, rows, G.idx), uvScale: [w, hgt],
+      info: [['Points', `${n}`], ['Fold hinges', `${hk.length}`]],
+      before(dt) { t += dt; setRest(); },
+      measure() {
+        let a = 0;
+        for (const h of hk) { const P = f._packed; a += Math.abs(f._angle(P.ha[h], P.hb[h], P.hc[h], P.hd[h])); }
+        return [['Fold angle held', `${(a / hk.length / DEG).toFixed(1)}°`], ['Asked', `${v.angle.toFixed(0)}°`]];
+      },
+      live(key, val) {
+        const s = f.settings;
+        if (key === 'angle') { target = val * DEG; v.angle = val; setRest(); }
+        else if (key === 'firm') for (const h of hk) f._packed.hComp[h] = 10 ** val;
+        else if (key === 'bendingLength') { f.stiff.B = density * Math.hypot(...s.gravity) * Math.pow(val, 3); f.stiff._h = null; }
+        else if (key === 'gravity') s.gravity = [0, -val * 100, 0];
+        else if (key === 'damping') s.damping = val;
+        else if (key === 'iterations') s.iterations = val;
+      },
+    };
+  },
+};
+
+// ------------------------------------------------------------------ a collar's roll, held at its gorge
+const collar = {
+  id: 'collar', name: 'Collar roll',
+  note: 'A turn-down collar sewn round the neck at its gorge (held), standing up to the roll line and turned down over it. The roll is a band of hinges as wide as its radius times its angle; it eases in from flat. The collar is cut curved (its spring) so the fall can lie out over the stand.',
+  params: [
+    { key: 'roll', label: 'Roll angle', unit: '°', min: 0, max: 175, step: 1, value: 160, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'turn', label: 'Roll turns the fall', type: 'select', options: [['out', 'Outward'], ['in', 'Inward']], value: 'out' },
+    { key: 'radius', label: 'Roll radius', unit: 'cm', min: 0.2, max: 2, step: 0.1, value: 0.6, fmt: (v) => v.toFixed(1) },
+    { key: 'stand', label: 'Stand height', unit: 'cm', min: 1.5, max: 5, step: 0.25, value: 3, fmt: (v) => v.toFixed(2) },
+    { key: 'spring', label: 'Collar spring (cut curve)', min: 0.02, max: 0.9, step: 0.02, value: 0.5, fmt: (v) => v.toFixed(2) },
+    { key: 'fall', label: 'Fall depth', unit: 'cm', min: 2, max: 8, step: 0.25, value: 4.5, fmt: (v) => v.toFixed(2) },
+    { key: 'material', label: 'Cloth', type: 'select', options: [['silk', 'Silk'], ['linen', 'Linen'], ['wool', 'Wool']], value: 'linen' },
+    { key: 'bendingLength', label: 'Bending length (interfaced)', unit: 'cm', min: 1, max: 12, step: 0.25, value: 6, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'hingeLog', label: 'Cloth hinge softness', unit: 'log', min: -6, max: 0, step: 0.25, value: -1, live: true, fmt: (v) => `1e${v.toFixed(2)}` },
+    { key: 'firm', label: 'Roll firmness', unit: 'log', min: -7, max: -1, step: 0.25, value: -4, live: true, fmt: (v) => `1e${v.toFixed(2)}` },
+    { key: 'ease', label: 'Ease in over', unit: 's', min: 0, max: 3, step: 0.1, value: 1.2, fmt: (v) => v.toFixed(1) },
+    { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, fmt: (v) => v.toFixed(1) },
+    { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.04, live: true, fmt: (v) => v.toFixed(3) },
+    { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+  ],
+  build(v) {
+    const { m, density } = materialSettings(v.material);
+    // round the back half of the neck (36 cm round). The collar is cut as a curve, an annular sector: a straight
+    // collar cannot turn down on a round neck, since its fall would have to stretch to lie further out than its
+    // stand (the first trial, cut straight, held its roll at 6 of 160 degrees). Pattern drafting gives a turn-down
+    // collar "spring": its fall edge cut longer than its neck edge, between a stand collar (straight, 0) and a flat
+    // collar (cut to the neckline's own curve). Here spring is the sine of the cone the sector rolls into.
+    const R = 36 / (2 * Math.PI), span = Math.PI, cols = 33, depth = v.stand + v.fall, rows = Math.max(10, Math.round(depth / 0.4) + 1);
+    const sinA = Math.max(0.02, Math.min(0.95, v.spring)), cosA = Math.sqrt(1 - sinA * sinA);
+    const R0 = R + 0.4, gorge = R0 * span, phi = span * sinA, rho0 = gorge / phi;
+    const dv = depth / (rows - 1), du = gorge / (cols - 1);
+    const at3 = (c, r) => { const a = -span / 2 + span * c / (cols - 1), v_ = r * dv; return [(R0 + v_ * sinA) * Math.sin(a), 40 + v_ * cosA, -(R0 + v_ * sinA) * Math.cos(a)]; };
+    const G = gridSheet(cols, rows, at3, { du, dv });
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const i = r * cols + c, th = phi * c / (cols - 1), rho = rho0 + r * dv; G.flat[2 * i] = rho * Math.cos(th); G.flat[2 * i + 1] = rho * Math.sin(th); }
+    const f = new Fabric(G.pos, { gravity: [0, -v.gravity * 100, 0], damping: v.damping, iterations: v.iterations, substep: 1 / 240, shear: m.shear, friction: 0.3, contact: 'iteration' });
+    // (held along the gorge and the row above it: the seam allowance is caught in the neckline seam with the
+    // bodice under it, so the collar cannot swing about the seam line; held on one row it flopped down at once)
+    for (let c = 0; c < cols; c++) { f.pin(G.idx(c, 0)); f.pin(G.idx(c, 1)); }
+    // (its hinges rest as it is laid round the neck, not flat: the neckline seam gives it that curve, and hinges resting
+    // flat crushed the cone in on itself, stretching it 50 to 80%)
+    f.sheet(cols, rows, G.idx, { bend: null, hinge: 10 ** v.hingeLog, shear: m.shear, flat: false });
+    // The collar's own stiffness is the implicit bend at its bending length (an interfaced collar: hinges alone cap
+    // out near 2 cm and a 7 cm collar fell flat from its gorge), with the threads held in the same solve. Across the
+    // roll band and one row either side the implicit bend is let go (scale 0), so the roll's hinges turn it there;
+    // kept at the band's edges, it pulled the turn flat and the roll held 10 of 160 degrees.
+    f.weigh(density);
+    f.stiffen({ bendingLength: v.bendingLength ?? 6, density, passes: 3, stretchK: 300 });
+    f.tether();
+    // the roll band: the rows within the roll's width (radius x angle) above the stand line, each its share
+    const band = [];
+    const width = Math.max(dv, v.radius * v.roll * DEG);
+    const r0 = Math.round(v.stand / dv), r1 = Math.max(r0 + 1, Math.round((v.stand + width) / dv));
+    for (let r = r0; r < Math.min(rows - 1, r1); r++) band.push(r);
+    for (let r = Math.max(0, r0 - 1); r <= Math.min(rows - 1, r1 + 1); r++) for (let c = 0; c < cols; c++) f.stiff.scale[G.idx(c, r)] = 0;
+    f.stiff._h = null;
+    const hk = [];
+    for (const r of band) for (let c = 0; c < cols - 1; c++) {
+      const a = G.idx(c, r), b = G.idx(c + 1, r);
+      if (f.crease(a, b, 0, { compliance: 10 ** v.firm, set: false })) hk.push(f._edgeHinge.get(f._key(a, b)));
+    }
+    f._pack();
+    // which way is out: the roll turns the fall outward, away from the neck; measured once, by a trial nudge
+    let sign = 1, target = v.roll * DEG, t = 0;
+    {
+      const P = f._packed, h = hk[Math.floor(hk.length / 2)];
+      const d = P.hd[h], save = [f.pos[3 * d], f.pos[3 * d + 2]];
+      const before = f._angle(P.ha[h], P.hb[h], P.hc[h], P.hd[h]);
+      const bq = P.hb[h];
+      const out = [f.pos[3 * bq], f.pos[3 * bq + 2]], l = Math.hypot(...out) || 1;
+      f.pos[3 * bq] += 0.05 * out[0] / l; f.pos[3 * bq + 2] += 0.05 * out[1] / l;
+      const after = f._angle(P.ha[h], P.hb[h], P.hc[h], P.hd[h]);
+      f.pos[3 * bq] -= 0.05 * out[0] / l; f.pos[3 * bq + 2] -= 0.05 * out[1] / l;
+      void save; void d;
+      sign = (Math.sign(after - before) || 1) * (v.turn === 'in' ? 1 : -1);
+    }
+    const setRest = () => { const k = v.ease > 0 ? Math.min(1, t / v.ease) : 1; const each = sign * target * k / Math.max(1, band.length); for (const h of hk) f._packed.hRest[h] = each; };
+    const neck = (p) => { const rr = Math.hypot(p[0], p[2]); if (rr >= R + 0.1 || p[1] < 30 || p[1] > 60) return false; const k = (R + 0.1) / (rr || 1); p[0] *= k; p[2] *= k; return true; };
+    const n = G.n, uv = new Float32Array(2 * n), parts = new Uint8Array(n);
+    for (let i = 0; i < n; i++) { uv[2 * i] = G.flat[2 * i]; uv[2 * i + 1] = G.flat[2 * i + 1]; }
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) parts[G.idx(c, r)] = r < r0 ? 0 : band.includes(r) ? 1 : 2;
+    for (let c = 0; c < cols; c++) parts[G.idx(c, 0)] = 3;
+    return {
+      f, tris: Uint32Array.from(f.tris), uv, parts, partNames: ['stand', 'roll', 'fall', 'gorge (held)'], partColors: ['#8fb3d9', '#d2523a', '#e0b35a', '#2f6b4f'],
+      body: neck, bodies: [{ type: 'cylinder', r: R, y0: 25, y1: 48 }], flat: G.flat, edges: threadsOf(cols, rows, G.idx), uvScale: [gorge, depth],
+      info: [['Points', `${n}`], ['Roll rows', `${band.length}`], ['Roll width', `${width.toFixed(2)} cm`]],
+      before(dt) { t += dt; setRest(); },
+      measure() {
+        // the roll as turned: the angle between the stand's and the fall's direction at centre back
+        const c = (cols - 1) / 2, x = f.pos, p = (r) => { const i = 3 * G.idx(c, r); return [x[i], x[i + 1], x[i + 2]]; };
+        const a = p(Math.max(0, r0 - 2)), b = p(r0), cc = p(Math.min(rows - 2, r1 + 1)), d = p(Math.min(rows - 1, r1 + 3));
+        const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [d[0] - cc[0], d[1] - cc[1], d[2] - cc[2]];
+        const cs = (u[0] * w[0] + u[1] * w[1] + u[2] * w[2]) / ((Math.hypot(...u) * Math.hypot(...w)) || 1);
+        return [['Roll held', `${(Math.acos(Math.max(-1, Math.min(1, cs))) / DEG).toFixed(0)}°`], ['Asked', `${v.roll.toFixed(0)}°`]];
+      },
+      live(key, val) {
+        const s = f.settings;
+        if (key === 'roll') { target = val * DEG; setRest(); }
+        else if (key === 'firm') for (const h of hk) f._packed.hComp[h] = 10 ** val;
+        else if (key === 'bendingLength') { f.stiff.B = density * Math.hypot(...s.gravity) * Math.pow(val, 3); f.stiff._h = null; }
+        else if (key === 'hingeLog') { const hs = new Set(hk); for (let k = 0; k < f._packed.hComp.length; k++) if (!hs.has(k)) f._packed.hComp[k] = 10 ** val; }
+        else if (key === 'gravity') s.gravity = [0, -val * 100, 0];
+        else if (key === 'damping') s.damping = val;
+        else if (key === 'iterations') s.iterations = val;
+      },
+    };
+  },
+};
+
+const PRESETS = [lace, drape, fold, collar];
+
+// the strain of every thread against its cut length, per point (the largest of its threads) and overall
+function strainOf(scene) {
+  const x = scene.f.pos, fl = scene.flat, e = scene.edges, n = scene.f.n, per = new Float32Array(n), w = scene.f.w;
+  let max = 0, sum = 0, cnt = 0;
+  for (let k = 0; k < e.length; k += 2) {
+    const i = e[k], j = e[k + 1];
+    if (w[i] === 0 && w[j] === 0) continue;          // (a thread between two held points is the stitching's)
+    const r = Math.hypot(fl[2 * i] - fl[2 * j], fl[2 * i + 1] - fl[2 * j + 1]);
+    const l = Math.hypot(x[3 * i] - x[3 * j], x[3 * i + 1] - x[3 * j + 1], x[3 * i + 2] - x[3 * j + 2]);
+    const s = Math.abs(l / r - 1);
+    if (s > per[i]) per[i] = s;
+    if (s > per[j]) per[j] = s;
+    if (s > max) max = s;
+    sum += s; cnt++;
+  }
+  return { per, max, mean: sum / (cnt || 1) };
+}
+
+return { LACE_PARTS, PRESETS, strainOf };
+})();
+
+
+const { PRESETS, strainOf } = __m['presets'];
+const L = __m['lace'];
+
+// ---------------------------------------------------------------- state
+const $ = (id) => document.getElementById(id);
+const state = { preset: PRESETS[0], values: {}, scene: null, playing: true, frame: 0, simT: 0, hist: [], mode: 'lace', ms: 0 };
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// ---------------------------------------------------------------- three
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+stage.prepend(renderer.domElement);
+const scene3 = new THREE.Scene();
+const paintStage = () => { renderer.setClearColor(new THREE.Color(css('--stage') || '#dfe3e8'), 1); };
+paintStage();
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', paintStage);
+new MutationObserver(paintStage).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 2000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene3.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 1.4));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(30, 60, 50); scene3.add(key);
+const rim = new THREE.DirectionalLight(0xffffff, 0.6); rim.position.set(-40, 20, -40); scene3.add(rim);
+let clothMesh = null, bodyGroup = new THREE.Group();
+scene3.add(bodyGroup);
+
+// the lace's look: the pattern drawn on a canvas over the cut strip (net, motifs, cordonnet, scallops)
+function laceTexture(scene) {
+  const [W, H] = scene.uvScale, pxPerCm = Math.min(64, 4096 / Math.max(W, H));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(64, Math.round(W * pxPerCm)); cv.height = Math.max(64, Math.round(H * pxPerCm));
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  if (!scene.S) { g.fillStyle = '#e9e4da'; g.fillRect(0, 0, cv.width, cv.height); }
+  else {
+    const p = scene.S.p, img = g.createImageData(cv.width, cv.height), d = img.data;
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const u = x / pxPerCm, v = y / pxPerCm, edge = L.scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
+      // (the strip's rows are stretched to the scallop: v here is the share of the column's depth)
+      const vv = v / H * edge;
+      const part = L.lacePart(u, vv, p.depth, p.scallop, p.scallopDepth);
+      let a = 0;
+      if (part === 0) {
+        // the net: a hexagonal mesh about 1.2 mm across (Chantilly's tulle ground)
+        const s = 0.09, q = u / s, r = vv / (s * 0.866), rr = Math.floor(r), qq = q + (rr & 1) * 0.5;
+        const fx = qq - Math.floor(qq), fy = r - rr;
+        const near = Math.min(Math.abs(fx - 0.5) < 0.08 ? 0 : 1, fy, 1 - fy) ;
+        a = near < 0.12 ? 0.9 : 0.0;
+      } else if (part === 1) a = 0.92 + 0.08 * Math.sin(u * 40) * Math.sin(vv * 40);
+      else if (part === 2) a = 1;
+      else a = 0.97;
+      const k = 4 * (y * cv.width + x);
+      const tone = part === 2 ? 236 : part === 1 ? 246 : 250;
+      d[k] = tone; d[k + 1] = tone - 3; d[k + 2] = tone - 10; d[k + 3] = Math.round(255 * a);
+    }
+    g.putImageData(img, 0, 0);
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function buildMesh(scene) {
+  if (clothMesh) { scene3.remove(clothMesh); clothMesh.geometry.dispose(); }
+  const n = scene.f.n, geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * n), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(3 * n).fill(1), 3));
+  const uv = new Float32Array(2 * n), [W, H] = scene.uvScale;
+  for (let i = 0; i < n; i++) {
+    uv[2 * i] = scene.uv[2 * i] / W;
+    if (scene.S) { const c = Math.floor(i / scene.S.rows), r = i % scene.S.rows; uv[2 * i + 1] = 1 - r / (scene.S.rows - 1); void c; }
+    else uv[2 * i + 1] = 1 - scene.uv[2 * i + 1] / H;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(new THREE.BufferAttribute(scene.tris, 1));
+  const tex = laceTexture(scene);
+  const mats = {
+    lace: new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.85 }),
+    parts: new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, flatShading: false }),
+    strain: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+    clay: new THREE.MeshStandardMaterial({ color: 0xc9c2b6, side: THREE.DoubleSide, roughness: 0.95 }),
+  };
+  clothMesh = new THREE.Mesh(geo, mats[state.mode]);
+  clothMesh.userData.mats = mats;
+  scene3.add(clothMesh);
+  // the bodies
+  bodyGroup.clear();
+  const bm = new THREE.MeshStandardMaterial({ color: 0x8a8f99, roughness: 0.8, transparent: true, opacity: 0.55 });
+  for (const b of scene.bodies || []) {
+    let m;
+    if (b.type === 'sphere') { m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 48, 24), bm); m.position.set(...b.c); }
+    else if (b.type === 'cylinder') { m = new THREE.Mesh(new THREE.CylinderGeometry(b.r, b.r, b.y1 - b.y0, 48, 1, true), bm); m.position.set(0, (b.y0 + b.y1) / 2, 0); }
+    else if (b.type === 'floor') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.size, b.size), bm); m.rotation.x = -Math.PI / 2; m.position.y = b.y; }
+    else if (b.type === 'plane') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), bm); m.position.set(0, b.y, b.z - 0.05); }
+    if (m) bodyGroup.add(m);
+  }
+}
+
+function updateMesh() {
+  const sc = state.scene, geo = clothMesh.geometry, P = geo.attributes.position.array, x = sc.f.pos;
+  for (let k = 0; k < P.length; k++) P[k] = x[k];
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  if (state.mode === 'parts' || state.mode === 'strain') {
+    const C = geo.attributes.color.array;
+    if (state.mode === 'parts') {
+      const cols = sc.partColors.map((h) => new THREE.Color(h));
+      for (let i = 0; i < sc.f.n; i++) { const c = cols[sc.parts[i]] || cols[0]; C[3 * i] = c.r; C[3 * i + 1] = c.g; C[3 * i + 2] = c.b; }
+    } else {
+      const st = state.lastStrain || strainOf(sc);
+      for (let i = 0; i < sc.f.n; i++) { const c = rampColor(Math.min(1, st.per[i] / 0.05)); C[3 * i] = c[0]; C[3 * i + 1] = c[1]; C[3 * i + 2] = c[2]; }
+    }
+    geo.attributes.color.needsUpdate = true;
+  }
+}
+const RAMP = [[0x2c, 0x4f, 0x9e], [0x3f, 0xa7, 0xa0], [0xe8, 0xd3, 0x5a], [0xd9, 0x53, 0x2f], [0x7d, 0x10, 0x20]];
+function rampColor(t) {
+  const s = t * (RAMP.length - 1), i = Math.min(RAMP.length - 2, Math.floor(s)), f = s - i, a = RAMP[i], b = RAMP[i + 1];
+  return [0, 1, 2].map((k) => ((a[k] + (b[k] - a[k]) * f) / 255) ** 2.2);
+}
+
+// cameras by name: the turnaround's views, framed on the cloth
+function frameCamera(view = 'q') {
+  const x = state.scene.f.pos;
+  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < x.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], x[i + k]); mx[k] = Math.max(mx[k], x[i + k]); }
+  const c = mn.map((v, k) => (v + mx[k]) / 2), size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], 4);
+  const d = size * 2.3;
+  const dir = { front: [0, 0.05, 1], back: [0, 0.05, -1], side: [1, 0.05, 0], q: [0.7, 0.35, 0.75], top: [0.001, 1, 0.001] }[view];
+  const l = Math.hypot(...dir);
+  camera.position.set(c[0] + d * dir[0] / l, c[1] + d * dir[1] / l, c[2] + d * dir[2] / l);
+  controls.target.set(...c);
+  camera.near = size / 50; camera.far = size * 50; camera.updateProjectionMatrix();
+  controls.update();
+}
+for (const v of ['front', 'side', 'back', 'q', 'top']) $('v-' + v).onclick = () => frameCamera(v);
+
+function resize() {
+  const r = stage.getBoundingClientRect();
+  renderer.setSize(Math.max(50, r.width), Math.max(50, r.height), false);
+  camera.aspect = Math.max(50, r.width) / Math.max(50, r.height); camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+
+// ---------------------------------------------------------------- controls
+function presetDefaults(P) { const v = {}; for (const p of P.params) v[p.key] = p.value; return v; }
+function buildControls() {
+  const P = state.preset, box = $('controls');
+  box.innerHTML = '';
+  const h = document.createElement('h2'); h.textContent = 'Settings'; box.append(h);
+  for (const p of P.params) {
+    if (p.show && !p.show(state.values)) continue;
+    const wrap = document.createElement('div'); wrap.className = 'ctl';
+    const id = `p-${P.id}-${p.key}`;
+    const lab = document.createElement('label'); lab.htmlFor = id; lab.textContent = p.label + (p.unit && p.unit !== 'log' ? ` (${p.unit})` : '');
+    if (p.live) { const s = document.createElement('span'); s.className = 'live'; s.textContent = 'live'; lab.append(s); }
+    wrap.append(lab);
+    if (p.type === 'select') {
+      wrap.append(document.createElement('span'));
+      const sel = document.createElement('select'); sel.id = id;
+      for (const [val, txt] of p.options) { const o = document.createElement('option'); o.value = val; o.textContent = txt; sel.append(o); }
+      sel.value = state.values[p.key];
+      sel.onchange = () => { state.values[p.key] = sel.value; rebuild(); };
+      wrap.append(sel);
+    } else {
+      let val = state.values[p.key];
+      if (val == null) val = defaultFor(p);
+      const out = document.createElement('output'); out.textContent = p.fmt ? p.fmt(val) : val;
+      const inp = document.createElement('input'); inp.type = 'range'; inp.id = id; inp.min = p.min; inp.max = p.max; inp.step = p.step; inp.value = val;
+      inp.oninput = () => {
+        const v = parseFloat(inp.value);
+        out.textContent = p.fmt ? p.fmt(v) : v;
+        state.values[p.key] = v;
+        if (p.live && state.scene) { state.scene.live(p.key, v); state.hist.push({ mark: p.label }); }
+      };
+      inp.onchange = () => { if (!p.live) rebuild(); };
+      wrap.append(out, inp);
+    }
+    box.append(wrap);
+  }
+  const info = document.createElement('table'); info.className = 'read'; info.id = 'info';
+  box.append(info);
+}
+// a slider whose default is the material's own (the lace's or cloth's bending length)
+function defaultFor(p) {
+  if (p.key === 'bendingLength') {
+    const sc = state.scene;
+    if (sc && sc.S) return sc.S.mat.bendingLength * 100;
+    if (sc) { const row = (sc.info || []).find((r) => r[0] === 'Bending length'); if (row) return parseFloat(row[1]); }
+    return 1;
+  }
+  return p.min;
+}
+
+function rebuild() {
+  const P = state.preset;
+  let sc;
+  try { sc = P.build({ ...state.values }); }
+  catch (e) { console.error(e); $('flags').innerHTML = `<li>Could not build this scene: ${e.message}</li>`; return; }
+  state.scene = sc; state.frame = 0; state.simT = 0; state.hist = []; state.lastStrain = null;
+  buildMesh(sc);
+  updateMesh();
+  frameCamera('q');
+  buildControls();
+  const info = $('info');
+  info.innerHTML = (sc.info || []).map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  legend();
+  readouts();
+}
+
+function legend() {
+  const sc = state.scene, el = $('legend');
+  if (state.mode === 'parts') el.innerHTML = sc.partNames.map((n, k) => `<div><span class="sw" style="background:${sc.partColors[k]}"></span>${n}</div>`).join('');
+  else if (state.mode === 'strain') el.innerHTML = '<div>Thread stretch against the cut</div><div class="ramp"></div><div class="row" style="justify-content:space-between;font-family:var(--f-data);font-size:11px"><span>0%</span><span>5%+</span></div>';
+  else el.innerHTML = state.mode === 'clay' ? '<div>Clay: form only</div>' : '<div>Lace: net, motifs, cordonnet</div>';
+}
+for (const b of $('modes').querySelectorAll('button')) b.onclick = () => {
+  state.mode = b.dataset.mode;
+  for (const o of $('modes').querySelectorAll('button')) o.setAttribute('aria-pressed', String(o === b));
+  clothMesh.material = clothMesh.userData.mats[state.mode];
+  legend(); updateMesh();
+};
+
+// ---------------------------------------------------------------- the run
+function simFrame() {
+  const sc = state.scene, f = sc.f, before = Float64Array.from(f.pos), t0 = performance.now();
+  const dt = 1 / 60;
+  if (sc.before) sc.before(dt);
+  const steps = f.advance(dt, { body: sc.body, neutral: true });
+  state.ms = 0.8 * state.ms + 0.2 * (performance.now() - t0);
+  let far = 0;
+  for (let a = 0; a < f.pos.length; a++) { const d = Math.abs(f.pos[a] - before[a]); if (d > far) far = d; }
+  const st = strainOf(sc);
+  state.lastStrain = st;
+  let ke = 0;
+  const h = f.settings.substep;
+  for (let i = 0; i < f.n; i++) { const m = f.kg ? f.kg[i] : 1, vx = (f.pos[3 * i] - f.prev[3 * i]) / h, vy = (f.pos[3 * i + 1] - f.prev[3 * i + 1]) / h, vz = (f.pos[3 * i + 2] - f.prev[3 * i + 2]) / h; ke += 0.5 * m * (vx * vx + vy * vy + vz * vz) / 1e4; }
+  const bad = !Number.isFinite(far) || !Number.isFinite(st.max);
+  state.frame++; state.simT += dt;
+  state.hist.push({ speed: far / Math.max(1, steps), strain: st.max, mean: st.mean, ke, steps });
+  if (state.hist.length > 600) state.hist.shift();
+  if (bad) { state.playing = false; $('play').textContent = 'Play'; }
+}
+
+function oneStep() {
+  const sc = state.scene, f = sc.f;
+  if (sc.before) sc.before(f.settings.substep);
+  f.step(f.settings.substep, sc.body, { neutral: true });
+  state.simT += f.settings.substep;
+  state.lastStrain = strainOf(sc);
+}
+
+function readouts() {
+  const sc = state.scene, H = state.hist.filter((q) => q.speed !== undefined), last = H[H.length - 1];
+  const st = state.lastStrain || strainOf(sc);
+  const rows = [
+    ['Time solved', `${state.simT.toFixed(2)} s`], ['Frame', `${state.frame}`],
+    ['Solver time a frame', `${state.ms.toFixed(1)} ms`],
+    ['Fastest point', last ? `${(last.speed * 10).toFixed(3)} mm a step` : '–'],
+    ['Worst thread stretch', `${(100 * st.max).toFixed(2)}%`], ['Mean thread stretch', `${(100 * st.mean).toFixed(3)}%`],
+    ['Kinetic energy', last ? `${last.ke.toExponential(2)} J` : '–'],
+    ...(sc.measure ? sc.measure() : []),
+  ];
+  $('read').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  const chips = [`t ${state.simT.toFixed(2)} s`, `${(100 * st.max).toFixed(1)}% worst`];
+  const settled = last && last.speed < 1e-4;
+  $('hud').innerHTML = chips.map((c) => `<span class="chip">${c}</span>`).join('') + (settled ? '<span class="chip">settled</span>' : '') + (st.max > 0.05 ? '<span class="chip warn">stretching</span>' : '');
+}
+
+function drawChart() {
+  const cv = $('chart'), r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const W = r.width, Hh = r.height, pad = { l: 34, r: 34, t: 8, b: 16 };
+  g.clearRect(0, 0, W, Hh);
+  const H = state.hist;
+  g.strokeStyle = css('--line'); g.lineWidth = 1; g.fillStyle = css('--muted'); g.font = '10px JetBrains Mono, monospace';
+  // log axis for the speed and energy: 1e-6 .. 1e1
+  const ly = (v) => { const lv = Math.log10(Math.max(1e-11, v)); return pad.t + (Hh - pad.t - pad.b) * (1 - (lv + 10) / 11); };
+  for (let e = -10; e <= 1; e += 1) { const y = ly(10 ** e); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(W - pad.r, y); g.globalAlpha = 0.5; g.stroke(); g.globalAlpha = 1; if (e % 2 === 0) g.fillText(`1e${e}`, 2, y + 3); }
+  const smax = 0.1, sy = (v) => pad.t + (Hh - pad.t - pad.b) * (1 - Math.min(1, v / smax));
+  g.textAlign = 'right';
+  for (const v of [0, 0.05, 0.1]) g.fillText(`${(v * 100).toFixed(0)}%`, W - 2, sy(v) + 3);
+  g.textAlign = 'left';
+  const N = Math.max(60, H.length), xs = (k) => pad.l + (W - pad.l - pad.r) * k / (N - 1);
+  const line = (sel, ymap, color) => {
+    g.strokeStyle = color; g.lineWidth = 1.6; g.beginPath(); let on = false;
+    H.forEach((q, k) => { if (q.speed === undefined) return; const y = ymap(sel(q)); if (!on) { g.moveTo(xs(k), y); on = true; } else g.lineTo(xs(k), y); });
+    g.stroke();
+  };
+  line((q) => q.speed, ly, '#3d78c9');
+  line((q) => q.ke, ly, '#3f9d72');
+  line((q) => q.strain, sy, '#d9532f');
+  // where a setting was moved
+  g.fillStyle = css('--muted');
+  H.forEach((q, k) => { if (q.mark) { g.globalAlpha = 0.6; g.fillRect(xs(k), pad.t, 1, Hh - pad.t - pad.b); g.globalAlpha = 1; } });
+  g.fillText(`last ${H.length} frames`, pad.l, Hh - 3);
+}
+
+function drawSections() {
+  const cv = $('sect'), r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const W = r.width, H = r.height;
+  g.clearRect(0, 0, W, H);
+  const sc = state.scene;
+  const flagsEl = $('flags');
+  if (!sc.sections) {
+    // a side profile instead: the cloth's outline from the side (y against z)
+    g.fillStyle = css('--muted'); g.font = '11px Instrument Sans, sans-serif';
+    g.fillText('Side profile (points from the side)', 6, 14);
+    const x = sc.f.pos; let mn = [Infinity, Infinity], mx = [-Infinity, -Infinity];
+    for (let i = 0; i < x.length; i += 3) { mn[0] = Math.min(mn[0], x[i + 2]); mx[0] = Math.max(mx[0], x[i + 2]); mn[1] = Math.min(mn[1], x[i + 1]); mx[1] = Math.max(mx[1], x[i + 1]); }
+    const s = Math.min((W - 20) / Math.max(1, mx[0] - mn[0]), (H - 30) / Math.max(1, mx[1] - mn[1]));
+    g.fillStyle = css('--accent');
+    for (let i = 0; i < x.length; i += 3) g.fillRect(10 + (x[i + 2] - mn[0]) * s, H - 8 - (x[i + 1] - mn[1]) * s, 1.5, 1.5);
+    const st = state.lastStrain || strainOf(sc);
+    flagsEl.className = st.max > 0.05 ? 'flags' : 'flags ok';
+    flagsEl.innerHTML = st.max > 0.05 ? `<li>Threads stretched ${(100 * st.max).toFixed(1)}% (over 5%)</li>` : '<li>No flags: threads within 5% of their cut length</li>';
+    return;
+  }
+  const S = sc.sections(), cols = ['#2c4f9e', '#3f8fb0', '#3fa77a', '#c79a2c', '#d9532f'];
+  // project each section: round mounts from above (x, z), a band from above (x, z), a jabot from above too
+  // (a jabot's sections run down the front: drawn from the front, down the page, their swing to the sides)
+  const pr = S.jabot ? (p) => [p[0], -p[1]] : (p) => [p[0], p[2]];
+  for (const s of S.lines) s.pts = s.pts.map((p) => { const q = pr(p); return [q[0], 0, q[1]]; });
+  let mn = [Infinity, Infinity], mx = [-Infinity, -Infinity];
+  for (const s of S.lines) for (const p of s.pts) { mn[0] = Math.min(mn[0], p[0]); mx[0] = Math.max(mx[0], p[0]); mn[1] = Math.min(mn[1], p[2]); mx[1] = Math.max(mx[1], p[2]); }
+  const sx = (W - 20) / Math.max(1e-3, mx[0] - mn[0]), sz = (H - 34) / Math.max(1e-3, mx[1] - mn[1]);
+  const s = S.round || S.jabot ? Math.min(sx, sz) : Math.min(sx, sz * 4);
+  const ox = 10 + ((W - 20) - (mx[0] - mn[0]) * s) / 2, oz = 20 + ((H - 34) - (mx[1] - mn[1]) * s) / 2;
+  S.lines.forEach((ln, k) => {
+    g.strokeStyle = cols[k % cols.length]; g.lineWidth = 1.4; g.beginPath();
+    ln.pts.forEach((p, i) => { const X = ox + (p[0] - mn[0]) * s, Z = oz + (p[2] - mn[1]) * s; if (i) g.lineTo(X, Z); else g.moveTo(X, Z); });
+    g.stroke();
+  });
+  g.font = '10px JetBrains Mono, monospace';
+  S.lines.forEach((ln, k) => { g.fillStyle = cols[k % cols.length]; g.fillText(`${ln.label}`, 8 + k * 40, 12); });
+  g.fillStyle = css('--muted'); g.fillText(S.jabot ? 'from the front: 0% stitched line … 100% scallop' : 'from above: 0% heading … 100% scallop', 8, H - 4);
+  const st = state.lastStrain || strainOf(sc);
+  const flags = sc.flags ? sc.flags({ max: st.max }) : [];
+  flagsEl.className = flags.length ? 'flags' : 'flags ok';
+  flagsEl.innerHTML = flags.length ? flags.map((f) => `<li>${f}</li>`).join('') : '<li>No flags: sections ripple, no kinks, threads within 5%</li>';
+}
+
+// ---------------------------------------------------------------- wiring
+$('preset').innerHTML = PRESETS.map((p) => `<option value="${p.id}">${p.name}</option>`).join('');
+$('preset').onchange = () => { state.preset = PRESETS.find((p) => p.id === $('preset').value); state.values = presetDefaults(state.preset); $('presetNote').textContent = state.preset.note; rebuild(); };
+$('play').onclick = () => { state.playing = !state.playing; $('play').textContent = state.playing ? 'Pause' : 'Play'; };
+$('step').onclick = () => { state.playing = false; $('play').textContent = 'Play'; simFrame(); updateMesh(); readouts(); drawChart(); drawSections(); };
+$('sub').onclick = () => { state.playing = false; $('play').textContent = 'Play'; oneStep(); updateMesh(); readouts(); drawSections(); };
+$('reset').onclick = () => rebuild();
+$('speed').oninput = () => { $('speedOut').textContent = $('speed').value; };
+
+state.values = presetDefaults(state.preset);
+$('presetNote').textContent = state.preset.note;
+resize();
+rebuild();
+
+let tick = 0;
+function loop() {
+  if (state.playing && state.scene) {
+    const k = parseInt($('speed').value, 10);
+    for (let i = 0; i < k; i++) simFrame();
+    updateMesh();
+    if (++tick % 3 === 0) { readouts(); drawChart(); drawSections(); }
+  }
+  controls.update();
+  renderer.render(scene3, camera);
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
