@@ -13,6 +13,7 @@ HEEL_DUMP=PATH saves the feet's data (.npz) for tools/heel/sheet.py, which draws
 The rig has one bone for the whole foot (no toe joint), so a heel cannot be posed with the rig: here the rest shape
 of the body itself is bent about the metatarsal heads' line (study.pose) and the body taken off the rig. The figure
 is good for still views only (no --walk)."""
+import math
 import os
 import sys
 
@@ -25,6 +26,7 @@ os.environ.setdefault('NO_DRESS', '1')
 os.environ.setdefault('NO_ACC', '1')
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
+from mathutils import Vector  # noqa: E402
 import female  # noqa: E402
 import sorceress_pendant as SP  # noqa: E402
 import draft  # noqa: E402
@@ -228,6 +230,45 @@ def pose_body(body, feet, ths, up):
     body.matrix_world = mw
 
 
+def unpose(X, f, th, up, band=0.55):
+    """study.pose undone: parts built on the heeled foot (turned by th about the metatarsal axis, raised by up) taken
+    back to the foot's own rest frame, so a bone can carry them through the walk."""
+    X1 = X - np.array([0.0, 0.0, up])
+    p, d = S.mtp_axis(f)
+    side = np.cross(d, [0, 0, 1.0])
+    if side[1] < 0:
+        side = -side
+    w = S._ss(-0.5 * band, 0.5 * band, (X1[:, :2] - p[:2]) @ side[:2])
+    return X1 + w[:, None] * (S._rot(X1, p, d, -th) - X1)
+
+
+def rig_part(o, side, f, th, up):
+    """A heel part carried by the foot's bones: into the foot's rest frame, weighted to the Foot bone behind the toe joint
+    and to the Toe bone ahead of it (the same weights the skin has there), and deformed by the rig."""
+    me = o.data
+    X = np.array([v.co[:] for v in me.vertices])
+    X = unpose(X, f, th, up)
+    names = {}
+    for v, x in zip(me.vertices, X):
+        v.co = x
+    mw = o.matrix_world.copy()
+    o.parent = None
+    o.matrix_world = mw
+    lw = female.leg_weights(side)
+    for v, x in zip(me.vertices, X):
+        w = lw(Vector(x))
+        w = {k: w.get(k, 0.0) for k in ('Foot.' + side, 'Toe.' + side)}
+        t = sum(w.values()) or 1.0
+        for k, val in w.items():
+            if val / t > 1e-4:
+                if k not in names:
+                    names[k] = o.vertex_groups.new(name=k)
+                names[k].add([v.index], val / t, 'REPLACE')
+    m = o.modifiers.new('rig', 'ARMATURE')
+    m.object = female.RIG['arm']
+    me.update()
+
+
 def build():
     res = SP.build()
     for o in bpy.data.objects:                   # (the necklace's parts: NO_ACC hides only the chain)
@@ -247,7 +288,7 @@ def build():
     feet = {}
     for side, sgn in (('R', -1.0), ('L', 1.0)):
         mask = (sgn * P[:, 0] > 0) & (P[:, 2] < M['ankle_z'] + 1.5) & \
-               (W[:, col['Foot.' + side]] + W[:, col['Shin.' + side]] > 0.5)
+               (W[:, col['Foot.' + side]] + W[:, col['Shin.' + side]] + (W[:, col['Toe.' + side]] if 'Toe.' + side in col else 0.0) > 0.5)
         ankle = np.array(rig.data.bones['Foot.' + side].head_local)
         f = S.measure(P, N, mask, ankle)
         Pl, step = S.plantar(P, N, mask)
@@ -265,9 +306,30 @@ def build():
         print('heel %s: %s' % (side, S.summary(f, d, o)), flush=True)
     d0 = outs['R'][0]
     if os.environ.get('HEEL_PARTS', '1') != '0':     # (HEEL_PARTS=0: the bare foot, flat on the floor)
-        pose_body(body, feet, ths, d0['insole'] + d0['sole'])
-        for side, (d, o) in outs.items():
-            build_heel(side, feet[side][0], d, o, H)
+        up = d0['insole'] + d0['sole']
+        if os.environ.get('HEEL_WALK') == '1':
+            # (the heel walk: the body stays on its rig, the parts ride the foot's bones, and the walk holds the foot
+            # pitched onto the heel with the figure raised by the sole: see female.HEEL_PITCH)
+            female.HEEL_PITCH = float(np.mean(list(ths.values())))
+            female.HEEL_UP = up
+            female.FIG['root'].location.z = up
+            az = female.ANKLE_Z
+            tread = []
+            for side, (d, o) in outs.items():
+                for part in build_heel(side, feet[side][0], d, o, H):
+                    rig_part(part, side, feet[side][0], ths[side], up)
+                    if side == 'R' and part.name.startswith(('Heel top lift 0', 'Heel sole')):
+                        Z = np.array([v.co[:] for v in part.data.vertices])
+                        Z = Z[-Z[:, 1] <= female.FOOT_BALL]     # (behind the toe joint: ahead of it the toe bone turns the sole flat)
+                        tread += [(float(-z[1]), float(z[2] - az)) for z in Z[::7]]
+            # what the foot stands on: the sole and the heel's tread behind the toe joint, 
+            female.HEEL_CONTACT = tread
+            female.HEEL_AXIS = (float(female.FOOT_BALL), float(female.TOE_JOINT[1] - az), float(female.TOE_JOINT[1] + up))
+            print('heel walk: pitch %.1f deg, raised %.2f, %d contact points' % (math.degrees(female.HEEL_PITCH), up, len(female.HEEL_CONTACT)), flush=True)
+        else:
+            pose_body(body, feet, ths, up)
+            for side, (d, o) in outs.items():
+                build_heel(side, feet[side][0], d, o, H)
     RESULT.update(feet=feet, outs=outs, k=k, e=e, h=h, bare=bare)
     if os.environ.get('HEEL_DUMP'):
         np.savez(os.environ['HEEL_DUMP'], P=P, N=N, maskR=feet['R'][3], maskL=feet['L'][3],
