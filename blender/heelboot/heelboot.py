@@ -33,12 +33,88 @@ M_THONG = female.mat_def(79, 'boot thong', female.ramp(0x6b4a30, 0.1), 0.3)
 
 
 M_SOLE = female.mat_def(87, 'boot sole leather', female.ramp(0x3b2a1e, 0.08), 0.3, surface='leather', closeup='leather')
-M_LIFT_A = female.mat_def(88, 'heel lift, light', female.ramp(0x70503a, 0.1), 0.3, surface='leather', closeup='leather')
-M_LIFT_B = female.mat_def(89, 'heel lift, dark', female.ramp(0x62442c, 0.1), 0.3, surface='leather', closeup='leather')
+# the stack's edge: lifts of vegetable-tanned sole leather (5 mm each: the atelier's rule, study.LIFT_MM), glassed and
+# sanded smooth, dyed to the upper's brown a shade down and waxed (Gentleman's Gazette, finishing a bespoke shoe: an
+# alcohol dye matched to the upper, three coats of hard wax ironed in, a last shinier coat). stack_material() draws
+# the lifts' joints and the fibre's grain on it.
+M_STACK = female.mat_def(88, 'heel stack edge', female.ramp(0x402a1b, 0.1), 0.35, closeup='leather')
 M_TOP_LIFT = female.mat_def(90, 'heel top lift', female.ramp(0x221d1a, 0.08), 0.45)
 WELD = 0.03                  # the stack's seat stands this far up into the sole, so the two are one solid
 SEAT_OUT = 0.06              # how far the sole stands out past the counter round the heel seat (about 1.5 mm)
 TAPER = 0.05                 # the stack closes in this share of its size from the seat down to the tread
+
+
+def stack_material():
+    """The stacked heel's edge in the 3D look: one dyed, waxed face (not a hide's pebbled grain) on which each lift
+    still reads: a fine dark joint where two lifts meet, each lift a touch lighter or darker than its neighbours
+    (the dye takes differently on each piece), and the leather's fibre showing as faint streaks along the lifts.
+    Reads the lifts' own 'stack_u' (the height up the stack, in lifts) and 'rest'. EXPERIMENTAL: the strengths are
+    set by eye; the sources give the finish, not numbers for it."""
+    m = female.mat(M_STACK)
+    nt = m.node_tree
+    bsdf = nt.nodes.get('close bsdf')
+    if bsdf is None or nt.nodes.get('stack joint') is not None:
+        return m
+    N, L = nt.nodes.new, nt.links.new
+
+    def math(op, a, b=None, name=None):
+        n = N('ShaderNodeMath')
+        n.operation = op
+        for k, v in ((0, a), (1, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                n.inputs[k].default_value = v
+            else:
+                L(v, n.inputs[k])
+        if name:
+            n.name = name
+        return n.outputs[0]
+
+    u = N('ShaderNodeAttribute')
+    u.attribute_name = 'stack_u'
+    d = math('PINGPONG', u.outputs['Fac'], 0.5)                 # how far from the nearest joint, in lifts
+    joint = N('ShaderNodeMapRange')
+    joint.name = 'stack joint'
+    joint.interpolation_type = 'SMOOTHSTEP'
+    for k, v in (('From Min', 0.0), ('From Max', 0.07), ('To Min', 1.0), ('To Max', 0.0)):
+        joint.inputs[k].default_value = v
+    L(d, joint.inputs['Value'])
+    piece = N('ShaderNodeTexWhiteNoise')                        # each lift its own tone
+    piece.noise_dimensions = '1D'
+    L(math('FLOOR', u.outputs['Fac']), piece.inputs['W'])
+    rest = N('ShaderNodeAttribute')
+    rest.attribute_name = 'rest'
+    mp = N('ShaderNodeMapping')
+    mp.inputs['Scale'].default_value = (1.2, 1.2, 30.0)         # (streaks along the lifts)
+    L(rest.outputs['Vector'], mp.inputs['Vector'])
+    fibre = N('ShaderNodeTexNoise')
+    fibre.inputs['Scale'].default_value = 2.0
+    fibre.inputs['Detail'].default_value = 3.0
+    L(mp.outputs['Vector'], fibre.inputs['Vector'])
+    val = math('MULTIPLY', math('MULTIPLY_ADD', piece.outputs['Value'], 0.22), math('MULTIPLY_ADD', fibre.outputs['Fac'], 0.24))
+    for n_, add in ((val.node.inputs[0].links[0].from_node, 0.89), (val.node.inputs[1].links[0].from_node, 0.88)):
+        n_.inputs[2].default_value = add
+    val = math('MULTIPLY', val, math('MULTIPLY_ADD', joint.outputs['Result'], -0.5))
+    val.node.inputs[1].links[0].from_node.inputs[2].default_value = 1.0
+    hsv = N('ShaderNodeHueSaturation')
+    hsv.inputs['Color'].default_value = bsdf.inputs['Base Color'].default_value
+    for l_ in list(bsdf.inputs['Base Color'].links):
+        L(l_.from_socket, hsv.inputs['Color'])
+    L(val, hsv.inputs['Value'])
+    L(hsv.outputs['Color'], bsdf.inputs['Base Color'])
+    bump = N('ShaderNodeBump')                                  # the joints a hair's depth in; no pebbling
+    bump.inputs['Strength'].default_value = 0.35
+    bump.inputs['Distance'].default_value = 0.05
+    L(math('MULTIPLY_ADD', joint.outputs['Result'], -1.0), bump.inputs['Height'])
+    for l_ in list(bsdf.inputs['Normal'].links):
+        nt.links.remove(l_)
+    L(bump.outputs['Normal'], bsdf.inputs['Normal'])
+    bsdf.inputs['Roughness'].default_value = 0.34               # waxed and ironed: a soft shine, not a mirror
+    if 'Coat Weight' in bsdf.inputs:
+        bsdf.inputs['Coat Weight'].default_value = 0.25
+        bsdf.inputs['Coat Roughness'].default_value = 0.22
+    return m
 
 
 def join_heel(side, lift):
@@ -107,7 +183,7 @@ def join_heel(side, lift):
     z_top = z_under + WELD
     h = z_top - tread(arc[:, 1])
     n = max(1, int(np.ceil(float(h.max()) / lift)))
-    mats = [female.mat(M_TOP_LIFT)] + [female.mat(M_LIFT_A if i % 2 else M_LIFT_B) for i in range(1, n)]
+    mats = [female.mat(M_TOP_LIFT)] + [stack_material()] * (n - 1)
     arm = female.RIG['arm']
     out = []
     m = len(arc)
@@ -127,6 +203,11 @@ def join_heel(side, lift):
         me = bpy.data.meshes.new('Heel lift %d.%s' % (i, side))
         me.from_pydata(V.tolist(), [], F)
         me.materials.append(mats[i])
+        at = me.attributes.new('rest', 'FLOAT_VECTOR', 'POINT')
+        at.data.foreach_set('vector', V.ravel().astype(np.float32))
+        at = me.attributes.new('stack_u', 'FLOAT', 'POINT')
+        # (the height up the stack in lifts, true where the top lift is cut short at the seat)
+        at.data.foreach_set('value', np.concatenate([np.full(m, float(i)), i + (hi[:, 2] - lo[:, 2]) / lift]).astype(np.float32))
         o = bpy.data.objects.new(me.name, me)
         bpy.context.scene.collection.objects.link(o)
         g = o.vertex_groups.new(name='Foot.' + side)
