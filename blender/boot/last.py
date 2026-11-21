@@ -378,7 +378,9 @@ def _sole(edge, z_welt, r):
 
 
 TOE_SMOOTH = 120     # (passes of Taubin smoothing over the toe box)
-TOE_BRIDGE = 0.5     # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
+TOE_SWELL = 4        # (rounds of spreading the toe box's clearance shortfall)
+TOE_SPREAD = 40      # (neighbour passes that spread it)
+TOE_BRIDGE = 0.5    # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
 TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.34, 0.06, 0.40     # (shares of the shin's width: see cut_lace)
 
 
@@ -575,6 +577,22 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             X += (lam * toe)[:, None] * (_nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X)
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
+    # over the toe box the clearance is made up as one swell, not toe by toe: where the smoothed box dips to a toe's
+    # dome, the shortfall is spread (a running maximum of the shortfall and its neighbours' mean) over the region and
+    # the box is carried out by that, so the pushing below has nothing left to carve the lobes back with
+    # (EXPERIMENTAL: the rounds and the spread are judged by eye)
+    zone = toe > 0.02
+    for _ in range(TOE_SWELL):
+        short = np.zeros(n)
+        for i in np.nonzero(zone)[0]:
+            loc, nrm, _, d = tree.find_nearest(X[i])
+            if loc is not None:
+                short[i] = max(r['gap'] - float(np.dot(X[i] - np.array(loc), np.array(nrm))), 0.0)
+        if short.max() < 1e-4:
+            break
+        for _ in range(TOE_SPREAD):
+            short = np.where(zone, np.maximum(short, _nbr_sum(np.repeat(short[:, None], 3, 1), E)[:, 0] / np.maximum(deg, 1)), 0.0)
+        X += Nr * (short * zone)[:, None]
     pushed = 0
     for i in range(n):
         loc, nrm, _, d = tree.find_nearest(X[i])
