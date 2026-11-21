@@ -125,7 +125,7 @@ def _solve(job):
     return tailor.tailor_collar(E, M, V, F, BV, BF, gor, Pp, settings=dict(st), log=lambda *a: None)
 
 
-def smooth_edges_pass(D, rounds=60, band=0.6, corner_deg=40.0, inner_rounds=30, front_y=None, roll=True, roll_rounds=80, roll_band=0.5, log=print):
+def smooth_edges_pass(D, rounds=60, band=0.6, corner_deg=40.0, inner_rounds=30, front_y=None, roll=True, roll_rounds=80, roll_band=0.5, tip=0.0, tip_rounds=200, tip_swell=0.0, log=print):
     """The smoothing pass (John, 2026-11-21: "create a smoothing pass that gets rid of all creases at the edges"): the
     collar's free edges (outer edge and ends; not the neck seam, which is sewn and hidden) and the cloth within `band` of
     them, faired after the solve.
@@ -142,6 +142,12 @@ def smooth_edges_pass(D, rounds=60, band=0.6, corner_deg=40.0, inner_rounds=30, 
       the roll    the fold's own line is a curve too, and its waves show as a wavy top edge: each half's roll is faired
                   along itself the same way, and the cloth within roll_band of it is carried with it (each point by its
                   nearest roll point's move, fading out), so the fold keeps its section and only loses its waves.
+
+      the tips    (John: "fix the collar creases at the tip with a smoothing round") with tip > 0 the cloth within `tip`
+                  of each collar point, measured on the pattern, gets a round of its own over the surface: the same
+                  two-step smoothing, strongest at the point and fading out to `tip`, the point's corner and the
+                  edges (already faired) held, the fold's own turn left out. A crease across the tip is a sharp bend
+                  between neighbouring triangles, which this takes out; the tip's overall lie stays.
 
     Returns the new positions; logs how far points moved and the edge's roughness before and after (the mean turn
     between successive edge segments, degrees)."""
@@ -164,6 +170,7 @@ def smooth_edges_pass(D, rounds=60, band=0.6, corner_deg=40.0, inner_rounds=30, 
     v1, v2 = UV[idx] - UV[J[:, 0]], UV[J[:, 1]] - UV[idx]
     turn = np.degrees(np.abs(np.arctan2(v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0], (v1 * v2).sum(1))))
     mov = turn < corner_deg
+    mov_all = mov.copy()
     idx, J = idx[mov], J[mov]
 
     def rough(P):
@@ -222,6 +229,50 @@ def smooth_edges_pass(D, rounds=60, band=0.6, corner_deg=40.0, inner_rounds=30, 
             disp = (pos - before)[ri][jr]
             pos += wr[:, None] * disp
         log('collarlab: roll faired: %d points, moved up to %.3f' % (len(ri), np.linalg.norm(pos - before, axis=1).max()))
+    if tip > 0:
+        corner_ids = np.array([i for i, v in nb.items() if len(v) == 2])
+        corner_ids = corner_ids[~mov_all] if len(corner_ids) == len(mov_all) else corner_ids[:0]
+        # (the collar's points: corners between the outer edge and an end)
+        tips = [i for i in corner_ids if {kind[nb[i][0]], kind[nb[i][1]], kind[i]} >= {'o', 'e'} or kind[i] in ('o', 'e')]
+        if len(tips):
+            before = pos.copy()
+            dt = cKDTree(UV[tips]).query(UV)[0]
+            wt = np.clip(1 - dt / tip, 0, 1)
+            wt = wt * wt * (3 - 2 * wt)
+            wt[edge_pts] = 0
+            wt[kind == 'r'] = 0
+            wt[kind == 's'] = 0
+            at = np.nonzero(wt > 0)[0]
+            cn = np.array([len(nbr[i]) for i in at])
+            j2 = np.concatenate([nbr[i] for i in at])
+            sl = np.repeat(np.arange(len(at)), cn)
+
+            def bend(P):                                  # mean angle between neighbouring triangles in the tips' cloth
+                tt = T[(wt[T] > 0).any(1)]
+                n_ = np.cross(P[tt[:, 1]] - P[tt[:, 0]], P[tt[:, 2]] - P[tt[:, 0]])
+                n_ /= np.maximum(np.linalg.norm(n_, axis=1, keepdims=True), 1e-12)
+                ek = {}
+                out_ = []
+                for ti, t_ in enumerate(tt):
+                    for a_, b_ in ((t_[0], t_[1]), (t_[1], t_[2]), (t_[2], t_[0])):
+                        key = (min(a_, b_), max(a_, b_))
+                        if key in ek:
+                            out_.append(np.degrees(np.arccos(np.clip(n_[ti] @ n_[ek[key]], -1, 1))))
+                        else:
+                            ek[key] = ti
+                return (float(np.mean(out_)), float(np.percentile(out_, 95))) if out_ else (0.0, 0.0)
+            b0 = bend(pos)
+            # (the two-step smoothing keeps broad shapes, and a crease across a tip is broad: with it the bend between
+            # triangles stayed 4.8 deg. The tips get the plain step alone (tip_swell 0): the cloth relaxes to the
+            # smoothest sheet between its faired edges and the cloth around it.)
+            for _ in range(tip_rounds):
+                for f_ in ((lam, mu * tip_swell / 0.53) if tip_swell else (lam,)):
+                    acc = np.zeros((len(at), 3))
+                    np.add.at(acc, sl, pos[j2])
+                    pos[at] += (f_ * wt[at])[:, None] * (acc / cn[:, None] - pos[at])
+            b1 = bend(pos)
+            log('collarlab: tips smoothed: %d tips, %d points within %.1f; moved up to %.3f; bend between triangles mean %.1f -> %.1f deg, 95th %.1f -> %.1f'
+                % (len(tips), len(at), tip, np.linalg.norm(pos - before, axis=1).max(), b0[0], b1[0], b0[1], b1[1]))
     mv = np.linalg.norm(pos - np.asarray(D['pos']), axis=1)
     log('collarlab: edges smoothed: %d edge points faired (%d corners held), %d points in the band; moved up to %.3f (median of moved %.3f); edge roughness %.1f -> %.1f deg'
         % (len(idx), int((~mov).sum()), len(act), mv.max(), np.median(mv[mv > 1e-6]) if (mv > 1e-6).any() else 0.0, r0, rough(pos)))
