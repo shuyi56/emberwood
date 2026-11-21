@@ -192,6 +192,8 @@ LAPEL = dict(
     whole_steps=1500,      # steps of the solve with the front let go (see _with_front)
     fold_deg=176,          # the lapel's fold: a full turn back over the roll line, pressed (degrees)
     fold_gap=0.12,         # how far the lapel's cloth past the turn rests off the bodice under it: just clear of the front's face (the cloth is 0.088 thick), so the lapel slopes down from its roll (0.32 high) to the chest. At 0.28 it lay level with the roll's top and read as floating (John, 2026-11-20); the value is a judgement, not from a source
+    # (0.25 tried 2026-11-21 for a softer roll, John's "rods": the turn's cloth grew from 0.49 to 0.77 and the gorge-hold's match
+    # (front-view proximity to the drafted gorge, 0.08) found 0 and 1 points: the lapels came loose, folds 144 and 149 of 176.)
     fold_radius=0.16,      # the fold's inside radius: a rounded roll that carries the lapel up to where it rests
     fold_row=0.05,         # rows of points marked parallel to the roll through the turn, this far apart
     # The fold's solve. The lapel hangs from the turn's fine rows: at the cloth's usual step (1/240 s) and give (1e-6)
@@ -434,10 +436,10 @@ FOLD_FABRIC = dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, da
 
 
 FRONT_FLOOR = []
-# The collar's cloth: the same navy as the bodice read as one dark mass (colorcheck.py bodice: dE 0, the same grey), so it is a
-# lighter slate navy, 4a5a7a (passes: dL 31, dE 33). A collar in a second cloth is how tailors faced a habit's collar;
-# COLLAR_DYE=<hex> restores the bodice's own wool (0x121621) if John prefers it and accepts the flag.
-COLLAR_DYE = int(os.environ.get('COLLAR_DYE', '0x4a5a7a'), 16)
+# The collar's cloth: the same navy as the bodice read as one dark mass (colorcheck.py bodice: dE 0, the same grey), so a lighter
+# slate navy, 4a5a7a, passed (dL 31, dE 33); John chose the bodice's own wool for the collar (2026-11-21), the flag accepted.
+# COLLAR_DYE=0x4a5a7a gives the slate again.
+COLLAR_DYE = int(os.environ.get('COLLAR_DYE', '0x121621'), 16)       # (John, 2026-11-21: "same material on top": the bodice's own wool, flag accepted)
 
 
 def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
@@ -641,7 +643,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
                 hit_ = (np.linalg.norm(dq_ - tq_[:, None] * gv[None], axis=1) < 0.08) & rimv[mv_] & past[mv_]
                 sewn[mv_[hit_]] = True
                 tg_ = tg_[hit_].copy()
-                if L_.get('gorge_on_chest', True):
+                if L_.get('gorge_on_chest', True) and len(tg_):
                     # (the drafted fold is flat, the chest is not: toward the shoulder the chest falls away from the
                     # fold's plane, and a gorge held in that plane stood up to 0.6 off the front, the lapel's point
                     # past it up to 1.2 (3 cm): the lapel floated. The gorge seam lies on the coat's chest, and the
@@ -1090,7 +1092,7 @@ def front_layers(o, M, lap):
 def build():
     """The figure for views.py: the mannequin, the redingote bodice drafted on it (hidden unless SHOW_BODICE), and the
     collar sewn to its neckline and folded in the solver."""
-    for d in ('redingote_bodice', 'redingote', 'vest', 'chemise', 'doublet', 'sorceress_pendant', 'base'):
+    for d in ('redingote_bodice', 'redingote', 'vest', 'chemise', 'doublet', 'sorceress_pendant', 'base', 'habit_all'):
         sys.path.insert(0, os.path.join(HERE, '..', d))
     import bpy
     import fabric as xf
@@ -1206,5 +1208,19 @@ def build():
     zc = M['z_neck_side']
     os.environ['HEAD_CZ'] = '%.2f' % (zc + 0.5)
     os.environ['HEAD_H'] = '%.2f' % (8.0 * M['w'])
+    for c_ in bpy.data.objects:                         # (the necklace's chain was a thin wire across the V in the render: John, "rods": hidden)
+        if c_.name.startswith('Necklace'):
+            c_.hide_render = True
+            c_.visible_camera = c_.visible_shadow = c_.visible_diffuse = c_.visible_glossy = False
+    if os.environ.get('SHOW_SLEEVES'):
+        # The sleeves (John, 2026-11-21: "add the sleeves"): the sleeves piece of habit_all, built over this body, in the
+        # bodice's own wool, with the bodice's horn for their cuff buttons.
+        import habit_all as HA
+        import sorceress_pendant as SP
+        SP.build = lambda: res                                      # (the body is built once)
+        os.environ['SLEEVE_NAVY'] = '%06x' % RB.DYE
+        before = set(bpy.data.objects)
+        HA.Piece('sleeves', 'sleeves', ['sleeves', 'redingote', 'chemise', 'vest']).run()
+        print('collar: the sleeves added (%d objects)' % len(set(bpy.data.objects) - before), flush=True)
     bpy.context.view_layer.update()
     return res
