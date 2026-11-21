@@ -79,3 +79,22 @@ and Blender's cloth (`blender/chemise/solver.py`).
 - `Folds.bake(passes=)`: hinge walks per step. More passes do not move a fold that geometry blocks (G1).
 - `Folds.bake(correct=True)`: at rest but off target, the hinges' rests are scaled by the shortfall, up to 178
   degrees. A fold that closes past target on a curved front is this correction meeting G1, not a hinge fault.
+
+## S5. Cloth near an open sheet's edge stays stretched and never relaxes (missing feature, fixed)
+
+- Symptom: strain freezes early (the collar: 5/95 % of -17/+30 by step 500, the same at step 2000) while the
+  fastest point keeps moving a steady amount each step. Smaller steps, friction 0, `planes=8` do not change it.
+  Without the body the same mesh and pins settle to -5/+14. The strain sits where the cloth is in the air just past
+  the edge of a cloth collider (a collar's stand above the bodice's neckline rim).
+- Cause: `MeshBody` takes the nearest sample's plane as the surface. A bodice is an open sheet, and past its rim the
+  nearest sample is a rim point whose plane carries on as an endless wall. Cloth behind that wall's extension, in
+  free air above the neckline, is pushed out of it every step, and the ties pull it back. It is not the solver
+  failing to relax: the body itself holds the cloth stretched. Relaxing in contact works (a sheet started 50 %
+  stretched round a cylinder relaxes to -0.3/0.9 % in 1000 steps with the body on).
+- Fix: `MeshBody(..., tangent=1.5 * spacing)` for any body built from an open sheet (cloth as a collider). A point
+  whose foot on the nearest sample's plane lies further than `tangent` from the sample is past the sheet's edge and
+  is not pushed. Test (`blender/shared/test_sheet_edge.py`, a strip 0.2 behind a bodice's plane above its rim):
+  5/95 % -17.4/46.3 and worst 127 % before, -0.1/0.1 and worst 0.3 % with `tangent=0.075` (samples every 0.05).
+  Default off, so closed bodies (skin) do not change.
+- Check for it: if the strain does not move between step 500 and step 2000 while the fastest point stays steady, run
+  once with the body and print which points the body touches. Touched points beyond a collider's rim are this.

@@ -459,7 +459,7 @@ class MeshBody:
     degrees away from the nearest one's (turn) within `band` of its distance."""
 
     def __init__(self, pts, normals, gap=0.06, floor=None, floor_gap=0.03, reach=4.0, planes=1, band=None,
-                 sweeps=6, turn=0.5):
+                 sweeps=6, turn=0.5, tangent=None):
         from scipy.spatial import cKDTree
         self.p = np.asarray(pts, float)
         n = np.asarray(normals, float)
@@ -469,6 +469,7 @@ class MeshBody:
         self.planes, self.sweeps = int(planes), int(sweeps)
         self.band = 2.0 * gap + 0.05 if band is None else band
         self.turn = float(turn)                  # (cos of the angle past which a sample is another wall: 0.5, 60 deg)
+        self.tangent = tangent                   # (an open sheet's edge: see _past_edge)
 
     def __call__(self, P):
         if self.planes > 1:
@@ -478,9 +479,21 @@ class MeshBody:
         j = np.where(near, j, 0)
         nrm = self.n[j]
         depth = np.einsum('ij,ij->i', P - self.p[j], nrm)
-        hit = near & (depth < self.gap)
+        hit = near & (depth < self.gap) & ~self._past_edge(P, j, nrm, depth)
         P[hit] += (self.gap - depth[hit])[:, None] * nrm[hit]
         return self._floor(P, hit)
+
+    def _past_edge(self, P, j, nrm, depth):
+        """tangent: for a body that is an open sheet (cloth as a collider: a bodice under a collar). Its nearest
+        sample's plane stands for the surface only over the sheet itself; past the sheet's edge it would carry on as
+        an endless wall, and cloth in the air beyond the rim (a collar's stand over the neckline) is pushed out of
+        that wall every step, held stretched and never relaxing (solver-issues.md, S5). With tangent set, a point
+        whose foot on the nearest sample's plane lies further than tangent from that sample is past the sheet's
+        edge and is not pushed. About 1.5 times the samples' spacing; None (off) for closed bodies."""
+        if self.tangent is None:
+            return np.zeros(len(P), bool)
+        lat = P - self.p[j] - depth[:, None] * nrm
+        return np.einsum('ij,ij->i', lat, lat) > self.tangent ** 2
 
     def _floor(self, P, hit):
         if self.floor is not None:
@@ -507,6 +520,7 @@ class MeshBody:
         j2 = j[np.arange(len(P)), np.argmax(other, 1)]
         Q = np.stack([self.p[j[:, 0]], self.p[j2]], 1)
         Nq = np.stack([Nn[:, 0], self.n[j2]], 1)
+        near &= ~self._past_edge(P, j[:, 0], Nn[:, 0], np.einsum('mj,mj->m', P - self.p[j[:, 0]], Nn[:, 0]))
         use = np.column_stack([near, near & has])
         off = np.einsum('mkj,mkj->mk', Q, Nq) + self.gap                 # (plane c: n . x >= off)
         X = P.copy()
