@@ -79,7 +79,7 @@ ARM_SPREAD = 0.42
 K_HIP = float(os.environ.get('K_HIP', '2.0'))
 K_ANKLE = float(os.environ.get('K_ANKLE', '1.2'))   # (the leg into the foot: a wide fillet, the front of the ankle one curve with the instep)
 ANKLE_FRONT_ITERS = int(os.environ.get('ANKLE_FRONT_ITERS', '0'))
-FOOT_SMOOTH = int(os.environ.get('FOOT_SMOOTH', '20'))
+FOOT_SMOOTH = int(os.environ.get('FOOT_SMOOTH', '60'))
 CUT_Z = 46.0           # the upper body's skin is kept above this; the pelvis is built from here down
 KEEP_Z = 47.0          # above this the new skin is put back exactly on the upper body's
 
