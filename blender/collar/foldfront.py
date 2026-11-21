@@ -34,7 +34,7 @@ blend, out = a[-3:-1] if has else a[-2:]
 #                  See blender/collar/STAND_COLLAR.md.
 RECIPES = {
     'stand_collar': dict(foot_over_bust=0.15, bow=-0.5, roll_radius=0.24, break_over=0.03, neck_x=2.2, sheet=6, fair=40,
-                         ease_chest=True, ease_rounds=150, bow_band=1.0, bow_over=1.5, lie=0.02, thick_out=1.0, t0=0.03),
+                         ease_chest=True, ease_rounds=150, tail=0, bow_band=1.0, bow_over=1.5, lie=0.02, thick_out=1.0, t0=0.03),
 }
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
@@ -52,6 +52,16 @@ th = sol.thickness
 foot = opt.get('foot', M['z_bust'] + opt.get('foot_over_bust', -0.6))
 belly = opt.get('belly', 0.0 if 'bow' in opt else 0.7)    # the cut line's swing out from the chord (a true curved cut)
 bow = opt.get('bow', 0.0 if belly else None)           # (the earlier way: the cloth drawn along the surface; None: tangent to the edge)
+# The lapel's outline, traced off John's photo of a camp-collar shirt (2026-11-21: "trace these lines for the lapel"), in
+# the fold's own measure: (how far down the fold from the neck, how far out from it), both as shares of the fold's
+# length. Read off both lapels of the photo: the top edge leaves the fold just under the neck and runs out to the
+# lapel's point, 0.27 of the way down and 0.48 of the fold's length out; from the point the outer edge runs straight
+# in to the foot of the fold at the top button. John's own outline drawn on our render puts the point 0.38 out, so
+# 0.40 is used. The front is CUT to this outline (the cloth past the roll line is the outline mirrored over it), so
+# the lapel is still the front's own cloth; where the bodice's corner is smaller than the outline, the front is cut
+# wider there, as a tailor draws the lapel onto the front's pattern.
+outline = opt.get('outline', None if 'bow' in opt else [[0.04, 0.0], [0.27, 0.40], [1.0, 0.0]])
+if outline and not belly: belly = 1e-6
 def bowdev(t):
     t = np.clip(t, 0, 1); return bow * 6.75 * t * t * (1 - t)
 def ss01(a_, b_, x_):
@@ -142,10 +152,62 @@ for s in sides:
         q[snap] -= sdc[snap][:, None] * nd[jn][snap]; W[snap, 0], W[snap, 2] = q[snap, 0], q[snap, 1]; sdc[snap] = 0.0
         chord = tl.copy(); sd, tl = sdc, td[jn]
         f = mine & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (chord > -0.15)
-        s.update(sd=sd, tl=tl, fold=f, crease=snap, C=Cd[jn], nl=nd[jn], Cd=Cd)
+        s.update(sd=sd, tl=tl, fold=f, crease=snap, C=Cd[jn], nl=nd[jn], Cd=Cd, nd=nd, td=td)
         continue
     f = (L_ == s['layer']) & (W[:, 1] < yc) & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (tl > -0.15)
     s.update(sd=sd, tl=tl, fold=f, crease=(L_ == s['layer']) & (W[:, 1] < yc) & (np.abs(sd) <= 1e-6) & (tl > -0.02) & (tl < 1.02))
+if outline:
+    from scipy.spatial import Delaunay
+    OT = np.array(outline, float)
+    rec = []
+    for s in sides:
+        ci = np.nonzero(s['crease'])[0]; ci = ci[np.argsort(s['tl'][ci])]
+        rec.append(([bm.verts[int(i)] for i in ci], s['tl'][ci].copy(), W[ci, 1].copy()))
+    ref_ny = np.median([f.normal.y for f in bm.faces if all(v[lay] == 1 for v in f.verts) and f.calc_center_median().y < yc - 1][:2000])
+    bmesh.ops.delete(bm, geom=[bm.verts[int(i)] for i in np.nonzero(top['fold'] | und['fold'])[0]], context='VERTS')
+    info = {}
+    hm = opt.get('lapel_mesh', 0.07)
+    for si, s in enumerate(sides):
+        cv, ct, cy = rec[si]; Lc = s['ln']
+        Dfun = lambda t_, Lc=Lc: np.interp(t_, OT[:, 0], OT[:, 1] * Lc, left=0.0, right=0.0)
+        pts = [(OT[1, 0], OT[1, 1] * Lc)]
+        for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
+            D = float(Dfun(t_)); n_ = int(np.ceil(D / hm))
+            pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
+        pts = np.array(pts)
+        keep = np.nonzero((ct >= OT[0, 0] - 1e-6) & (ct <= 1 + 1e-6))[0]; nc = len(keep)
+        allp = np.vstack([np.column_stack([ct[keep] * Lc, np.zeros(nc)]), np.column_stack([pts[:, 0] * Lc, pts[:, 1]])])
+        tri = Delaunay(allp).simplices
+        tt = np.concatenate([ct[keep], pts[:, 0]]); dd = np.concatenate([np.zeros(nc), pts[:, 1]])
+        Cq = np.column_stack([np.interp(tt, s['td'], s['Cd'][:, k]) for k in (0, 1)])
+        nq = np.column_stack([np.interp(tt, s['td'], s['nd'][:, k]) for k in (0, 1)])
+        flat = Cq + dd[:, None] * nq                    # where the cloth lies as cut, before it is turned
+        vs = [cv[int(i)] for i in keep]
+        for k in range(nc, len(tt)):
+            v = bm.verts.new(tuple(np.array([flat[k, 0], np.interp(tt[k], ct, cy), flat[k, 1]]) @ inv[:3, :3].T + inv[:3, 3]))
+            v[lay] = s['layer']; vs.append(v); info[v] = (si, dd[k], tt[k])
+        nf = 0
+        for a_, b_, c_ in tri:
+            if max(a_, b_, c_) < nc: continue
+            e1, e2 = flat[b_] - flat[a_], flat[c_] - flat[a_]; ny = e1[1] * e2[0] - e1[0] * e2[1]
+            if abs(ny) < 1e-9: continue
+            order = (a_, b_, c_) if ny * ref_ny > 0 else (a_, c_, b_)
+            try: bm.faces.new([vs[int(i)] for i in order]); nf += 1
+            except ValueError: pass
+        s['Dfun'] = Dfun
+        print('foldfront: front %d: cut to the traced lapel: point %.2f of the way down the fold, %.1f cm out; %d points, %d faces of its own cloth'
+              % (s['layer'], OT[1, 0], 2.62 * OT[1, 1] * Lc, len(tt) - nc, nf))
+    bm.verts.index_update(); bm.verts.ensure_lookup_table(); bm.faces.ensure_lookup_table(); bm.normal_update()
+    W = world(); L_ = np.array([v[lay] for v in bm.verts]); q = W[:, [0, 2]]; nV = len(W)
+    for si, s in enumerate(sides):
+        cv, ct, cy = rec[si]
+        sd, tl, f, cr = np.zeros(nV), np.zeros(nV), np.zeros(nV, bool), np.zeros(nV, bool)
+        for v, t_ in zip(cv, ct): cr[v.index] = True; tl[v.index] = t_
+        for v, (sj, d_, t_) in info.items():
+            if sj == si: f[v.index] = True; sd[v.index] = d_; tl[v.index] = t_
+        C = np.column_stack([np.interp(tl, s['td'], s['Cd'][:, k]) for k in (0, 1)])
+        nl = np.column_stack([np.interp(tl, s['td'], s['nd'][:, k]) for k in (0, 1)])
+        s.update(sd=sd, tl=tl, fold=f, crease=cr, C=C, nl=nl)
 n0 = len(W)
 def caster(skip, layers=None):
     """Rays from the front onto the cloth that stays (the faces with no point of `skip`; of these layers only) and the body."""
@@ -183,6 +245,7 @@ for s in (und, top):                                  # the under front first: t
     # the lapel's width at each height, read off the cloth itself
     bins = np.linspace(0, 1, 25); wb = np.array([d[(t >= lo) & (t <= hi)].max() if ((t >= lo) & (t <= hi)).any() else 0 for lo, hi in zip(bins[:-1], bins[1:])])
     wloc = np.maximum(np.interp(t, 0.5 * (bins[:-1] + bins[1:]), wb), 1e-3)
+    if outline: wloc = np.maximum(s['Dfun'](t), 1e-3)
     # the roll: a half turn of radius rr at the break (open all the way down, tapering at the foot), then the lapel
     # bends back toward the chest on a wide arc so its edge lies on the front
     rr = r0 * np.clip((1 - t) / 0.12, 0.15, 1) * np.clip((t + 0.05) / 0.1, 0.4, 1)
@@ -199,7 +262,12 @@ for s in (und, top):                                  # the under front first: t
     X = P - d[:, None] * n[None] + ex[:, None] * n[None]
     if belly: X = s['C'][ii] + ex[:, None] * s['nl'][ii]            # (turned over the curve: out from its own nearest point)
     X = X + (bowdev(t) * np.exp(-((ex - d) / opt.get('bow_over', 1.5)) ** 2))[:, None] * n[None]      # (the lapel goes with its curved line)
+    # where the cloth past the line is only a sliver (the tail running down to the foot beside the top button, and the
+    # first of it at the neck) it is not turned at all: a strip that thin cannot roll, and it showed as a ragged fringe.
+    # The fold opens out of the flat front as the lapel gains width.
     g_ = np.ones(len(ii))
+    if opt.get('tail', (0.12, 0.45)) and not outline:
+        g_ = ss01(*opt.get('tail', (0.12, 0.45)), wloc)
     gy = ground(X)
     yc_t = np.interp(t, tl[ci][np.argsort(tl[ci])], W[ci, 1][np.argsort(tl[ci])]) if len(ci) > 1 else np.nanmedian(gy)
     gy = np.where(np.isfinite(gy), gy, yc_t)
