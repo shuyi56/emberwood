@@ -1326,6 +1326,9 @@ def box(sx, sy, sz):
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
 HEAD_NECK_Z = -0.13                      # the head's sculpt runs down the neck to here (inside the collar), in head heights
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
+# The toes' joint (the metatarsophalangeal axis) of a foot with a toe bone: (how far ahead of the ankle, how high), or None
+# for the feet whose toes are part of the foot (the boots' lasts, the painted sheets). anatomy.patch sets it.
+TOE_JOINT = None
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
 LEG_X, SH_X = 3.3, 5.75
@@ -2007,6 +2010,15 @@ def leg_weights(side):
         # shin -> foot across the ankle: the boot is one piece from the shaft into the foot, so the bend is spread over
         # the instep and the heel (a band 2.6 deep) instead of pinching in a single ring where the foot folds up
         foot = _smooth(az + 1.6, az - 1.0, co.z)
+        if TOE_JOINT:
+            # the toes ahead of the metatarsal heads take the toe bone, eased over a little more than a toe's width
+            # (narrow under the sole, so the ball's pad stays with the foot; wide over the top, where the skin has to
+            # slide over the joint: a narrow band there was squashed to a tenth of its area as the toes bent)
+            zt = 1.0 - _smooth(1.2, 0.5, co.z)
+            ya, yb = -TOE_JOINT[0] + 0.25 + 0.65 * zt, -TOE_JOINT[0] - 0.85 - 1.15 * zt
+            toe = _smooth(ya, yb, co.y)
+            return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot * (1 - toe),
+                    f'Toe.{side}': lower * foot * toe}
         return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot}
     return w
 
@@ -2044,6 +2056,7 @@ def build_rig(body):
         segs = [('Thigh', (lx, 0, HIP_Z), (lx, 0, HIP_Z - THIGH)),
                 ('Shin', (lx, 0, HIP_Z - THIGH), (lx, 0, HIP_Z - THIGH - SHIN)),
                 ('Foot', (lx, 0, ANKLE_Z), (lx, -3.0, 0.5)),
+                *((('Toe', (lx, -TOE_JOINT[0], TOE_JOINT[1]), (lx, -TOE_JOINT[0] - 1.8, TOE_JOINT[1])),) if TOE_JOINT else ()),
                 ('UpperArm', (ax, 0.2, SH_Z), (ax, 0.2, SH_Z - UPPER)),
                 ('Forearm', (ax, 0.2, SH_Z - UPPER), (ax, 0.2, SH_Z - UPPER - FORE)),
                 ('Hand', (ax, 0.2, SH_Z - UPPER - FORE), (ax, 0.2, SH_Z - UPPER - FORE - 2.5))]
@@ -2184,7 +2197,7 @@ def resplit_neck():
                     gs[n].remove([v.index])
 
 
-PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
+PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'Toe': 'Toe', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
             'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Cervical': 'Cervical', 'Midneck': 'Midneck', 'Neck': 'Head'}
 
 
@@ -4031,7 +4044,9 @@ def build_legs(pelvis, leg):
         x = -s * LEG_X
         hip = empty(f'Hip.{side}', (x, 0, 0), pelvis)
         kn = empty(f'Knee.{side}', (0, 0, -THIGH), hip)
-        empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
+        an = empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
+        if TOE_JOINT:
+            empty(f'Toe.{side}', (0, -TOE_JOINT[0], TOE_JOINT[1] - ANKLE_Z), an)
         leg(side, s, x, leg_weights(side))
 
 
@@ -4565,6 +4580,7 @@ def pose_sheet(col, walking):
         # (the foot is held at its pitch from level: the ankle takes out the shin's lean, and the foot is turned
         # back against the pelvis's turn, so it points down the line of the walk)
         an.rotation_euler = (th - kb - pitch, 0, -s * toe - turn)
+        set_toe(side, pitch)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
@@ -4603,6 +4619,21 @@ def _euler_m(e):
     ry = np.array([[cb, 0, sb], [0, 1, 0], [-sb, 0, cb]])
     rz = np.array([[cc, -sc, 0], [sc, cc, 0], [0, 0, 1]])
     return rz @ ry @ rx
+
+
+def set_toe(side, pitch, k=1.0):
+    """Bend the toes of a foot with a toe bone: when the foot is pitched toes-down (pitch < 0) to roll over its ball,
+    the toes stay as flat as the floor lets them (k = 1), eased off to k in the swing. A bend is the foot's pitch
+    taken back out at the toe joint."""
+    t = bpy.data.objects.get(f'Toe.{side}')
+    if t is not None:
+        t.rotation_euler = (min(0.0, pitch) * k, 0, 0)
+
+
+def swing_toe(u):
+    """How much of the push-off's toe bend the toes keep u (0-1) of the way through the swing: all of it as the foot
+    leaves the ground, 0.35 of it a quarter of the way on."""
+    return 0.35 + 0.65 * max(0.0, 1.0 - u / 0.25)
 
 
 def foot_level(pelvis, hip, knee, pitch, toe=0.0):
@@ -4650,6 +4681,7 @@ def pose_locked(col):
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
+        set_toe(side, pitch, 1.0 if ground else swing_toe((t - STANCE_L) / (1 - STANCE_L)))
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG)) - L_ARM_BACK
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = L_WRIST + L_WRIST_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
@@ -4823,6 +4855,7 @@ def pose_run(col):
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * R_TOE_OUT)
+        set_toe(side, pitch, 1.0 if ground else swing_toe((t - RUN_STANCE) / (1 - RUN_STANCE)))
         c = math.cos(2 * math.pi * (t - 0.5 - R_ARM_LAG))
         a = R_ARM_SWING * c - R_ARM_BACK
         sh.rotation_euler = (-a, s * (ARM_OUT + R_ARM_CLEAR + 0.06 * max(0.0, -a)), 0)

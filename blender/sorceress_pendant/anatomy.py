@@ -222,6 +222,8 @@ def patch():
         female.SOLE_UNDER_ANKLE = ANKLE_H      # (the walk views draw their floor this far under the ankle)
         female.SHIN = 13.8 + (3.4 - ANKLE_H)
         female.FOOT_BALL = FOOT_BALL_M
+        # (a toe bone at the metatarsal heads, under the skin of the knuckles: the walk rolls the foot over it with the toes flat)
+        female.TOE_JOINT = (FOOT_BALL_M, 0.8)
 
 
 # ---------------------------------------------------------------- pelvis

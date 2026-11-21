@@ -247,7 +247,7 @@ def build():
     feet = {}
     for side, sgn in (('R', -1.0), ('L', 1.0)):
         mask = (sgn * P[:, 0] > 0) & (P[:, 2] < M['ankle_z'] + 1.5) & \
-               (W[:, col['Foot.' + side]] + W[:, col['Shin.' + side]] > 0.5)
+               (W[:, col['Foot.' + side]] + W[:, col['Shin.' + side]] + (W[:, col['Toe.' + side]] if 'Toe.' + side in col else 0.0) > 0.5)
         ankle = np.array(rig.data.bones['Foot.' + side].head_local)
         f = S.measure(P, N, mask, ankle)
         Pl, step = S.plantar(P, N, mask)
