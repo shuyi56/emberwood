@@ -47,7 +47,7 @@ Batching rules (John, 2026-11-19)
   * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
     job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
-import argparse, functools, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
+import argparse, functools, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("RQ_HOME", HERE)   # queue.json, results/, events.jsonl: next to the code unless RQ_HOME says
@@ -287,6 +287,8 @@ def git(*a, check=True, cwd=REPO):
 
 
 LOCK = os.path.join(DATA, "queue.lock")
+INBOX = os.path.join(DATA, "inbox")   # threads drop one new file per add or cancel here; only the serving machine writes queue.json
+SERVING = False
 _lock_depth = 0
 
 
@@ -340,7 +342,7 @@ def _clean(o):
     return json.dumps({k: v for k, v in o.items() if not k.startswith("_")}, sort_keys=True)
 
 
-def load():
+def load(raw=False):
     try:
         with open(STATE) as f:
             s = json.load(f)
@@ -350,7 +352,99 @@ def load():
     # what this process saw, so save() can tell its own changes from other processes' (a three-way merge)
     s["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in s.get(k, [])} for k in _LISTS},
                   "top": {k: json.dumps(v, sort_keys=True) for k, v in s.items() if k not in _LISTS and not k.startswith("_")}}
+    if not raw and not SERVING:
+        _merge_inbox(s)
     return s
+
+
+def _inbox_ops():
+    ops = []
+    for f in glob.glob(os.path.join(INBOX, "*.json")):
+        try:
+            with open(f) as fh:
+                ops.append((f, json.load(fh)))
+        except (OSError, ValueError):
+            pass                                     # (half-written or just taken: next time)
+    ops.sort(key=lambda x: (x[1].get("created", ""), x[1].get("token", "")))
+    return ops
+
+
+def _merge_inbox(s):
+    """A read-only view: requests threads have dropped in the inbox but the serving machine has not taken yet show
+    up as pending, marked _inbox so that save() never writes them."""
+    have = {r.get("token") for r in s["requests"] if r.get("token")}
+    nxt = max([s["next"]] + [r["id"] + 1 for r in s["requests"]])
+    for f, d in _inbox_ops():
+        if d.get("op") == "add":
+            r = dict(d["request"])
+            if r.get("token") in have:
+                continue
+            have.add(r.get("token"))
+            r["id"] = nxt; nxt += 1; r["_inbox"] = True
+            s["requests"].append(r)
+        elif d.get("op") == "cancel":
+            for r in s["requests"]:
+                if (d.get("token") and r.get("token") == d["token"]) or (not d.get("token") and r["id"] == d.get("id")):
+                    r["state"] = "cancelled"
+
+
+def admit(s, r):
+    """Put a request that arrived in the inbox into the queue: number it, drop a waiting request it replaces, mark the
+    intent it answers."""
+    r["id"] = s["next"]
+    outs = r["outputs"]
+    for o in s["requests"]:   # coalescing: a newer request for the same piece replaces one still waiting
+        # (the same thread and branch following the branch tip, or the same branch asking for the same views and
+        #  cells at another commit, pinned or not: the stale one is dropped, never rendered)
+        if o["state"] in ("pending", "conflict") and o["branch"] == r["branch"] and o["outputs"] == outs and (
+                (o["thread"] == r["thread"] and not r.get("sha") and not o.get("sha"))
+                or (sorted(o.get("views") or []) == sorted(r["views"]) and o.get("cells") == r["cells"]
+                    and o.get("quality") == r["quality"])):
+            o["state"] = f"superseded by {r['id']}"
+            event("coalesced", None, dropped=o["id"], by=r["id"], branch=r["branch"])
+    figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
+    for i in s.get("intents", []):    # the request an intent announced has come
+        if i["state"] == "open" and i["branch"] == r["branch"] and (i["piece"] in figs or not figs):
+            i["state"] = f"sent as #{r['id']}"
+    s["next"] += 1
+    s["requests"].append(r)
+
+
+def ingest():
+    """Only the serving machine runs this: take what threads dropped in the inbox into queue.json. Threads never
+    write queue.json for an add or a cancel, so no other machine's write can lose theirs (2026-11-21: three adds
+    and a cancel vanished that way, each thread seeing the shared folder through its own mount)."""
+    ops = _inbox_ops()
+    if not ops:
+        return 0
+    with qlock():
+        s = load(raw=True)
+        toks = {r.get("token") for r in s["requests"] if r.get("token")}
+        for f, d in ops:
+            if d.get("op") == "add":
+                r = dict(d["request"])
+                if r.get("token") not in toks:
+                    toks.add(r.get("token")); admit(s, r)
+            elif d.get("op") == "cancel":
+                for r in s["requests"]:
+                    if (d.get("token") and r.get("token") == d["token"]) or (not d.get("token") and r["id"] == d.get("id")):
+                        r["state"] = "cancelled"
+        save(s)
+        for f, d in ops:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+    return len(ops)
+
+
+def drop_in_inbox(op):
+    os.makedirs(INBOX, exist_ok=True)
+    name = f"{op['op']}-{op['created'].replace(':', '')}-{op.get('token') or uuid.uuid4().hex[:8]}.json"
+    tmp = os.path.join(INBOX, "." + name)
+    with open(tmp, "w") as f:
+        json.dump(op, f); f.flush(); os.fsync(f.fileno())
+    os.rename(tmp, os.path.join(INBOX, name))
 
 
 def merge_disk(s, disk):
@@ -396,7 +490,8 @@ def save(s):
     left the file cut short. A local copy is kept too. Under the lock, merged with what the file holds now."""
     orig = s
     base = s.get("_base")
-    s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]]}
+    s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]
+                           if not r.get("_inbox")]}
     os.makedirs(WORK, exist_ok=True)
     for _ in range(5):
         with qlock():
@@ -994,6 +1089,8 @@ def job_gb(job):
 
 def cmd_serve(a):
     """Run jobs in priority order until a request (or a sheet) finishes, then exit so the thread can deliver."""
+    global SERVING
+    SERVING = True      # (this process sees only what ingest() has taken into queue.json)
     os.makedirs(WORK, exist_ok=True)
     lock = os.path.join(WORK, "serve.pid")
     if os.path.exists(lock):
@@ -1008,6 +1105,7 @@ def cmd_serve(a):
     waits_seen = {}   # key -> what a job was held for (the batching stats)
     try:
         while True:
+            ingest()
             main, held, batches, jobs = plan(fetch=not running)
             s = load()
             fin = settle(s)
@@ -1270,7 +1368,6 @@ def is_extra(v):
     return RQ_VIEWS in w and not any(f in w for f in ("--turn", "--head", "--walk", "--run", "--cells"))
 
 
-@locked
 def cmd_add(a):
     s = load()
     outs = [o for o in a.outputs.split(",") if o]
@@ -1297,46 +1394,24 @@ def cmd_add(a):
                      "A check-quality request you can add yourself: add --quality check")
         unreviewed = True
     before_only_from_cache(a, outs)
-    r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
-         "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
-         "quality": a.quality}
-    for o in s["requests"]:   # coalescing: a newer request for the same piece replaces one still waiting
-        # (the same thread and branch following the branch tip, or the same branch asking for the same views and
-        #  cells at another commit, pinned or not: the stale one is dropped, never rendered)
-        if o["state"] in ("pending", "conflict") and o["branch"] == a.branch and o["outputs"] == outs and (
-                (o["thread"] == a.thread and not a.sha and not o.get("sha"))
-                or (sorted(o.get("views") or []) == sorted(r["views"]) and o.get("cells") == r["cells"]
-                    and o.get("quality") == r["quality"])):
-            o["state"] = f"superseded by {r['id']}"
-            event("coalesced", None, dropped=o["id"], by=r["id"], branch=a.branch)
+    tentative = max([s["next"]] + [o["id"] + 1 for o in s["requests"]])
+    r = {"id": tentative, "token": uuid.uuid4().hex[:12], "thread": a.thread, "branch": a.branch, "sha": a.sha,
+         "outputs": outs, "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending",
+         "created": now(), "quality": a.quality}
     r["repeat"] = repeat_count(s, a.thread, r["views"], r["quality"], time.time()) if r["views"] else 0
-    figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
-    for i in s.get("intents", []):    # the request an intent announced has come
-        if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
-            i["state"] = f"sent as #{r['id']}"
-    s["next"] += 1; s["requests"].append(r); save(s)
-    # The shared folder is a network mount and each thread has its own view of it, so a lock file does not reach
-    # across machines and a write can lose to another machine's (2026-11-21: #314 was added twice and one add
-    # vanished). Look again after the mount has caught up; if this request is not in the file, add it again.
-    for _ in range(4):
-        time.sleep(3)
-        try:
-            with open(STATE) as f:
-                disk = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if any(o["id"] == r["id"] and o.get("created") == r["created"] and o.get("thread") == a.thread
-               and o.get("branch") == a.branch for o in disk.get("requests", [])):
-            break
-        event("readded", None, thread=a.thread, request=r["id"])
-        s = load()
-        r["id"] = max(s["next"], max([o["id"] for o in s["requests"]] + [0]) + 1)
-        s["next"] = r["id"] + 1; s["requests"].append(dict(r)); save(s)
-        print(f"rq note: the request was lost to a write from another thread; added again as #{r['id']}", flush=True)
+    for w in hog_warnings(s, thread=a.thread):     # (the requesting thread hears it in the add's answer)
+        print(f"rq warning: {w['text']}", flush=True)
+        event("hog", None, thread=a.thread, rule=w["rule"], value=w["value"], request=r["id"])
+    # One new file in the inbox, never a write to queue.json: the serving machine takes it in within seconds and
+    # numbers it. (Each thread sees the shared folder through its own mount, and a write to queue.json from here lost
+    # to another machine's three times on 2026-11-21.)
+    drop_in_inbox({"op": "add", "created": r["created"], "token": r["token"], "request": r})
     if unreviewed:
         event("unreviewed", None, thread=a.thread, request=r["id"])
         print("rq note: the queue was idle, so this final request skipped the reviewer", flush=True)
     print(json.dumps(r, indent=2))
+    print(f"rq note: queued (token {r['token']}). The renderer takes it into the queue within seconds and numbers it; the "
+          f"id above can change, so read the real id by ping. To cancel before then: cancel {r['id']} --token {r['token']}", flush=True)
     if r["repeat"]:
         steps = min(r["repeat"], PEN["max"])
         print(f"rq note: this is repeat {r['repeat']} of the same views: it runs {steps} step{'s' * (steps > 1)} behind other "
@@ -1788,13 +1863,8 @@ def cmd_export(a):
     print(a.out, len(rows), "rows")
 
 
-@locked
 def cmd_cancel(a):
-    s = load()
-    for r in s["requests"]:
-        if r["id"] == a.id:
-            r["state"] = "cancelled"
-    save(s)
+    drop_in_inbox({"op": "cancel", "created": now(), "id": a.id, "token": a.token})
 
 
 def cmd_resolve(a):
@@ -1851,7 +1921,9 @@ def main():
         sub.add_parser(n)
     for n in ("resolve", "resolved"):
         sub.add_parser(n).add_argument("branch")
-    sub.add_parser("cancel").add_argument("id", type=int)
+    cp = sub.add_parser("cancel")
+    cp.add_argument("id", type=int)
+    cp.add_argument("--token", default=None, help="the token add printed, when the id may have changed")
     sub.add_parser("export").add_argument("out")
     sub.add_parser("hogs")
     q = sub.add_parser("ping", help="what the queue is doing now, and where your own requests stand (read-only)")

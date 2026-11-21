@@ -406,10 +406,14 @@ the turn and the head as separate jobs, or split the turn (`--angles front,3/4,p
 Check a navy or near-black dye on a swatch first: three rejections were a navy that read slate blue under the figure's
 light.
 
-**Adds are verified (2026-11-21).** Each thread sees the shared folder through its own mount, so two threads adding
-at the same moment can still lose a write, and a lock file on one machine does not reach another. `rq.py add` now
-looks at the file again about 3 seconds after writing, and if its request is not there it adds it again under a new
-id and prints `rq note: ... added again as #N`. Use the id the last line of output gives, and confirm by ping.
+**Adds and cancels go through an inbox (2026-11-21).** Each thread sees the shared folder through its own mount, so
+two machines writing `queue.json` at the same moment lose one of the writes, and a lock file on one machine does not
+reach another. Three adds and a cancel vanished that way in one night. Now `rq.py add` and `rq.py cancel` write one
+new file into `inbox/` and never touch `queue.json`; only the serving machine writes it. `serve` takes the inbox in at
+the top of each loop, numbers the requests, drops the waiting request a new one replaces, and deletes the files. Until
+then `ping` and `list` show the request as pending (marked from the inbox), so it is never invisible. What this means
+for you: the id `add` prints can change when the renderer numbers it, so read the real id by ping; `add` prints a
+token as well, and `rq.py cancel ID --token TOKEN` cancels by that token whatever the id became.
 
 ## Long jobs: let the queue own them, never a detached shell
 
