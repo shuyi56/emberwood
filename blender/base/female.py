@@ -4661,8 +4661,10 @@ def pose_sheet(col, walking):
             fwd = -1.0 if s > 0 else 4.6
             out = 0.0 if s > 0 else 0.6
             toe = 0.0 if s > 0 else 0.35
-            th, shn = leg_ik(hip_z, fwd, ANKLE_Z)
-            kb, pitch = th - shn, 0.0
+            # (on a heel, HEEL_CONTACT: the foot stands pitched onto it, the ankle as high as the tread sets it)
+            pitch = -HEEL_PITCH if HEEL_CONTACT is not None else 0.0
+            th, shn = leg_ik(hip_z, fwd, heel_ankle_z(pitch) if HEEL_CONTACT is not None else ANKLE_Z)
+            kb = th - shn
         hip.location = (-s * (LEG_X + out), 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
