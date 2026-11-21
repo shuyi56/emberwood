@@ -48,6 +48,21 @@ def parts_roll(st, runs, K):
     return part
 
 
+PARTS_CURLY = ['cap and gather', 'core', 'gripped wraps and curls', '', '', '', '', 'loose curls and ends', 'held by a pin or the tie']
+
+
+def parts_curly(st, runs, K):
+    """A curly bun's parts: the core, the wraps the hold grips, and the loose curls and ends the test measures apart (their
+    order is not the structural bun's, so its band-by-band split does not apply)."""
+    part = np.zeros(len(runs), int)
+    for k in K['body']:
+        part[k] = 2
+    part[K['core']] = 1
+    for k in K['free']:
+        part[k] = 7
+    return part
+
+
 def parts_of(st, runs, X0, K):
     """Each strand's design part: the knot's bands in the order the creator builds them (core, then 4 bands, each a
     tube or rope with its clump), the escaping end and the short ends; everything else is cap and gather."""
@@ -85,15 +100,15 @@ def main():
     states = {'drawn': X0, 'rest': Xs}
     for p in opt('--poses', 'run,spin,twist').split(','):
         _, Fp, _ = R.check_pose(p, st['strands'], W, (X0, Xs, runs, roots, thick), walk, cache)
-        rows = [B.knot_metrics(X0, Y, K, W, thick) for Y in Fp['frames']]
+        rows = [B.knot_metrics(Xs if B.BUN['ref'] == 'rest' else X0, Y, K, W, thick) for Y in Fp['frames']]
         states[p] = Fp['frames'][int(np.argmax([r['sag'] + r['deform'] for r in rows]))]
     hv, hf = head_mesh(W)
     held = np.zeros(len(X0), bool)
     if len(B._STATE.get('hold', [])):
         held[B._STATE['hold']] = True
     np.savez_compressed(out, head_v=hv, head_f=hf, counts=np.array([len(r) for r in runs], np.int32),
-                        thick=np.asarray(thick, np.float16), part=(parts_roll(st, runs, K) if B.BUN['roll'] else parts_of(st, runs, X0, K)).astype(np.int8),
-                        held=held, names=np.array(list(states)), parts=np.array(PARTS_ROLL if B.BUN['roll'] else PARTS),
+                        thick=np.asarray(thick, np.float16), part=(parts_roll(st, runs, K) if B.BUN['roll'] else parts_curly(st, runs, K) if B.BUN['free_by'] == 'extent' else parts_of(st, runs, X0, K)).astype(np.int8),
+                        held=held, names=np.array(list(states)), parts=np.array(PARTS_ROLL if B.BUN['roll'] else PARTS_CURLY if B.BUN['free_by'] == 'extent' else PARTS),
                         tag=opt('--tag', ''), bun=json.dumps(B.BUN),
                         **{'s_' + k: v.astype(np.float16) for k, v in states.items()})
     print(out, os.path.getsize(out), 'bytes;', len(hv), 'head points,', len(runs), 'strands, states', list(states))

@@ -168,7 +168,7 @@ R.POSES = R.POSES + ('twist',)
 HELD = {'tie': True, 'core': True, 'tucks': True, 'pins': 4, 'pin_catch': 0.035, 'net': 2e-4, 'shape': 0.3, 'damp': 0.2}
 BUN = {'tie': False, 'core': False, 'core_scale': 0.8, 'pins': 0, 'pin_lat': 0.25, 'pin_catch': 0.02,
        'pin_phase': 0.0, 'net': None, 'sticks': 0, 'tucks': False, 'shape': 0.0, 'damp': 0.0,
-       'roll': False, 'pin_seam': [-0.88, 0.48, 0.0], 'pin_span': [0.12, 0.88], 'pin_cross': False}
+       'roll': False, 'pin_seam': [-0.88, 0.48, 0.0], 'pin_span': [0.12, 0.88], 'pin_cross': False, 'slack': 0.0, 'ref': 'drawn', 'free_by': 'length', 'tuck_r': 1.4}
 # The French twist (round 0, 2026-11-21): the same hold on a roll instead of a ball. `roll` swaps the core's ellipsoid
 # for a capsule along the core strand's own centre line (the roll follows the curve of the back of the head, which a
 # straight ellipsoid cannot), the gather ends and tucks are tested against it, and the pins are driven in along the
@@ -184,7 +184,7 @@ HELD_ROLL = dict(HELD, roll=True, pins=5, pin_catch=0.035, core_scale=1.0, shape
 
 def configure(**kw):
     BUN.update(kw)
-    R.SOLVE_VERSION = '7+bun:' + json.dumps(BUN, sort_keys=True) + (f'+smooth{RUN_G}' if SMOOTH else '')
+    R.SOLVE_VERSION = '7+bun:' + json.dumps({k: v for k, v in BUN.items() if k != 'ref'}, sort_keys=True) + (f'+smooth{RUN_G}' if SMOOTH else '')
 
 
 _build = R.build_solver
@@ -255,7 +255,7 @@ def build_solver(strands, W):
             e = X[runs[k][-1]]
             if len(starts) and np.linalg.norm(starts - e, axis=1).min() < 0.03:
                 continue                       # (its end carries on as an escaping end)
-            if _near_core(e[None], K, 1.4, 0.0)[0]:
+            if _near_core(e[None], K, BUN['tuck_r'], 0.0)[0]:
                 hold.append(runs[k][-2:])
     if BUN['pins']:
         body = np.concatenate([runs[k] for k in K['body']])
@@ -395,7 +395,7 @@ def knot_of(strands, X0, runs):
         # on the cap, and the combed sections ending at its top, are not part of it: the roll's strands run its length)
         for k, r in enumerate(runs):
             d, rr, _ = path_near(X0[r], path, pr)
-            if (d < 1.15 * rr + 0.012).mean() > 0.85 and (lens[k] > 0.5 or k == core):
+            if (d < 1.15 * rr + 0.012 + BUN['slack']).mean() > 0.85 and (lens[k] > 0.5 or k == core):
                 knot.append(k)
     else:
         for k, r in enumerate(runs):
@@ -405,8 +405,20 @@ def knot_of(strands, X0, runs):
     idx = np.concatenate([runs[k] for k in knot])
     # (its body: the wraps and the core; the short pieces, the escaping end and the flyaways, are left free to move
     # as they are meant to and measured apart)
+    if BUN['free_by'] == 'extent':
+        # (a curl's path is several times as long as the strand it winds along: a curly style tells a free end or flyaway
+        # from a wrap by how far it reaches from its root, not by the length of its coil)
+        lens = [float(np.linalg.norm(X0[r] - X0[r][0], axis=1).max()) * (1.25 / 0.8) if float(np.mean(strands[k]['w'])) >= 0.006 else 0.0
+                for k, r in enumerate(runs)]      # (reach 0.2 HH or more is a wrap (1.25/0.8 maps it past 0.25); the thin flyaways are free whatever their reach)
     bodyk = [k for k in knot if lens[k] > 0.25 or k == core]
     free = [k for k in knot if lens[k] <= 0.25 and k != core]
+    if BUN['free_by'] == 'extent' and len(_STATE.get('hold', [])):
+        # (a loop or curl the hold grips at only its end is a loose piece, measured with the free ends: the hold
+        # is not what keeps it in place, so it is not the hold's to pass)
+        hs = set(int(q) for q in _STATE['hold'])
+        loose = [k for k in bodyk if k != core and sum(int(q) in hs for q in runs[k]) < 0.05 * len(runs[k])]      # (gripped at under 5 percent of its points: its two tucked end points only)
+        bodyk = [k for k in bodyk if k not in loose]
+        free = free + loose
     half = 0.5 * float(np.linalg.norm(P[-1] - P[0]))
     Kd = {'body': bodyk, 'free': free, 'body_idx': np.concatenate([runs[k] for k in bodyk]),'centre': c, 'axis': n, 'core': core, 'core_r': float(strands[core]['w'].max()), 'core_half': half,
           'strands': knot, 'idx': idx, 'runs': runs}
@@ -582,7 +594,8 @@ def run(src, style='bun', out=None, poses=('walk', 'run', 'turn', 'startstop', '
     W._head_pts = world['head']
     for p in poses:
         _, Fp, _ = R.check_pose(p, st['strands'], W, (X0, Xs, runs, roots, thick), walk, cache)
-        rows = [knot_metrics(X0, Y, K, W, thick) for Y in Fp['frames']]
+        ref = Xs if BUN['ref'] == 'rest' else X0      # (curls: the drawn coil is not the solver's rest, so a curly style measures its motion from its settled rest, and reports the settle apart)
+        rows = [knot_metrics(ref, Y, K, W, thick) for Y in Fp['frames']]
         states.append((f'{p}, worst frame', Fp['frames'][int(np.argmax([r['sag'] + r['deform'] for r in rows]))]))
         res[p] = {'sag_max': max(r['sag'] for r in rows), 'drop_max': max(r['drop'] for r in rows),
                   'swivel_max': max(r['swivel'] for r in rows), 'deform_p99': max(r['deform'] for r in rows),
