@@ -17,7 +17,7 @@ import sys
 import bpy
 import numpy as np
 
-argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]      # (blender -b --python ... -- ARGS, or run by rq_run.py with plain ARGS)
 
 
 def opt(k, d=None):
