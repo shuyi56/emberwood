@@ -1,0 +1,109 @@
+{
+ "body": {
+  "height": 25.712,
+  "shoulder_width": 15.432,
+  "hip_width": 17.109,
+  "hip_depth": 4.699
+ },
+ "garments": {
+  "Boot eyelets.L": {
+   "verts": 5168,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.73,
+   "squash_p1": 0.929,
+   "over_25pct": 270,
+   "under_25pct": 30
+  },
+  "Boot eyelets.R": {
+   "verts": 5168,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.15,
+   "squash_p1": 0.813,
+   "over_25pct": 41,
+   "under_25pct": 75
+  },
+  "Boot lace.L": {
+   "verts": 5814,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.29,
+   "squash_p1": 0.937,
+   "over_25pct": 144,
+   "under_25pct": 18
+  },
+  "Boot lace.R": {
+   "verts": 5814,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.278,
+   "squash_p1": 0.956,
+   "over_25pct": 135,
+   "under_25pct": 15
+  },
+  "Boot sole.L": {
+   "verts": 722,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Boot sole.R": {
+   "verts": 722,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.0,
+   "squash_p1": 1.0,
+   "over_25pct": 0,
+   "under_25pct": 0
+  },
+  "Boot stitches.L": {
+   "verts": 12090,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 2.084,
+   "squash_p1": 0.871,
+   "over_25pct": 618,
+   "under_25pct": 167
+  },
+  "Boot stitches.R": {
+   "verts": 12064,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0,
+   "stretch_p99": 1.094,
+   "squash_p1": 0.908,
+   "over_25pct": 170,
+   "under_25pct": 96
+  },
+  "Boot.L": {
+   "verts": 38068,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0
+  },
+  "Boot.R": {
+   "verts": 38068,
+   "inside": 0,
+   "inside_pct": 0.0,
+   "max_depth": 0.0
+  },
+  "Hose": {
+   "verts": 164376,
+   "inside": 1198,
+   "inside_pct": 0.73,
+   "max_depth": 0.497
+  }
+ },
+ "seconds": 0.81
+}
