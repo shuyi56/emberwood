@@ -278,6 +278,13 @@ def _compact(D, fs):
     return D[used], [[int(km[i]) for i in f] for f in fs]
 
 
+def _nbr_sum(X, E):
+    """For each point the sum of the points joined to it by the edges E (a fast scatter-add: bincount, not add.at)."""
+    n = len(X)
+    return np.stack([np.bincount(E[:, 0], weights=X[E[:, 1], k], minlength=n)
+                     + np.bincount(E[:, 1], weights=X[E[:, 0], k], minlength=n) for k in range(3)], axis=1)
+
+
 def _largest(D, fs, name='tongue'):
     """The faces fs joined by shared points into islands: keep the biggest one only (a piece of leather is one piece;
     a fragment cut off from it by the fields' cross-over is not part of it) and compact it. Returns (points, faces)."""
@@ -556,10 +563,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # new foot, about 1 cm), and the bridging runs on until the toe box is smooth)
     bridge = r['bridge'] + TOE_BRIDGE * toe
     for _ in range(360):
-        acc = np.zeros_like(X)
-        np.add.at(acc, E[:, 0], X[E[:, 1]])
-        np.add.at(acc, E[:, 1], X[E[:, 0]])
-        lap = acc / np.maximum(deg, 1)[:, None] - X
+        lap = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, bridge - lift)
         lift += out
         X += Nr * out[:, None]
@@ -568,10 +572,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # box does not shrink), weighted by the toe region's mask; EXPERIMENTAL: the passes' count is judged by eye
     for _ in range(TOE_SMOOTH):
         for lam in (0.5, -0.53):
-            acc = np.zeros_like(X)
-            np.add.at(acc, E[:, 0], X[E[:, 1]])
-            np.add.at(acc, E[:, 1], X[E[:, 0]])
-            X += (lam * toe)[:, None] * (acc / np.maximum(deg, 1)[:, None] - X)
+            X += (lam * toe)[:, None] * (_nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X)
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
     pushed = 0
