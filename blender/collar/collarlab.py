@@ -125,7 +125,115 @@ def _solve(job):
     return tailor.tailor_collar(E, M, V, F, BV, BF, gor, Pp, settings=dict(st), log=lambda *a: None)
 
 
+def smooth_edges_pass(D, rounds=60, band=0.6, corner_deg=40.0, inner_rounds=30, front_y=None, roll=True, roll_rounds=80, roll_band=0.5, log=print):
+    """The smoothing pass (John, 2026-11-21: "create a smoothing pass that gets rid of all creases at the edges"): the
+    collar's free edges (outer edge and ends; not the neck seam, which is sewn and hidden) and the cloth within `band` of
+    them, faired after the solve.
+
+      the edge    each free edge is a curve: it is faired along itself with Taubin's two-step smoothing (Taubin 1995:
+                  a shrinking step then a slightly larger swelling step, so wrinkles go and the curve keeps its
+                  length and place), its corners held (the collar's points and the notch: where the cut pattern
+                  turns more than corner_deg), so the cut shape stays.
+      the band    the cloth within `band` of a free edge is smoothed the same way over the surface, fading to nothing
+                  at the band's inner side, so the edge's wrinkles do not stay as dents behind it.
+
+      the seam    at the fronts the seam's edge shows (the gorge, on the lapel): with front_y set, seam points in front of
+                  that y are faired as a free edge too. The seam round the neck stays where it is sewn.
+      the roll    the fold's own line is a curve too, and its waves show as a wavy top edge: each half's roll is faired
+                  along itself the same way, and the cloth within roll_band of it is carried with it (each point by its
+                  nearest roll point's move, fading out), so the fold keeps its section and only loses its waves.
+
+    Returns the new positions; logs how far points moved and the edge's roughness before and after (the mean turn
+    between successive edge segments, degrees)."""
+    from scipy.spatial import cKDTree
+    pos, T, UV, kind = np.asarray(D['pos'], float).copy(), np.asarray(D['T']), np.asarray(D['UV']), np.asarray(D['kind'])
+    E = np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1)
+    E, c = np.unique(E, axis=0, return_counts=True)
+    Bd = E[c == 1]
+    free_pt = np.isin(kind, ('o', 'e'))
+    if front_y is not None:
+        free_pt |= (kind == 's') & (pos[:, 1] < front_y)
+    Bd = Bd[free_pt[Bd].all(1)]
+    nb = {}
+    for a_, b_ in Bd:
+        nb.setdefault(a_, []).append(b_)
+        nb.setdefault(b_, []).append(a_)
+    idx = np.array([i for i, v in nb.items() if len(v) == 2])
+    J = np.array([nb[i] for i in idx])
+    # corners: where the pattern's own outline turns
+    v1, v2 = UV[idx] - UV[J[:, 0]], UV[J[:, 1]] - UV[idx]
+    turn = np.degrees(np.abs(np.arctan2(v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0], (v1 * v2).sum(1))))
+    mov = turn < corner_deg
+    idx, J = idx[mov], J[mov]
+
+    def rough(P):
+        a1, a2 = P[idx] - P[J[:, 0]], P[J[:, 1]] - P[idx]
+        cs = (a1 * a2).sum(1) / np.maximum(np.linalg.norm(a1, axis=1) * np.linalg.norm(a2, axis=1), 1e-12)
+        return float(np.degrees(np.arccos(np.clip(cs, -1, 1))).mean())
+    r0 = rough(pos)
+    lam, mu = 0.5, -0.53
+    for _ in range(rounds):
+        for f_ in (lam, mu):
+            pos[idx] += f_ * (0.5 * (pos[J[:, 0]] + pos[J[:, 1]]) - pos[idx])
+    # the band behind the edge
+    edge_pts = np.unique(Bd)
+    d = cKDTree(UV[edge_pts]).query(UV)[0]
+    wgt = np.clip(1 - d / band, 0, 1)
+    wgt = wgt * wgt * (3 - 2 * wgt)
+    wgt[np.isin(np.arange(len(UV)), edge_pts)] = 0          # (the edge itself is set)
+    wgt[(kind == 's') & ~free_pt] = 0
+    nbr = [[] for _ in range(len(UV))]
+    for a_, b_ in E:
+        nbr[a_].append(b_)
+        nbr[b_].append(a_)
+    act = np.nonzero(wgt > 0)[0]
+    cnt = np.array([len(nbr[i]) for i in act])
+    ii = np.repeat(act, cnt)
+    jj = np.concatenate([nbr[i] for i in act])
+    slot = np.repeat(np.arange(len(act)), cnt)
+    for _ in range(inner_rounds):
+        for f_ in (lam, mu):
+            acc = np.zeros((len(act), 3))
+            np.add.at(acc, slot, pos[jj])
+            pos[act] += (f_ * wgt[act])[:, None] * (acc / cnt[:, None] - pos[act])
+    if roll:
+        before = pos.copy()
+        rmov = np.zeros(len(pos), bool)
+        for sx in (1, -1):
+            rr = np.nonzero((kind == 'r') & (pos[:, 0] * sx > 0))[0]
+            if len(rr) < 5:
+                continue
+            # (in order along the roll: by the angle round the neck, then down the front)
+            rr = rr[np.argsort(np.abs(UV[rr, 0]))]
+            ends = [0, len(rr) - 1]
+            Pr = pos[rr].copy()
+            for _ in range(roll_rounds):
+                for f_ in (lam, mu):
+                    Pr[1:-1] += f_ * (0.5 * (Pr[:-2] + Pr[2:]) - Pr[1:-1])
+            pos[rr] = Pr
+            rmov[rr] = True
+        ri = np.nonzero(rmov)[0]
+        if len(ri):
+            dr, jr = cKDTree(UV[ri]).query(UV)
+            wr = np.clip(1 - dr / roll_band, 0, 1)
+            wr = wr * wr * (3 - 2 * wr)
+            wr[rmov] = 0
+            wr[(kind == 's') & ~free_pt] = 0
+            disp = (pos - before)[ri][jr]
+            pos += wr[:, None] * disp
+        log('collarlab: roll faired: %d points, moved up to %.3f' % (len(ri), np.linalg.norm(pos - before, axis=1).max()))
+    mv = np.linalg.norm(pos - np.asarray(D['pos']), axis=1)
+    log('collarlab: edges smoothed: %d edge points faired (%d corners held), %d points in the band; moved up to %.3f (median of moved %.3f); edge roughness %.1f -> %.1f deg'
+        % (len(idx), int((~mov).sum()), len(act), mv.max(), np.median(mv[mv > 1e-6]) if (mv > 1e-6).any() else 0.0, r0, rough(pos)))
+    return pos
+
+
 def main():
+    if sys.argv[1] == 'smooth':                       # collarlab.py smooth IN.pkl OUT.pkl ['{"rounds": 60, "band": 0.6}']
+        D = pickle.load(open(sys.argv[2], 'rb'))
+        D['pos'] = smooth_edges_pass(D, **(json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}))
+        pickle.dump(D, open(sys.argv[3], 'wb'))
+        return
     f = pickle.load(open(sys.argv[1], 'rb'))
     st = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
     ext = float(st.pop('gorge_ext', 0.0))
