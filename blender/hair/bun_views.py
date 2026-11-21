@@ -1,6 +1,6 @@
 """Clay turnaround of a bun hold solve (tools/render-queue/rq_bun.py, packed by rq_bun_pack.py): the head's surface
 and the hair's strands as drawn, settled at rest and at the worst frame of each motion, orthographic, from the front,
-3/4, profile, back 3/4 and back, plus a close-up of the knot from behind and above. Workbench (flat clay or the
+3/4, profile, back 3/4 and back, plus a close-up of the knot from behind and above. Clay (flat clay or the
 colour-coded design pass), so a view costs a second or two.
 
     blender -b --python bun_views.py -- --data blender/hair/data/bun-after.npz --out DIR
@@ -40,23 +40,35 @@ os.makedirs(OUT, exist_ok=True)
 for o in list(bpy.data.objects):
     bpy.data.objects.remove(o, do_unlink=True)
 scene = bpy.context.scene
-scene.render.engine = 'BLENDER_WORKBENCH'
+scene.render.engine = 'CYCLES'       # (the render machine has no GPU or GL: Workbench cannot start there)
+scene.cycles.samples = int(opt('--samples', '8'))
+scene.cycles.use_denoising = True
+scene.cycles.max_bounces = 3
 scene.render.resolution_x = scene.render.resolution_y = SIZE
 scene.render.film_transparent = False
-sh = scene.display.shading
-sh.light = 'STUDIO'
-sh.show_shadows = True
-sh.show_cavity = True
-sh.cavity_type = 'WORLD'
-scene.display.shadow_shift = 0.1
 scene.world = scene.world or bpy.data.worlds.new('w')
-sh.background_type = 'VIEWPORT'
-sh.background_color = (0.96, 0.95, 0.93)
+scene.world.use_nodes = True
+scene.world.node_tree.nodes['Background'].inputs[0].default_value = (0.92, 0.91, 0.89, 1.0)
+scene.world.node_tree.nodes['Background'].inputs[1].default_value = 0.55
+scene.view_settings.view_transform = 'Standard'
+for nm, rot, en in (('key', (math.radians(50), 0, math.radians(-35)), 3.5), ('rim', (math.radians(60), 0, math.radians(150)), 2.0)):
+    L = bpy.data.lights.new(nm, 'SUN')
+    L.energy = en
+    L.angle = math.radians(15)
+    ob = bpy.data.objects.new(nm, L)
+    ob.rotation_euler = rot
+    scene.collection.objects.link(ob)
 
 
 def material(name, rgb):
-    m = bpy.data.materials.get(name) or bpy.data.materials.new(name)
-    m.diffuse_color = (*rgb, 1.0)
+    m = bpy.data.materials.get(name)
+    if m:
+        return m
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Base Color'].default_value = (*rgb, 1.0)
+    b.inputs['Roughness'].default_value = 0.85
     return m
 
 
@@ -148,7 +160,6 @@ for DATA in DATAS:
           objs = strands(X, look)
           for ang in ANGLES:
               cam = camera(ang)
-              sh.color_type = 'MATERIAL'
               scene.render.filepath = os.path.join(OUT, f"{TAG}-{st}-{ang.replace('/', '')}-{look}.png")
               bpy.ops.render.render(write_still=True)
               bpy.data.objects.remove(cam, do_unlink=True)
