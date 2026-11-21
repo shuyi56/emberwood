@@ -31,7 +31,16 @@ M = {k[7:]: b[k] for k in b.keys() if k.startswith('bodice_')}
 w, yc, lap = M['w'], M['yc'], M['lap']
 sol = [m for m in b.modifiers if m.type == 'SOLIDIFY'][0]
 th = sol.thickness
-foot = opt.get('foot', M['z_bust'] + 0.15)                    # the break: at the bust line (John: "you need a deeper fold"; it was 2 in above)
+# the break: at the bust line (John: "you need a deeper fold"; it was 2 in above). The top button goes right at the
+# fold's foot, in the crook of the V (John: "it should be right on the fold line and curved").
+foot = opt.get('foot', M['z_bust'] + 0.15)
+# the fold line is no straight chord: it falls steeply from the neck and sweeps in to the button, a rounded V (bow < 0:
+# away from the V, fullest two thirds of the way down). Straight, the two folds met 4 cm above the top button.
+bow = opt.get('bow', -0.5)
+def bowdev(t):
+    t = np.clip(t, 0, 1); return bow * 6.75 * t * t * (1 - t)
+def ss01(a_, b_, x_):
+    t_ = np.clip((x_ - a_) / (b_ - a_), 0, 1); return t_ * t_ * (3 - 2 * t_)
 neck_x = opt.get('neck_x', 2.2)
 t0 = opt.get('t0', 0.03)
 r0 = opt.get('roll_radius', 0.24)
@@ -104,6 +113,17 @@ def caster(skip, layers=None):
             if h[0] is not None: o[k] = h[0][1]
         return o
     return cast
+# the line curved: the cloth by the line is drawn along its own surface so that the cut line becomes the curve
+band_w = opt.get('bow_band', 1.0)
+for s_ in sides:
+    own = caster(np.zeros(len(W), bool), (s_['layer'],))
+    sel = (L_ == s_['layer']) & (W[:, 1] < yc) & ~s_['fold'] & (s_['sd'] <= 1e-6) & (s_['sd'] > -band_w) & (s_['tl'] > -0.1) & (s_['tl'] < 1.1)
+    jj = np.nonzero(sel)[0]
+    dv = bowdev(s_['tl'][jj]) * (1 - ss01(0, band_w, -s_['sd'][jj]))
+    nq = q[jj] + dv[:, None] * s_['n'][None]; ny = own(nq)
+    s_['warp'] = (jj, nq, np.where(np.isfinite(ny), ny, W[jj, 1]))
+for s_ in sides:
+    jj, nq, ny = s_['warp']; W[jj, 0], W[jj, 2], W[jj, 1] = nq[:, 0], nq[:, 1], ny
 out_side = opt.get('thick_out', 1.0) * th              # (how much of the cloth's thickness stands outside the mesh's own surface)
 for s in (und, top):                                  # the under front first: the upper front's lapel then lies on what is there
     N, u, n, ln, sd, tl = s['N'], s['u'], s['n'], s['ln'], s['sd'], s['tl']
@@ -131,6 +151,7 @@ for s in (und, top):                                  # the under front first: t
     hh = np.where(rest > 0, np.maximum(2 * rr - Rc * (1 - np.cos(np.minimum(ph, phm))), np.minimum(lie, 2 * rr)), hh)
     P = q[ii]
     X = P - d[:, None] * n[None] + ex[:, None] * n[None]
+    X = X + (bowdev(t) * np.exp(-((ex - d) / opt.get('bow_over', 1.5)) ** 2))[:, None] * n[None]      # (the lapel goes with its curved line)
     g_ = np.ones(len(ii))
     gy = ground(X)
     yc_t = np.interp(t, tl[ci][np.argsort(tl[ci])], W[ci, 1][np.argsort(tl[ci])]) if len(ci) > 1 else np.nanmedian(gy)
@@ -161,7 +182,12 @@ b.data.update()
 # 3. the buttons, last: down the front below the break
 if opt.get('buttons', True):
     rb = M['button'] * w; step = opt.get('button_step', M['button_step']) * w
-    z1 = foot - opt.get('break_over', 0.19) - rb; z0 = M['z_hem_front'] + 0.55 * w
+    # the top button right at the fold's foot (John: "it should be right on the fold line"): just under where the two
+    # curved folds meet at the middle
+    tt = np.linspace(0, 1, 400); cx = top['N'][0] + tt * top['ln'] * top['u'][0] + bowdev(tt) * top['n'][0]
+    cz = top['N'][1] + tt * top['ln'] * top['u'][1] + bowdev(tt) * top['n'][1]
+    zcross = float(np.interp(0.0, cx * np.sign(cx[-1] - cx[0]), cz))
+    z1 = zcross - rb - opt.get('break_over', 0.03); z0 = M['z_hem_front'] + 0.55 * w
     nbt = max(2, int(round((z1 - z0) / step)) + 1)
     Wb = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
     fb = BVHTree.FromPolygons([Vector(p) for p in Wb], [tuple(p.vertices) for p in b.data.polygons])
@@ -180,5 +206,5 @@ if opt.get('buttons', True):
     mat = bpy.data.materials.get('bodice button')
     if mat: me.materials.append(mat)
     if b.parent: o.parent = b.parent; o.matrix_parent_inverse = b.parent.matrix_world.inverted()
-    print('foldfront: buttoned last: %d buttons from z %.2f (%.1f cm under the break) down to z %.2f, %.1f cm apart' % (nbt, z1, 2.62 * (foot - z1), z0, 2.62 * (z1 - z0) / (nbt - 1)))
+    print('foldfront: buttoned last: %d buttons from z %.2f (the folds meet at the middle at z %.2f, the break is at %.2f) down to z %.2f, %.1f cm apart' % (nbt, z1, zcross, foot, z0, 2.62 * (z1 - z0) / (nbt - 1)))
 bpy.ops.wm.save_as_mainfile(filepath=out)
