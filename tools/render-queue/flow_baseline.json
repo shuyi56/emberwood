@@ -1,0 +1,1460 @@
+{
+ "_doc": "The approved band for rq_flow.py, per pose: each limit is the worst value among the garments John approved (listed under approved) in that pose, with a margin (rq_flow.calibrate). limits is the rest pose. Re-run rq_flow.py --calibrate on new approved flow-poses.json files to widen or tighten it.",
+ "from": [
+  "views-0a8c28aac239/flow-poses.json",
+  "views-05159b056b65/flow-poses.json",
+  "views-0e767d28ffaa/flow-poses.json"
+ ],
+ "limits": {
+  "stretch_p99": 1.3987,
+  "squash_p1": 0.6887,
+  "shear_p99": 66.15,
+  "strain_p99": 0.5119,
+  "jag_p99": 0.1451,
+  "roughness": 0.5162,
+  "peaks": 38.0,
+  "peak_max": 1.5846,
+  "seam_mismatch_pct": 2.375,
+  "fold_radius_p1": 0.5792
+ },
+ "poses": {
+  "arms-fwd": {
+   "stretch_p99": 3.3788,
+   "squash_p1": 0.2525,
+   "shear_p99": 109.6375,
+   "strain_p99": 4.6481,
+   "jag_p99": 0.8334,
+   "roughness": 0.455,
+   "peaks": 66.0,
+   "peak_max": 1.658,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.024
+  },
+  "arms-up": {
+   "stretch_p99": 2.97,
+   "squash_p1": 0.5588,
+   "shear_p99": 107.95,
+   "strain_p99": 3.528,
+   "jag_p99": 0.8334,
+   "roughness": 0.4612,
+   "peaks": 75.0,
+   "peak_max": 1.6573,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.0344
+  },
+  "crouch": {
+   "stretch_p99": 3.8713,
+   "squash_p1": 0.19,
+   "shear_p99": 107.4875,
+   "strain_p99": 6.1795,
+   "jag_p99": 0.8334,
+   "roughness": 0.44,
+   "peaks": 84.0,
+   "peak_max": 1.6626,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.0776
+  },
+  "elbows": {
+   "stretch_p99": 2.1575,
+   "squash_p1": 0.0363,
+   "shear_p99": 104.6625,
+   "strain_p99": 1.7016,
+   "jag_p99": 0.8334,
+   "roughness": 0.3862,
+   "peaks": 69.0,
+   "peak_max": 1.664,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.1104
+  },
+  "look-down": {
+   "stretch_p99": 1.3987,
+   "squash_p1": 0.5025,
+   "shear_p99": 76.575,
+   "strain_p99": 0.5119,
+   "jag_p99": 0.1451,
+   "roughness": 0.48,
+   "peaks": 43.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.5224
+  },
+  "look-up": {
+   "stretch_p99": 1.3987,
+   "squash_p1": 0.5288,
+   "shear_p99": 86.45,
+   "strain_p99": 0.5119,
+   "jag_p99": 0.1451,
+   "roughness": 0.4625,
+   "peaks": 45.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.532
+  },
+  "nod": {
+   "stretch_p99": 1.3987,
+   "squash_p1": 0.43,
+   "shear_p99": 80.2875,
+   "strain_p99": 0.5119,
+   "jag_p99": 0.1451,
+   "roughness": 0.5137,
+   "peaks": 44.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.488
+  },
+  "rest": {
+   "stretch_p99": 1.3987,
+   "squash_p1": 0.6887,
+   "shear_p99": 66.15,
+   "strain_p99": 0.5119,
+   "jag_p99": 0.1451,
+   "roughness": 0.5162,
+   "peaks": 38.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.5792
+  },
+  "step": {
+   "stretch_p99": 3.18,
+   "squash_p1": 0.4325,
+   "shear_p99": 66.675,
+   "strain_p99": 4.0861,
+   "jag_p99": 0.1968,
+   "roughness": 0.5162,
+   "peaks": 38.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.3648
+  },
+  "tilt": {
+   "stretch_p99": 1.3987,
+   "squash_p1": 0.6337,
+   "shear_p99": 72.625,
+   "strain_p99": 0.5119,
+   "jag_p99": 0.1451,
+   "roughness": 0.5075,
+   "peaks": 43.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.54
+  },
+  "turn": {
+   "stretch_p99": 1.3987,
+   "squash_p1": 0.0988,
+   "shear_p99": 98.8875,
+   "strain_p99": 0.5119,
+   "jag_p99": 0.1451,
+   "roughness": 0.4813,
+   "peaks": 45.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.548
+  },
+  "twist": {
+   "stretch_p99": 1.7662,
+   "squash_p1": 0.2475,
+   "shear_p99": 88.1875,
+   "strain_p99": 1.05,
+   "jag_p99": 0.8332,
+   "roughness": 0.455,
+   "peaks": 64.0,
+   "peak_max": 1.5846,
+   "seam_mismatch_pct": 2.375,
+   "fold_radius_p1": 0.2928
+  }
+ },
+ "outliers": {
+  "arms-fwd": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     39.859
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     793.8803
+    ]
+   ]
+  },
+  "arms-up": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     37.75
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     712.0131
+    ]
+   ]
+  },
+  "crouch": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     19.357
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     186.852
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.022
+    ]
+   ]
+  },
+  "elbows": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     13.073
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     84.9505
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.027
+    ]
+   ]
+  },
+  "look-down": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     3.227
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     4.7072
+    ]
+   ],
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6667
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.039
+    ]
+   ]
+  },
+  "look-up": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     3.998
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     7.4981
+    ]
+   ],
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6667
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.033
+    ]
+   ]
+  },
+  "nod": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     3.078
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     4.2385
+    ]
+   ],
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6838
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.034
+    ]
+   ]
+  },
+  "rest": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     2.744
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     3.2689
+    ]
+   ],
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6667
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.056
+    ]
+   ]
+  },
+  "step": {
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6667
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.056
+    ]
+   ]
+  },
+  "tilt": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     3.212
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     4.658
+    ]
+   ],
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6667
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.044
+    ]
+   ]
+  },
+  "turn": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     4.085
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     7.8468
+    ]
+   ],
+   "jag_p99": [
+    [
+     "Vest / views-05159b056b65",
+     0.6721
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.012
+    ]
+   ]
+  },
+  "twist": {
+   "stretch_p99": [
+    [
+     "Vest / views-05159b056b65",
+     3.452
+    ]
+   ],
+   "strain_p99": [
+    [
+     "Vest / views-05159b056b65",
+     5.4634
+    ]
+   ],
+   "fold_radius_p1": [
+    [
+     "Vest / views-05159b056b65",
+     0.029
+    ]
+   ]
+  }
+ },
+ "approved": {
+  "rest": {
+   "Chemise": {
+    "stretch_p99": 1.165,
+    "squash_p1": 0.8,
+    "shear_p99": 13.69,
+    "strain_p99": 0.2049,
+    "jag_p99": 0.0772,
+    "roughness": 0.413,
+    "peaks": 36,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.724
+   },
+   "Vest": {
+    "stretch_p99": 2.744,
+    "squash_p1": 0.88,
+    "shear_p99": 52.92,
+    "strain_p99": 3.2689,
+    "jag_p99": 0.6667,
+    "roughness": 0.388,
+    "peaks": 17,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.056
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "arms-up": {
+   "Chemise": {
+    "stretch_p99": 2.576,
+    "squash_p1": 0.647,
+    "shear_p99": 57.59,
+    "strain_p99": 2.8224,
+    "jag_p99": 0.6508,
+    "roughness": 0.369,
+    "peaks": 73,
+    "peak_max": 1.3258,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.086
+   },
+   "Vest": {
+    "stretch_p99": 37.75,
+    "squash_p1": 0.803,
+    "shear_p99": 86.36,
+    "strain_p99": 712.0131,
+    "jag_p99": 0.6667,
+    "roughness": 0.276,
+    "peaks": 62,
+    "peak_max": 1.1009,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.043
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "arms-fwd": {
+   "Chemise": {
+    "stretch_p99": 2.903,
+    "squash_p1": 0.561,
+    "shear_p99": 67.16,
+    "strain_p99": 3.7185,
+    "jag_p99": 0.6574,
+    "roughness": 0.364,
+    "peaks": 64,
+    "peak_max": 1.3264,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.06
+   },
+   "Vest": {
+    "stretch_p99": 39.859,
+    "squash_p1": 0.402,
+    "shear_p99": 87.71,
+    "strain_p99": 793.8803,
+    "jag_p99": 0.6667,
+    "roughness": 0.263,
+    "peaks": 45,
+    "peak_max": 1.1022,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.03
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "elbows": {
+   "Chemise": {
+    "stretch_p99": 1.926,
+    "squash_p1": 0.229,
+    "shear_p99": 65.25,
+    "strain_p99": 1.3613,
+    "jag_p99": 0.3696,
+    "roughness": 0.278,
+    "peaks": 67,
+    "peak_max": 1.3312,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.138
+   },
+   "Vest": {
+    "stretch_p99": 13.073,
+    "squash_p1": 0.493,
+    "shear_p99": 83.73,
+    "strain_p99": 84.9505,
+    "jag_p99": 0.6667,
+    "roughness": 0.309,
+    "peaks": 29,
+    "peak_max": 0.9557,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.027
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "step": {
+   "Chemise": {
+    "stretch_p99": 1.165,
+    "squash_p1": 0.8,
+    "shear_p99": 13.69,
+    "strain_p99": 0.2049,
+    "jag_p99": 0.0772,
+    "roughness": 0.413,
+    "peaks": 36,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.724
+   },
+   "Vest": {
+    "stretch_p99": 2.744,
+    "squash_p1": 0.88,
+    "shear_p99": 52.92,
+    "strain_p99": 3.2689,
+    "jag_p99": 0.6667,
+    "roughness": 0.388,
+    "peaks": 17,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.056
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.001,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 4589.596
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.001,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 13723.187
+   },
+   "Boot.L": {
+    "stretch_p99": 1.335,
+    "squash_p1": 0.667,
+    "shear_p99": 24.13,
+    "strain_p99": 0.4137,
+    "jag_p99": 0.0942,
+    "roughness": 0.231,
+    "peaks": 10,
+    "peak_max": 0.5738,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.484
+   },
+   "Boot.R": {
+    "stretch_p99": 1.489,
+    "squash_p1": 0.546,
+    "shear_p99": 36.55,
+    "strain_p99": 0.6086,
+    "jag_p99": 0.1574,
+    "roughness": 0.237,
+    "peaks": 13,
+    "peak_max": 0.9618,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 0.456
+   },
+   "Hose": {
+    "stretch_p99": 1.99,
+    "squash_p1": 0.576,
+    "shear_p99": 53.34,
+    "strain_p99": 1.4967,
+    "jag_p99": 0.0698,
+    "roughness": 0.053,
+    "peaks": 21,
+    "peak_max": 0.2962,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 1.173
+   }
+  },
+  "crouch": {
+   "Chemise": {
+    "stretch_p99": 1.902,
+    "squash_p1": 0.537,
+    "shear_p99": 51.25,
+    "strain_p99": 1.3181,
+    "jag_p99": 0.4522,
+    "roughness": 0.352,
+    "peaks": 82,
+    "peak_max": 1.3301,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.097
+   },
+   "Vest": {
+    "stretch_p99": 19.357,
+    "squash_p1": 0.378,
+    "shear_p99": 85.99,
+    "strain_p99": 186.852,
+    "jag_p99": 0.6667,
+    "roughness": 0.316,
+    "peaks": 44,
+    "peak_max": 1.0404,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.022
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9819.162
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 22120.636
+   },
+   "Boot.L": {
+    "stretch_p99": 2.17,
+    "squash_p1": 0.436,
+    "shear_p99": 50.33,
+    "strain_p99": 1.8552,
+    "jag_p99": 0.3184,
+    "roughness": 0.212,
+    "peaks": 11,
+    "peak_max": 1.0405,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.158
+   },
+   "Boot.R": {
+    "stretch_p99": 2.177,
+    "squash_p1": 0.5,
+    "shear_p99": 47.41,
+    "strain_p99": 1.8705,
+    "jag_p99": 0.3265,
+    "roughness": 0.216,
+    "peaks": 12,
+    "peak_max": 1.014,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 0.195
+   },
+   "Hose": {
+    "stretch_p99": 3.297,
+    "squash_p1": 0.352,
+    "shear_p99": 73.15,
+    "strain_p99": 4.9436,
+    "jag_p99": 0.1338,
+    "roughness": 0.046,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.283
+   }
+  },
+  "twist": {
+   "Chemise": {
+    "stretch_p99": 1.613,
+    "squash_p1": 0.629,
+    "shear_p99": 45.66,
+    "strain_p99": 0.84,
+    "jag_p99": 0.2643,
+    "roughness": 0.308,
+    "peaks": 62,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.366
+   },
+   "Vest": {
+    "stretch_p99": 3.452,
+    "squash_p1": 0.398,
+    "shear_p99": 70.55,
+    "strain_p99": 5.4634,
+    "jag_p99": 0.6666,
+    "roughness": 0.364,
+    "peaks": 40,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.029
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9710.214
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9955.433
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.226,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.31,
+    "squash_p1": 0.788,
+    "shear_p99": 25.26,
+    "strain_p99": 0.3841,
+    "jag_p99": 0.0164,
+    "roughness": 0.068,
+    "peaks": 13,
+    "peak_max": 1.2025,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 2.53
+   }
+  },
+  "nod": {
+   "Chemise": {
+    "stretch_p99": 1.17,
+    "squash_p1": 0.799,
+    "shear_p99": 14.1,
+    "strain_p99": 0.2163,
+    "jag_p99": 0.0837,
+    "roughness": 0.411,
+    "peaks": 42,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.61
+   },
+   "Vest": {
+    "stretch_p99": 3.078,
+    "squash_p1": 0.544,
+    "shear_p99": 64.23,
+    "strain_p99": 4.2385,
+    "jag_p99": 0.6838,
+    "roughness": 0.356,
+    "peaks": 23,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.034
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "look-down": {
+   "Chemise": {
+    "stretch_p99": 1.178,
+    "squash_p1": 0.8,
+    "shear_p99": 14.55,
+    "strain_p99": 0.2349,
+    "jag_p99": 0.0889,
+    "roughness": 0.384,
+    "peaks": 41,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.653
+   },
+   "Vest": {
+    "stretch_p99": 3.227,
+    "squash_p1": 0.602,
+    "shear_p99": 61.26,
+    "strain_p99": 4.7072,
+    "jag_p99": 0.6667,
+    "roughness": 0.346,
+    "peaks": 24,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.039
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "look-up": {
+   "Chemise": {
+    "stretch_p99": 1.181,
+    "squash_p1": 0.799,
+    "shear_p99": 14.95,
+    "strain_p99": 0.2413,
+    "jag_p99": 0.0914,
+    "roughness": 0.37,
+    "peaks": 43,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.665
+   },
+   "Vest": {
+    "stretch_p99": 3.998,
+    "squash_p1": 0.623,
+    "shear_p99": 69.16,
+    "strain_p99": 7.4981,
+    "jag_p99": 0.6667,
+    "roughness": 0.296,
+    "peaks": 29,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.033
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "tilt": {
+   "Chemise": {
+    "stretch_p99": 1.175,
+    "squash_p1": 0.798,
+    "shear_p99": 14.48,
+    "strain_p99": 0.2269,
+    "jag_p99": 0.0874,
+    "roughness": 0.406,
+    "peaks": 41,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.675
+   },
+   "Vest": {
+    "stretch_p99": 3.212,
+    "squash_p1": 0.707,
+    "shear_p99": 58.1,
+    "strain_p99": 4.658,
+    "jag_p99": 0.6667,
+    "roughness": 0.342,
+    "peaks": 23,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.044
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  },
+  "turn": {
+   "Chemise": {
+    "stretch_p99": 1.18,
+    "squash_p1": 0.794,
+    "shear_p99": 15.31,
+    "strain_p99": 0.2406,
+    "jag_p99": 0.0916,
+    "roughness": 0.385,
+    "peaks": 43,
+    "peak_max": 1.2677,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.685
+   },
+   "Vest": {
+    "stretch_p99": 4.085,
+    "squash_p1": 0.279,
+    "shear_p99": 79.11,
+    "strain_p99": 7.8468,
+    "jag_p99": 0.6721,
+    "roughness": 0.305,
+    "peaks": 24,
+    "peak_max": 1.2051,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 0.012
+   },
+   "Boot sole.L": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 9960.446
+   },
+   "Boot sole.R": {
+    "stretch_p99": 1.0,
+    "squash_p1": 1.0,
+    "shear_p99": 0.0,
+    "strain_p99": 0.0,
+    "jag_p99": 0.0,
+    "roughness": 0.0,
+    "peaks": 0,
+    "peak_max": 0.0,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 31622.777
+   },
+   "Boot.L": {
+    "stretch_p99": 1.319,
+    "squash_p1": 0.751,
+    "shear_p99": 28.67,
+    "strain_p99": 0.4095,
+    "jag_p99": 0.1161,
+    "roughness": 0.298,
+    "peaks": 10,
+    "peak_max": 0.8794,
+    "seam_mismatch_pct": 1.88,
+    "fold_radius_p1": 0.822
+   },
+   "Boot.R": {
+    "stretch_p99": 1.167,
+    "squash_p1": 0.862,
+    "shear_p99": 10.84,
+    "strain_p99": 0.2005,
+    "jag_p99": 0.0475,
+    "roughness": 0.218,
+    "peaks": 9,
+    "peak_max": 0.2261,
+    "seam_mismatch_pct": 1.9,
+    "fold_radius_p1": 1.207
+   },
+   "Hose": {
+    "stretch_p99": 1.305,
+    "squash_p1": 0.817,
+    "shear_p99": 21.73,
+    "strain_p99": 0.3712,
+    "jag_p99": 0.0133,
+    "roughness": 0.046,
+    "peaks": 3,
+    "peak_max": 0.0709,
+    "seam_mismatch_pct": 0.0,
+    "fold_radius_p1": 3.099
+   }
+  }
+ }
+}
