@@ -24,7 +24,8 @@ def opt(k, d=None):
     return argv[argv.index(k) + 1] if k in argv else d
 
 
-DATA = opt('--data', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'bun-after.npz'))
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATAS = opt('--data', 'data/bun-before.npz,data/bun-after.npz').split(',')      # (several: each rendered in turn)
 OUT = opt('--out', 'out')
 SIZE = int(opt('--size', '480'))
 LOOK = opt('--look', 'both')
@@ -34,14 +35,6 @@ PART_RGB = [(0.62, 0.60, 0.57), (0.30, 0.25, 0.55), (0.90, 0.62, 0.15), (0.20, 0
             (0.85, 0.35, 0.65), (0.95, 0.90, 0.25), (0.55, 0.85, 0.85), (0.85, 0.10, 0.10)]
 CLAY = (0.72, 0.70, 0.67)
 
-z = np.load(DATA)
-STATES = opt('--states', ','.join(str(s) for s in z['names'])).split(',')
-TAG = str(z['tag']) or 'bun'
-counts = z['counts']
-starts = np.r_[0, np.cumsum(counts)[:-1]]
-thick = z['thick'].astype(float)
-part = z['part'].astype(int)
-held = z['held'].astype(bool)
 os.makedirs(OUT, exist_ok=True)
 
 for o in list(bpy.data.objects):
@@ -138,18 +131,28 @@ def camera(name):
     return ob
 
 
-hd = head()
 looks = ['clay', 'parts'] if LOOK == 'both' else [LOOK]
-for st in STATES:
-    X = z['s_' + st]
-    for look in looks:
-        objs = strands(X, look)
-        for ang in ANGLES:
-            cam = camera(ang)
-            sh.color_type = 'MATERIAL'
-            scene.render.filepath = os.path.join(OUT, f"{TAG}-{st}-{ang.replace('/', '')}-{look}.png")
-            bpy.ops.render.render(write_still=True)
-            bpy.data.objects.remove(cam, do_unlink=True)
-        for o in objs:
-            bpy.data.objects.remove(o, do_unlink=True)
-print('bun_views: done', len(STATES), 'states')
+for DATA in DATAS:
+  z = np.load(DATA if os.path.isabs(DATA) or os.path.exists(DATA) else os.path.join(HERE, DATA))
+  STATES = opt('--states', ','.join(str(s) for s in z['names'])).split(',')
+  TAG = str(z['tag']) or 'bun'
+  counts = z['counts']
+  starts = np.r_[0, np.cumsum(counts)[:-1]]
+  thick = z['thick'].astype(float)
+  part = z['part'].astype(int)
+  held = z['held'].astype(bool)
+  hd = head()
+  for st in STATES:
+      X = z['s_' + st]
+      for look in looks:
+          objs = strands(X, look)
+          for ang in ANGLES:
+              cam = camera(ang)
+              sh.color_type = 'MATERIAL'
+              scene.render.filepath = os.path.join(OUT, f"{TAG}-{st}-{ang.replace('/', '')}-{look}.png")
+              bpy.ops.render.render(write_still=True)
+              bpy.data.objects.remove(cam, do_unlink=True)
+          for o in objs:
+              bpy.data.objects.remove(o, do_unlink=True)
+  bpy.data.objects.remove(hd, do_unlink=True)
+print('bun_views: done', len(DATAS), 'solves')
