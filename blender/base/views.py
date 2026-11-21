@@ -123,7 +123,7 @@ def look_3d(samples):
         sc.cycles.denoiser = 'OPENIMAGEDENOISE'
         sc.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
     sc.cycles.max_bounces = 4
-    sc.cycles.transparent_max_bounces = int(os.environ.get('TRANSP_BOUNCES', '16'))     # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8 it ended black)
+    sc.cycles.transparent_max_bounces = int(os.environ.get('TRANSP_BOUNCES', '128'))    # (cut-out hair: a ray through overlapping strand tips crosses many walls; at 8, and still at 16, it ended black, a brown speckle down the jaw and cheeks)
     sc.cycles.pixel_filter_type = 'GAUSSIAN'
     sc.cycles.filter_width = 1.5
     sc.render.film_transparent = False

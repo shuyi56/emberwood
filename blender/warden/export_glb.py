@@ -12,6 +12,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bpy  # noqa: E402
+# (the game model takes the creator's head in merge-head.mjs, which drops the Blender one: export the Blender head)
+os.environ.setdefault('WARDEN_HEAD_GLB', '')
 import warden  # noqa: E402
 import female  # noqa: E402
 
