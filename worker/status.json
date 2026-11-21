@@ -1,24 +1,8 @@
 {
-    "state":  "RUNNING views-e86564b4038d",
-    "job":  {
-                "key":  "views-e86564b4038d",
-                "branch":  "render-jobs",
-                "sha":  "7a07fb10efdba799ee00bc6ce5a7aae1486d9497",
-                "quality":  "check",
-                "command":  [
-                                "blender/base/rq_views.py",
-                                "--figure",
-                                "boot",
-                                "--mannequin",
-                                "--head",
-                                "--angles",
-                                "front",
-                                "--size",
-                                "300"
-                            ]
-            },
+    "state":  "READY",
+    "job":  null,
     "pending":  [
-                    "views-e86564b4038d"
+
                 ],
     "recent":  [
                    {
@@ -290,6 +274,16 @@
                        "peak_gb":  1.49,
                        "reason":  null,
                        "at":  "2026-11-21T21:53:33Z"
+                   },
+                   {
+                       "key":  "views-e86564b4038d",
+                       "sha":  "7a07fb10efdba799ee00bc6ce5a7aae1486d9497",
+                       "outcome":  "done",
+                       "seconds":  691,
+                       "build_seconds":  685,
+                       "peak_gb":  1.43,
+                       "reason":  null,
+                       "at":  "2026-11-21T22:09:55Z"
                    }
                ]
 }
