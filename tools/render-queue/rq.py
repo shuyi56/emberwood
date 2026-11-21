@@ -1315,6 +1315,24 @@ def cmd_add(a):
         if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
             i["state"] = f"sent as #{r['id']}"
     s["next"] += 1; s["requests"].append(r); save(s)
+    # The shared folder is a network mount and each thread has its own view of it, so a lock file does not reach
+    # across machines and a write can lose to another machine's (2026-11-21: #314 was added twice and one add
+    # vanished). Look again after the mount has caught up; if this request is not in the file, add it again.
+    for _ in range(4):
+        time.sleep(3)
+        try:
+            with open(STATE) as f:
+                disk = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if any(o["id"] == r["id"] and o.get("created") == r["created"] and o.get("thread") == a.thread
+               and o.get("branch") == a.branch for o in disk.get("requests", [])):
+            break
+        event("readded", None, thread=a.thread, request=r["id"])
+        s = load()
+        r["id"] = max(s["next"], max([o["id"] for o in s["requests"]] + [0]) + 1)
+        s["next"] = r["id"] + 1; s["requests"].append(dict(r)); save(s)
+        print(f"rq note: the request was lost to a write from another thread; added again as #{r['id']}", flush=True)
     if unreviewed:
         event("unreviewed", None, thread=a.thread, request=r["id"])
         print("rq note: the queue was idle, so this final request skipped the reviewer", flush=True)

@@ -406,6 +406,11 @@ the turn and the head as separate jobs, or split the turn (`--angles front,3/4,p
 Check a navy or near-black dye on a swatch first: three rejections were a navy that read slate blue under the figure's
 light.
 
+**Adds are verified (2026-11-21).** Each thread sees the shared folder through its own mount, so two threads adding
+at the same moment can still lose a write, and a lock file on one machine does not reach another. `rq.py add` now
+looks at the file again about 3 seconds after writing, and if its request is not there it adds it again under a new
+id and prints `rq note: ... added again as #N`. Use the id the last line of output gives, and confirm by ping.
+
 ## Long jobs: let the queue own them, never a detached shell
 
 (2026-11-21, John asked after a collar build died with nobody noticing and the thread lost an hour.) A render or
