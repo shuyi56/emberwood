@@ -209,7 +209,9 @@ LAPEL = dict(
 # roll_side: the roll line is aimed one side-stand up the neck from the neck point at the shoulder (the tailor's draft:
 # 1 inch, which at her scale is 0.49 w), so it runs on as the collar's roll; it ends on the neck edge where it crosses
 # it (roll_cross). The gorge and point stay where they were approved, measured from the neck edge's point at 'gap'.
-NOTCH_LAPEL = dict(gorge=(0.157, -0.474), point=(0.572, -0.403), roll_side=0.49)
+# point: widened from (0.572, -0.403) to John's guide lines on the 1885-95 habit photo (2026-11-20): the lapel's outer
+# edge runs out toward the armhole and down to the bust. The values are read off his sketch by eye: experimental.
+NOTCH_LAPEL = dict(gorge=(0.157, -0.474), point=(0.85, -0.403), roll_side=0.49, belly=0.10)   # (1.10, -0.55 with belly 0.25 gave a lobe hanging under the break that peeled off the chest: fold 105 deg)
 
 
 # The styles. 'turned': the first one (kept as it was approved): a turned-down collar all round, its short points over
@@ -220,7 +222,7 @@ NOTCH_LAPEL = dict(gorge=(0.157, -0.474), point=(0.572, -0.403), roll_side=0.49)
 STYLES = dict(
     turned=(dict(RATIOS), dict(LAPEL)),
     notch=(dict(RATIOS, stand=0.65, stand_front=0.12, fall_back=0.75, fall_front=1.00, notch=0.30, gap=1.8),
-           dict(LAPEL, **NOTCH_LAPEL, drop=1.35, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, belly=0.10)),
+           dict(LAPEL, drop=1.35, notch_at=0.60, notch_angle=65, point_len=0.85, point_w=0.70, **NOTCH_LAPEL)),
 )
 STYLE = os.environ.get('COLLAR_STYLE', 'notch')
 RATIOS.update(STYLES[STYLE][0])
@@ -252,6 +254,20 @@ def lapel_outlines(E, M, D, cpos, L_=None):
             Pp = G + np.array([sg * L_['point'][0], L_['point'][1]]) * w
             if L_.get('roll_side'):
                 N = roll_cross(E, M, B, sg, L_)[0]
+            if L_.get('from_front', False):     # (tried and dropped: John wants the wide lapel)
+                # The lapel is the buttoned front's own top corner turned back (John, 2026-11-20, on the 1890s habit
+                # photo: the front edge is one line from the hem to the neck, and the lapel is what lies above the top
+                # button, creased on the roll). Buttoned to the neck the front's edge runs straight up from B to the
+                # neck edge at K; the cloth between that edge, the neck edge and the roll line is the lapel, and turned
+                # back it is that triangle mirrored in the roll line. The gorge is the front's neck edge (N to K'), the
+                # collar sewn on it as far as the notch G (notch_at of the way), and the lapel's point is K' itself.
+                # The set gorge and point above made a lapel whose point, unfolded, lay 0.95 past the front's edge and
+                # 1.8 above the neck: cloth the buttoned front does not have.
+                fr = E[E[:, 1] < M['yc']]
+                fr = fr[np.argsort(fr[:, 0])]
+                K = np.array([B[0], float(np.interp(B[0], fr[:, 0], fr[:, 2]))])
+                Pp = _mirror(K[None], B, N)[0]
+                G = N + L_.get('notch_at', 0.6) * (Pp - N)
         else:
             UVc = D['UV']
             side = np.sign(cpos[:, 0]) == sg
@@ -268,7 +284,7 @@ def lapel_outlines(E, M, D, cpos, L_=None):
             Pp = G + max(cands, key=lambda u: sg * u[0])                       # (the turn that takes it outward, the notch opening sideways)
         q = np.linspace(0, 1, 24)[1:-1]
         chord = B - Pp
-        bulge = np.array([chord[1], -chord[0]]) / np.linalg.norm(chord) * L_['belly'] * w
+        bulge = np.array([chord[1], -chord[0]]) / np.linalg.norm(chord) * (0.0 if L_.get('gorge') and L_.get('from_front', False) else L_['belly']) * w   # (the buttoned edge is straight)
         bulge *= np.sign(bulge[0]) * sg
         outer = Pp[None] + q[:, None] * chord[None] + (4 * q * (1 - q))[:, None] * bulge[None]
         poly = np.vstack([B, N, G, Pp, outer])
@@ -417,6 +433,9 @@ FOLDED = []          # what fold_front last folded, per lapel: flat pattern, fol
 FOLD_FABRIC = dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=0.4)
 
 
+FRONT_FLOOR = []
+
+
 def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     """Turn the fronts back as the lapels. The bodice comes with its front open along the two roll lines (front_cut).
     Each front is drafted on past its roll line by its lapel: the lapel's outline mirrored across the roll, which is
@@ -440,6 +459,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
     zs = np.concatenate([q[:, 1] for _, _, q in outlines])
     box = ((np.abs(bodyP[:, 0]) < np.abs(xs).max() + 1.5) & (bodyP[:, 2] > zs.min() - 1.5) & (bodyP[:, 2] < zs.max() + 1.5)
            & (bodyP[:, 1] < yc))
+    FRONT_FLOOR[:] = [bodyP[:len(W)].copy(), bodyN[:len(W)].copy()]     # (the bodice's own drafted surface, whole: the front's floor in _with_front)
     own = (np.arange(len(bodyP)) < len(W))[box]       # (bodyP's first rows are the bodice's own points, then the body's)
     bodyP, bodyN = bodyP[box], bodyN[box]             # (only the chest under the lapels: the fold meets nothing else)
     # (the lapel is kept a cloth's thickness off the bodice's cloth, but only a hair off the body itself: the bodice
@@ -709,7 +729,13 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
     zb = min(B[1] for B, _, _ in outlines)
     zn = max(N[1] for _, N, _ in outlines)
     xm = max(np.abs(q[:, 0]).max() for _, _, q in outlines) + 0.8      # (inside the body's own box: see fold_front)
-    inr = (C[:, 1] < yc) & (np.abs(C[:, 0]) < xm) & (C[:, 2] > zb - 1.5 * w) & (C[:, 2] < zn + 1.0 * w)
+    # (the whole front half, hem to shoulder: the crease's pull is taken up by all of the front's cloth, not by a box
+    # round the lapels whose pinned border stood 1.5 w under the break (John, 2026-11-20: "make sure it's being
+    # redistributed by the entire body"). COLLAR_FRONT_BOX=1 gives the old box.)
+    if os.environ.get('COLLAR_FRONT_BOX'):
+        inr = (C[:, 1] < yc) & (np.abs(C[:, 0]) < xm) & (C[:, 2] > zb - 1.5 * w) & (C[:, 2] < zn + 1.0 * w)
+    else:
+        inr = C[:, 1] < yc
     reg = np.nonzero(inr)[0]
     R = np.array(sorted({i for f in reg for i in fv[f]}))
     outside = {i for f in np.nonzero(~inr)[0] for i in fv[f]}
@@ -720,8 +746,23 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
     rollv = set(np.concatenate([pt['line'] for pt in parts]).tolist())
     # (held: the region's border, the buttoned lap, and the cloth's own cut edges but the roll lines: the armholes
     # and the neck are sewn to the sleeves and the collar)
-    held = np.array([(i in outside) or (abs(W[i, 0]) < lap and W[i, 2] < zb - 0.1 * w) or (edge[i] and i not in rollv)
-                     for i in R])
+    # The buttons hold the fronts at their own points only, and none within a button's step of the break (John,
+    # 2026-11-20: "the button is not respecting the fold which creates tension"). The lap was held as one block 1.2
+    # wide from 0.2 under the break: a rigid edge right under the roll lines, which the turned lapels pulled against.
+    import bpy
+    from scipy.spatial import cKDTree as _KD
+    bq = [np.array([v.co[:] for v in o_.data.vertices]) @ np.array(o_.matrix_world)[:3, :3].T + np.array(o_.matrix_world)[:3, 3]
+          for o_ in bpy.data.objects if o_.name.startswith('Redingote bodice') and o_.name.endswith('buttons')]
+    bq = np.vstack(bq)[:, [0, 2]] if bq else np.zeros((0, 2))
+    bq = bq[bq[:, 1] < zb - L_.get('button_clear', 0.25) * w]
+    if L_.get('button_points', True) and len(bq):
+        btn = _KD(bq).query(W[R][:, [0, 2]])[0] < 0.06
+        btn &= W[R][:, 1] < yc
+        log('collar: buttoned at the buttons only: %d front points held under them, the highest at z %.2f (break %.2f)' % (int(btn.sum()), W[R][btn, 2].max(), zb))
+    else:
+        btn = (np.abs(W[R][:, 0]) < lap) & (W[R][:, 2] < zb - 0.1 * w)
+    held = np.array([(i in outside) or bool(btn[j]) or (edge[i] and i not in rollv)
+                     for j, i in enumerate(R)])
     offs = np.cumsum([nR] + [len(pt['ext']) for pt in parts])
     pos = np.vstack([W[R]] + [pt['ext'] for pt in parts])
     fab = xf.Fabric(pos.copy(), dict(FOLD_FABRIC))
@@ -754,7 +795,18 @@ def _with_front(W, fv, C, edge, parts, outlines, M, bodyP, bodyN, own, L_, log=p
     # the bodies: under the front's cloth, its own drafted surface (the taut line over the corset and what else is
     # worn under it: the cloth may lift off it or slide on it, not sink through it; on the bare body alone the front
     # fell 0.2 onto the skin); under the lapels, the front and the body as in their own fold
-    skin = xf.MeshBody(bodyP[own], bodyN[own], gap=0.0, reach=1.0)
+    # (at the lap the fronts lie one on the other: the floor there is the under layer alone. With both layers in it the
+    # under front was pushed up onto the top front's drafted surface, 0.09 against the buttons' hold: strain of
+    # several hundred percent down the button line once the lap was no longer held as a block)
+    oP, oN = (FRONT_FLOOR[0], FRONT_FLOOR[1]) if FRONT_FLOOR and not os.environ.get('COLLAR_FRONT_BOX') else (bodyP[own], bodyN[own])
+    oP, oN = oP[oP[:, 1] < yc + 1.0], oN[oP[:, 1] < yc + 1.0]      # (the box round the lapels left the cloth under z 46.4 with no floor at all: it sagged 0.1 and more)
+    lapz = np.nonzero(np.abs(oP[:, 0]) < lap + 0.15)[0]
+    kd_ = _KD(oP[lapz][:, [0, 2]])
+    top_ = np.zeros(len(oP), bool)
+    for a_, nb_ in zip(lapz, kd_.query_ball_point(oP[lapz][:, [0, 2]], 0.09)):
+        top_[a_] = (oP[lapz[nb_], 1] > oP[a_, 1] + 0.04).any()      # (another layer lies behind it: it is the top one)
+    log('collar: the floor at the lap is the under front: %d of %d points of the top front left out' % (int(top_.sum()), len(lapz)))
+    skin = xf.MeshBody(oP[~top_], oN[~top_], gap=0.0, reach=1.0)
     use = parts[0]['use']
     for pt in parts[1:]:
         use = use & pt['use']
