@@ -20,7 +20,7 @@ The limits (CIE Lab, D65):
 """
 import os, sys, math, argparse
 R = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'blender')
-for d in ('base', 'boot', 'hose', 'shared'):
+for d in ('base', 'boot', 'hose', 'shared', 'redingote_bodice'):
     sys.path.insert(0, os.path.join(R, d))
 import numpy as np
 
@@ -56,7 +56,11 @@ PAIRS = {'boot': [('boot leather', 'boot lace'), ('boot lace', 'boot eyelet'),
                   ('boot lace', 'hose wool')]}
 # an accent (the rings) sits tone on tone: it must read, but never pull the eye from the cord it frames
 ACCENTS = {'boot': [('boot eyelet', 'boot leather', 'boot lace')]}
-CORDS = {'boot': [('boot lace', 'boot leather')]}
+CORDS = {'boot': [('boot lace', 'boot leather')], 'bodice': []}
+# the redingote bodice with its collar (John, 2026-11-20: the colour-map check runs before any textured render)
+PAIRS['bodice'] = [('bodice wool', 'collar wool'), ('bodice wool', 'bodice button'), ('collar wool', 'skin'),
+                   ('bodice wool', 'skin'), ('bodice button', 'skin')]
+ACCENTS['bodice'] = []
 
 
 def main():
@@ -66,6 +70,13 @@ def main():
     ap.add_argument('--try', dest='tries', nargs='*', action='extend', default=[], help="swatches to test before changing a file: 'boot leather=0x3a2418'")
     a = ap.parse_args()
     import female, boot, hose
+    if a.figure == 'bodice':
+        # (the bodice's and the collar's own materials, from the same constants the build paints with: redingote_bodice.py
+        # line 45-46 and collar.py's build)
+        import redingote_bodice as RB
+        female.mat_def(94, 'bodice wool', female.ramp(RB.DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True)
+        female.mat_def(95, 'bodice button', female.ramp(0x5a5048, 0.12), 0.0, closeup='leather')
+        female.mat_def(97, 'collar wool', female.ramp(0x4a5a7a, 0.10), 0.0, surface='wool', closeup='wool', form=True)
     mats = {m['name']: m for m in female.MATERIALS.values()}
     for t in a.tries:
         n, h = t.rsplit('=', 1)
