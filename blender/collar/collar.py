@@ -434,6 +434,10 @@ FOLD_FABRIC = dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, da
 
 
 FRONT_FLOOR = []
+# The collar's cloth: the same navy as the bodice read as one dark mass (colorcheck.py bodice: dE 0, the same grey), so it is a
+# lighter slate navy, 4a5a7a (passes: dL 31, dE 33). A collar in a second cloth is how tailors faced a habit's collar;
+# COLLAR_DYE=<hex> restores the bodice's own wool (0x121621) if John prefers it and accepts the flag.
+COLLAR_DYE = int(os.environ.get('COLLAR_DYE', '0x4a5a7a'), 16)
 
 
 def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
@@ -1165,7 +1169,7 @@ def build():
     if par is not None:
         o.parent = par
         o.matrix_parent_inverse = par.matrix_world.inverted()
-    cloth = female.mat(female.mat_def(97, 'collar wool', female.ramp(RB.DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True))
+    cloth = female.mat(female.mat_def(97, 'collar wool', female.ramp(COLLAR_DYE, 0.10), 0.0, surface='wool', closeup='wool', form=True))
     me.materials.append(cloth)
     for p in me.polygons:
         p.use_smooth = True

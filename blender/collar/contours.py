@@ -8,6 +8,7 @@ across each roll line (the fold's own profile: it should be one smooth hairpin, 
 side sections, the front outline of the cut edges, and the bend of each hinge drawn on the flat pattern."""
 import sys
 import pickle
+import os
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -102,8 +103,9 @@ def sheet(D, out):
         lc.set_clim(-lim, lim)
         a.add_collection(lc)
         plt.colorbar(lc, ax=a, label='strain, %')
-        hp = P0[fr['held']]
-        a.plot(hp[:, 0], hp[:, 2], '.', color='0.3', ms=1.5)
+        if not os.environ.get('CONTOUR_NO_PINS'):         # (CONTOUR_NO_PINS=1: the held points not drawn, only the cloth's strain)
+            hp = P0[fr['held']]
+            a.plot(hp[:, 0], hp[:, 2], '.', color='0.3', ms=1.5)
         mv = np.linalg.norm(P1 - P0, axis=1)
         a.set_aspect('equal')
         a.autoscale()
