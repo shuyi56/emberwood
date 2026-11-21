@@ -1113,6 +1113,7 @@ def job_gb(job):
 # the PC does not start or finish in time runs in the cloud instead. Off unless DATA/desktop.on exists.
 DESK_ON = os.path.join(DATA, "desktop.on")
 DESK_BACKOFF = os.path.join(WORK, "desk.backoff")
+DESK_HEAVY = re.compile(r"hose|boot|heel|habit|skirt|petticoat|doublet|vest|chemise|dress|cape|cloak|robe", re.I)
 DESK_PICKUP_S = 4 * 60      # the PC has not started a job by then: run it in the cloud
 DESK_WAIT_S = 12 * 60       # it has not finished by then: run it in the cloud
 DESK_ENV = dict(os.environ, GIT_AUTHOR_NAME="Claude", GIT_AUTHOR_EMAIL="noreply@anthropic.com",
@@ -1166,6 +1167,8 @@ def desk_eligible(job, s, busy):
     p = job.get("param") or ""
     if not p.endswith(CHECK) or job_gb(job) > 2.5 or len({c["branch"] for c in job["combines"]}) != 1:
         return None
+    if DESK_HEAVY.search(p):
+        return None                                           # clothes builds take 10+ min on the PC (2026-11-21 tests)
     reqs = [r for r in s["requests"] if r["id"] in job["requests"]]
     if any(r.get("where") == "cloud" for r in reqs):
         return None
