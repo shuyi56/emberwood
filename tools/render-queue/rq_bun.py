@@ -167,7 +167,19 @@ R.POSES = R.POSES + ('twist',)
 # cohesion: tuned values, not measured ones.
 HELD = {'tie': True, 'core': True, 'tucks': True, 'pins': 4, 'pin_catch': 0.035, 'net': 2e-4, 'shape': 0.3, 'damp': 0.2}
 BUN = {'tie': False, 'core': False, 'core_scale': 0.8, 'pins': 0, 'pin_lat': 0.25, 'pin_catch': 0.02,
-       'pin_phase': 0.0, 'net': None, 'sticks': 0, 'tucks': False, 'shape': 0.0, 'damp': 0.0}
+       'pin_phase': 0.0, 'net': None, 'sticks': 0, 'tucks': False, 'shape': 0.0, 'damp': 0.0,
+       'roll': False, 'pin_seam': [-0.88, 0.48, 0.0], 'pin_span': [0.12, 0.88], 'pin_cross': False}
+# The French twist (round 0, 2026-11-21): the same hold on a roll instead of a ball. `roll` swaps the core's ellipsoid
+# for a capsule along the core strand's own centre line (the roll follows the curve of the back of the head, which a
+# straight ellipsoid cannot), the gather ends and tucks are tested against it, and the pins are driven in along the
+# seam (`pin_seam`, the direction from the roll's axis to its seam, `pin_span` the share of the roll's length the
+# first and last pin sit at), as a French twist is pinned (Marie Claire: pins nearly vertical, one every 1-2 inches;
+# L'Oreal: tuck the ends into the tunnel of the twist).
+# Round 3 (2026-11-21) set the roll's two values apart from the ball's: `core_scale` 1.0 (the roll's strands lie on its
+# surface, drawn at the core's own radius; at the ball's 0.8 they sank into the gap and the start-stop deform stayed
+# at 0.025 HH over three rounds) and `shape` 0.4 (0.3 left the core pierce at 0.013 with the full-size core; the roll
+# is twice the knot's length). Five pins span the roll, 1.4-1.5 inches apart on a 15 cm roll.
+HELD_ROLL = dict(HELD, roll=True, pins=5, pin_catch=0.035, core_scale=1.0, shape=0.4)
 
 
 def configure(**kw):
@@ -194,6 +206,32 @@ def _pin_lines(K):
     return L
 
 
+def _pin_lines_roll(K):
+    """The pins of a French twist: driven in along the seam, each from a point on the roll's surface on the seam side
+    toward its axis, evenly spread over the roll's length."""
+    P, pr = K['path'], K['pr']
+    seg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))]
+    s = BUN['pin_seam']
+    s = np.array(s, float) / np.linalg.norm(s)
+    lo, hi = BUN['pin_span']
+    L = []
+    for k in range(BUN['pins']):
+        f = lo + (hi - lo) * (k / max(1, BUN['pins'] - 1))
+        j = int(np.searchsorted(seg, f * seg[-1]))
+        j = min(j, len(P) - 1)
+        sk = s * np.array([-1.0, 1.0, 1.0]) if BUN.get('pin_cross') and k % 2 else s      # (crossed: every second pin from the other side)
+        L.append((P[j] + 1.3 * pr[j] * sk, -sk, 2.0 * pr[j]))
+    return L
+
+
+def _near_core(Y, K, k, add):
+    """Which points of Y lie within k core radii (plus add) of the core: the ball's centre, or the roll's centre line."""
+    if 'path' in K:
+        D, Rr, _ = path_near(Y, K['path'], K['pr'])
+        return D < k * Rr + add
+    return np.linalg.norm(Y - K['centre'], axis=1) < k * K['core_r'] + add
+
+
 def build_solver(strands, W):
     f, runs, roots, X, thick = _build(strands, W)
     if not any([BUN['tie'], BUN['core'], BUN['pins'], BUN['net'], BUN['sticks'], BUN['tucks'], BUN['shape']]):
@@ -207,7 +245,7 @@ def build_solver(strands, W):
         for k, r in enumerate(runs):
             if k in K['strands']:
                 continue
-            if np.linalg.norm(X[r[-1]] - K['centre']) < 1.25 * K['core_r'] + 0.05:
+            if _near_core(X[r[-1]][None], K, 1.25, 0.05)[0]:
                 hold.append(r[-2:])
     if BUN['tucks']:
         starts = np.array([X[runs[k][0]] for k in K['free']]) if K['free'] else np.zeros((0, 3))
@@ -217,15 +255,16 @@ def build_solver(strands, W):
             e = X[runs[k][-1]]
             if len(starts) and np.linalg.norm(starts - e, axis=1).min() < 0.03:
                 continue                       # (its end carries on as an escaping end)
-            if np.linalg.norm(e - K['centre']) < 1.4 * K['core_r']:
+            if _near_core(e[None], K, 1.4, 0.0)[0]:
                 hold.append(runs[k][-2:])
     if BUN['pins']:
         body = np.concatenate([runs[k] for k in K['body']])
-        for p0, d in _pin_lines(K):
+        lines = [(p0, d, 2.0 * K['core_r']) for p0, d in _pin_lines(K)] if not BUN['roll'] else _pin_lines_roll(K)
+        for p0, d, depth in lines:
             v = X[body] - p0
             a = v @ d
             dist = np.linalg.norm(v - np.outer(a, d), axis=1)
-            hold.append(body[(dist < BUN['pin_catch']) & (a > 0) & (a < 2.0 * K['core_r'])])
+            hold.append(body[(dist < BUN['pin_catch']) & (a > 0) & (a < depth)])
     hold = np.unique(np.concatenate(hold)) if hold else np.zeros(0, int)
     f.pin(hold)
     if BUN['net']:
@@ -236,7 +275,7 @@ def build_solver(strands, W):
         f.tie(idx[a[o]], idx[b[o]], BUN['net'])
     inside = np.zeros(len(X), bool)
     if BUN['core']:
-        cd = core_depth(X, dict(K, core_r=K['core_r'] * BUN['core_scale'], core_half=K['core_half'] * BUN['core_scale']), 1.0)
+        cd = core_depth(X, dict(K, core_r=K['core_r'] * BUN['core_scale'], core_half=K['core_half'] * BUN['core_scale'], cscale=BUN['core_scale']), 1.0)
         inside = cd > 0
         inside[runs[K['core']]] = True
     _STATE.update(K=K, inside=inside, hold=hold, rest=X.copy(), tgt_prev=None)
@@ -257,6 +296,21 @@ def collider(W, thick, hh, frame=None):
 
     def core_push(Y, gp):
         """Points of Y (head heights, the head's frame) inside the core, set out onto its surface plus gp."""
+        if 'path' in K:
+            Z = Y.copy()
+            near = np.linalg.norm(Y - c, axis=1) < K['core_half'] * 1.4 + 2 * K['core_r'] + 0.1
+            m = np.zeros(len(Y), bool)
+            if near.any():
+                D, Rr, C = path_near(Y[near], K['path'], K['pr'] * BUN['core_scale'])
+                g = gp[near] if np.ndim(gp) else gp
+                rr = Rr + g
+                inn = D < rr
+                Zn = Y[near].copy()
+                dd = np.maximum(D, 1e-9)[:, None]
+                Zn[inn] = (C + (Y[near] - C) * (rr[:, None] / dd))[inn]
+                Z[near] = Zn
+                m[np.where(near)[0][inn]] = True
+            return Z, m
         d = Y - c
         a = d @ n
         rv = d - np.outer(a, n)
@@ -320,10 +374,11 @@ def knot_of(strands, X0, runs):
     # the core: the broadest strand at the back of the crown (the dark ball under the knot, drawn as one tube along
     # the knot's axis, far wider than any lock)
     best, core = -1, None
+    roll = BUN['roll']
     for k, r in enumerate(runs):
         P = X0[r]
         wm = float(np.mean(strands[k]['w']))
-        if P[:, 1].mean() > 0.25 and P[:, 2].mean() > 0.6 and wm > best:
+        if P[:, 1].mean() > 0.25 and P[:, 2].mean() > (0.45 if roll else 0.6) and wm > best:
             best, core = wm, k
     rad = best
     P = X0[runs[core]]
@@ -331,18 +386,33 @@ def knot_of(strands, X0, runs):
     n = (P[-1] - P[0]) / np.linalg.norm(P[-1] - P[0])
     reach = 0.25
     knot = []
-    for k, r in enumerate(runs):
-        d = np.linalg.norm(X0[r] - c, axis=1)
-        if (d < reach).mean() > 0.7:
-            knot.append(k)
+    if roll:
+        path = X0[runs[core]]
+        w0 = np.abs(np.asarray(strands[core]['w'], float))
+        pr = np.interp(np.linspace(0, 1, len(path)), np.linspace(0, 1, len(w0)), w0)
+        pr = np.maximum(pr, 0.35 * pr.max())      # (the tube's ends are closed round: a capsule keeps a radius there)
+        # (the roll's strands lie on its surface, a radius off its centre line: the gather's locks that run up beside it
+        # on the cap, and the combed sections ending at its top, are not part of it: the roll's strands run its length)
+        for k, r in enumerate(runs):
+            d, rr, _ = path_near(X0[r], path, pr)
+            if (d < 1.15 * rr + 0.012).mean() > 0.85 and (lens[k] > 0.5 or k == core):
+                knot.append(k)
+    else:
+        for k, r in enumerate(runs):
+            d = np.linalg.norm(X0[r] - c, axis=1)
+            if (d < reach).mean() > 0.7:
+                knot.append(k)
     idx = np.concatenate([runs[k] for k in knot])
     # (its body: the wraps and the core; the short pieces, the escaping end and the flyaways, are left free to move
     # as they are meant to and measured apart)
     bodyk = [k for k in knot if lens[k] > 0.25 or k == core]
     free = [k for k in knot if lens[k] <= 0.25 and k != core]
     half = 0.5 * float(np.linalg.norm(P[-1] - P[0]))
-    return {'body': bodyk, 'free': free, 'body_idx': np.concatenate([runs[k] for k in bodyk]),'centre': c, 'axis': n, 'core': core, 'core_r': float(strands[core]['w'].max()), 'core_half': half,
-            'strands': knot, 'idx': idx, 'runs': runs}
+    Kd = {'body': bodyk, 'free': free, 'body_idx': np.concatenate([runs[k] for k in bodyk]),'centre': c, 'axis': n, 'core': core, 'core_r': float(strands[core]['w'].max()), 'core_half': half,
+          'strands': knot, 'idx': idx, 'runs': runs}
+    if roll:
+        Kd.update(path=path, pr=pr, core_r=float(pr.max()), core_half=0.5 * float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum()))
+    return Kd
 
 
 def kabsch(A, B):
@@ -357,9 +427,35 @@ def kabsch(A, B):
     return ang, np.linalg.norm(B - fit, axis=1)
 
 
+def path_near(Y, P, pr, chunk=1500):
+    """For each point of Y, its distance to the polyline P, the radius there (pr interpolated along P) and the nearest
+    point on it."""
+    A, B = P[:-1], P[1:]
+    AB = B - A
+    L2 = np.maximum((AB ** 2).sum(1), 1e-12)
+    D = np.empty(len(Y))
+    Rr = np.empty(len(Y))
+    C = np.empty((len(Y), 3))
+    for s0 in range(0, len(Y), chunk):
+        y = Y[s0:s0 + chunk]
+        t = np.clip(((y[:, None, :] - A[None]) * AB[None]).sum(2) / L2[None], 0, 1)
+        c = A[None] + t[..., None] * AB[None]
+        d = np.linalg.norm(y[:, None, :] - c, axis=2)
+        j = np.argmin(d, axis=1)
+        r = np.arange(len(y))
+        D[s0:s0 + chunk] = d[r, j]
+        C[s0:s0 + chunk] = c[r, j]
+        Rr[s0:s0 + chunk] = pr[j] + t[r, j] * (pr[j + 1] - pr[j])
+    return D, Rr, C
+
+
 def core_depth(Y, K, hh):
     """How deep points sit inside the core (an ellipsoid round the knot's axis, radius core_r, half-length
-    core_half), as a share of HH (0 outside)."""
+    core_half; for a roll a capsule along the core strand's centre line), as a share of HH (0 outside)."""
+    if 'path' in K:
+        sc = K.get('cscale', 1.0)
+        D, Rr, _ = path_near(Y, K['path'], K['pr'] * sc)
+        return np.maximum(0.0, 1 - D / Rr) * Rr / hh
     d = Y - K['centre']
     a = d @ K['axis']
     rr = np.linalg.norm(d - np.outer(a, K['axis']), axis=1)
@@ -401,7 +497,7 @@ def knot_sheet(states, K, W, path, size=220):
     i = K['body_idx']
     X0 = states[0][1]
     c = K['centre']
-    span = 0.42
+    span = max(0.42, 2.4 * K['core_half']) if 'path' in K else 0.42
     H = W._head_pts if hasattr(W, '_head_pts') else None
     rows = len(states)
     img = Image.new('RGB', (size * 2 + 360 + 40, rows * (size + 30) + 10), (247, 245, 240))
@@ -445,7 +541,7 @@ def knot_sheet(states, K, W, path, size=220):
             d.text((ox + 4, oy + size - 14), 'side' if col == 0 else 'back', fill=(80, 80, 80))
         ox = 20 + 2 * (size + 10)
         shift = []
-        for k, hgt in enumerate((-0.03, 0.05, 0.13)):
+        for k, hgt in enumerate((-0.5 * K['core_half'], 0.0, 0.5 * K['core_half']) if 'path' in K else (-0.03, 0.05, 0.13)):
             y0 = oy + 10 + k * (size // 3)
             d.text((ox, y0 - 10), f'section {hgt:+.2f} HH along the axis', fill=(80, 80, 80))
             for P, colr in ((X0[i], (190, 190, 190)), (X[i], (30, 90, 170))):
@@ -530,6 +626,8 @@ if __name__ == '__main__':
         globals()['SMOOTH'] = False
     if opt('--bun'):
         configure(**json.loads(opt('--bun')))
+    elif '--held-roll' in a:
+        configure(**HELD_ROLL)
     elif '--held' in a:
         configure(**HELD)
     r = run(a[0], opt('--style', 'bun'), opt('--out'), tuple(opt('--poses', 'walk,run,turn,startstop,spin,twist').split(',')))

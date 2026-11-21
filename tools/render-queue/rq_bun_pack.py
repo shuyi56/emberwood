@@ -3,7 +3,7 @@ the hair test's head field, cut at the neck), and the hair's strands as drawn, s
 of each motion, every point in the head's frame and head heights, with each strand's part of the bun (for the
 colour-coded design pass). Read from the solve cache only: nothing is solved again.
 
-    python3 rq_bun_pack.py STYLES_DIR OUT.npz [--bun JSON] [--poses run,spin,twist] [--tag before]
+    python3 rq_bun_pack.py STYLES_DIR OUT.npz [--bun JSON] [--poses run,spin,twist] [--tag before] [--style bun|twist]
 """
 import json
 import os
@@ -31,6 +31,21 @@ def head_mesh(W):
     f = idx[f]
     f = f[(f >= 0).all(1)]
     return v[keep].astype(np.float32), f.astype(np.int32)
+
+
+PARTS_ROLL = ['cap and gather', 'roll core', 'twisted strands', 'seam fold']
+
+
+def parts_roll(st, runs, K):
+    """The French twist's parts: the roll's core, its twisted strands and the seam's fold; everything else is cap and gather."""
+    part = np.zeros(len(runs), int)
+    for k in K['body']:
+        part[k] = 2
+    part[K['core']] = 1
+    for k in K['body']:
+        if k != K['core'] and st['strands'][k]['w'].mean() < 0.012:
+            part[k] = 3
+    return part
 
 
 def parts_of(st, runs, X0, K):
@@ -61,7 +76,7 @@ def main():
         B.configure(**json.loads(opt('--bun')))
     src, out = a[0], a[1]
     world = R.load_world(os.path.join(src, 'head.json.gz'))
-    st = R.load_style(os.path.join(src, 'bun.json.gz'))
+    st = R.load_style(os.path.join(src, opt('--style', 'bun') + '.json.gz'))
     cache = R.cache_dir()
     W = R.World(world, st, cache)
     X0, Xs, runs, roots, thick, steps, cached = R.settle(st['strands'], W, cache)
@@ -77,8 +92,8 @@ def main():
     if len(B._STATE.get('hold', [])):
         held[B._STATE['hold']] = True
     np.savez_compressed(out, head_v=hv, head_f=hf, counts=np.array([len(r) for r in runs], np.int32),
-                        thick=np.asarray(thick, np.float16), part=parts_of(st, runs, X0, K).astype(np.int8),
-                        held=held, names=np.array(list(states)), parts=np.array(PARTS),
+                        thick=np.asarray(thick, np.float16), part=(parts_roll(st, runs, K) if B.BUN['roll'] else parts_of(st, runs, X0, K)).astype(np.int8),
+                        held=held, names=np.array(list(states)), parts=np.array(PARTS_ROLL if B.BUN['roll'] else PARTS),
                         tag=opt('--tag', ''), bun=json.dumps(B.BUN),
                         **{'s_' + k: v.astype(np.float16) for k, v in states.items()})
     print(out, os.path.getsize(out), 'bytes;', len(hv), 'head points,', len(runs), 'strands, states', list(states))

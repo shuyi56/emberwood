@@ -125,6 +125,7 @@ CAMS = {   # azimuth from the front (degrees, toward the figure's left), elevati
     'front': (0, 5, (0, 0.1, 0.6), 1.5), '3/4': (45, 8, (0, 0.1, 0.6), 1.5), 'profile': (90, 5, (0, 0.1, 0.6), 1.5),
     'back3/4': (135, 10, (0, 0.1, 0.6), 1.5), 'back': (180, 10, (0, 0.1, 0.6), 1.5),
     'knot': (160, 35, (0, 0.43, 0.89), 0.7),
+    'roll': (200, 12, (0, 0.45, 0.6), 1.25),      # (the French twist's roll from behind and a little to the side)
 }
 
 
