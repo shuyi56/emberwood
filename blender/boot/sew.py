@@ -598,11 +598,11 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
         chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 2, 2))
-    for sd, T, wig in ((-1.0, 10.2, 2.9), (1.0, 8.4, -2.4)):                          # (the tails)
+    for sd, T, out in ((-1.0, 10.2, 3.6), (1.0, 8.4, 3.1)):                           # (the tails: out over the leather, then down)
         u = np.linspace(0.0, 1.0, 56)
-        aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.6 * u) * u)
+        aa = sd * out * (1 - (1 - u) ** 2.5)
         vv = -T * u
-        chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 2, 0))   # free ends hang low
+        chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 3, 0))   # free ends hang low
     if DRAPE:
         import fabric
         import time as _t
@@ -650,6 +650,8 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
                 L1 = np.linalg.norm(np.diff(q, axis=0), axis=1).sum()
                 log('boot lacing %s: free end %d: %.1f cm laid, %.1f cm after the solve (reach down %.1f cm)'
                     % (o.name, k_ - 1, L0 * 2.619, L1 * 2.619, (q[0, 2] - q[:, 2].min()) * 2.619))
+                log('boot lacing %s: free end %d: %.1f cm out from its start laid, %.1f after the solve'
+                    % (o.name, k_ - 1, np.linalg.norm(c[-1, :2] - c[0, :2]) * 2.619, np.linalg.norm(q[-1, :2] - q[0, :2]) * 2.619))
             at0 += len(c)
         at0 = 0
         out = []
@@ -670,7 +672,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
-DRAPE = dict(bend=2e-4, friction=0.6, steps=600, g=0.7, loops=False, gap=3.8, iters=200)         # the bow's settling (see lacing)
+DRAPE = dict(bend=2e-4, friction=0.9, steps=80, g=0.2, loops=False, gap=3.8, iters=200)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
