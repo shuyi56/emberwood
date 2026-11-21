@@ -378,9 +378,11 @@ def _sole(edge, z_welt, r):
 
 
 TOE_SMOOTH = 120     # (passes of Taubin smoothing over the toe box)
-TOE_SLICE = 0.45     # (the slices the toe dome is fitted in, units along the foot)
-TOE_ANG = 36         # (angular bins of its envelope)
-TOE_ENV = 150        # (smoothing passes of the envelope)
+TOE_ALLOW = 0.045    # (the box's tip beyond the longest toe, a share of H: about 1.1 cm, a thumb's width)
+TOE_SLICE_BACK = 0.6 # (units behind the ball: the slice the box is sized from)
+TOE_TAPER = 2.2      # (the exponent of the plan's and the height's taper to the tip)
+TOE_SECT = 2.6       # (the exponent of the section: 2 an ellipse, more a squarer box)
+H_CM = 2.619         # (cm per unit)
 TOE_SWELL = 4        # (rounds of spreading the toe box's clearance shortfall)
 TOE_SPREAD = 40      # (neighbour passes that spread it)
 TOE_BRIDGE = 0.5    # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
@@ -572,67 +574,59 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, bridge - lift)
         lift += out
         X += Nr * out[:, None]
-    # the toe box as one dome: in each slice across the foot (by y) the toes' outer radius about the slice's centre is
-    # taken as an envelope over the angle (the largest radius in each angular bin, so it spans the gaps between the
-    # toes), that envelope is smoothed round the angle and along the foot, and the leather's points over the toes
-    # are set to it (EXPERIMENTAL: the bins, the smoothing and the room are judged by eye)
+    # the toe box, drafted as a shape of its own and not smoothed out of the toes: a superellipse section whose width
+    # and height are the foot's at the ball (the toes' outer extent, over the ball's slice) and which tapers to a
+    # rounded tip a toe allowance beyond the longest toe (a thumb's width, TOE_ALLOW, the usual fitting rule; the
+    # exponents of the section and the taper are EXPERIMENTAL, judged by eye). Its size is then lifted as one factor
+    # until every toe is inside, so the box stands clear of the toes without taking their lobes.
     top = np.clip((Nr[:, 2] + 0.2) / 0.6, 0.0, 1.0)
     wd = toe * top * (toe > 0.02)
-    ids = np.nonzero(wd > 0)[0]
-    if len(ids):
-        yy = X[ids, 1]
-        edges = np.arange(yy.min() - 1e-6, yy.max() + TOE_SLICE, TOE_SLICE)
-        sl = np.clip(np.digitize(yy, edges) - 1, 0, len(edges) - 2)
-        nb = TOE_ANG
-        env = np.full((len(edges) - 1, nb), np.nan)
-        cen = np.zeros((len(edges) - 1, 2))
-        ang = np.zeros(len(ids))
-        rho = np.zeros(len(ids))
-        for k in range(len(edges) - 1):
-            m = np.nonzero(sl == k)[0]
-            if len(m) < 6:
-                continue
-            allm = np.nonzero((X[:, 1] >= edges[k]) & (X[:, 1] < edges[k + 1]) & (z < M['ankle_z']))[0]
-            c = np.array([X[allm, 0].mean(), X[allm, 2].min() + 0.15])
-            cen[k] = c
-            d = X[ids[m]][:, [0, 2]] - c
-            ang[m] = np.arctan2(d[:, 1], d[:, 0])
-            rho[m] = np.hypot(d[:, 0], d[:, 1])
-            ab = np.clip(((ang[m] + np.pi) / (2 * np.pi) * nb).astype(int), 0, nb - 1)
-            for b in range(nb):
-                if (ab == b).any():
-                    env[k, b] = rho[m][ab == b].max()
-        ok = ~np.isnan(env).all(1)
-        # fill empty bins from their neighbours, then smooth round the angle and along y
-        for k in np.nonzero(ok)[0]:
-            row = env[k]
-            if np.isnan(row).any():
-                good = ~np.isnan(row)
-                row[~good] = np.interp(np.nonzero(~good)[0], np.nonzero(good)[0], row[good], period=nb)
-        for _ in range(TOE_ENV):
-            for k in np.nonzero(ok)[0]:
-                env[k] = (np.roll(env[k], 1) + 2 * env[k] + np.roll(env[k], -1)) / 4.0
-            e2 = env.copy()
-            for k in np.nonzero(ok)[0]:
-                nbrs = [j for j in (k - 1, k + 1) if 0 <= j < len(env) and ok[j]]
-                if nbrs:
-                    e2[k] = (2 * env[k] + sum(env[j] for j in nbrs)) / (2 + len(nbrs))
-            env = e2
-        for k in np.nonzero(ok)[0]:
-            m = np.nonzero(sl == k)[0]
-            if not len(m):
-                continue
-            ab = np.clip(((ang[m] + np.pi) / (2 * np.pi) * nb).astype(int), 0, nb - 1)
-            tgt = np.maximum(env[k][ab], rho[m] * 0.0)
-            c = cen[k]
-            f = wd[ids[m]]
-            newr = rho[m] * (1 - f) + tgt * f
-            X[ids[m], 0] = c[0] + newr * np.cos(ang[m])
-            X[ids[m], 2] = c[1] + newr * np.sin(ang[m])
+    for sgn_ in (-1, 1):
+        side = X0[:, 0] * sgn_ > 0
+        ids = np.nonzero((wd > 0) & side)[0]
+        if not len(ids):
+            continue
+        zone_all = np.nonzero((z < M['ankle_z']) & (toe > 0.02) & side)[0]
+        y_tip = float(X[zone_all, 1].min()) - TOE_ALLOW * H          # (the box's tip: ahead of the longest toe)
+        y_b = y_ball + TOE_SLICE_BACK
+        sb = np.nonzero((abs(X[:, 1] - y_b) < 0.3) & (z < M['ankle_z']) & side)[0]
+        cx0 = float(0.5 * (X[sb, 0].min() + X[sb, 0].max()))
+        a0 = float(0.5 * (X[sb, 0].max() - X[sb, 0].min()))
+        zb = float(X[sb, 2].min()) + 0.15
+        b0 = float(X[sb, 2].max()) - zb
+        def prof(yv):
+            s_ = np.clip((yv - y_tip) / max(y_b - y_tip, 1e-6), 0.0, 1.0)
+            return (1.0 - (1.0 - s_) ** TOE_TAPER) ** (1.0 / TOE_TAPER)
+        def shape(yv, th, k):
+            f = prof(yv)
+            a, b = np.maximum(a0 * f * k, 1e-3), np.maximum(b0 * f * k, 1e-3)
+            q = TOE_SECT
+            return (np.abs(np.cos(th) / a) ** q + np.abs(np.sin(th) / b) ** q) ** (-1.0 / q)
+        # (the centre line runs with the foot's: the slice's own middle, not a straight one)
+        cen = {}
+        for yv in np.unique(np.round(X[ids, 1] / 0.25) * 0.25):
+            al = np.nonzero((abs(X[:, 1] - yv) < 0.15) & (z < M['ankle_z']) & side)[0]
+            cen[yv] = float(0.5 * (X[al, 0].min() + X[al, 0].max())) if len(al) > 3 else cx0
+        yk = np.round(X[ids, 1] / 0.25) * 0.25
+        cxs = np.array([cen[v] for v in yk])
+        dx, dz = X[ids, 0] - cxs, X[ids, 2] - zb
+        th, rh = np.arctan2(dz, dx), np.hypot(dx, dz)
+        k = 1.0
+        for _ in range(40):
+            over = rh / shape(X[ids, 1], th, k)
+            if over.max() <= 1.0 or k > 1.3:
+                break
+            k *= min(over.max(), 1.04)
+        tgt = shape(X[ids, 1], th, k)
+        newr = rh * (1 - wd[ids]) + tgt * wd[ids]
+        X[ids, 0] = cxs + newr * np.cos(th)
+        X[ids, 2] = zb + newr * np.sin(th)
+        log('boot: the toe box drafted: %.1f cm wide, %.1f high at the ball, its tip %.1f cm beyond the longest toe, size factor %.2f'
+            % (2 * a0 * H_CM, b0 * H_CM, TOE_ALLOW * H * H_CM, k))
     # the toe box: the leather over the toes is one smooth shape, so the toes' lobes (their tips, their domes) are
     # smoothed away over the toe region by Taubin's filter (a pass that smooths and a pass that swells back, so the
     # box does not shrink), weighted by the toe region's mask; EXPERIMENTAL: the passes' count is judged by eye
-    for _ in range(TOE_SMOOTH):
+    for _ in range(0):
         for lam in (0.5, -0.53):
             X += (lam * toe)[:, None] * (_nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X)
     # and never nearer the skin than the gap
