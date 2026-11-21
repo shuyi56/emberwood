@@ -48,7 +48,7 @@ EXP = dict(
     toe_h=0.85,                              # a toe's height over its width
     arch_peak=0.45,                          # where the arch's plantar skin stands highest (t, under the navicular)
     arch_span=0.13,                          # and how far along it the lift reaches (t, a gaussian's width)
-    edge=0.30,                               # the sole's edge rounding (the bottom of the section's exponent)
+    edge=0.40,                               # the sole's edge rounding (the bottom of the section's exponent)
 )
 MARKS = {}
 CAP = 0.035                  # (the forefoot's rounded front under the toes, share of FL: EXPERIMENTAL)
@@ -81,7 +81,7 @@ def _ring(hw_in, hw_out, top, bot, n, p, arch, inner_sign=1.0):
             x, z = hw * ca, mid + (top - mid) * sa
         else:
             e = abs(sa) ** p
-            x = hw * math.copysign(abs(ca) ** 0.55, ca)
+            x = hw * math.copysign(abs(ca) ** 0.7, ca)
             z = mid - (mid - bot) * e
             # (the arch: the sole lifted from a band along the outer border, rising toward the inner edge)
             xn = x / max(hw, 1e-9)
@@ -157,7 +157,7 @@ def profile(FL):
             c = math.sqrt(max(1.0 - ((t - 0.80) / CAP) ** 2, 0.0))
             wi, wo = wi * (0.3 + 0.7 * c), wo - (1 - c) * 0.4 * ball_in
             # (a nose at the toes' mid height, the bottom rising as the top falls: no plate on the floor under the toes)
-            nose = 0.30 * ball_top
+            nose = 0.55 * ball_top
             top = nose + (top - nose) * c
             cap_bot = nose * (1 - c)
         bot = 0.035 * FL * (1 - _ss(0.0, 0.06, t)) + 0.0          # (the heel's back curls up off the floor)
