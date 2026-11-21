@@ -52,6 +52,7 @@ def linen_closeup(name, P=LINEN):
     if flat is not None:
         flat.name = 'sprite bsdf'
     weave_img, streak_img = linen_texture.make_images()
+    pitch = P.get('pitch', PITCH)              # (a coarser cloth of the same weave: a wider thread)
     uv = N('ShaderNodeUVMap')
 
     def image(img, span):
@@ -64,8 +65,8 @@ def linen_closeup(name, P=LINEN):
         sep = N('ShaderNodeSeparateColor')
         nt.links.new(tex.outputs['Color'], sep.inputs['Color'])
         return sep.outputs['Red'], sep.outputs['Green'], sep.outputs['Blue']
-    height, tone, rub = image(weave_img, linen_texture.WEAVE_THREADS * PITCH)
-    streak, body, _ = image(streak_img, linen_texture.STREAK_SPAN * PITCH)
+    height, tone, rub = image(weave_img, linen_texture.WEAVE_THREADS * pitch)
+    streak, body, _ = image(streak_img, linen_texture.STREAK_SPAN * pitch)
 
     def rng(sock, a, b, lo, hi):
         r = N('ShaderNodeMapRange')
@@ -102,7 +103,7 @@ def linen_closeup(name, P=LINEN):
     col = scaled(P['colour'], math_('MULTIPLY', shade, rng(ao.outputs['AO'], 0.0, 1.0, 0.45, 1.0)))
     # the relief: the weave, and the fuller yarns standing a little proud
     bump = N('ShaderNodeBump')
-    bump.inputs['Strength'].default_value, bump.inputs['Distance'].default_value = P['relief'], 0.5 * PITCH
+    bump.inputs['Strength'].default_value, bump.inputs['Distance'].default_value = P['relief'], 0.5 * pitch
     nt.links.new(math_('ADD', height, math_('MULTIPLY', body, 0.6)), bump.inputs['Height'])
     pb = N('ShaderNodeBsdfPrincipled')
     nt.links.new(col, pb.inputs['Base Color'])
@@ -113,6 +114,16 @@ def linen_closeup(name, P=LINEN):
     pb.inputs['Sheen Roughness'].default_value = 0.3
     pb.name = 'close bsdf'
     nt.links.new(pb.outputs['BSDF'], out.inputs['Surface'])
+
+
+def dress(body, m, under=None, ratios=None):
+    """The chemise on a body already built (m: fit.measure's measurements), under another garment or alone (see
+    drape.build_chemise). Returns the object and its draft."""
+    o, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
+                               settle=os.environ.get('CHEMISE_DRAWN') is None, under=under, ratios=ratios or drape.RATIOS,
+                               colliders=[c for c in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if c])
+    linen_closeup('chemise linen')
+    return o, d
 
 
 def build():
@@ -129,12 +140,9 @@ def build():
     hp = np.array([(o.matrix_world @ v.co)[:] for o in heads for v in o.data.vertices]) if heads else None
     m = fit.measure(P, aw, hp)
     MEASURES.update(m)
-    _, d = drape.build_chemise(body, m, rig=bpy.data.objects.get('Rig'), material=female.mat(M_LINEN),
-                                settle=os.environ.get('CHEMISE_DRAWN') is None,
-                                colliders=[o for o in (bpy.data.objects.get('Hand.L'), bpy.data.objects.get('Hand.R')) if o])
-    linen_closeup('chemise linen')
+    _, d = dress(body, m)
     # the --head view on the garment: from under its hem to the chin
-    lo, hi = d.z_hem - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
+    lo, hi = d.z_hem_worn - 0.6 * m['w'], m['z_chin'] + 0.8 * m['w']
     os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (lo + hi)))
     os.environ.setdefault('HEAD_H', '%.2f' % (hi - lo))
     bpy.context.view_layer.update()

@@ -55,3 +55,50 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
   into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
   clashed, and forest green read badly (and vanished on the grass), so her robe and cape are a deep plum. Check the cape against the hair in the side and back views.
+
+## Layered clothes: add a layer over what is already settled
+
+- When a garment is added over another (or the outer one is changed), do not run the cloth solver on the stack.
+  Use the lower layer's settled shape as it was last kept (`CHEMISE_CACHE`, `blender/chemise/kept/`), build only
+  the new layer, without the solver, and show that render first.
+- Only after that render has been looked at, and only if it needs it, run another round with the solver on both
+  layers together (`CHEMISE_SETTLE=1`).
+- Check a layered figure with `blender/base/spots.py`: it measures where the under layer shows through and
+  renders only crops of those places. Render the full turn once, at the end.
+- Find a cloth's settings on `blender/chemise/swatch.py` (seconds a trial), not on the whole garment.
+- Every layer clears the outside of the one under it, thickness included: the vest and the shoulder plates are fitted
+  over the rest shape of what is worn (`fit.rest_tree`, solidify on), and the shirt's free cloth is put out to
+  `drape.LAYER_GAP` off the gambeson's outside on the posed body (`drape.clear_of`, geometry, no solver). A cloth
+  settle collides with a garment's thin sheet; its thickness is added after, so check with `spots.py`, which counts
+  free cloth lying inside the outer garment's thickness as well as held cloth through it.
+
+## Colour coding is part of the draft stage
+
+- Every draft gets a flat, distinct colour per material or part, so the parts can be told apart before any texture
+  is laid on. Include the colour map with the draft.
+- Before any textured render, run the colour-map check (`tools/render-review/colorcheck.py`, built by the hose
+  thread; use it once it is on the branch). It flags: touching parts whose value gap is too small (also compared in
+  grayscale), hue clashes between parts that should read separately, and dark materials that blacken their
+  neighbours.
+- Fix flagged pairs on swatches first, not on the whole figure.
+- No textured render with an unresolved colour flag unless John accepts it.
+
+## Contours before renders
+
+- After any solver run, and before any render, look at the contours of the result: level cuts at several heights,
+  the front and side profiles (`blender/base/contours.py`), and a bend or strain map on the flat pattern (the
+  sleeve's: `SLEEVE_STRAIN=path`). A shaded render hides what an outline shows.
+- An outline that is perfectly round, stepped or kinked has a cause: fix the cause first, then render.
+- Show the contour sheet with the result.
+- Stop iterating when the fixes stop paying. Keep the contour and strain numbers of each round of a fix. Stop when
+  two rounds in a row improve them only slightly, when a round makes them worse, when the same flaw comes back, or at
+  five rounds on one problem. Then render the best result so far (a clay draft with its contour sheet) and report:
+  what each round tried, the numbers before and after, whether the cause looks like tuning, modelling or the solver,
+  and what you would try next. John decides from there.
+
+## Retrospective after a long modelling session
+
+- When a long modelling session ends and John accepts the result, write a retrospective and lessons learned in
+  `docs/clothing-solvers/`: what was built, what failed and why (tuning, modelling or solver), the key numbers,
+  which checks caught or missed problems, and what to do differently.
+- Add to the existing files where a lesson fits. Create a new file for a new topic. Commit it to the thread's branch.
