@@ -97,7 +97,7 @@ def _coarsen(flat, T, lap, keep_every, row_h):
     return P, tri, idx
 
 
-def run(cap, S, log=print):
+def run(cap, S, log=print, _pre=None):
     t_start = time.time()
     C = dict(np.load(cap, allow_pickle=True))
     flat, T, lap = C['flat'], C['T'], C['lap'].astype(bool)
@@ -163,6 +163,11 @@ def run(cap, S, log=print):
         d_in = s0 + R_ * np.sin(ph) - sd[on]
         rest[on, :2] += d_in[:, None] * nperp[None]
         rest[on, 2] = sg_ * R_ * (1 - np.cos(ph))
+    if _pre is not None:                          # (ham pressing's second pass: the pressed rest, from the first pass's cloth)
+        rest = _pre['rest'].copy()
+        start = _pre['start'].copy()
+        fab.pos[:] = start
+        fab.prev[:] = start
     fab.mesh([tuple(int(i) for i in t_) for t_ in T], stretch=S['fold_stretch'], rest_pos=rest,
              bend=S['fold_bend'], flat=S['fold_bend'], bend_at=fo.soft_at(flat, T, creases))
     if S['tape_cm'] > 0 or S.get('tape_pct'):
@@ -252,6 +257,52 @@ def run(cap, S, log=print):
                 res=res, segs=segs, edges=(e, l0, l1, onlap), bodyP=bodyP, bodyN=bodyN, measure=m, report=str(rep))
 
 
+def run_ham(cap, S, log=print):
+    """Pressing over a tailor's ham (EXPERIMENTAL): a pad-stitched lapel that must lie over the bust is steamed and
+    pressed over a ham, the wool shrunk where the surface curves both ways, so its own rest shape follows the chest.
+    Here: a first try folds the lapel as usual; where its flap stands off the chest past fold_gap, the flap is pressed
+    down onto the chest (eased in over ham_ease past the turn), the change in the cloth's lengths is held to ham_cap
+    (wool's shrink with steam; 3 % is a placeholder, no source found yet) at the 95th percentile, and that shape
+    becomes the cloth's rest for a second try from where the first stopped."""
+    R1 = run(cap, S, log)
+    X1, flat, T, past = R1['X'], R1['flat'], R1['T'], R1['past']
+    from scipy.spatial import cKDTree
+    bP, bN = R1['bodyP'], R1['bodyN']
+    jb = cKDTree(bP).query(X1)[1]
+    n = bN[jb]
+    ht = ((X1 - bP[jb]) * n).sum(1)
+    u, nperp, t, sd = _frame(R1['B'], R1['N'], flat)
+    turn = math.radians(S['fold_deg']) * S['fold_radius']
+    q = np.clip((sd - turn - S['fold_row']) / S.get('ham_ease', 0.4), 0, 1)
+    wgt = np.where(past, q * q * (3 - 2 * q), 0.0)
+    drop = np.maximum(ht - S['fold_gap'], 0.0) * wgt
+    P = X1 - drop[:, None] * n
+    e, l0 = R1['edges'][0], R1['edges'][1]
+    cap_ = S.get('ham_cap', 3.0)
+    def p95(a):
+        Q = X1 + a * (P - X1)
+        l = np.linalg.norm(Q[e[:, 0]] - Q[e[:, 1]], axis=1)
+        l1 = np.linalg.norm(X1[e[:, 0]] - X1[e[:, 1]], axis=1)
+        return float(np.percentile(np.abs(l / np.maximum(l1, 1e-9) - 1) * 100, 95))
+    lo, hi = 0.0, 1.0
+    if p95(1.0) > cap_:
+        for _ in range(20):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if p95(mid) <= cap_ else (lo, mid)
+        a = lo
+    else:
+        a = 1.0
+    Pa = X1 + a * (P - X1)
+    R2 = run(cap, S, log, _pre=dict(rest=Pa, start=X1))
+    R2['res']['ham'] = dict(pressed=round(a, 3), lift_before=round(float(ht[past].max()), 3), shrink_p95=round(p95(a), 2),
+                            fold_first=R1['res']['fold'])
+    return R2
+
+
+def run_any(cap, S):
+    return run_ham(cap, S) if S.get('ham') else run(cap, S)
+
+
 # ------------------------------------------------------------------ the sheet
 
 def sheet(R, path, title):
@@ -322,7 +373,7 @@ def _one(job):
             S['bake'].update(v)
         else:
             S[k] = v
-    R = run(cap, S)
+    R = run_any(cap, S)
     png = os.path.join(out, '%s.png' % name)
     sheet(R, png, '%s  %s  %s' % (name, os.path.basename(cap), json.dumps(over)))
     np.savez(os.path.join(out, '%s.npz' % name), X=R['X'], flat=R['flat'], T=R['T'], lap=R['lap'])
@@ -371,7 +422,7 @@ def main():
     if '--coarse' in sys.argv:
         S['coarse'] = int(sys.argv[sys.argv.index('--coarse') + 1])
     os.makedirs(out, exist_ok=True)
-    R = run(cap, S)
+    R = run_any(cap, S)
     png = os.path.join(out, '%s.png' % name)
     sheet(R, png, '%s  %s  %s' % (name, os.path.basename(cap), json.dumps(over)))
     np.savez(os.path.join(out, '%s.npz' % name), X=R['X'], flat=R['flat'], T=R['T'], lap=R['lap'])
