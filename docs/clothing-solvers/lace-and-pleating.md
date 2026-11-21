@@ -81,7 +81,11 @@ It hangs over the hips (a cylinder just inside the pleats' inner layer for 15 cm
   bridge column is too large a share of each layer). A narrower bridge than a column fails here as on the lace (37%).
 - The bridge leaves a gap between the layers as wide as a column, so the pleats lean like tiles and the ratio comes
   out 2.56 (at 0.75 cm) instead of 3.
-- The bench's "Pleated skirt" scene runs it at 1 cm (11,526 points, a few frames a second).
+- Speed. The study case takes about 260 ms a frame (3 cm pleats, 1 cm mesh, 4 bend passes, 240 steps a second); the
+  bend's passes are four-fifths of that. The bench's "Pleated skirt" scene defaults to 4.5 cm pleats on a 1.5 cm
+  mesh round and 2 cm down, 2 passes, 120 steps: 4,004 points, about 19 ms a frame, settling at 1.1% worst stretch
+  with the folds at 172°. Going coarser down than 2 cm fails (17% at 2.5 cm with a 1 cm mesh round), and so does
+  dropping to 2 constraint walks (9%).
 
 ## What matters (the sweep, cuff knife and cuff gather as the bases)
 

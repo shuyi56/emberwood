@@ -53,7 +53,8 @@ const lace = {
     const o = { ...v, gravity: v.gravity * 100, substep: 1 / v.substepHz, cuffRadius: v.finished / (2 * Math.PI) };
     if (v.bendingLength == null) delete o.bendingLength;
     if (v.kind === 'box' && v.pleatDepth > v.pitch / 2 + 1e-6) o.pleatDepth = v.pitch / 2;
-    o.rows = Math.max(8, Math.round(v.depth / v.res) + 1);
+    o.rows = Math.max(8, Math.round(v.depth / (v.resDown ?? v.res)) + 1);
+    delete o.resDown;
     delete o.substepHz;
     const S = L.buildStrip(o), f = S.f, n = f.n;
     const parts = Uint8Array.from(S.part);
@@ -120,16 +121,21 @@ const skirt = {
     { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.8, max: 5, step: 0.05, value: null, live: true, fmt: (v) => v.toFixed(2) },
     { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, scale: 100, fmt: (v) => v.toFixed(1) },
     { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
-    { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 2, max: 8, step: 0.5, value: 3, fmt: (v) => v.toFixed(1) },
-    { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 1, max: 6, step: 0.5, value: 3, fmt: (v) => v.toFixed(1) },
+    { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 2, max: 8, step: 0.5, value: 4.5, fmt: (v) => v.toFixed(1) },
+    { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 1, max: 6, step: 0.5, value: 4.5, fmt: (v) => v.toFixed(1) },
     { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0) },
     { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 50, fmt: (v) => v.toFixed(0) },
-    { key: 'res', label: 'Mesh spacing', unit: 'cm', min: 0.5, max: 2, step: 0.25, value: 1, fmt: (v) => v.toFixed(2) },
+    { key: 'res', label: 'Mesh spacing round', unit: 'cm', min: 0.5, max: 2, step: 0.25, value: 1.5, fmt: (v) => v.toFixed(2) },
+    { key: 'resDown', label: 'Mesh spacing down', unit: 'cm', min: 0.5, max: 3, step: 0.25, value: 2, fmt: (v) => v.toFixed(2) },
     { key: 'stretchK', label: 'Threads held in the bend solve', min: 0, max: 600, step: 10, value: 300, live: true, fmt: (v) => v.toFixed(0) },
-    { key: 'passes', label: 'Bend solve passes', min: 1, max: 6, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'passes', label: 'Bend solve passes', min: 1, max: 6, step: 1, value: 2, live: true, fmt: (v) => v.toFixed(0) },
     { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
-    { key: 'substepHz', label: 'Steps a second', min: 120, max: 960, step: 60, value: 240, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'substepHz', label: 'Steps a second', min: 120, max: 960, step: 60, value: 120, live: true, fmt: (v) => v.toFixed(0) },
   ],
+  // (the defaults are the fast ones: 4.5 cm pleats on a 1.5 by 2 cm mesh, 2 bend passes at 120 steps a second, 4,004
+  // points, about 19 ms a frame against 260 for the study's 3 cm pleats at 1 cm, 4 passes, 240 steps; it settles at
+  // 1.1% worst stretch with the folds at 172 degrees. The bend's band grows with the rows, and the passes and steps
+  // multiply it, so those are what the speed comes from. A coarser mesh down than 2 cm comes apart (17% at 2.5 cm).)
   build(v) {
     // (the mesh at most a third of the pleat's width: a 3 cm knife pleat solves clean at 1 cm, 0.8% worst stretch,
     // and comes apart at 1.25 cm, where the fold's bridge column is too wide a share of each layer)
