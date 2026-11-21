@@ -42,7 +42,11 @@ LEATHER = dict(
     gap=0.03,                # how far the leather is kept off the hose
     steps=120,
 )
-HOLD = {'sole': 0.30, 'collar': 0.60}   # how far up from the upper's lower edge, and down from its top, it is held
+HOLD = {'sole': 0.30, 'collar': 0.25}
+# sewing bends flat sheets round the leg: a stiffer bend than the creases', walked longer, so a sheet wraps in one
+# smooth curve and does not ripple
+SEWN = dict(LEATHER, bend=2e-7, stretch=5e-4, shear=5e-4, iterations=16, steps=200)   # (the hide gives a few per cent, as leather pulled over a last does, where a flat sheet cannot follow it)
+FLAT = ('inner shaft', 'outer shaft', 'tongue')      # the pieces cut and kept as flat sheets (sew)   # how far up from the upper's lower edge, and down from its top, it is held
 # The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge. The foot's seams,
 # then each shaft's (last.SHAFTS); a seam whose pieces a boot does not have is passed over.
 SEAMS = (
@@ -142,8 +146,26 @@ def _co(o):
     return x.reshape(-1, 3)
 
 
-def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
+
+def _even(Y, base, o, n):
+    """What each point moved by in the solve, evened with its neighbours' (the solver's walk leaves a fine jitter, a
+    millimetre or so from point to point, that a hide does not have): the wrap's shape kept, the jitter taken."""
+    ee = np.empty(len(o.data.edges) * 2, dtype=np.int64)
+    o.data.edges.foreach_get('vertices', ee)
+    ee = ee.reshape(-1, 2)
+    dsp = Y - base
+    for _ in range(8):
+        acc, cnt = np.zeros_like(dsp), np.zeros(n)
+        np.add.at(acc, ee[:, 0], dsp[ee[:, 1]])
+        np.add.at(acc, ee[:, 1], dsp[ee[:, 0]])
+        np.add.at(cnt, ee[:, 0], 1.0)
+        np.add.at(cnt, ee[:, 1], 1.0)
+        dsp = 0.4 * dsp + 0.6 * acc / np.maximum(cnt, 1.0)[:, None]
+    return base + dsp
+
+def sew(o, pieces, rig, colliders, P=None, log=print):
     """Sew the boot o (the upper's pieces, as last.build_boots made them) from its flat pieces on the colliders."""
+    P = SEWN if P is None else P
     uppers = [p for p in pieces if p['name'] != 'sole']
     X, Nv = _co(o), _normals(o)
     n = len(X)
@@ -177,14 +199,47 @@ def sew(o, pieces, rig, colliders, P=LEATHER, log=print):
     body = fabric.bvh_body(BVHTree.FromPolygons(pts, tris), P['gap'])
     import time
     t0 = time.time()
-    fab = fabric.Fabric(base, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
+    # the leg's pieces (FLAT) are flat sheets: the solver is given each one's lengths as it lies flat on the pattern
+    # (pattern.flatten: the piece peeled off the last and pressed flat, at its true size), so on the leg it can only
+    # bend, as a sheet of leather does, and what roundness it has comes from being wrapped; the foot's pieces (the
+    # vamp, the toe cap) keep the last's lengths, as leather stretched over the last does
+    import pattern
+    flat = base.copy()
+    for p in uppers:
+        if p['name'] in FLAT:
+            uv, give = pattern.flatten(p)
+            sl = slice(p['start'], p['start'] + len(p['V']))
+            flat[sl] = np.column_stack([uv, np.zeros(len(uv))])
+            log('boot sewing: %s cut flat (flat lengths %.0f%%..%.0f%% of its lengths on the last)'
+                % (p['name'], 100 * give[0], 100 * give[2]))
+    # the sewn shell is baked: the pieces as cut (on the last and flat), the leather's numbers and the hose make the
+    # key, so a later run (a new tongue's bend, a texture, the lights) takes the panels' folds as they are
+    import hashlib
+    side = o.name.rsplit('.', 1)[-1]
+    key = hashlib.sha1(np.round(base, 4).tobytes() + np.round(flat, 4).tobytes() + np.round(np.array(pts), 3).tobytes()
+                       + repr(sorted((k, P[k]) for k in P)).encode() + repr(sorted(HOLD.items())).encode()
+                       + b'smooth8').hexdigest()[:16]
+    cache = os.path.join(os.environ.get('BOOT_CACHE', '/mnt/project-files/hose/boot-cache'), 'sew-%s-%s.npy' % (side, key))
+    fab = fabric.Fabric(flat, {k: P[k] for k in ('stretch', 'shear', 'bend', 'friction', 'iterations', 'gravity')})
     fab.pin(np.arange(n), pin)
     ties = fab.mesh([tuple(p.vertices) for p in o.data.polygons])
+    fab.pos[:] = base                                           # (then set on the last, to be drawn to those lengths)
+    fab.prev[:] = base
     # (each pair held at the distance it was cut at: the two pieces' points along a seam are not spaced alike, so
     # drawing each to the other's nearest point gathers the seam into scallops)
     fab.tie(sew_ij[:, 0], sew_ij[:, 1], 0.0)
-    steps = fab.settle(body, most=P['steps'])
-    Y = fab.pos.copy()
+    if os.path.exists(cache) and not os.environ.get('BOOT_NOCACHE'):
+        Y = np.load(cache)
+        log('boot sewing %s: the sewn shell taken from the cache (%s), no solve' % (o.name, os.path.basename(cache)))
+        steps = 0
+    else:
+        steps = fab.settle(body, most=P['steps'])
+        Y = _even(fab.pos.copy(), base, o, n)
+        try:
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            np.save(cache, Y)
+        except OSError:
+            pass
     log('boot sewing %s: settled by the fabric solver in %d steps (%.0f s): %d threads, %d diagonals, %d bend ties, '
         '%d seam ties' % (o.name, steps, time.time() - t0, ties[0], ties[1], ties[2], len(sew_ij)))
     gap = np.linalg.norm(Y[sew_ij[:, 0]] - Y[sew_ij[:, 1]], axis=1)
@@ -401,40 +456,184 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         p = by[q + ' shaft']
         g = p['start'] + p['eyelets']
         rows[q] = (X[g] + Nv[g] * tl, Nv[g])
+    # hand-punched, not stepped off by a machine: each eyelet sits a little off its place along the edge and in from
+    # it, and the rings differ a little in size
+    # (the two panels' rows pair up from the bottom: an eyelet with none to cross to would stand empty at the top)
+    n_pair = min(len(rows['inner'][0]), len(rows['outer'][0]))
+    rows = {q: (rows[q][0][:n_pair], rows[q][1][:n_pair]) for q in rows}
+    side_ = o.name.rsplit('.', 1)[-1]
+    rng = np.random.default_rng(sum(map(ord, side_)) + 17)
+    pitch = r['eyelet_pitch']
+    R = r['eyelet']
+    for q in rows:
+        P, N = rows[q]
+        P = P.copy()
+        for k in range(len(P)):
+            t = P[min(k + 1, len(P) - 1)] - P[max(k - 1, 0)]
+            t /= max(np.linalg.norm(t), 1e-9)
+            u = np.cross(N[k], t)
+            P[k] = P[k] + t * rng.normal(0, 0.03 * pitch) + u * rng.normal(0, 0.10 * R) * (1 if q == 'outer' else -1)
+        Ns_ = np.array([N[max(0, k - 2):k + 3].mean(0) for k in range(len(N))])     # (the row's normals smoothed: a
+        N = Ns_ / np.maximum(np.linalg.norm(Ns_, axis=1, keepdims=True), 1e-9)       # vertex normal alone is noisy)
+        rows[q] = (P, N)
+    sizes = {q: R * (1 + rng.normal(0, 0.05, len(rows[q][0]))) for q in rows}
     # the eyelets: rings lying on the leather, a tube round the hole
-    R, tube = r['eyelet'], 0.32 * r['eyelet']
     ang = np.linspace(0, 2 * np.pi, 16, endpoint=False)
     EV, EF = [], []
-    for P, N in rows.values():
-        for c, nrm in zip(P, N):
+    for q, (P, N) in rows.items():
+        for c, nrm, Rk in zip(P, N, sizes[q]):
+            tube = 0.17 * Rk                 # (a thin ring: it barely stands over the leather round the hole)
             u = np.cross(nrm, [0.0, 0.0, 1.0])
             u /= max(np.linalg.norm(u), 1e-9)
-            path = c[None, :] + (R - tube) * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * np.cross(nrm, u))
-            path = np.concatenate([path, path[:1]]) + nrm * 0.4 * tube
+            path = c[None, :] + (Rk - tube) * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * np.cross(nrm, u))
+            path = np.concatenate([path, path[:1]]) + nrm * 0.2 * tube
             v, f = _tube(path, tube, 8, ring=True)
             EF += [[i + len(EV) for i in ff] for ff in f]
             EV += list(v)
     eyelets = _on_boot(o, np.array(EV), EF, o.name.replace('Boot', 'Boot eyelets'), metal, rig)
-    # the lace: from each eyelet across the opening to the next one up on the other side, criss-cross, lying over
-    # the tongue between them
+    # the lace: a cord that goes down into each hole, crosses the opening to the next hole up on the other side
+    # (one strand over the other at every crossing, as it is threaded), with its own slack and a width that varies
+    from mathutils.bvhtree import BVHTree
+    tree = BVHTree.FromPolygons([tuple(v) for v in X], [tuple(p.vertices) for p in o.data.polygons])
+
+    def onto(p, off):
+        hit = tree.find_nearest(tuple(p))
+        if hit[0] is None:
+            return p
+        nrm = np.array(hit[1])
+        out = Nv[list(o.data.polygons[hit[2]].vertices)].mean(axis=0)      # (the side the leather's normals face)
+        if nrm @ out < 0:
+            nrm = -nrm
+        return np.array(hit[0]) + nrm * (off + tl)       # (the leather's face: its sheet and its thickness)
+
     (Pi, Ni), (Po, No) = rows['inner'], rows['outer']
     LV, LF = [], []
+
+    def strand(path, rad):
+        v, f = _tube(path, np.asarray(rad)[:, None, None] if np.ndim(rad) else rad, 8)
+        LF.extend([[i + len(LV) for i in ff] for ff in f])
+        LV.extend(list(v))
+
     n = min(len(Pi), len(Po))
+    rl = r['lace']
+    s = np.linspace(0.0, 1.0, 13)[:, None]
     for k in range(n - 1):
-        for (A, NA), (B, NB) in (((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])), ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1]))):
-            s = np.linspace(0.0, 1.0, 9)[:, None]
-            up = 0.5 * (NA + NB)
-            mid = 0.5 * (A + B) + up * (r['lace'] * 0.5)              # (drawn tight: flat over the tongue)
-            path = (1 - s) ** 2 * (A + NA * r['lace']) + 2 * s * (1 - s) * mid + s ** 2 * (B + NB * r['lace'])
-            v, f = _tube(path, r['lace'])
-            LF += [[i + len(LV) for i in ff] for ff in f]
-            LV += list(v)
+        for j, ((A, NA), (B, NB)) in enumerate((((Pi[k], Ni[k]), (Po[k + 1], No[k + 1])),
+                                                 ((Po[k], No[k]), (Pi[k + 1], Ni[k + 1])))):
+            slack = rng.uniform(0.3, 1.3) * rl
+            # the cord is drawn from hole to hole along the leather's own curve: a Hermite curve that leaves each
+            # hole along the surface there (so it arches over the shin as the contour does, not across the chord),
+            # a cord's width over it; at every crossing the same strand lies on top, a full cord over the other
+            d = B - A
+            tA = 0.7 * (d - NA * (d @ NA))
+            tB = 0.7 * (d - NB * (d @ NB))
+            h00, h10, h01, h11 = 2 * s ** 3 - 3 * s ** 2 + 1, s ** 3 - 2 * s ** 2 + s, -2 * s ** 3 + 3 * s ** 2, s ** 3 - s ** 2
+            path = h00 * A + h10 * tA + h01 * B + h11 * tB
+            Ns = (1 - s) * NA + s * NB
+            Ns /= np.linalg.norm(Ns, axis=1, keepdims=True)
+            w = np.minimum(1.0, 6 * np.minimum(s[:, 0], 1 - s[:, 0]))[:, None]        # (down into the hole at each end)
+            # drawn tight, the cord lies on whatever is under it: the panels near the holes, the tongue down in the
+            # opening (a leather's thickness and the panels' lap lower), so each point is laid on the face found
+            # straight under it, a cord's radius off it; the strand on top rides over the other only where they
+            # cross, in the middle. The heights are eased along the cord (a taut cord does not follow every step)
+            # but never below the face
+            over = 2.0 * rl * np.exp(-((s[:, 0] - 0.5) / 0.2) ** 2) if j == 0 else 0.0
+            face = np.empty(len(path))
+            for i in range(len(path)):
+                q = path[i] + Ns[i] * 8.0 * rl
+                hit = tree.ray_cast(tuple(q), tuple(-Ns[i]), 30.0 * rl)
+                face[i] = (np.array(hit[0]) - path[i]) @ Ns[i] + tl if hit[0] is not None else rl
+            seat = face + rl
+            eased = seat.copy()
+            for _ in range(3):
+                eased[1:-1] = 0.25 * eased[:-2] + 0.5 * eased[1:-1] + 0.25 * eased[2:]
+            seat = np.maximum(eased, face + 0.9 * rl) + over
+            hole = rl * (1.1 + 0.05 * w[:, 0])
+            lift = (w[:, 0] * seat + (1.0 - w[:, 0]) * hole + 0.15 * slack * np.sin(np.pi * s[:, 0]))[:, None]
+            path = path + Ns * lift
+            wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
+            ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
+            strand(path, rl * wob * ends * (1.05 if j == 0 else 1.0))
+    # (the two ends are tucked in at the top holes: no loose ends hang over the panels)
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
 
 
-CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=1.2, gain=0.4)  # (the ankle's bend in degrees, and the holds)
+# the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
+# worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
+# panels' top edge (shares of the tongue's height above it)
+TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
+
+
+def bend_tongue(o, pieces, B=TONGUE_BEND, log=print):
+    """Bend the sewn boot o's tongue forward above the panels' top edge, with an authored fold (folds.py) on the
+    tongue alone: below the fold line it is held as sewn, above it turns over a rolled crease to B's angle. The fold
+    is cached (folds.bake_cached) and a contour sheet of it written. Returns the report."""
+    import folds
+    by = {p['name']: p for p in pieces}
+    if 'tongue' not in by:
+        return None
+    t = by['tongue']
+    sl = slice(t['start'], t['start'] + len(t['V']))
+    X = _co(o)
+    P = X[sl].copy()
+    uv, _ = pattern.flatten(t)
+    T = []
+    for f in t['F']:
+        T += [(f[0], f[i], f[i + 1]) for i in range(1, len(f) - 1)]
+    T = np.array(T, np.int64)
+    # (wound alike on the pattern, its right side up)
+    a, b, c = uv[T[:, 0]], uv[T[:, 1]], uv[T[:, 2]]
+    neg = ((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])) < 0
+    T[neg] = T[neg][:, [0, 2, 1]]
+    panels = np.concatenate([X[p['start']:p['start'] + len(p['V'])] for p in pieces if p['name'].endswith('shaft')])
+    z_edge = float(np.percentile(panels[:, 2], 99.5))
+    free = P[:, 2] > z_edge
+    if free.sum() < 12:
+        log('boot tongue %s: nothing stands above the panels to bend' % o.name)
+        return None
+    # the line on the pattern: across the tongue at the height (on the boot) a share B['at'] above the panels' edge
+    z_line = z_edge + B['at'] * (P[:, 2].max() - z_edge)
+    near = np.abs(P[:, 2] - z_line) < 0.12
+    v_line = float(np.median(uv[near, 1])) if near.any() else float(np.median(uv[free, 1]))
+    up = 1.0 if np.corrcoef(uv[:, 1], P[:, 2])[0, 1] > 0 else -1.0
+    x0, x1 = uv[:, 0].min() - 1.0, uv[:, 0].max() + 1.0
+    line = np.array([[x0, v_line], [x1, v_line]]) if up > 0 else np.array([[x1, v_line], [x0, v_line]])
+    hold = P[:, 2] < z_line - 2.0 * B['radius']
+
+    def sheet():
+        # (its ties at the lengths it was sewn at: the fold turns it, the folds' hinges hold the turn)
+        f = fabric.Fabric(P, dict(stretch=0.0, shear=1e-7, bend=2e-7, friction=0.0, iterations=12, gravity=(0.0, 0.0, 0.0)))
+        f.pin(np.nonzero(hold)[0])
+        f.mesh([tuple(x) for x in T])
+        return f
+    fab = sheet()
+    # (forward: away from the leg; which way that is on the pattern is read off the tongue's normal on the boot)
+    nrm = _normals(o)[sl][free].mean(0)
+    # (which way the pattern's right side faces on the boot: a triangle wound up on the pattern has its normal on
+    # the boot to that side; forward is out, along the leather's outer normal)
+    tn = np.cross(P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]])
+    side_ = 1.0 if float((tn.sum(0)) @ nrm) > 0 else -1.0
+    log('boot tongue %s: the pattern faces %s on the boot; folding to side %+d' % (o.name, 'out' if side_ > 0 else 'in', side_))
+    crease = dict(line=line, angle=np.radians(B['angle']), radius=B['radius'], side=side_, name='tongue top')
+    side = o.name.rsplit('.', 1)[-1]
+    pos, rep, how = folds.bake_cached('boot-tongue-%s' % side, fab, uv, T, [crease],
+                                      extra=([B['angle'], B['radius'], B['at'], side_], nrm),
+                                      log=log, tol_deg=2.0, most=4000)
+    out = float(((pos - P)[free].mean(0)) @ nrm)
+    log('boot tongue %s: its free top moved %.3f along the outer normal (%s)' % (o.name, out, 'forward' if out > 0 else 'BACK, toward the leg'))
+    X[sl] = pos
+    o.data.vertices.foreach_set('co', X.ravel())
+    o.data.update()
+    cr = (rep.get('creases') or [{}])[0]
+    log('boot tongue %s: its top turned forward over a %.2f roll: %.1f of %.1f deg (%s, %s); contour sheet %s'
+        % (o.name, B['radius'], cr.get('achieved_deg', float('nan')), cr.get('target_deg', B['angle']), how,
+           'reached' if rep.get('ok') else 'stopped short: %s' % rep.get('why'), rep.get('sheet')))
+    return rep
+
+
+CREASE = dict(bend=16.0, steps=360, hold_sole=0.45, hold_collar=0.5, gain=0.4)  # (the ankle's bend in degrees, and the holds)
 
 
 def _deform(o, rig):
