@@ -39,9 +39,17 @@ M_SOLE = female.mat_def(87, 'boot sole leather', female.ramp(0x3b2a1e, 0.08), 0.
 # the lifts' joints and the fibre's grain on it.
 M_STACK = female.mat_def(88, 'heel stack edge', female.ramp(0x402a1b, 0.1), 0.35, closeup='leather')
 M_TOP_LIFT = female.mat_def(90, 'heel top lift', female.ramp(0x221d1a, 0.08), 0.45)
+# The heel's shape and height, as tools/heel/optimize.py's gradient descent on the support gauge found them for this
+# foot (2026-11-21; three starts agree on a block: straight sides, no rake, 1.8 to 2.0 cm high, the tread a fifth
+# shorter than the seat's run). The descent's weights are EXPERIMENTAL (see that file).
+SHAPE = dict(h=1.77,        # cm, the rise at the seat point
+             width=1.0,     # the tread's width, a share of the seat's (1: straight sides)
+             length=0.81,   # the tread's length, a share of the block's
+             rake=0.0,      # the tread's middle in front of the seat point, a share of the block's tread length
+             arch=0.39,     # the footbed's fill through the waist
+             cup=1.0)       # and its cup round the heel
 WELD = 0.03                  # the stack's seat stands this far up into the sole, so the two are one solid
 SEAT_OUT = 0.06              # how far the sole stands out past the counter round the heel seat (about 1.5 mm)
-TAPER = 0.05                 # the stack closes in this share of its size from the seat down to the tread
 
 
 def stack_material():
@@ -179,7 +187,6 @@ def join_heel(side, lift):
     arc = ring[ring[:, 1] >= y0][:, :2]
     cx = float(arc[:, 0].mean())
     arc = arc[np.argsort(np.arctan2(arc[:, 0] - cx, arc[:, 1] - y0 + 1e-6))]
-    c = np.array([cx, y0 + 0.45 * (yb - y0)])
     z_top = z_under + WELD
     h = z_top - tread(arc[:, 1])
     n = max(1, int(np.ceil(float(h.max()) / lift)))
@@ -188,11 +195,21 @@ def join_heel(side, lift):
     out = []
     m = len(arc)
 
+    # the tread against the seat, from the study's design d (the foot's rest frame): how far its back edge is set in
+    # under the seat's, and its front edge behind the breast (the breast then leans back to it)
+    d = heel.RESULT['outs'][side][0]
+    block = 2.0 * (d['seat_y'] - d['breast_y'])
+    mid = d['seat_y'] - SHAPE['rake'] * block
+    back_in = max(0.0, (d['seat_y'] + 0.5 * block) - (mid + 0.5 * SHAPE['length'] * block))
+    front_in = max(0.0, (mid - 0.5 * SHAPE['length'] * block) - d['breast_y'])
+
     def level(kk):
         z = np.minimum(tread(arc[:, 1]) + kk * lift, z_top) if kk < n else np.full(m, z_top)
         u = np.clip((z_top - z) / max(float(h.max()), 1e-6), 0, 1)        # 0 at the seat, 1 on the tread
-        xy = c + (arc - c) * (1.0 - TAPER * u)[:, None]
-        xy[:, 1] = np.maximum(xy[:, 1], y0)                               # (the breast stands straight)
+        xy = arc.copy()
+        xy[:, 0] = cx + (arc[:, 0] - cx) * (1.0 - (1.0 - SHAPE['width']) * u)
+        ya, yz = y0 + front_in * u, yb - back_in * u                       # (the breast and the back, at this height)
+        xy[:, 1] = ya + (arc[:, 1] - y0) * (yz - ya) / (yb - y0)
         return np.column_stack([xy, z])
 
     for i in range(n):
@@ -225,6 +242,7 @@ def build():
     os.environ['HEEL_PARTS'] = '1'
     os.environ['HEEL_WALK'] = '1'
     os.environ['FOOT_FORM'] = 'shod'
+    heel.H_SEAT, heel.ARCH_FILL, heel.CUP = SHAPE['h'], SHAPE['arch'], SHAPE['cup']
     res = heel.build()                         # the figure, the derived heel, the lifts on the foot's bones
     up = female.HEEL_UP
     root = female.FIG['root']
