@@ -554,7 +554,51 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
             ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
             strand(path, rl * wob * ends * (1.05 if j == 0 else 1.0))
-    # (the two ends are tucked in at the top holes: no loose ends hang over the panels)
+    # the finish at the top: the two ends come out of the top holes and are tied in a small bow over the opening, its
+    # loops spread over the panels and its two tails of unequal length draped down over them, outside the eyelet rows
+    # so they do not lie across the cords below. (EXPERIMENTAL: no source gives a bow's proportions; the one rule
+    # found, realmenrealstyle.com's "if the ends of the bow reach past the edge of the shoe, your laces are too
+    # long", is kept: nothing here goes past the boot's front. Sizes in cm, about 2.6 cm to the unit.)
+    cm = 1.0 / 2.619
+    E0, E1 = Pi[n - 1], Po[n - 1]
+    K0 = 0.5 * (E0 + E1)
+    hk = tree.find_nearest(tuple(K0))
+    NK = np.array(hk[1])
+    if NK @ Nv[list(o.data.polygons[hk[2]].vertices)].mean(axis=0) < 0:
+        NK = -NK
+    ex = (E1 - E0) - NK * ((E1 - E0) @ NK)
+    ex /= max(np.linalg.norm(ex), 1e-9)
+    ey = np.array([0.0, 0.0, 1.0]) - NK * NK[2]
+    ey /= max(np.linalg.norm(ey), 1e-9)
+    K0 = K0 + ey * 0.55 * cm                               # (the knot a little above the top pair of holes)
+
+    def at(a, v, off=1.05):                                # (a point a cm across and v cm up from the knot, on the leather)
+        return onto(K0 + ex * a * cm + ey * v * cm, off * rl)
+
+    def run(pts, rad):
+        pts = np.array(pts)
+        if len(pts) > 3:
+            for _ in range(2):
+                pts[1:-1] = 0.25 * pts[:-2] + 0.5 * pts[1:-1] + 0.25 * pts[2:]
+        strand(pts, rad)
+    t_ = np.linspace(0.0, 1.0, 14)
+    for E in (E0, E1):                                     # (each end from its hole up to the knot)
+        pts = [onto((1 - u) * E + u * K0, 1.05 * rl) for u in t_]
+        run(pts, rl * np.minimum(1.0, 0.6 + 5 * t_))
+    run([at(-0.35 + 0.7 * u, 0.0, 1.25) for u in np.linspace(0, 1, 5)], 1.35 * rl)       # (the knot)
+    for sd, ang, Ll in ((-1.0, 16.0, 2.9), (1.0, 24.0, 2.5)):                           # (the loops)
+        ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
+        ph = np.linspace(0.0, 2 * np.pi, 26)
+        bx = 0.5 * Ll * (1 - np.cos(ph))
+        by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
+        pts = [at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_)) for x, y, p_ in zip(bx, by, ph)]
+        strand(np.array(pts), rl)
+    for sd, T, wig in ((-1.0, 7.4, 0.8), (1.0, 5.8, -0.6)):                           # (the tails)
+        u = np.linspace(0.0, 1.0, 22)
+        aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.4 * u) * u)
+        vv = -T * u + 1.1 * np.sin(np.pi * u) * 0.0
+        pts = [at(a, v, 1.1 + 0.2 * uu) for a, v, uu in zip(aa, vv, u)]
+        run(pts, rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((u - 0.9) / 0.1, 0, 1)))
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
