@@ -38,6 +38,9 @@ export const CASES = {
   // the hem (a knee-length skirt with a 20 cm yoke), pleats 3 cm wide and 3 cm deep, hard-pressed (at press 0.7 the
   // inner layers sag onto the hips and the contact tears them 26%; at 1, 0.8% worst)
   'skirt-knife':    { kind: 'knife', mount: 'skirt', lace: 'wool', pitch: 3, pleatDepth: 3, finished: 96, depth: 50, rows: 67, res: 0.75, press: 1, headingWidth: 1.0 },
+  // the same skirt on the game's base figure (figure.js, from blender/base/female.py): the yoke's seam at her widest
+  // hip, her trunk and legs the body; the bench's fast settings (4.5 cm pleats, a 1.5 by 2 cm mesh, 2 passes, 120 Hz)
+  'skirt-figure':   { kind: 'knife', mount: 'skirt', body: 'figure', yokeZ: 32, lace: 'wool', pitch: 4.5, pleatDepth: 4.5, depth: 42, rows: 22, res: 1.5, press: 1, headingWidth: 1.0, passes: 2, substep: 1 / 120 },
   'collar-flute':   { kind: 'flute', mount: 'collar', radius: 0.35, finished: 36, depth: 4, res: 0.3, press: 0.8, lace: 'starched' },
 };
 

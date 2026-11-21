@@ -1,5 +1,5 @@
 // Builds the solver viewer: one self-contained page (viewer/lace-solver-viewer.html) with the study's modules
-// inlined, so it runs the very code the study runs (fabric-core.js, fabric-stiff.js, lace.js, presets.js).
+// inlined, so it runs the very code the study runs (fabric-core.js, fabric-stiff.js, figure.js, lace.js, presets.js).
 //
 //   node tools/lace-study/viewer/build.mjs [--out FILE]
 import fs from 'fs';
@@ -7,7 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), root = path.join(here, '..');
-const order = ['fabric-stiff', 'fabric-core', 'lace', 'presets'];
+const order = ['fabric-stiff', 'fabric-core', 'figure', 'lace', 'presets'];
 let mods = 'const __m = {};\n';
 for (const name of order) {
   let src = fs.readFileSync(path.join(root, name + '.js'), 'utf8');

@@ -6,6 +6,7 @@
 // flat (the cut pattern, for the strain), edges (the threads, for the strain) }
 import { Fabric, MATERIALS } from './fabric-core.js';
 import * as L from './lace.js';
+import * as FIG from './figure.js';
 
 const DEG = Math.PI / 180;
 
@@ -116,6 +117,7 @@ const skirt = {
   id: 'skirt', name: 'Pleated skirt',
   note: 'A knee-length wool skirt, cut at the pleat\'s length ratio, pleated onto a hip yoke and hung over the hips. Ease the press off to watch the pleats open and fall onto the hips; the bend sets how crisply they hang.',
   params: [
+    { key: 'body', label: 'Worn on', type: 'select', options: [['figure', 'The figure (the game\'s base body)'], ['form', 'A plain hip form']], value: 'figure' },
     { key: 'kind', label: 'Pleat', type: 'select', options: [['knife', 'Knife'], ['box', 'Box']], value: 'knife' },
     { key: 'press', label: 'Press (heat set)', min: 0, max: 1, step: 0.05, value: 1, live: true, fmt: (v) => v.toFixed(2) },
     { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.8, max: 5, step: 0.05, value: null, live: true, fmt: (v) => v.toFixed(2) },
@@ -123,8 +125,8 @@ const skirt = {
     { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
     { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 2, max: 8, step: 0.5, value: 4.5, fmt: (v) => v.toFixed(1) },
     { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 1, max: 6, step: 0.5, value: 4.5, fmt: (v) => v.toFixed(1) },
-    { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0) },
-    { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 50, fmt: (v) => v.toFixed(0) },
+    { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0), show: (v) => v.body !== 'figure' },
+    { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 42, fmt: (v) => v.toFixed(0) },
     { key: 'res', label: 'Mesh spacing round', unit: 'cm', min: 0.5, max: 2, step: 0.25, value: 1.5, fmt: (v) => v.toFixed(2) },
     { key: 'resDown', label: 'Mesh spacing down', unit: 'cm', min: 0.5, max: 3, step: 0.25, value: 2, fmt: (v) => v.toFixed(2) },
     { key: 'stretchK', label: 'Threads held in the bend solve', min: 0, max: 600, step: 10, value: 300, live: true, fmt: (v) => v.toFixed(0) },
@@ -139,7 +141,17 @@ const skirt = {
   build(v) {
     // (the mesh at most a third of the pleat's width: a 3 cm knife pleat solves clean at 1 cm, 0.8% worst stretch,
     // and comes apart at 1.25 cm, where the fold's bridge column is too wide a share of each layer)
-    const sc = lace.build({ ...v, res: Math.min(v.res, v.pitch / 3, v.pleatDepth / 3), mount: 'skirt', lace: 'wool', headingWidth: 1.0 });
+    // On the figure: the yoke's seam at her widest hip (32 of her units), its round her band line there, out over
+    // the pleats' depth; the yoke above it, from her waist, is drawn, not solved. Her trunk and legs are the body.
+    const fig = v.body === 'figure';
+    const sc = lace.build({ ...v, res: Math.min(v.res, v.pitch / 3, v.pleatDepth / 3), mount: 'skirt', lace: 'wool', headingWidth: 1.0, ...(fig ? { body: 'figure', yokeZ: 32 } : { body: undefined }) });
+    if (fig) {
+      const p = sc.S.p, outer = Math.max(...sc.S.prof.xz.map((q) => q[1]));
+      sc.bodies = [...FIG.meshes(32).map((m) => ({ type: 'mesh', ...m })),
+        { type: 'mesh', ...FIG.yokeMesh(32, 39.4, 32, 0.45, p.yokeOff + outer + 0.1), color: 0x56607a, opacity: 1 }];
+      sc.info.unshift(['Worn on', 'the figure, 165 cm']);
+      sc.frameBox = [[-20, (FIG.ANKLE_Z - 32) * FIG.CM, -15], [20, (48 - 32) * FIG.CM, 15]];
+    }
     sc.partNames = ['wool', '', '', 'yoke seam (stitched)', 'pressed fold'];   // (no lace parts in plain cloth)
     sc.info.unshift(['Cloth', 'worsted wool']);
     return sc;

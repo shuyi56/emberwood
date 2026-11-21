@@ -17,6 +17,7 @@
 //  5. hang: gravity, the lace's weight and its bending stiffness (from its bending length) do the rest.
 
 import { Fabric } from './fabric-core.js';
+import * as FIG from './figure.js';
 
 export const U = 100;                      // units a metre: centimetres
 
@@ -275,6 +276,15 @@ export function buildStrip(over = {}) {
   if (p.bendingLength != null) mat.bendingLength = p.bendingLength / 100;
   if (p.weight != null) mat.weight = p.weight;
   const kind = p.kind;
+  if (onFigure(p)) {
+    // a skirt on the figure: its finished length is the yoke's round on her at yokeZ, offset so the pleats' inner
+    // layer clears her by 0.3 cm (the pleats' depth found from a first layout)
+    const pr0 = pleatProfile({ ...p, finished: 100, depth: p.pleatDepth });
+    const inner = Math.min(...pr0.xz.map((q) => q[1]));
+    p.yokeOff = 0.3 - inner;
+    p.finished = closedLength(FIG.bandRing(p.yokeZ, p.yokeOff / FIG.CM));
+    p.cuffRadius = p.finished / (2 * Math.PI);
+  }
   const prof = pleatProfile({ ...p, depth: p.pleatDepth });
   const cols = prof.cols, rows = p.rows, du = prof.du;
   // the cut: column c at u = c du, its rows from the heading to the scallop at that u (so the scallop is the edge
@@ -340,7 +350,7 @@ export function buildStrip(over = {}) {
   const folded = creaseCols.map((c) => foldAngle(f, idx, c, 0, span(c)));
   const creases = creaseCols.map((c, k) => ({ col: c, folded: folded[k] }));
   f.tether();
-  if (p.mount === 'skirt' && p.hipRadius == null) {
+  if (p.mount === 'skirt' && p.hipRadius == null && !onFigure(p)) {
     // (the hips just inside the pleats' inner layer at the yoke: a body cutting into the pleats as hung tears them)
     let rin = Infinity;
     for (let c = 0; c < cols; c++) { const i = idx(c, 0); rin = Math.min(rin, Math.hypot(f.pos[3 * i], f.pos[3 * i + 2])); }
@@ -381,10 +391,70 @@ function mean(a) { let s = 0; for (const v of a) s += v; return s / (a.length ||
 
 // Where the stitching holds the top edge, and how the strip hangs from it as laid out: (x, z) the edge's point in
 // its pleat's shape, v how far down the strip
+export const onFigure = (p) => p.mount === 'skirt' && p.body === 'figure';
+const closedLength = (C) => { let L = 0; for (let k = 0; k < C.length; k++) { const a = C[k], b = C[(k + 1) % C.length]; L += Math.hypot(b[0] - a[0], b[1] - a[1]); } return L; };
+
+// A yoke laid on the figure: the pleats' top edge round her ring at yokeZ. Each column steps along the ring by its
+// run over (1 + its offset x the ring's curvature there), so the threads keep their cut lengths at every layer, as
+// the round mount does; the ring is scaled about her centre line until the edge closes.
+export function figureYoke(p, prof) {
+  // (the ring starts at her centre back, where the skirt's seam goes)
+  const C0 = FIG.bandRing(p.yokeZ, p.yokeOff / FIG.CM, 512, Math.PI), n = C0.length, xz = prof.xz;
+  const lay = (g) => {
+    const C = C0.map((q) => [q[0] * g, q[1] * g]);
+    const S = [0]; for (let k = 1; k <= n; k++) { const a = C[k - 1], b = C[k % n]; S.push(S[k - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    const L = S[n];
+    let turn = 0;
+    for (let k = 0; k < n; k++) { const a = C[k], b = C[(k + 1) % n], c = C[(k + 2) % n]; const u = Math.atan2(b[1] - a[1], b[0] - a[0]), w = Math.atan2(c[1] - b[1], c[0] - b[0]); turn += Math.atan2(Math.sin(w - u), Math.cos(w - u)); }
+    const sigma = Math.sign(turn);
+    const at = (s) => {
+      s = ((s % L) + L) % L;
+      let k = 0; while (k < n - 1 && S[k + 1] < s) k++;
+      const a = C[k], b = C[(k + 1) % n], t = (s - S[k]) / ((S[k + 1] - S[k]) || 1);
+      const P = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const tx = (b[0] - a[0]) / ((S[k + 1] - S[k]) || 1), tz = (b[1] - a[1]) / ((S[k + 1] - S[k]) || 1);
+      // (the ring runs from her front toward her right, which is clockwise from above: outward is the tangent's left)
+      let nx = -tz, nz = tx; if (nx * P[0] + nz * P[1] < 0) { nx = -nx; nz = -nz; }
+      // (the curvature: the tangent's turn from the segment before to the one after, over the two segments' run)
+      const c = C[(k + n - 1) % n], d = C[(k + 2) % n];
+      const t0 = Math.atan2(a[1] - c[1], a[0] - c[0]), t2 = Math.atan2(d[1] - b[1], d[0] - b[0]);
+      const run = 0.5 * Math.hypot(a[0] - c[0], a[1] - c[1]) + Math.hypot(b[0] - a[0], b[1] - a[1]) + 0.5 * Math.hypot(d[0] - b[0], d[1] - b[1]);
+      // (signed: positive where she is convex, negative in the hollow between the seat's two forms)
+      const kap = sigma * Math.atan2(Math.sin(t2 - t0), Math.cos(t2 - t0)) / run;
+      return { P, N: [nx, nz], kap };
+    };
+    // each column placed so its step from the last is exactly the cut's: a first guess from the curvature, then
+    // the secant method on the step's length (her ring's curvature changes too fast at the sides for the guess alone:
+    // it left threads 3% out at the yoke, held there by the stitching)
+    const ptAt = (s, z) => { const A = at(s); return [A.P[0] + A.N[0] * z, A.P[1] + A.N[1] * z]; };
+    const s = [0];
+    for (let c = 1; c < xz.length; c++) {
+      const zm = 0.5 * (xz[c][1] + xz[c - 1][1]), dx = xz[c][0] - xz[c - 1][0];
+      const d0 = Math.hypot(dx, xz[c][1] - xz[c - 1][1]), Q = ptAt(s[c - 1], xz[c - 1][1]);
+      const err = (sv) => { const R = ptAt(sv, xz[c][1]); return Math.hypot(R[0] - Q[0], R[1] - Q[1]) - d0; };
+      let a0 = s[c - 1] + dx / (1 + zm * at(s[c - 1]).kap), a1 = a0 + 0.01 * Math.sign(dx || 1), e0 = err(a0), e1 = err(a1);
+      for (let it = 0; it < 8 && Math.abs(e1) > 1e-6 && e1 !== e0; it++) { const a2 = a1 - e1 * (a1 - a0) / (e1 - e0); a0 = a1; e0 = e1; a1 = a2; e1 = err(a1); }
+      s.push(Math.abs(e1) < Math.abs(e0) ? a1 : a0);
+    }
+    return { s, L, at };
+  };
+  let lo = 0.8, hi = 1.25;
+  for (let it = 0; it < 40; it++) { const g = (lo + hi) / 2, r = lay(g); if (r.s[r.s.length - 1] > r.L) lo = g; else hi = g; }
+  const { s, at } = lay((lo + hi) / 2);
+  let col = 0;
+  return (x, z, v) => {
+    while (col < xz.length - 1 && xz[col][0] !== x) col++;
+    if (xz[col][0] !== x) col = xz.findIndex((q) => q[0] === x);
+    const A = at(s[Math.max(0, col)]);
+    return [A.P[0] + A.N[0] * z, -v, A.P[1] + A.N[1] * z];
+  };
+}
+
 export const isRound = (p) => p.mount === 'cuff' || p.mount === 'collar' || p.mount === 'skirt';
 
 export function mountFn(p, prof) {
   const F = prof.finished;
+  if (onFigure(p)) return figureYoke(p, prof);
   if (isRound(p)) {
     // round a circle the finished length round (an engageante sewn into a sleeve's end; a frill on a neckband),
     // z outward; the cuff hangs down, the collar stands up
@@ -421,6 +491,7 @@ export function bodyFn(p) {
     const R = p.cuffRadius * 0.7;
     return (q) => { const r = Math.hypot(q[0], q[2]); if (r >= R + 0.05 || r < 1e-6) return false; const k = (R + 0.05) / r; q[0] *= k; q[2] *= k; return true; };
   }
+  if (onFigure(p) && !p.noBody) return FIG.bodyFn(p.yokeZ, 0.3);
   if (p.mount === 'skirt' && !p.noBody) {
     // the hips under a skirt sewn to a hip yoke (its heading at the hip line, y 0): round just inside the pleats'
     // inner layer for the top 15 cm (hipRadius, set by buildStrip), tapering by 14% to 40 cm down (the thighs, taken

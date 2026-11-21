@@ -228,7 +228,13 @@ function buildMesh(scene) {
     if (b.type === 'sphere') { m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 48, 24), bm); m.position.set(...b.c); }
     else if (b.type === 'cylinder') { m = new THREE.Mesh(new THREE.CylinderGeometry(b.r, b.r, b.y1 - b.y0, 48, 1, true), bm); m.position.set(0, (b.y0 + b.y1) / 2, 0); }
     else if (b.type === 'floor') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.size, b.size), bm); m.rotation.x = -Math.PI / 2; m.position.y = b.y; }
-    else if (b.type === 'plane') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), bm); m.position.set(0, b.y, b.z - 0.05); }
+    else if (b.type === 'mesh') {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
+      g.setIndex(new THREE.BufferAttribute(b.indices, 1));
+      g.computeVertexNormals();
+      m = new THREE.Mesh(g, b.color != null ? new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.9, side: THREE.DoubleSide }) : bm);
+    } else if (b.type === 'plane') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), bm); m.position.set(0, b.y, b.z - 0.05); }
     if (m) bodyGroup.add(m);
   }
 }
@@ -262,6 +268,8 @@ function frameCamera(view = 'q') {
   const x = state.scene.f.pos;
   let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < x.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], x[i + k]); mx[k] = Math.max(mx[k], x[i + k]); }
+  // (a scene may ask for more in frame than its cloth: the figure a skirt is worn on)
+  if (state.scene.frameBox) { const [a, b] = state.scene.frameBox; mn = mn.map((v, k) => Math.min(v, a[k])); mx = mx.map((v, k) => Math.max(v, b[k])); }
   const c = mn.map((v, k) => (v + mx[k]) / 2), size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], 4);
   const d = size * 2.3;
   const dir = { front: [0, 0.05, 1], back: [0, 0.05, -1], side: [1, 0.05, 0], q: [0.7, 0.35, 0.75], top: [0.001, 1, 0.001] }[view];

@@ -1090,6 +1090,179 @@ function cross(ax, ay, az, bx, by, bz) { return [ay * bz - az * by, az * bx - ax
 
 return { FABRIC_DEFAULTS, MATERIALS, material, Fabric };
 })();
+__m['figure'] = (() => {
+// The project's base female figure (blender/base/female.py), its trunk and legs, as a body for the solver to hang
+// cloth on and for the bench to draw. The shapes are the figure's own tables, copied unchanged:
+//  - TORSO: female.py's half-width, front depth and back depth at each height, eased by a cosine between rows, with
+//    torso_point's seat (two soft forms on the back over the hips) and bust;
+//  - LEG_R: the Warden's leg profile (blender/warden/warden.py, the figure's bare leg), from 2 above the hip joint
+//    down to the ankle, 1.04 times as deep as wide;
+//  - HIP_Z, LEG_X, THIGH, SHIN: female.py's joints.
+// The figure is in design pixels (one Blender unit), 63 tall to the top of the head. At a woman of 165 cm a unit is
+// 2.62 cm (CM), which gives her 88 cm round the hips and 52 round the waist: a slim figure, as the sprites are.
+// Blender's frame (x to her left side, -y her front, z up) becomes the solver's (x, z up as y, -y as z), so her
+// front faces +z, the bench's front camera.
+
+const CM = 165 / 63;
+// (one name to a declaration: the bench's build exports only the first of a list)
+const HIP_Z = 31.0;
+const LEG_X = 3.3;
+const THIGH = 14.0;
+const SHIN = 13.8;
+const ANKLE_Z = 3.4;
+const TORSO = [
+  [53.0, 1.6, 1.5, 1.7], [51.4, 2.8, 2.2, 2.5], [50.4, 5.0, 2.6, 2.9], [49.2, 6.0, 2.8, 3.1], [47.2, 5.6, 2.9, 3.1],
+  [44.5, 5.2, 3.0, 3.0], [42.0, 4.35, 2.85, 2.75], [39.4, 3.65, 2.6, 2.5], [37.0, 4.5, 2.75, 2.85], [34.5, 5.9, 3.1, 3.6],
+  [32.0, 6.6, 3.3, 4.0], [30.0, 6.3, 3.3, 3.8], [28.5, 5.6, 3.1, 3.4],
+];
+const LEG_R = [[2.0, 3.05], [-1.0, 2.95], [-6.0, 2.45], [-THIGH + 1.2, 1.98], [-THIGH, 1.93], [-THIGH - 1.5, 1.9],
+  [-THIGH - 4.0, 1.92], [-THIGH - SHIN, 1.3]];
+
+const ease = (t) => (1 - Math.cos(Math.PI * t)) / 2;
+
+function torsoDims(z) {
+  const T = TORSO;
+  if (z >= T[0][0]) return T[0].slice(1);
+  if (z <= T[T.length - 1][0]) return T[T.length - 1].slice(1);
+  for (let k = 0; k < T.length - 1; k++) {
+    const a = T[k], b = T[k + 1];
+    if (b[0] <= z && z <= a[0]) { const t = ease((a[0] - z) / (a[0] - b[0])); return [1, 2, 3].map((q) => a[q] + (b[q] - a[q]) * t); }
+  }
+  return T[T.length - 1].slice(1);
+}
+
+// female.py's torso_point: the body at height z (units), phi round from the front toward her right, pushed out by
+// off; returns Blender (x, y)
+function torsoPoint(z, phi, off = 0, bust = 1) {
+  const [rx, fy, by] = torsoDims(z), sx = Math.sin(phi), c = Math.cos(phi);
+  const x = -(rx + off) * sx;
+  let y;
+  if (c >= 0) {
+    y = -(fy + off) * c;
+    for (const s of [-1, 1]) { const zc = 44.3, sz = z > zc ? 2.3 : 1.6; y -= bust * 1.25 * Math.exp(-(((x - s * 2.2) / 2.2) ** 2) - (((z - zc) / sz) ** 2)) * c; }
+  } else {
+    y = -(by + off) * c;
+    for (const s of [-1, 1]) y -= 0.9 * Math.exp(-(((x - s * 2.6) / 2.3) ** 2) - (((z - 32.3) / 2.3) ** 2)) * c;
+  }
+  return [x, y];
+}
+
+function legRadius(zr) {
+  const T = LEG_R;
+  if (zr >= T[0][0]) return T[0][1];
+  for (let k = 0; k < T.length - 1; k++) {
+    const [za, ra] = T[k], [zb, rb] = T[k + 1];
+    if (zb <= zr && zr <= za) return ra + (rb - ra) * ease((za - zr) / (za - zb));
+  }
+  return T[T.length - 1][1];
+}
+
+// a point of the solver's (cm, y up, front +z, the origin at height `z0` units on her centre line) in her units
+const toFig = (q, z0) => [q[0] / CM, -q[2] / CM, q[1] / CM + z0];
+
+// The torso's ring at height z as a closed curve in the solver's x-z plane (cm), n points from the front round:
+// for laying a waistband or a yoke on her
+function ring(z, off = 0, n = 256, phi0 = 0) {
+  const out = [];
+  for (let k = 0; k < n; k++) { const [x, y] = torsoPoint(z, phi0 + 2 * Math.PI * k / n, off, 0); out.push([x * CM, -y * CM]); }
+  return out;
+}
+
+// The ring as cloth lies round it: a band does not follow her into the hollow between the seat's two forms, so the
+// ring's convex hull, resampled evenly by arc length and smoothed so its curvature has no corners (a yoke's line)
+function bandRing(z, off = 0, n = 512, phi0 = 0) {
+  const R = ring(z, off, 1024, phi0);
+  // (the hull, by the monotone chain, kept in the ring's own turning order)
+  const pts = R.map((q, k) => [q[0], q[1], k]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  const keep = new Set([...lo, ...hi].map((p) => p[2]));
+  let H = R.filter((_, k) => keep.has(k));
+  // evenly by arc length
+  const even = (P, m) => {
+    const S = [0]; for (let k = 1; k <= P.length; k++) { const a = P[k - 1], b = P[k % P.length]; S.push(S[k - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    const out = []; let k = 0;
+    for (let q = 0; q < m; q++) { const s = S[P.length] * q / m; while (S[k + 1] < s) k++; const a = P[k], b = P[(k + 1) % P.length], t = (s - S[k]) / ((S[k + 1] - S[k]) || 1); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+    return out;
+  };
+  H = even(H, n);
+  for (let it = 0; it < 30; it++) H = H.map((q, k) => { const a = H[(k + n - 1) % n], b = H[(k + 1) % n]; return [0.5 * q[0] + 0.25 * (a[0] + b[0]), 0.5 * q[1] + 0.25 * (a[1] + b[1])]; });
+  return even(H, n);
+}
+
+// The body for the solver: pushes a point (cm) out of her trunk (heights 28.5 to 53) and her legs (the hip joint
+// down to the ankle), `pad` cm clear of the skin. z0: the height, in her units, of the solver's y = 0.
+function bodyFn(z0, pad = 0.3) {
+  const pu = pad / CM;
+  return (q) => {
+    const [x, y, z] = toFig(q, z0);
+    let hit = false, best = null;
+    // the trunk: find the point's own angle on her ellipse-like ring, then compare with her surface there
+    if (z <= 53 && z >= 28.5) {
+      const r = Math.hypot(x, y);
+      if (r > 1e-6) {
+        const [rx, fy, by] = torsoDims(z), th = Math.atan2(-x, -y), d = Math.cos(th) >= 0 ? fy : by;
+        // (torso_point's phi for a point at polar angle th: tan phi = depth tan th / half-width)
+        let phi = Math.atan2(d * Math.sin(th), rx * Math.cos(th));
+        let s = torsoPoint(z, phi, pu, 0);
+        for (let it = 0; it < 2; it++) { const ts = Math.atan2(-s[0], -s[1]); phi += th - ts; s = torsoPoint(z, phi, pu, 0); }
+        const rs = Math.hypot(s[0], s[1]);
+        if (r < rs) { best = [x * rs / r, y * rs / r]; hit = true; }
+      }
+    }
+    // the legs: each a round column about its hip joint's line, 1.04 times as deep as wide
+    // (only below the trunk's bottom: above it her legs are inside her hips, and a leg's column standing out of the
+    // hips' sides pushed the skirt's second row 10% out of line under the yoke)
+    if (!hit && z < 29.0 && z > ANKLE_Z) {
+      for (const s of [-1, 1]) {
+        const cx = s * LEG_X, dx = x - cx, dy = y / 1.04, r = Math.hypot(dx, dy), R = legRadius(z - HIP_Z) + pu;
+        if (r < R && r > 1e-6) { best = [cx + dx * R / r, dy * R / r * 1.04]; hit = true; break; }
+      }
+    }
+    if (!hit) return false;
+    q[0] = best[0] * CM; q[2] = -best[1] * CM;
+    return true;
+  };
+}
+
+// her trunk and legs as triangle meshes for the bench to draw (cm, the solver's frame)
+function meshes(z0, { top = 50.4 } = {}) {
+  const out = [];
+  const tube = (zs, pt, n = 48) => {
+    const P = [], I = [];
+    for (const z of zs) for (let k = 0; k < n; k++) { const [x, y] = pt(z, 2 * Math.PI * k / n); P.push(x * CM, (z - z0) * CM, -y * CM); }
+    for (let a = 0; a < zs.length - 1; a++) for (let k = 0; k < n; k++) {
+      const i = a * n + k, j = a * n + (k + 1) % n;
+      I.push(i, j, i + n, j, j + n, i + n);
+    }
+    return { positions: Float32Array.from(P), indices: Uint32Array.from(I) };
+  };
+  const tz = []; for (let z = top; z >= 28.5 - 1e-9; z -= 0.25) tz.push(z);
+  out.push(tube(tz, (z, phi) => torsoPoint(z, phi, 0, 1)));
+  for (const s of [-1, 1]) {
+    const lz = []; for (let z = HIP_Z + 1.5; z >= ANKLE_Z; z -= 0.4) lz.push(z);
+    out.push(tube(lz, (z, phi) => { const r = legRadius(z - HIP_Z); return [s * LEG_X - r * Math.sin(phi), -r * 1.04 * Math.cos(phi)]; }, 32));
+  }
+  return out;
+}
+
+// the yoke the pleats hang from, drawn (not solved): her band line from the waist down to the yoke's seam, standing
+// out from her by `off0` at the waist and `off1` at the seam (out over the pleats' top, so no step shows)
+function yokeMesh(z0, zTop, zBot, off0, off1, n = 96) {
+  const zs = []; for (let z = zTop; z >= zBot - 1e-9; z -= 0.25) zs.push(z);
+  const P = [], I = [];
+  for (const z of zs) {
+    const t = (zTop - z) / (zTop - zBot), off = off0 + (off1 - off0) * t * t;
+    for (const q of bandRing(z, off / CM, n, Math.PI)) P.push(q[0], (z - z0) * CM, q[1]);
+  }
+  for (let a = 0; a < zs.length - 1; a++) for (let k = 0; k < n; k++) { const i = a * n + k, j = a * n + (k + 1) % n; I.push(i, j, i + n, j, j + n, i + n); }
+  return { positions: Float32Array.from(P), indices: Uint32Array.from(I) };
+}
+
+return { CM, HIP_Z, LEG_X, THIGH, SHIN, ANKLE_Z, TORSO, LEG_R, torsoDims, torsoPoint, legRadius, ring, bandRing, bodyFn, meshes, yokeMesh };
+})();
 __m['lace'] = (() => {
 // Lace and pleating study: a lace material, flat strips cut for each kind of pleat or gather, folded, stitched
 // and hung on the project's fabric solver (fabric-core.js, fabric-stiff.js: copied unchanged from the fabric
@@ -1110,6 +1283,7 @@ __m['lace'] = (() => {
 //  5. hang: gravity, the lace's weight and its bending stiffness (from its bending length) do the rest.
 
 const { Fabric } = __m['fabric-core'];
+const FIG = __m['figure'];
 const U = 100;                      // units a metre: centimetres
 
 // The solver's settings for the study: small steps (Macklin et al. 2019, "Small steps in physics simulation"), two
@@ -1367,6 +1541,15 @@ function buildStrip(over = {}) {
   if (p.bendingLength != null) mat.bendingLength = p.bendingLength / 100;
   if (p.weight != null) mat.weight = p.weight;
   const kind = p.kind;
+  if (onFigure(p)) {
+    // a skirt on the figure: its finished length is the yoke's round on her at yokeZ, offset so the pleats' inner
+    // layer clears her by 0.3 cm (the pleats' depth found from a first layout)
+    const pr0 = pleatProfile({ ...p, finished: 100, depth: p.pleatDepth });
+    const inner = Math.min(...pr0.xz.map((q) => q[1]));
+    p.yokeOff = 0.3 - inner;
+    p.finished = closedLength(FIG.bandRing(p.yokeZ, p.yokeOff / FIG.CM));
+    p.cuffRadius = p.finished / (2 * Math.PI);
+  }
   const prof = pleatProfile({ ...p, depth: p.pleatDepth });
   const cols = prof.cols, rows = p.rows, du = prof.du;
   // the cut: column c at u = c du, its rows from the heading to the scallop at that u (so the scallop is the edge
@@ -1432,7 +1615,7 @@ function buildStrip(over = {}) {
   const folded = creaseCols.map((c) => foldAngle(f, idx, c, 0, span(c)));
   const creases = creaseCols.map((c, k) => ({ col: c, folded: folded[k] }));
   f.tether();
-  if (p.mount === 'skirt' && p.hipRadius == null) {
+  if (p.mount === 'skirt' && p.hipRadius == null && !onFigure(p)) {
     // (the hips just inside the pleats' inner layer at the yoke: a body cutting into the pleats as hung tears them)
     let rin = Infinity;
     for (let c = 0; c < cols; c++) { const i = idx(c, 0); rin = Math.min(rin, Math.hypot(f.pos[3 * i], f.pos[3 * i + 2])); }
@@ -1473,10 +1656,70 @@ function mean(a) { let s = 0; for (const v of a) s += v; return s / (a.length ||
 
 // Where the stitching holds the top edge, and how the strip hangs from it as laid out: (x, z) the edge's point in
 // its pleat's shape, v how far down the strip
+const onFigure = (p) => p.mount === 'skirt' && p.body === 'figure';
+const closedLength = (C) => { let L = 0; for (let k = 0; k < C.length; k++) { const a = C[k], b = C[(k + 1) % C.length]; L += Math.hypot(b[0] - a[0], b[1] - a[1]); } return L; };
+
+// A yoke laid on the figure: the pleats' top edge round her ring at yokeZ. Each column steps along the ring by its
+// run over (1 + its offset x the ring's curvature there), so the threads keep their cut lengths at every layer, as
+// the round mount does; the ring is scaled about her centre line until the edge closes.
+function figureYoke(p, prof) {
+  // (the ring starts at her centre back, where the skirt's seam goes)
+  const C0 = FIG.bandRing(p.yokeZ, p.yokeOff / FIG.CM, 512, Math.PI), n = C0.length, xz = prof.xz;
+  const lay = (g) => {
+    const C = C0.map((q) => [q[0] * g, q[1] * g]);
+    const S = [0]; for (let k = 1; k <= n; k++) { const a = C[k - 1], b = C[k % n]; S.push(S[k - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    const L = S[n];
+    let turn = 0;
+    for (let k = 0; k < n; k++) { const a = C[k], b = C[(k + 1) % n], c = C[(k + 2) % n]; const u = Math.atan2(b[1] - a[1], b[0] - a[0]), w = Math.atan2(c[1] - b[1], c[0] - b[0]); turn += Math.atan2(Math.sin(w - u), Math.cos(w - u)); }
+    const sigma = Math.sign(turn);
+    const at = (s) => {
+      s = ((s % L) + L) % L;
+      let k = 0; while (k < n - 1 && S[k + 1] < s) k++;
+      const a = C[k], b = C[(k + 1) % n], t = (s - S[k]) / ((S[k + 1] - S[k]) || 1);
+      const P = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      const tx = (b[0] - a[0]) / ((S[k + 1] - S[k]) || 1), tz = (b[1] - a[1]) / ((S[k + 1] - S[k]) || 1);
+      // (the ring runs from her front toward her right, which is clockwise from above: outward is the tangent's left)
+      let nx = -tz, nz = tx; if (nx * P[0] + nz * P[1] < 0) { nx = -nx; nz = -nz; }
+      // (the curvature: the tangent's turn from the segment before to the one after, over the two segments' run)
+      const c = C[(k + n - 1) % n], d = C[(k + 2) % n];
+      const t0 = Math.atan2(a[1] - c[1], a[0] - c[0]), t2 = Math.atan2(d[1] - b[1], d[0] - b[0]);
+      const run = 0.5 * Math.hypot(a[0] - c[0], a[1] - c[1]) + Math.hypot(b[0] - a[0], b[1] - a[1]) + 0.5 * Math.hypot(d[0] - b[0], d[1] - b[1]);
+      // (signed: positive where she is convex, negative in the hollow between the seat's two forms)
+      const kap = sigma * Math.atan2(Math.sin(t2 - t0), Math.cos(t2 - t0)) / run;
+      return { P, N: [nx, nz], kap };
+    };
+    // each column placed so its step from the last is exactly the cut's: a first guess from the curvature, then
+    // the secant method on the step's length (her ring's curvature changes too fast at the sides for the guess alone:
+    // it left threads 3% out at the yoke, held there by the stitching)
+    const ptAt = (s, z) => { const A = at(s); return [A.P[0] + A.N[0] * z, A.P[1] + A.N[1] * z]; };
+    const s = [0];
+    for (let c = 1; c < xz.length; c++) {
+      const zm = 0.5 * (xz[c][1] + xz[c - 1][1]), dx = xz[c][0] - xz[c - 1][0];
+      const d0 = Math.hypot(dx, xz[c][1] - xz[c - 1][1]), Q = ptAt(s[c - 1], xz[c - 1][1]);
+      const err = (sv) => { const R = ptAt(sv, xz[c][1]); return Math.hypot(R[0] - Q[0], R[1] - Q[1]) - d0; };
+      let a0 = s[c - 1] + dx / (1 + zm * at(s[c - 1]).kap), a1 = a0 + 0.01 * Math.sign(dx || 1), e0 = err(a0), e1 = err(a1);
+      for (let it = 0; it < 8 && Math.abs(e1) > 1e-6 && e1 !== e0; it++) { const a2 = a1 - e1 * (a1 - a0) / (e1 - e0); a0 = a1; e0 = e1; a1 = a2; e1 = err(a1); }
+      s.push(Math.abs(e1) < Math.abs(e0) ? a1 : a0);
+    }
+    return { s, L, at };
+  };
+  let lo = 0.8, hi = 1.25;
+  for (let it = 0; it < 40; it++) { const g = (lo + hi) / 2, r = lay(g); if (r.s[r.s.length - 1] > r.L) lo = g; else hi = g; }
+  const { s, at } = lay((lo + hi) / 2);
+  let col = 0;
+  return (x, z, v) => {
+    while (col < xz.length - 1 && xz[col][0] !== x) col++;
+    if (xz[col][0] !== x) col = xz.findIndex((q) => q[0] === x);
+    const A = at(s[Math.max(0, col)]);
+    return [A.P[0] + A.N[0] * z, -v, A.P[1] + A.N[1] * z];
+  };
+}
+
 const isRound = (p) => p.mount === 'cuff' || p.mount === 'collar' || p.mount === 'skirt';
 
 function mountFn(p, prof) {
   const F = prof.finished;
+  if (onFigure(p)) return figureYoke(p, prof);
   if (isRound(p)) {
     // round a circle the finished length round (an engageante sewn into a sleeve's end; a frill on a neckband),
     // z outward; the cuff hangs down, the collar stands up
@@ -1513,6 +1756,7 @@ function bodyFn(p) {
     const R = p.cuffRadius * 0.7;
     return (q) => { const r = Math.hypot(q[0], q[2]); if (r >= R + 0.05 || r < 1e-6) return false; const k = (R + 0.05) / r; q[0] *= k; q[2] *= k; return true; };
   }
+  if (onFigure(p) && !p.noBody) return FIG.bodyFn(p.yokeZ, 0.3);
   if (p.mount === 'skirt' && !p.noBody) {
     // the hips under a skirt sewn to a hip yoke (its heading at the hip line, y 0): round just inside the pleats'
     // inner layer for the top 15 cm (hipRadius, set by buildStrip), tapering by 14% to 40 cm down (the thighs, taken
@@ -1649,7 +1893,7 @@ function cacheKey(S) {
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-return { U, SOLVER, LACE, PART, partWeight, partStiff, scallopEdge, lacePart, PLEATS, pleatProfile, DEFAULTS, buildStrip, setPress, foldAngle, isRound, mountFn, bodyFn, frame, strains, energies, creaseHold, sections, contourFlags, cacheKey };
+return { U, SOLVER, LACE, PART, partWeight, partStiff, scallopEdge, lacePart, PLEATS, pleatProfile, DEFAULTS, buildStrip, setPress, foldAngle, onFigure, figureYoke, isRound, mountFn, bodyFn, frame, strains, energies, creaseHold, sections, contourFlags, cacheKey };
 })();
 __m['presets'] = (() => {
 // The solver viewer's scenes. Each preset builds a cloth on the project's fabric solver and says which of its
@@ -1660,6 +1904,7 @@ __m['presets'] = (() => {
 // flat (the cut pattern, for the strain), edges (the threads, for the strain) }
 const { Fabric, MATERIALS } = __m['fabric-core'];
 const L = __m['lace'];
+const FIG = __m['figure'];
 const DEG = Math.PI / 180;
 
 // the colour-coded draft's parts: flat, distinct, readable in grey too (values spread from dark to light)
@@ -1769,6 +2014,7 @@ const skirt = {
   id: 'skirt', name: 'Pleated skirt',
   note: 'A knee-length wool skirt, cut at the pleat\'s length ratio, pleated onto a hip yoke and hung over the hips. Ease the press off to watch the pleats open and fall onto the hips; the bend sets how crisply they hang.',
   params: [
+    { key: 'body', label: 'Worn on', type: 'select', options: [['figure', 'The figure (the game\'s base body)'], ['form', 'A plain hip form']], value: 'figure' },
     { key: 'kind', label: 'Pleat', type: 'select', options: [['knife', 'Knife'], ['box', 'Box']], value: 'knife' },
     { key: 'press', label: 'Press (heat set)', min: 0, max: 1, step: 0.05, value: 1, live: true, fmt: (v) => v.toFixed(2) },
     { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.8, max: 5, step: 0.05, value: null, live: true, fmt: (v) => v.toFixed(2) },
@@ -1776,8 +2022,8 @@ const skirt = {
     { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
     { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 2, max: 8, step: 0.5, value: 4.5, fmt: (v) => v.toFixed(1) },
     { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 1, max: 6, step: 0.5, value: 4.5, fmt: (v) => v.toFixed(1) },
-    { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0) },
-    { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 50, fmt: (v) => v.toFixed(0) },
+    { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0), show: (v) => v.body !== 'figure' },
+    { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 42, fmt: (v) => v.toFixed(0) },
     { key: 'res', label: 'Mesh spacing round', unit: 'cm', min: 0.5, max: 2, step: 0.25, value: 1.5, fmt: (v) => v.toFixed(2) },
     { key: 'resDown', label: 'Mesh spacing down', unit: 'cm', min: 0.5, max: 3, step: 0.25, value: 2, fmt: (v) => v.toFixed(2) },
     { key: 'stretchK', label: 'Threads held in the bend solve', min: 0, max: 600, step: 10, value: 300, live: true, fmt: (v) => v.toFixed(0) },
@@ -1792,7 +2038,17 @@ const skirt = {
   build(v) {
     // (the mesh at most a third of the pleat's width: a 3 cm knife pleat solves clean at 1 cm, 0.8% worst stretch,
     // and comes apart at 1.25 cm, where the fold's bridge column is too wide a share of each layer)
-    const sc = lace.build({ ...v, res: Math.min(v.res, v.pitch / 3, v.pleatDepth / 3), mount: 'skirt', lace: 'wool', headingWidth: 1.0 });
+    // On the figure: the yoke's seam at her widest hip (32 of her units), its round her band line there, out over
+    // the pleats' depth; the yoke above it, from her waist, is drawn, not solved. Her trunk and legs are the body.
+    const fig = v.body === 'figure';
+    const sc = lace.build({ ...v, res: Math.min(v.res, v.pitch / 3, v.pleatDepth / 3), mount: 'skirt', lace: 'wool', headingWidth: 1.0, ...(fig ? { body: 'figure', yokeZ: 32 } : { body: undefined }) });
+    if (fig) {
+      const p = sc.S.p, outer = Math.max(...sc.S.prof.xz.map((q) => q[1]));
+      sc.bodies = [...FIG.meshes(32).map((m) => ({ type: 'mesh', ...m })),
+        { type: 'mesh', ...FIG.yokeMesh(32, 39.4, 32, 0.45, p.yokeOff + outer + 0.1), color: 0x56607a, opacity: 1 }];
+      sc.info.unshift(['Worn on', 'the figure, 165 cm']);
+      sc.frameBox = [[-20, (FIG.ANKLE_Z - 32) * FIG.CM, -15], [20, (48 - 32) * FIG.CM, 15]];
+    }
     sc.partNames = ['wool', '', '', 'yoke seam (stitched)', 'pressed fold'];   // (no lace parts in plain cloth)
     sc.info.unshift(['Cloth', 'worsted wool']);
     return sc;
@@ -2173,7 +2429,13 @@ function buildMesh(scene) {
     if (b.type === 'sphere') { m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 48, 24), bm); m.position.set(...b.c); }
     else if (b.type === 'cylinder') { m = new THREE.Mesh(new THREE.CylinderGeometry(b.r, b.r, b.y1 - b.y0, 48, 1, true), bm); m.position.set(0, (b.y0 + b.y1) / 2, 0); }
     else if (b.type === 'floor') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.size, b.size), bm); m.rotation.x = -Math.PI / 2; m.position.y = b.y; }
-    else if (b.type === 'plane') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), bm); m.position.set(0, b.y, b.z - 0.05); }
+    else if (b.type === 'mesh') {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
+      g.setIndex(new THREE.BufferAttribute(b.indices, 1));
+      g.computeVertexNormals();
+      m = new THREE.Mesh(g, b.color != null ? new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.9, side: THREE.DoubleSide }) : bm);
+    } else if (b.type === 'plane') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), bm); m.position.set(0, b.y, b.z - 0.05); }
     if (m) bodyGroup.add(m);
   }
 }
@@ -2207,6 +2469,8 @@ function frameCamera(view = 'q') {
   const x = state.scene.f.pos;
   let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < x.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], x[i + k]); mx[k] = Math.max(mx[k], x[i + k]); }
+  // (a scene may ask for more in frame than its cloth: the figure a skirt is worn on)
+  if (state.scene.frameBox) { const [a, b] = state.scene.frameBox; mn = mn.map((v, k) => Math.min(v, a[k])); mx = mx.map((v, k) => Math.max(v, b[k])); }
   const c = mn.map((v, k) => (v + mx[k]) / 2), size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], 4);
   const d = size * 2.3;
   const dir = { front: [0, 0.05, 1], back: [0, 0.05, -1], side: [1, 0.05, 0], q: [0.7, 0.35, 0.75], top: [0.001, 1, 0.001] }[view];

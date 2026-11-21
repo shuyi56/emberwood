@@ -64,6 +64,7 @@ fastest point is under 2e-4 cm a step for 20 frames (or 600 frames). Every solve
 | jabot knife | 8.9 / 2.3 % | 157° / 120° | spreads 4× | droops into falling folds; the kink check misreads a frill hanging across its section plane |
 | jabot gather | 8.5 / 3.2 % | soft | spreads 5× | as the jabot knife |
 | skirt knife (wool, press 1, 0.75 cm) | 1.06 / 0.58 % | 176° / 176° | 1.00 | sound |
+| skirt on the figure (wool, fast settings) | 0.97 / 0.52 % | 173° / 174° | 1.00 | sound |
 | collar flute (standing, starched) | 56 / 22 % | — | — | fails: a 4 cm standing frill never settles, at 240 or 480 Hz, with 1 or 3 held rows |
 
 ## The pleated skirt
@@ -86,6 +87,23 @@ It hangs over the hips (a cylinder just inside the pleats' inner layer for 15 cm
   mesh round and 2 cm down, 2 passes, 120 steps: 4,004 points, about 19 ms a frame, settling at 1.1% worst stretch
   with the folds at 172°. Going coarser down than 2 cm fails (17% at 2.5 cm with a 1 cm mesh round), and so does
   dropping to 2 constraint walks (9%).
+
+### On the figure
+
+`skirt-figure` hangs the skirt on the game's base figure (`tools/lace-study/figure.js`: blender/base/female.py's
+torso table and torso_point, the Warden's leg profile, at 2.62 cm a unit for a 165 cm woman). The yoke's seam sits
+at her widest hip (32 of her units) on her band line there: the hull of her ring, since a band bridges the hollow
+between the seat's two forms, smoothed and set out by the pleats' depth. The yoke above it, from her waist, is drawn
+on the bench, not solved. Her trunk and legs are the body it collides with. With the bench's fast settings it
+settles at 0.97% worst stretch (p99 0.52%), folds 173° / 174°, 3,784 points, about 24 ms a frame.
+
+- The yoke is laid column by column at each step's exact cut length (the secant method on the step), with her ring's
+  signed curvature for the first guess. With the curvature's magnitude only, the hollow at her seat read as convex and
+  the yoke started 7–10% stretched; on her raw ring (not its hull) the pleats' 3 cm offset crossed itself there.
+- Her legs collide only below her trunk (her height 29): above it they lie inside her hips, and a leg's column
+  standing out of the hips' side pushed the skirt's second row 10% out of line.
+- The pleats stand about 6 cm off her hips (the layers sit a mesh column apart), so the drawn yoke flares to meet
+  them. Smaller pleats on a finer mesh sit closer, at the cost of speed.
 
 ## What matters (the sweep, cuff knife and cuff gather as the bases)
 
