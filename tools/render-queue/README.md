@@ -484,6 +484,9 @@ python3 /mnt/project-files/render-queue/rq.py add --thread <id> --branch <branch
     --note "draft topology check: boot"
 ```
 
+Needs numpy, scipy (the flattening, the nearest-point searches; imported only inside the functions that use them) and
+PIL for the sheet: the render machine's setup must install scipy.
+
 Self test: `python3 rq_drafttopo.py --selftest` (17 known shapes and graphs: disc, annulus, sewn tube, torus,
 spherical cap against Gauss-Bonnet and Bertrand-Diguet-Puiseux, a lace graph, closures). The flattening was checked
 against `blender/boot/pattern.py`'s own unwrap (Blender's minimum stretch) on the boot's pieces: the shafts and the
