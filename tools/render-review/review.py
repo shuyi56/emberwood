@@ -678,7 +678,7 @@ def review(req, thread, do_smoke=True):
         src = show(merged, tok[0])
         if src is None:
             near = [p for p in rq.git("ls-tree", "-r", "--name-only", merged, "--", "blender/").stdout.split()
-                    if p.endswith("views.py")]
+                    if os.path.basename(p) == "views.py"]
             rep.block("views", f"{tok[0]} is not in the commit.", "View scripts in this commit: " + ", ".join(near),
                       "P010")
             continue
@@ -721,7 +721,7 @@ def review(req, thread, do_smoke=True):
 
     # ---- a material change renders the material, not the figure (John's rule, 2026-11-17; P024)
     mat_defs = material_only(since, tip)
-    figure_jobs = [v for v, tok in parsed if tok and tok[0].endswith("views.py")]
+    figure_jobs = [v for v, tok in parsed if tok and os.path.basename(tok[0]) == "views.py"]
     if mat_defs and figure_jobs:
         if not req.get("needs_render"):
             rep.block("material", "Since this branch was last rendered only material code changed (" +
@@ -738,7 +738,7 @@ def review(req, thread, do_smoke=True):
     changed = sorted({d for path, defs in fresh.items() if path.startswith("blender/") for d in defs})
     hairy = any(HAIR.search(d) for d in changed)
     for v, tok in parsed:
-        if not tok or not tok[0].endswith("views.py"):
+        if not tok or not os.path.basename(tok[0]) == "views.py":
             continue
         known = flags_known_to(show(merged, tok[0]) or "") or set()
         one = "--angles" in tok and tok.index("--angles") + 1 < len(tok) \
