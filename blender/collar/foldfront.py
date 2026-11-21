@@ -25,18 +25,32 @@ a = sys.argv
 has = a[-1].lstrip().startswith('{')
 opt = json.loads(a[-1]) if has else {}
 blend, out = a[-3:-1] if has else a[-2:]
+# The saved recipes: '{"recipe": "stand_collar"}' (any other option given beside it overrides the recipe's own).
+#   stand_collar   John, 2026-11-21: "save the current recipe for building a beautiful stand collar" (the sheet
+#                  bodice-button-on-curved-fold.png). The bodice's own neck edge stands round the neck as the collar,
+#                  and each front is turned back from it on a curved roll line that sweeps in to the top button:
+#                  the break 0.15 above the bust line, the line bowed 0.5 away from the V (a rounded V), a 1.3 cm roll,
+#                  the top button just under where the two folds meet, cloth 4.4 mm thick (bodice_cut's THICK 0.085).
+#                  See blender/collar/STAND_COLLAR.md.
+RECIPES = {
+    'stand_collar': dict(foot_over_bust=0.15, bow=-0.5, roll_radius=0.24, break_over=0.03, neck_x=2.2, sheet=6, fair=40,
+                         ease_chest=True, ease_rounds=150, bow_band=1.0, bow_over=1.5, lie=0.02, thick_out=1.0, t0=0.03),
+}
+if opt.get('recipe'):
+    opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 bpy.ops.wm.open_mainfile(filepath=blend)
 b = bpy.data.objects['Redingote bodice']
 M = {k[7:]: b[k] for k in b.keys() if k.startswith('bodice_')}
 w, yc, lap = M['w'], M['yc'], M['lap']
 sol = [m for m in b.modifiers if m.type == 'SOLIDIFY'][0]
 th = sol.thickness
-# the break: at the bust line (John: "you need a deeper fold"; it was 2 in above). The top button goes right at the
-# fold's foot, in the crook of the V (John: "it should be right on the fold line and curved").
-foot = opt.get('foot', M['z_bust'] + 0.15)
-# the fold line is no straight chord: it falls steeply from the neck and sweeps in to the button, a rounded V (bow < 0:
-# away from the V, fullest two thirds of the way down). Straight, the two folds met 4 cm above the top button.
-bow = opt.get('bow', -0.5)
+# The fold and the buttons (John: "deeper fold; the buttons should not be fighting the fold; the fold should leave a
+# line long for buttons to hold in place"; "it should be right on the fold line and curved"): the fold line runs deep,
+# to under the bust line, and it is no straight chord: it bows into the V and turns down to run INTO the front's
+# closing edge, tangent to it. So the V closes well above the fold's foot, and from there down the front is one straight
+# closed line, which the buttons hold; the top button sits just under where the V closes, on the line the fold becomes.
+foot = opt.get('foot', M['z_bust'] + opt.get('foot_over_bust', -0.6))
+bow = opt.get('bow')                                   # (None: as much as brings the line in tangent to the edge)
 def bowdev(t):
     t = np.clip(t, 0, 1); return bow * 6.75 * t * t * (1 - t)
 def ss01(a_, b_, x_):
@@ -79,6 +93,7 @@ for layer, sg in ((1, -1.0), (2, 1.0)):               # (the right front's neck 
     N = W[i][[0, 2]]; B = np.array([-sg * lap, foot]); ln = np.linalg.norm(B - N); u = (B - N) / ln
     n = np.array([-u[1], u[0]]); n = n if n[0] * -sg > 0 else -n       # toward the V
     sides.append(dict(layer=layer, sg=sg, N=N, B=B, u=u, n=n, ln=ln))
+    if bow is None: bow = opt.get('tangent', 0.9) * abs(u[0] / u[1]) * ln / 6.75
     geom = [f for f in bm.faces if all(v[lay] == layer for v in f.verts) and min(W[v.index, 2] for v in f.verts) > foot - 0.4
             and max(W[v.index, 1] for v in f.verts) < yc]
     ge = list({e for f in geom for e in f.edges}); gv = list({v for f in geom for v in f.verts})
@@ -187,7 +202,7 @@ if opt.get('buttons', True):
     tt = np.linspace(0, 1, 400); cx = top['N'][0] + tt * top['ln'] * top['u'][0] + bowdev(tt) * top['n'][0]
     cz = top['N'][1] + tt * top['ln'] * top['u'][1] + bowdev(tt) * top['n'][1]
     zcross = float(np.interp(0.0, cx * np.sign(cx[-1] - cx[0]), cz))
-    z1 = zcross - rb - opt.get('break_over', 0.03); z0 = M['z_hem_front'] + 0.55 * w
+    z1 = zcross - rb - opt.get('break_over', 0.12); z0 = M['z_hem_front'] + 0.55 * w
     nbt = max(2, int(round((z1 - z0) / step)) + 1)
     Wb = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
     fb = BVHTree.FromPolygons([Vector(p) for p in Wb], [tuple(p.vertices) for p in b.data.polygons])
