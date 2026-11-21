@@ -598,7 +598,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
         chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 2, 2))
-    for sd, T, wig in ((-1.0, 10.0, 1.8), (1.0, 8.0, -1.5)):                          # (the tails)
+    for sd, T, wig in ((-1.0, 8.5, 1.6), (1.0, 7.0, -1.3)):                          # (the tails)
         u = np.linspace(0.0, 1.0, 56)
         aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.6 * u) * u)
         vv = -T * u
@@ -608,7 +608,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         import time as _t
         t0 = _t.time()
         pts = np.concatenate([c[0] for c in chains])
-        fb = fabric.Fabric(pts, dict(bend=DRAPE['bend'], stretch=0.0, friction=DRAPE['friction'], iterations=16,
+        fb = fabric.Fabric(pts, dict(bend=DRAPE['bend'], stretch=0.0, friction=DRAPE['friction'], iterations=DRAPE['iters'],
                                           gravity=(0.0, 0.0, -375.0 * DRAPE['g'])))
         at0, pin = 0, []
         for c, p0, p1 in chains:
@@ -643,6 +643,15 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         log('boot lacing %s: the bow let fall by the cloth solver in %d steps (%.1f s): the tails and loops moved %.2f cm on average, %.2f at most'
             % (o.name, steps, _t.time() - t0, d.mean() * 2.619, d.max() * 2.619))
         at0 = 0
+        for k_, (c, p0, p1) in enumerate(chains):
+            if k_ >= 2:
+                q = fb.pos[at0:at0 + len(c)]
+                L0 = np.linalg.norm(np.diff(c, axis=0), axis=1).sum()
+                L1 = np.linalg.norm(np.diff(q, axis=0), axis=1).sum()
+                log('boot lacing %s: free end %d: %.1f cm laid, %.1f cm after the solve (reach down %.1f cm)'
+                    % (o.name, k_ - 1, L0 * 2.619, L1 * 2.619, (q[0, 2] - q[:, 2].min()) * 2.619))
+            at0 += len(c)
+        at0 = 0
         out = []
         for c, p0, p1 in chains:
             out.append(fb.pos[at0:at0 + len(c)].copy())
@@ -661,7 +670,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
-DRAPE = dict(bend=2e-4, friction=0.6, steps=600, g=0.7, loops=False, gap=3.2)         # the bow's settling (see lacing)
+DRAPE = dict(bend=2e-4, friction=0.6, steps=600, g=0.7, loops=False, gap=3.2, iters=200)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
