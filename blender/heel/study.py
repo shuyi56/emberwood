@@ -43,6 +43,7 @@ JOINT = 5.0 / 7.0               # Golding: the inside joint (1st metatarsal head
 SEAT_OF_TREAD = 0.75            # Golding: the seat's width, a share of the sole's width at the joint (his 'tread')
 HEEL_OF_LAST = 0.25             # One & Awl: the heel's length, a share of the last's length
 LAST_ALLOW = 2.5 * 0.847        # Golding: the last 2.5 sizes (1/3 in each) longer than the foot, in cm
+MT1_AT, MT5_AT = 0.728, 0.658   # Lee, Lin & Wang 2014: the 1st and 5th metatarsal heads, a share of the foot's length from the heel
 MTP_AXIS_DEG = 90.0 - 73.0      # Raychoudhury 2014: the metatarsal heads' line slants back this far from square
 CAVANAGH = dict(heel=0.60, midfoot=0.08, forefoot=0.28, toes=0.04, heel_peak=139.0, fore_peak=53.0)
 GAIT_PEAK = 1.10                # Perry & Burnfield: walking's vertical force peak, x body weight
@@ -104,10 +105,13 @@ def measure(P, N, foot, ankle):
     inner = prof[:, 2] if side < 0 else -prof[:, 1]     # (how far each section reaches to the inside)
     outer = -prof[:, 1] if side < 0 else prof[:, 2]
     band = (prof[:, 0] > 0.55) & (prof[:, 0] < 0.90)
-    i1 = np.nanargmax(np.where(band, inner, -np.inf))
-    i5 = np.nanargmax(np.where((prof[:, 0] > 0.50) & (prof[:, 0] < 0.85), outer, -np.inf))
-    f['mt1'] = np.array([prof[i1, 2] if side < 0 else prof[i1, 1], hy - prof[i1, 0] * L])
-    f['mt5'] = np.array([prof[i5, 1] if side < 0 else prof[i5, 2], hy - prof[i5, 0] * L])
+    # (the heads at Lee 2014's 0.728 and 0.658 of the length from the heel, at the section's medial and lateral edges.
+    # Read off the widest sections instead, the 1st head came out at 0.86 and the 5th at 0.80: the big toe's edge, 4 cm
+    # too far forward, and the heel bent about a line through the toes)
+    i1 = int(np.argmin(np.abs(prof[:, 0] - MT1_AT)))
+    i5 = int(np.argmin(np.abs(prof[:, 0] - MT5_AT)))
+    f['mt1'] = np.array([prof[i1, 2] if side < 0 else prof[i1, 1], hy - MT1_AT * L])
+    f['mt5'] = np.array([prof[i5, 1] if side < 0 else prof[i5, 2], hy - MT5_AT * L])
     f['ball_w'] = float(np.nanmax(prof[band, 2] - prof[band, 1]))
     # (the heel's breadth at the seat point, under the ankle bones: the malleoli are wider than the heel and stand
     # over the seat, not in it)
