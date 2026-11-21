@@ -40,7 +40,9 @@ Run `rq.py ping --thread <your id>` first (see "Ping the queue before you ask fo
 * **Final quality, `frames`, `glb`, or `ready`**: send the **reviewer thread**, "Review render requests before queueing"
   (cmsg_01CnnKqGvuWEUi2G9X9cb9nBJkqDv7Ktra4a31euzvMxpx), a message with `message_thread` holding one JSON block. The
   reviewer reads it first (see "Review before the queue" below) and passes it on to the queue, or sends it back to you
-  with fixes. `rq.py add` refuses a final-quality request that the reviewer has not passed.
+  with fixes. `rq.py add` refuses a final-quality request that the reviewer has not passed, **unless the queue is idle**: with
+  nothing rendering or waiting (check with `rq.py ping`), add the final yourself and skip the reviewer (John,
+  2026-11-19; the add logs an `unreviewed` event). The no-sheet and no-before checks still apply.
 
 Do not message the render-queue thread to ask for a render or to ask whether it is done. The JSON block:
 
@@ -265,7 +267,8 @@ add `--gaps-only`: the job stops after the checks (a mannequin outfit build is a
 ## Review before the queue
 
 The reviewer thread checks each final-quality, `frames`, `glb` or `ready` request without rendering anything, in about
-two minutes. Check-quality requests skip it: a thread adds those itself with `rq.py add --quality check`.
+two minutes. Check-quality requests skip it (a thread adds those itself with `rq.py add --quality check`), and so
+does any request sent while the queue is idle.
 
 * the request itself: outputs, cells, view commands; no full sheet in any form (not as an output, not a character
   script run as a view, not `frames` covering most of the sheet); no before of main that is not cached
@@ -394,6 +397,27 @@ same view eight times in an afternoon:
 Render time is split among the requests a job served, so a shared set build is not charged twice. Being alone on the
 queue is never hogging: the share rules need a second thread that actually waited.
 
+### Repeats lose priority
+
+Asking for the same views again and again now costs priority as well as a warning (John, 2026-11-19). A request is a
+**repeat** when it follows another request from the same thread for the same views at the same quality, with no
+different request from that thread in between and no more than 45 minutes after it. The first request is repeat 0;
+the next is repeat 1, and so on. A repeat runs `repeat` steps behind other requests, up to 3, so while anything else
+is waiting it starts after them (a step is one priority level: finals and crops are 0, `glb` is 1, the sheet is 9).
+
+It never starves. Every 10 minutes a repeat waits it wins one step back, and when nothing else is waiting or
+rendering it runs at once. A different request from the thread, or 45 quiet minutes, resets the count. The penalty
+shows in `rq.py ping` ("priority -2: repeat 3") and on the dashboard next to the status, `rq.py add` says so when you
+send the repeat, and the nightly stats count the penalised requests and the steps per thread. The hogging warnings above
+stay as they are. The numbers are `PEN` in `rq.py`.
+
+## What the render machine needs installed
+
+Besides Blender (`bpy`), the petticoat's pattern code needs the Python packages `shapely` and `triangle`
+(`pip install shapely triangle`). On 2026-11-19 the machine had neither, and the first four flow checks of the riding
+skirt over the petticoat (#252 to #254, #256) failed on `ModuleNotFoundError`. They are installed in the running
+container now, but a fresh container needs them again: put the line in the environment's setup script.
+
 ## Time limits
 
 John's rule (2026-11-17): a job running past **10 minutes** is reported to John and to the requesting thread as it
@@ -410,6 +434,25 @@ an image takes 5 to 6 minutes, and that turn was killed at 30 minutes (#187). To
 the turn and the head as separate jobs, or split the turn (`--angles front,3/4,profile` and `--angles back3/4,back`).
 Check a navy or near-black dye on a swatch first: three rejections were a navy that read slate blue under the figure's
 light.
+
+## Long jobs: let the queue own them, never a detached shell
+
+(2026-11-21, John asked after a collar build died with nobody noticing and the thread lost an hour.) A render or
+solve you start yourself with `(nohup python3 ... > log 2>&1 &)` inside a plain Bash call is not safe: the
+environment ends the call's process group when the call or the turn ends, the process vanishes with no error, and
+nothing watches it. The queue cannot see it either, because it only watches the jobs it started.
+
+- **Submit it as a request.** A check-quality request (`--quality check`) needs no reviewer. The queue owns the job,
+  runs it to the end whatever your turn does, and on a failure marks the request failed with its cause (the log
+  tail) and messages you. Ping, add, end your turn, and read the result by ping.
+- **If you must run something yourself**, start it with the Bash tool's `run_in_background` flag, never a
+  backgrounded subshell, and have the script write a `started` line, a line every minute or so, and a final
+  `finished` or the exception, so a silent stop is visible in the log. Check the log's last line and age the next
+  time you wake.
+- **How the queue reports a death:** a job it started that exits is failed at once, with `exit N after S s` and the
+  cause in the manifest (exit 137 is a memory kill). A job past 10 minutes is warned, past 30 minutes killed. A
+  pending request that waits with no serve running is the one thing it cannot report from inside, so the renderer
+  thread watches every state change and starts serve whenever a request waits.
 
 ## John's desktop (GPU worker)
 

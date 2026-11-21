@@ -47,7 +47,7 @@ Batching rules (John, 2026-11-19)
   * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
     job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
-import argparse, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
+import argparse, functools, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("RQ_HOME", HERE)   # queue.json, results/, events.jsonl: next to the code unless RQ_HOME says
@@ -63,6 +63,11 @@ NOT_INPUTS = ("blender/facecheck/",)
 RENDERED = ("blender/ranger/ranger-blender.png",)   # the pngs the queue itself renders
 REQUESTABLE = ("frames", "views", "glb")
 PRIORITY = {"frames": 0, "views": 0, "glb": 1, "sheet": 9}
+# John, 2026-11-19: a thread that asks for the same views again and again loses priority each time. The request that
+# repeats the previous one (same thread, same views, same quality, not interrupted by a different request, and not
+# more than `quiet_s` after it) is `repeat` steps behind, up to `max`; each `age_s` it waits wins one step back, so
+# it is never starved, and an idle queue runs it at once. Hogging warnings stay as they were.
+PEN = {"quiet_s": 2700, "max": 3, "age_s": 600}
 MAX_BATCH = int(os.environ.get("RQ_MAX_BATCH", "4"))      # branches merged into one commit
 MAX_MERGE = int(os.environ.get("RQ_MAX_MERGE", "6"))      # requests in one combined views.py job
 WINDOW_S = int(os.environ.get("RQ_WINDOW", "45"))         # a job waits this long after its newest request
@@ -89,6 +94,7 @@ def sets():
     return {}
 
 
+@functools.lru_cache(maxsize=None)
 def ts(t):
     import calendar
     return calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ"))
@@ -280,6 +286,60 @@ def git(*a, check=True, cwd=REPO):
     return r
 
 
+LOCK = os.path.join(DATA, "queue.lock")
+_lock_depth = 0
+
+
+class qlock:
+    """One writer at a time for queue.json, across processes (an O_EXCL lock file; a lock older than 60 s is a
+    dead process's and is broken). Re-entrant, so a locked command can call save()."""
+    def __enter__(self):
+        global _lock_depth
+        if _lock_depth == 0:
+            end = time.time() + 45
+            while True:
+                try:
+                    fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.write(fd, f"{os.getpid()} {now()}".encode()); os.close(fd)
+                    break
+                except FileExistsError:
+                    try:
+                        if time.time() - os.path.getmtime(LOCK) > 60:
+                            os.unlink(LOCK)
+                            continue
+                    except OSError:
+                        pass
+                    if time.time() > end:
+                        break                      # never block the queue for good: go on without the lock
+                    time.sleep(0.05)
+        _lock_depth += 1
+        return self
+
+    def __exit__(self, *e):
+        global _lock_depth
+        _lock_depth -= 1
+        if _lock_depth == 0:
+            try:
+                os.unlink(LOCK)
+            except OSError:
+                pass
+
+
+def locked(fn):
+    @functools.wraps(fn)
+    def w(*a, **k):
+        with qlock():
+            return fn(*a, **k)
+    return w
+
+
+_LISTS = ("requests", "intents")
+
+
+def _clean(o):
+    return json.dumps({k: v for k, v in o.items() if not k.startswith("_")}, sort_keys=True)
+
+
 def load():
     try:
         with open(STATE) as f:
@@ -287,36 +347,80 @@ def load():
     except FileNotFoundError:
         s = {"next": 1, "requests": []}
     s.setdefault("ready", []); s.setdefault("sheet_due", False); s.setdefault("sheets_done", {})
+    # what this process saw, so save() can tell its own changes from other processes' (a three-way merge)
+    s["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in s.get(k, [])} for k in _LISTS},
+                  "top": {k: json.dumps(v, sort_keys=True) for k, v in s.items() if k not in _LISTS and not k.startswith("_")}}
     return s
+
+
+def merge_disk(s, disk):
+    """s is this process's copy (loaded some time ago, perhaps before a slow step); disk is the file now.
+    Keep what this process changed, and take everything else from the file: a request another thread added, a
+    cancel, a state another process set. Without this the last writer won and lost the others' changes."""
+    base = s.get("_base")
+    if base is None:
+        return s
+    out = {k: v for k, v in s.items() if not k.startswith("_")}
+    for k, v in disk.items():
+        if k in _LISTS or k.startswith("_"):
+            continue
+        if k in ("next", "next_intent"):
+            out[k] = max(out.get(k, 1), v)
+        elif k not in out or json.dumps(out[k], sort_keys=True) == base["top"].get(k):
+            out[k] = v                                   # unchanged here: the file's value is newer
+    for k in _LISTS:
+        if k not in s and k not in disk:
+            continue
+        b = base["lists"].get(k, {})
+        mine = {o["id"]: o for o in s.get(k, [])}
+        theirs = {o["id"]: o for o in disk.get(k, [])}
+        merged = []
+        for i in sorted(set(mine) | set(theirs)):
+            m, d = mine.get(i), theirs.get(i)
+            if m is not None and (i not in b or _clean(m) != b[i]):
+                if (k == "requests" and d is not None and d.get("state") == "cancelled" and i in b
+                        and json.loads(b[i]).get("state") != "cancelled" and m.get("state") in ("pending", "rendering", "conflict")):
+                    merged.append(d)                     # cancelled meanwhile: the cancel stands
+                else:
+                    merged.append(m)                     # changed or added here
+            elif d is not None:
+                merged.append(d)                         # unchanged here, or added elsewhere: the file's version
+            elif m is not None and i not in b:
+                merged.append(m)
+        out[k] = merged
+    return out
 
 
 def save(s):
     """Compact JSON, written and then read back: the shared folder is a network mount, and a replace on it once
-    left the file cut short. A local copy is kept too."""
+    left the file cut short. A local copy is kept too. Under the lock, merged with what the file holds now."""
+    orig = s
+    base = s.get("_base")
     s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]]}
     os.makedirs(WORK, exist_ok=True)
     for _ in range(5):
-        # (keep requests another process added since s was loaded: plan() holds s through slow git merges; read
-        # again on every try, since an add that lands between the write and the check is what made it fail)
-        try:
+        with qlock():
+            try:
+                with open(STATE) as f:
+                    disk = json.load(f)
+                s = merge_disk({**s, "_base": base}, disk)
+                if s["requests"]:
+                    s["next"] = max(s["next"], max(r["id"] for r in s["requests"]) + 1)
+            except (OSError, ValueError, KeyError):
+                pass
+            data = json.dumps({k: v for k, v in s.items() if not k.startswith("_")}, separators=(",", ":"))
+            with open(os.path.join(WORK, "queue.local.json"), "w") as f:
+                f.write(data)
+            with open(STATE, "w") as f:
+                f.write(data); f.flush(); os.fsync(f.fileno())
+            time.sleep(0.2)
             with open(STATE) as f:
-                disk = json.load(f)
-            have = {r["id"] for r in s["requests"]}
-            extra = [r for r in disk.get("requests", []) if r["id"] not in have and r["id"] >= min(have | {10 ** 9})]
-            if extra:
-                s["requests"] = sorted(s["requests"] + extra, key=lambda r: r["id"])
-                s["next"] = max(s["next"], disk.get("next", 1))
-        except (OSError, ValueError, KeyError):
-            pass
-        data = json.dumps(s, separators=(",", ":"))
-        with open(os.path.join(WORK, "queue.local.json"), "w") as f:
-            f.write(data)
-        with open(STATE, "w") as f:
-            f.write(data); f.flush(); os.fsync(f.fileno())
-        time.sleep(0.5)
-        with open(STATE) as f:
-            if f.read() == data:
-                return
+                if f.read() == data:
+                    w = json.loads(data)        # what the file holds now is this process's new base
+                    orig["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in w.get(k, [])} for k in _LISTS},
+                                     "top": {k: json.dumps(v, sort_keys=True) for k, v in w.items()
+                                             if k not in _LISTS and not k.startswith("_")}}
+                    return
     sys.exit(f"could not write {STATE} intact; the local copy is in {WORK}/queue.local.json")
 
 
@@ -607,6 +711,7 @@ def plan(fetch=True):
             bjobs.append({"kind": kind, "param": param, "commit": b["commit"], "requests": [r["id"] for r in rs],
                           "combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"]} for r in b["requests"]],
                           "key": job_key(b["commit"], kind, param), "prio": PRIORITY[kind],
+                          "pen": min(eff_penalty(r) for r in rs),
                           "order": min(r["id"] for r in rs)})
         jobs += combine_views(bjobs, solo)
     # identical jobs (the same key) from different batches are one job for all their requests
@@ -614,6 +719,7 @@ def plan(fetch=True):
     for j in jobs:
         if j["key"] in seen:
             seen[j["key"]]["requests"] = sorted(set(seen[j["key"]]["requests"]) | set(j["requests"]))
+            seen[j["key"]]["pen"] = min(seen[j["key"]].get("pen", 0), j.get("pen", 0))
             seen[j["key"]]["dups"] = seen[j["key"]].get("dups", 0) + 1
         else:
             seen[j["key"]] = j
@@ -634,7 +740,7 @@ def plan(fetch=True):
     for j in jobs:
         j["cached"] = cached(j["key"])
     # cheap drafts before expensive finals
-    jobs.sort(key=lambda j: (j["prio"], 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
+    jobs.sort(key=lambda j: (j["prio"] + j.get("pen", 0), 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
     save(s)
     return main, held, batches, jobs
 
@@ -646,7 +752,7 @@ def show(main, held, batches, jobs):
         "batches": [{"combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"][:9], "changes": r["_footprint"],
                                    "not_combined_with": r.get("not_combined_with")} for r in b["requests"]]}
                     for b in batches],
-        "jobs": [{k: j[k] for k in ("key", "kind", "param", "prio", "requests", "cached")} for j in jobs]}, indent=2))
+        "jobs": [{k: j[k] for k in ("key", "kind", "param", "prio", "pen", "requests", "cached")} for j in jobs]}, indent=2))
 
 
 # ------------------------------------------------------------------ running
@@ -879,6 +985,8 @@ def job_gb(job):
     p = job.get("param") or ""
     if "OUTFIT=" in p:
         return min(6.0, 2.0 + 0.6 * len(re.search(r"OUTFIT=(\S+)", p)[1].split(",")))
+    if "HABIT_PIECES" in p or "habit_all" in p or "petticoat" in p:
+        return 7.0                  # (nightly 2026-11-20: two habit/petticoat builds side by side, #255 and #256, one killed at 142 s)
     if "--mannequin" in p:
         return 2.0                                     # (no head, face or hair: a light build)
     return 7.6 if "warden" in p else 4.0
@@ -1060,6 +1168,7 @@ def open_intents(s):
             and i["eta"] + INTENT_TTL_S > t]
 
 
+@locked
 def cmd_intent(a):
     """A thread says what it is about to send, before it does the work, so the queue can hold a related job for it."""
     s = load()
@@ -1092,6 +1201,7 @@ def cmd_intents(a):
                   f"eta {time.strftime('%H:%M:%SZ', time.gmtime(i['eta']))}  {i['branch']}  {i.get('note') or ''}")
 
 
+@locked
 def cmd_drop_intent(a):
     s = load()
     for i in s.get("intents", []):
@@ -1160,6 +1270,7 @@ def is_extra(v):
     return RQ_VIEWS in w and not any(f in w for f in ("--turn", "--head", "--walk", "--run", "--cells"))
 
 
+@locked
 def cmd_add(a):
     s = load()
     outs = [o for o in a.outputs.split(",") if o]
@@ -1176,9 +1287,15 @@ def cmd_add(a):
     a.view = [expand_view(v) for v in (a.view or [])] or None
     if a.quality is None:     # crops and pose strips are cheap drafts unless the request says final
         a.quality = "check" if a.view and all(is_extra(v) for v in a.view) else "final"
+    unreviewed = False
     if a.quality == "final" and not a.reviewed:
-        sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'). "
-                 "A check-quality request you can add yourself: add --quality check")
+        # John, 2026-11-19: with nothing rendering or waiting, a request may skip the reviewer (a crash costs nobody a wait)
+        busy = [o["id"] for o in s["requests"] if o["state"] in ("pending", "rendering", "conflict")]
+        if busy:
+            sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'), "
+                     f"unless the queue is idle; #{', #'.join(map(str, busy))} is rendering or waiting now. "
+                     "A check-quality request you can add yourself: add --quality check")
+        unreviewed = True
     before_only_from_cache(a, outs)
     r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
          "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
@@ -1192,12 +1309,22 @@ def cmd_add(a):
                     and o.get("quality") == r["quality"])):
             o["state"] = f"superseded by {r['id']}"
             event("coalesced", None, dropped=o["id"], by=r["id"], branch=a.branch)
+    r["repeat"] = repeat_count(s, a.thread, r["views"], r["quality"], time.time()) if r["views"] else 0
     figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
     for i in s.get("intents", []):    # the request an intent announced has come
         if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
             i["state"] = f"sent as #{r['id']}"
     s["next"] += 1; s["requests"].append(r); save(s)
+    if unreviewed:
+        event("unreviewed", None, thread=a.thread, request=r["id"])
+        print("rq note: the queue was idle, so this final request skipped the reviewer", flush=True)
     print(json.dumps(r, indent=2))
+    if r["repeat"]:
+        steps = min(r["repeat"], PEN["max"])
+        print(f"rq note: this is repeat {r['repeat']} of the same views: it runs {steps} step{'s' * (steps > 1)} behind other "
+              f"requests (each {PEN['age_s'] // 60} minutes it waits wins one step back; an idle queue runs it at once; "
+              f"a different request, or {PEN['quiet_s'] // 60} quiet minutes, resets it)", flush=True)
+        event("penalty", None, thread=a.thread, request=r["id"], repeat=r["repeat"], steps=steps)
     lp = last_ping(a.thread)
     if lp is None or time.time() - lp > PING_FRESH_S:
         print(f"rq note: no ping from this thread in the last {PING_FRESH_S // 60} minutes. Before the next request, run "
@@ -1219,19 +1346,53 @@ HOG = {"wait_s": 120, "hour_share": 0.5, "hour_min_s": 600,     # over half the 
        "streak": 5}                              # 5 submissions in a row while another thread had one waiting
 
 
+_SECS = {}      # job key -> (seconds, requests it served): a finished job's manifest never changes
+
+
+def _job_seconds(k):
+    if k in _SECS:
+        return _SECS[k]
+    for d in (k, k + "-failed"):
+        mp = os.path.join(RESULTS, d, "manifest.json")
+        if os.path.exists(mp):
+            try:
+                m = json.load(open(mp))
+            except ValueError:
+                return (0.0, 1)        # (being written: not cached, read again next time)
+            _SECS[k] = (m.get("seconds", 0), max(1, len(m.get("requests") or [1])))
+            return _SECS[k]
+    return (0.0, 1)
+
+
 def request_seconds(r):
     """A request's share of render time: each of its jobs' seconds, split among the requests that job served."""
     t = 0.0
     for k in r.get("jobs") or []:
-        for d in (k, k + "-failed"):
-            mp = os.path.join(RESULTS, d, "manifest.json")
-            if os.path.exists(mp):
-                try:
-                    m = json.load(open(mp))
-                except ValueError:
-                    break
-                t += m.get("seconds", 0) / max(1, len(m.get("requests") or [1])); break
+        sec, n = _job_seconds(k)
+        t += sec / n
     return t
+
+
+def repeat_count(s, thread, views, quality, at):
+    """How many requests in a row, just before this one, this thread sent for the same views at the same quality.
+    A different request from the thread, or a gap over PEN["quiet_s"], ends the run."""
+    key = (sorted(views or []), quality)
+    n, prev = 0, at
+    for o in sorted((o for o in s["requests"] if o["thread"] == thread and o.get("created")), key=lambda o: -o["id"]):
+        if o["state"].startswith(("superseded", "cancelled")):
+            continue
+        if (sorted(o.get("views") or []), o.get("quality")) != key or prev - ts(o["created"]) > PEN["quiet_s"]:
+            break
+        n += 1; prev = ts(o["created"])
+    return n
+
+
+def eff_penalty(r, at=None):
+    """The steps a request is behind now: its repeat count (at most PEN["max"]) less one for every PEN["age_s"] waited."""
+    n = min(r.get("repeat", 0), PEN["max"])
+    if not n or r["state"] not in ("pending", "conflict") or not r.get("created"):
+        return n if r["state"] in ("pending", "conflict") else 0
+    return max(0, n - int(((at or time.time()) - ts(r["created"])) // PEN["age_s"]))
 
 
 HOG_RULES = ("over {hour_share:.0%} of the last hour's render time (at least {hour_min_s} s) or {day_share:.0%} of the "
@@ -1308,9 +1469,11 @@ def hog_warnings(s, at=None, thread=None):
     run, best = [], {}
     for r in subs:
         run = run + [r] if run and run[-1]["thread"] == r["thread"] else [r]
-        lo, hi = ts(run[0]["created"]), ts(r["created"])
-        others = any(o["thread"] != r["thread"] and ts(o["created"]) < hi and
-                     (not o.get("finished") or ts(o["finished"]) > lo) for o in srt)
+        hi = ts(r["created"])
+        # (another thread had a request waiting or rendering at the moment one of the run's requests was sent)
+        others = any(o["thread"] != r["thread"] and o.get("created") and not o["state"].startswith(("cancelled", "superseded"))
+                     and ts(o["created"]) <= ts(x["created"]) and
+                     (not o.get("finished") or ts(o["finished"]) > ts(x["created"])) for o in srt for x in run)
         if len(run) >= HOG["streak"] and others and hi > at - 3600 * HOG["repeat_h"]:
             best[r["thread"]] = [x["id"] for x in run]
     for t, ids in best.items():
@@ -1363,10 +1526,11 @@ def queue_state(s, thread=None, at=None):
         elif r["state"] == "pending" or r["state"] == "conflict":
             waiting.append({"id": r["id"], "thread": name(r["thread"]), "mine": r["thread"] == thread,
                             "state": r["state"], "waited_s": round(at - ts(r["created"])), "est_s": round(_est_seconds(r, done)),
+                            "penalty": eff_penalty(r, at), "repeat": r.get("repeat", 0),
                             "views": r.get("views"), "note": r.get("note")})
     # (a rough clock: PARALLEL slots, each job taking its estimate; the queue starts jobs in id order)
     slots = sorted([x["left_s"] for x in rendering] + [0] * max(0, PARALLEL - len(rendering)))[:PARALLEL] or [0]
-    for w in waiting:
+    for w in sorted(waiting, key=lambda w: (w["penalty"], w["id"])):    # (the queue starts the least penalised first)
         if w["state"] != "pending":
             continue
         i = min(range(len(slots)), key=slots.__getitem__)
@@ -1393,10 +1557,18 @@ def queue_state(s, thread=None, at=None):
         if out["you"]["rendering"] or out["you"]["waiting"]:
             adv.append(f"you already have #{', #'.join(map(str, out['you']['rendering'] + out['you']['waiting']))} in the queue: "
                        "wait for it, or send a newer request for the same views, which replaces a waiting one")
+        pens = [w for w in waiting if w["mine"] and w["penalty"]]
+        if pens:
+            adv.append("your waiting request is behind others because it repeats the same views: " +
+                       ", ".join(f"#{w['id']} by {w['penalty']}" for w in pens) +
+                       "; change the views, or wait, and it moves up one step every "
+                       f"{PEN['age_s'] // 60} minutes")
         if out["you"]["warnings"]:
             adv.append("you are flagged for hogging: send a cheaper crop or check that your edit changes the build before the next full render")
         if busy == "busy":
             adv.append(f"the queue is busy: a new request would start in about {fmt_s(new_wait)}; prefer a check-quality crop")
+        if busy == "idle":
+            adv.append("the queue is idle: a final-quality request can skip the reviewer, add it yourself with rq.py add")
         out["you"]["advice"] = adv or ["the queue has room: go ahead"]
     return out
 
@@ -1442,7 +1614,8 @@ def cmd_ping(a):
         print(f"  rendering #{x['id']} {x['thread']}: {fmt_s(x['running_s'])} in, about {fmt_s(x['left_s'])} left  {x['note'] or ''}")
     for w in st["waiting"]:
         when = f"starts in about {fmt_s(w['starts_in_s'])}" if "starts_in_s" in w else w["state"]
-        print(f"  waiting   #{w['id']} {w['thread']}: {when}  {w['note'] or ''}")
+        pen = f" (priority -{w['penalty']}: repeat {w['repeat']})" if w["penalty"] else ""
+        print(f"  waiting   #{w['id']} {w['thread']}: {when}{pen}  {w['note'] or ''}")
     if st["open_intents"]:
         print("  announced: " + "; ".join(f"intent #{i['id']} {i['thread']} ({i['piece']})" for i in st["open_intents"]))
     if st["sheet_due"]:
@@ -1458,6 +1631,7 @@ def cmd_ping(a):
             print(f"  advice: {v}")
 
 
+@locked
 def cmd_ready(a):
     s = load()
     if a.branch not in s["ready"]:
@@ -1465,6 +1639,7 @@ def cmd_ready(a):
     save(s)
 
 
+@locked
 def cmd_sheet_due(a):
     s = load(); s["sheet_due"] = True; save(s)
 
@@ -1573,6 +1748,10 @@ def cmd_export(a):
             "warnings": (f"{len(r['warnings'])} undefined name(s) after the merge" if r.get("warnings") else ""),
             "piece": ", ".join(_figures(r.get("views"))),
             "quality": r.get("quality") or ("final" if "views" in r["outputs"] else ""),
+            "repeat": r["repeat"] if "repeat" in r else (repeat_count({"requests": [o for o in s["requests"] if o["id"] < r["id"]]},
+                                                                       r["thread"], r.get("views"), r.get("quality"), ts(r["created"]))
+                                                        if r.get("views") and r.get("created") else 0),
+            "priority": -eff_penalty(r) if state in ("pending", "conflict") else 0,
             "kind": ", ".join(_view_kinds(r.get("views"), r["outputs"])),
             "combined": "set" if any(k in sets_of for k in r.get("jobs") or []) else
                         ("shared" if any(k in shared for k in r.get("jobs") or []) else "alone"),
@@ -1591,6 +1770,7 @@ def cmd_export(a):
     print(a.out, len(rows), "rows")
 
 
+@locked
 def cmd_cancel(a):
     s = load()
     for r in s["requests"]:
