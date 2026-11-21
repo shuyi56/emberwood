@@ -378,6 +378,9 @@ def _sole(edge, z_welt, r):
 
 
 TOE_SMOOTH = 120     # (passes of Taubin smoothing over the toe box)
+TOE_SLICE = 0.25     # (the slices the toe dome is fitted in, units along the foot)
+TOE_ANG = 36         # (angular bins of its envelope)
+TOE_ENV = 30         # (smoothing passes of the envelope)
 TOE_SWELL = 4        # (rounds of spreading the toe box's clearance shortfall)
 TOE_SPREAD = 40      # (neighbour passes that spread it)
 TOE_BRIDGE = 0.5    # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
@@ -569,6 +572,63 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, bridge - lift)
         lift += out
         X += Nr * out[:, None]
+    # the toe box as one dome: in each slice across the foot (by y) the toes' outer radius about the slice's centre is
+    # taken as an envelope over the angle (the largest radius in each angular bin, so it spans the gaps between the
+    # toes), that envelope is smoothed round the angle and along the foot, and the leather's points over the toes
+    # are set to it (EXPERIMENTAL: the bins, the smoothing and the room are judged by eye)
+    top = np.clip((Nr[:, 2] + 0.2) / 0.6, 0.0, 1.0)
+    wd = toe * top * (toe > 0.02)
+    ids = np.nonzero(wd > 0)[0]
+    if len(ids):
+        yy = X[ids, 1]
+        edges = np.arange(yy.min() - 1e-6, yy.max() + TOE_SLICE, TOE_SLICE)
+        sl = np.clip(np.digitize(yy, edges) - 1, 0, len(edges) - 2)
+        nb = TOE_ANG
+        env = np.full((len(edges) - 1, nb), np.nan)
+        cen = np.zeros((len(edges) - 1, 2))
+        ang = np.zeros(len(ids))
+        rho = np.zeros(len(ids))
+        for k in range(len(edges) - 1):
+            m = np.nonzero(sl == k)[0]
+            if len(m) < 6:
+                continue
+            allm = np.nonzero((X[:, 1] >= edges[k]) & (X[:, 1] < edges[k + 1]) & (z < M['ankle_z']))[0]
+            c = np.array([X[allm, 0].mean(), X[allm, 2].min() + 0.15])
+            cen[k] = c
+            d = X[ids[m]][:, [0, 2]] - c
+            ang[m] = np.arctan2(d[:, 1], d[:, 0])
+            rho[m] = np.hypot(d[:, 0], d[:, 1])
+            ab = np.clip(((ang[m] + np.pi) / (2 * np.pi) * nb).astype(int), 0, nb - 1)
+            for b in range(nb):
+                if (ab == b).any():
+                    env[k, b] = rho[m][ab == b].max()
+        ok = ~np.isnan(env).all(1)
+        # fill empty bins from their neighbours, then smooth round the angle and along y
+        for k in np.nonzero(ok)[0]:
+            row = env[k]
+            if np.isnan(row).any():
+                good = ~np.isnan(row)
+                row[~good] = np.interp(np.nonzero(~good)[0], np.nonzero(good)[0], row[good], period=nb)
+        for _ in range(TOE_ENV):
+            for k in np.nonzero(ok)[0]:
+                env[k] = (np.roll(env[k], 1) + 2 * env[k] + np.roll(env[k], -1)) / 4.0
+            e2 = env.copy()
+            for k in np.nonzero(ok)[0]:
+                nbrs = [j for j in (k - 1, k + 1) if 0 <= j < len(env) and ok[j]]
+                if nbrs:
+                    e2[k] = (2 * env[k] + sum(env[j] for j in nbrs)) / (2 + len(nbrs))
+            env = e2
+        for k in np.nonzero(ok)[0]:
+            m = np.nonzero(sl == k)[0]
+            if not len(m):
+                continue
+            ab = np.clip(((ang[m] + np.pi) / (2 * np.pi) * nb).astype(int), 0, nb - 1)
+            tgt = np.maximum(env[k][ab], rho[m] * 0.0)
+            c = cen[k]
+            f = wd[ids[m]]
+            newr = rho[m] * (1 - f) + tgt * f
+            X[ids[m], 0] = c[0] + newr * np.cos(ang[m])
+            X[ids[m], 2] = c[1] + newr * np.sin(ang[m])
     # the toe box: the leather over the toes is one smooth shape, so the toes' lobes (their tips, their domes) are
     # smoothed away over the toe region by Taubin's filter (a pass that smooths and a pass that swells back, so the
     # box does not shrink), weighted by the toe region's mask; EXPERIMENTAL: the passes' count is judged by eye
