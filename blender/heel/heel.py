@@ -218,7 +218,9 @@ def build():
     rig = bpy.data.objects.get('Rig')
     H = SP.anatomy.head_height() or SP.anatomy.HEAD
     B = draft.body_data(body)
-    M = draft.measure_legs(B, rig, H)
+    # (only the ankle is needed here: the hose draft's full leg measure reads the trunk too, and trips on a seam
+    # vertex between the thighs that the voxel grid leaves on some builds)
+    M = {'ankle_z': float(rig.data.bones['Foot.R'].head_local.z)}
     P, N, W, names = B['P'], B['N'], B['W'], B['groups']
     col = {g: i for i, g in enumerate(names)}
     feet = {}
