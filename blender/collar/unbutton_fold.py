@@ -216,6 +216,23 @@ for k, s_ in enumerate((top, und)):
         A = np.array([Q[list(nb[i])][:, 1].mean() for i in idx]); Q[idx, 1] += 0.5 * w[idx] * (A - Q[idx, 1])
     base = len(W2) + sum(len(v) for v in newV)
     newV.append(Q); newF += [tuple(int(i) + base for i in t_) for t_ in T]
+    # one cloth: the lapel's crease row is sewn to the front's cut edge with a strip of faces, so the front runs through
+    # the roll into the lapel with no gap, and the thickness and the shading carry round the fold (John: "why does it
+    # look like 2 materials").
+    if len(crease3) > 2 and opt.get('weld', True):
+        dq, jq = cKDTree(W2).query(crease3); bi = np.unique(jq[dq < 1e-4])
+        tb = ((W2[bi][:, [0, 2]] - N) @ u) / ln; o_ = np.argsort(tb); bi, tb = bi[o_], tb[o_]
+        ci = np.nonzero((np.abs((P - N) @ nrm) < 1e-9))[0]; tc = tl[ci]; o_ = np.argsort(tc); ci, tc = ci[o_], tc[o_]
+        keep = np.concatenate([[True], np.diff(tc) > 1e-6]); ci, tc = ci[keep], tc[keep]
+        kb = (tb > tc[0] - 0.03) & (tb < tc[-1] + 0.03); bi, tb = bi[kb], tb[kb]
+        ia, ib, ns = 0, 0, 0
+        while ia < len(ci) - 1 or ib < len(bi) - 1:
+            if ib >= len(bi) - 1 or (ia < len(ci) - 1 and tc[ia + 1] <= tb[ib + 1]):
+                newF.append((int(ci[ia]) + base, int(ci[ia + 1]) + base, int(bi[ib]))); ia += 1
+            else:
+                newF.append((int(ci[ia]) + base, int(bi[ib + 1]), int(bi[ib]))); ib += 1
+            ns += 1
+        print('unbutton_fold: sewn to the front along the fold with %d faces (%d front points, %d lapel points)' % (ns, len(bi), len(ci)))
     print('unbutton_fold: %s lapel: %.1f cm wide at the neckline, %.1f cm long; the roll %.1f cm high at its fullest'
           % ('upper' if s_ is top else 'under', 2.62 * sd.max(), 2.62 * (P[:, 1].max() - P[:, 1].min()), 2.62 * 2 * rr.max()))
 bm = bmesh.new(); bm.from_mesh(b.data)
@@ -225,6 +242,7 @@ for f in newF:
     try: bm.faces.new([allv[i] for i in f])
     except ValueError: pass
 bmesh.ops.remove_doubles(bm, verts=vs, dist=1e-5)
+bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))     # (one side out all round the fold: the thickness goes the right way)
 bm.to_mesh(b.data); bm.free()
 for p in b.data.polygons: p.use_smooth = True
 b.data.update()
