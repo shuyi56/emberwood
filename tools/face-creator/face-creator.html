@@ -987,7 +987,9 @@ function orbitSkinField(S, headY, box, M, nh) {
     // follows the ball down instead of bridging to the face's plane. Held near the plane, the inner third of the
     // opening stood off the ball and showed the socket's lining)
     var sul = (1.5 + 1.0 * wu[k]) * e + (2.5 + 2.5 * osm(0.5 * S.a, -0.5 * S.a, X[k] - S.cx - S.xc)) * e * (1 - osm(0.0, 0.85, along[k]));
+    var Lb = L[k], wmed = osm(0.5 * S.a, -0.5 * S.a, X[k] - S.cx - S.xc) * (1 - osm(0.0, 0.85, along[k]));
     L[k] = -osmax(-L[k], -(Hh[k] + sul), 4.0 * e);
+    L[k] += (Lb - L[k]) * wmed;      // (the inner corner: the lid apposed to the ball down to the canthus, the lacrimal lake small: apply-inner-corner.py)
     reach[k] = (wu[k] * S.crease + (1 - wu[k]) * 0.8 * S.lower_fold) * (0.3 + 0.7 * Math.pow(along[k], 0.6));
     core[k] = dist[k] <= reach[k] - 2.5 * e ? 1 : 0;
     fixed[k] = core[k] || out0[k];

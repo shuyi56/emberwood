@@ -371,7 +371,14 @@ def skin_field(S, head_y, box, M, nh, step=None):
     # follows the ball down instead of bridging to the face's plane. Held near the plane, the inner third of the
     # opening stood off the ball and showed the socket's lining)
     sulcus = (1.5 + 1.0 * wu) * e + (2.5 + 2.5 * smooth(0.5 * S['a'], -0.5 * S['a'], xl - S['xc'])) * e * (1 - smooth(0.0, 0.85, along))
+    L_bed = L
     L = -smax(-L, -(Hh + sulcus), 4.0 * e)
+    # (the inner corner: the lid apposed to the ball down to the canthus, which only the small lacrimal lake and the
+    # caruncle separate from the eyeball (StatPearls, Lateral Canthoplasty; Elsevier, Medial angle of eye). Held to the
+    # face's plane there, the margin stood 10 mm off the ball and the skin showed through it from 3/4: the clamp is
+    # eased out on the corner's own weight. tools/face-creator/apply-inner-corner.py)
+    w_med = smooth(0.5 * S['a'], -0.5 * S['a'], xl - S['xc']) * (1 - smooth(0.0, 0.85, along))
+    L = L + (L_bed - L) * w_med
     reach = (wu * S['crease'] + (1 - wu) * 0.8 * S['lower_fold']) * (0.3 + 0.7 * along ** 0.6)
     # the fill is held to the lid well inside the lid's reach, then the lid hands over to it across a band
     # 3 mm wide (a hard edge to the held cells drew the reach's outline as a ridge)

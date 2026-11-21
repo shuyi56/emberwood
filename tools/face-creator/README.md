@@ -34,3 +34,8 @@ Two more fixes after combining (`apply-shade-fix.py`, `apply-eye-makeup.py`, eac
   penumbra; it is now PCF radius 4 (1.5 mm), from the Blender key's size (24 across at about 64).
 - **The Ranger's eye make-up.** A mulberry-brown shadow (#6e4652) opposite her green iris and beside her copper hair,
   and a tapered plum-brown liner (#3a2228, 0.8 to 2.4 mm at liner 1) with a short wing, as for a round, open eye.
+- **The inner corner of the eye** (`apply-inner-corner.py`, mirrored in `blender/shared/orbit.py`). From 3/4 the near
+  eye showed dark red flesh between the ball and the lids at the inner corner: the lid was held to the face's plane
+  there, so over the inner 4.5 mm its margin stood up to 10 mm off the ball. Toward the inner corner the lid now lies
+  on the ball down to the canthus (lids apposed to the globe; the canthus separated from it only by the small
+  lacrimal lake and the caruncle).
