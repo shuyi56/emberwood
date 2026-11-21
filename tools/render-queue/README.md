@@ -18,6 +18,7 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
 | `rq_flow.py` | the flow check: each garment's strain field, seams and jaggedness, with a heatmap, before the render |
+| `rq_hair.py`, `rq_hair_export.cjs` | the hair stress test: flow, drape and motion on our own solver, with heatmap and contour sheet, before the render |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -341,6 +342,33 @@ in turn; each layer's gap is its inner face less the outer face of the outermost
 It is report-only and never stops a job (`RQ_LAYER_GAPS=0` turns it off). For the numbers alone, without a render,
 add `--gaps-only`: the job stops after the checks (a mannequin outfit build is about 2.5 minutes, the checks about
 40 s for seven poses).
+
+## The hair stress test: flow, drape and motion before the render
+
+John's request (2026-11-20): run a hairstyle through our own solver and check that the flow makes sense, before
+anything renders. `rq_hair.py` is the flow check for hair, built on the same pieces as `rq_flow.py`: report-only,
+a band calibrated on approved hair, the worst spots ringed and numbered, results cached.
+
+- **Input:** `node rq_hair_export.cjs face-creator.html DIR [styles]` writes every style's strands (every ring) and
+  the head's skin; `python3 rq_hair.py DIR [--styles a,b] [--out OUT]` runs the test.
+- **The head first:** the creator's skin is measured (chin, crown, width, depth, centre) and every distance is a
+  share of the measured height (HH). Nothing is a hand-placed offset.
+- **Checks:** as drawn (kinks, spikes, roots, flow against neighbours, crossings, depth into the skin, body and
+  the hair's own cap); settled at rest by `blender/shared/fabric.py` with hair's stiffness (`SHAPE`, tuned by
+  `--tune` from a hair's own stiffness against its weight); and in five motions (walk from the game's cycle, run,
+  turn, start-stop, spin): jitter, depth into the body, stretch, bends, crossings.
+- **One solve for the drape, the check and the animation:** the settle and every motion frame are cached once in
+  `hair-cache/` (shared folder, keyed on the hair, the solver settings and the motion). The check only reads it.
+  `--drape STYLE --into EXPORT --out DRAPED` writes the hair export with the settled strands for the renders, and
+  `--motion STYLE:POSE --into EXPORT --out FILE.npz` the per-frame strands for playback. No second solve.
+- **Contours after every solve (John's rule):** inspect the contour sheet before any render. `hair-contours.png`
+  shows the outline of the hair mass (front and side) and sections at six heights for the hair as drawn, settled
+  and in each motion. A perfectly regular ring or a stepped outline is fixed first; real hair is ragged. Include
+  the sheet whenever you show a hair solve.
+- **Files:** `hair.json` (numbers, flags, worst spots with places), `hair-heat.png`, `hair-contours.png`.
+  `rq_hair.py --selftest DIR` checks that a clean head of hair passes and broken ones are flagged. The limits are
+  loose defaults until `hair_baseline.json` is written by `--calibrate` on approved hair (Warden, Ranger, the
+  rogue's ponytail).
 
 ## Review before the queue
 
