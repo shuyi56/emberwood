@@ -318,13 +318,40 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
         log('collar: tailor: ' + 'laid flat and turned over near X: %d points' % len(iv))
     flat3 = np.column_stack([UV, np.zeros(N_)])
     rest3 = flat3
+    if P_.get('stretch_out', 0) > 0:
+        # The outer edge stretched at the side of the neck (John, 2026-11-21: "how do you fix this crease", a drag line
+        # in the fall beside the neck): the fall's edge goes round the neck's side on a wider curve than the roll, and
+        # with no swing in the pattern it is too short there, so the cloth drags from the roll to the edge. The tailor
+        # stretches the collar's outer edge with the iron at the shoulder only. The rest shape is drawn out along the
+        # outer edge by `stretch_out` over `stretch_len` centred where the back neck meets the front neck (A), fading
+        # to nothing at the roll. EXPERIMENTAL.
+        rest3 = flat3.copy()
+        cA = toP(A2[None])[0]
+        for sx in (1, -1):
+            oo = np.nonzero((kind == 'o') & (UV[:, 0] * sx > 0))[0]
+            if len(oo) < 4:
+                continue
+            c0 = cA * np.array([sx, 1.0])
+            ic = oo[np.argmin(np.linalg.norm(UV[oo] - c0, axis=1))]
+            c = UV[ic]
+            nn_ = oo[np.argsort(np.linalg.norm(UV[oo] - c, axis=1))[:9]]
+            t = np.linalg.svd(UV[nn_] - UV[nn_].mean(0))[2][0]
+            Ls = P_.get('stretch_len', 3.0)
+            d = UV - c
+            al, ac = d @ t, np.abs(d[:, 0] * t[1] - d[:, 1] * t[0])
+            wa = np.clip(1.5 - np.abs(al) / (0.5 * Ls), 0, 1)
+            depth_ = np.linalg.norm(c - c0) + 1e-9          # (the edge's distance from the seam there: the fall and the stand)
+            wc = np.clip(1 - ac / (P_.get('stretch_w', 0.7) * depth_), 0, 1)
+            wgt = (wa * wa * (3 - 2 * wa)) * wc * (UV[:, 0] * sx > 0)
+            rest3[:, :2] += (P_['stretch_out'] * wgt * al)[:, None] * t[None]
+        log('collar: tailor: outer edge stretched %.0f %% over %.1f at each side of the neck' % (100 * P_['stretch_out'], P_.get('stretch_len', 3.0)))
     if P_.get('shrink', 0) > 0:
         # Steam pressing (John, 2026-11-21: "how do you press down here"): the tailor presses the collar folded on its
         # crease and shrinks the crease edge at the front with steam, so the cloth there has no length to spare and lies
         # down instead of rippling (UKY CT-LMH.176: the collar is shaped by shrinking and stretching before it is sewn on).
         # The cloth's rest shape is drawn in along the roll by `shrink` (a share of its length) over the roll's last
         # `shrink_len` before its front end, fading out over `shrink_w` either side of the roll. EXPERIMENTAL.
-        rest3 = flat3.copy()
+        rest3 = rest3.copy()
         for sx in (1, -1):
             rr = np.nonzero((kind == 'r') & (UV[:, 0] * sx > 0))[0]
             if len(rr) < 4:
