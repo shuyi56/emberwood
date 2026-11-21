@@ -317,6 +317,32 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
         des[~kn2] = solve_h(kn2)
         log('collar: tailor: ' + 'laid flat and turned over near X: %d points' % len(iv))
     flat3 = np.column_stack([UV, np.zeros(N_)])
+    rest3 = flat3
+    if P_.get('shrink', 0) > 0:
+        # Steam pressing (John, 2026-11-21: "how do you press down here"): the tailor presses the collar folded on its
+        # crease and shrinks the crease edge at the front with steam, so the cloth there has no length to spare and lies
+        # down instead of rippling (UKY CT-LMH.176: the collar is shaped by shrinking and stretching before it is sewn on).
+        # The cloth's rest shape is drawn in along the roll by `shrink` (a share of its length) over the roll's last
+        # `shrink_len` before its front end, fading out over `shrink_w` either side of the roll. EXPERIMENTAL.
+        rest3 = flat3.copy()
+        for sx in (1, -1):
+            rr = np.nonzero((kind == 'r') & (UV[:, 0] * sx > 0))[0]
+            if len(rr) < 4:
+                continue
+            rr = rr[np.argsort(-np.abs(UV[rr, 0]))]                  # (front end first)
+            ra = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(UV[rr], axis=0), axis=1))])
+            Ls = P_.get('shrink_len', 2.5)
+            seg = UV[rr[ra <= Ls]]
+            c = seg.mean(0)
+            t = seg[-1] - seg[0]
+            t /= np.linalg.norm(t)
+            d = UV - c
+            al, ac = d @ t, np.abs(d[:, 0] * t[1] - d[:, 1] * t[0])
+            wa = np.clip(1.5 - np.abs(al) / (0.5 * Ls), 0, 1)
+            wc = np.clip(1 - ac / P_.get('shrink_w', 1.0), 0, 1)
+            wgt = (wa * wa * (3 - 2 * wa)) * (wc * wc * (3 - 2 * wc)) * (UV[:, 0] * sx > 0)
+            rest3[:, :2] -= (P_['shrink'] * wgt * al)[:, None] * t[None]
+        log('collar: tailor: crease edge shrunk %.0f %% over %.1f at each front' % (100 * P_['shrink'], P_.get('shrink_len', 2.5)))
     strain = lambda Xx: 100 * (np.linalg.norm(Xx[ed[:, 0]] - Xx[ed[:, 1]], axis=1) / np.linalg.norm(UV[ed[:, 0]] - UV[ed[:, 1]], axis=1) - 1)
     s0 = strain(des)
     log('collar: tailor: ' + 'start shape against the pattern: strain 5/95 %.1f %.1f, worst %.1f %.1f' % (*np.percentile(s0, [5, 95]), s0.min(), s0.max()))
@@ -372,13 +398,14 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
         pins0 = np.concatenate([pins0, ce_])
         log('collar: tailor: the crease held on the lapel\'s fold edge at %d points' % len(ce_))
     front_out = np.nonzero((kind == 'o') & (np.linalg.norm(des[:, [0, 2]] - np.where(des[:, :1] < 0, X, X * np.array([-1, 1])), axis=1) < 3.0) | (kind == 'e'))[0]
+    press_kd = cKDTree(bodyP[box]) if P_.get('press', 0) > 0 else None
     def run(start, pins, stretch, bend, steps, tag, nobody=False, guide=0.0):
         fab = xf.Fabric(start.copy(), dict(walk='gauss-seidel', iterations=4, stretch=0.0, bend=2e-4, damping=0.03, friction=P_.get('friction', 0.4)))
         fab.prev[:] = fab.pos; fab.pin(pins)
         Hc = Hh[on & (fab.w[Hh] > 0).any(1)]
         rest = fo.dihedral(des, Hc); comp = np.zeros(len(Hc))
         soft = np.zeros(N_); soft[np.unique(Hc)] = 1e-2
-        fab.mesh([tuple(int(i) for i in t) for t in T], stretch=stretch, rest_pos=flat3, bend=bend, flat=bend, bend_at=soft)
+        fab.mesh([tuple(int(i) for i in t) for t in T], stretch=stretch, rest_pos=rest3, bend=bend, flat=bend, bend_at=soft)
         Fh = fo.Folds(fab, flat3, T); batches = fo._colour(Hc, fab.w == 0)
         hh = 1.0 / P_.get('rate', 960); fab.settings['damping'] = 0.35
         for k in range(1, steps + 1):
@@ -392,6 +419,19 @@ def tailor_collar(E, M, V, F, BV, BF, gorges, Pp, settings=None, log=print):
             for _ in range(4): Fh._walk(Hc, rest, comp, hh, batches, lam)
             if not nb_:
                 p, t = body(fab.pos.copy()); live = t & (fab.w > 0); fab.pos[live] = p[live]
+            if P_.get('press', 0) > 0 and not nb_ and k > 0.4 * steps and k < 0.9 * steps:
+                # The pressing pass (John, 2026-11-21: "how do you press down here"): the iron on the collar's front, the
+                # collar folded: cloth standing more than `press_to` off what is under it (the bodice, the lapel, the body)
+                # is pushed down toward it along the surface's normal, `press` per step, over the middle of the solve; the
+                # last tenth is left free so it settles as it will lie. Only the fronts (in front of the neck's side): the
+                # back's fall hangs off the stand and is not pressed. EXPERIMENTAL.
+                frn = (fab.w > 0) & (fab.pos[:, 1] < M['yc'] - P_.get('press_front', 1.0))
+                # (toward the nearest cloth under it, not along that cloth's normal: the turned lapel's normals face the
+                # body, and a height taken along them is negative there, so the first pressing pass moved nothing)
+                dq_, jq = press_kd.query(fab.pos[frn])
+                dir_ = (fab.pos[frn] - bodyP[box][jq]) / np.maximum(dq_, 1e-9)[:, None]
+                dn = np.clip(dq_ - P_.get('press_to', 0.2), 0, P_['press'])
+                fab.pos[frn] -= dn[:, None] * dir_
             if k % 500 == 0:
                 sn = strain(fab.pos)
                 log('collar: tailor: ' + '%s step %d fastest %.5f strain 5/95 %.1f %.1f worst %.1f %.1f' % (tag, k, np.abs(fab.pos - fab.prev).max(), *np.percentile(sn, [5, 95]), sn.min(), sn.max()))
