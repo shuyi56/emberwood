@@ -278,6 +278,65 @@ def _compact(D, fs):
     return D[used], [[int(km[i]) for i in f] for f in fs]
 
 
+def _nbr_sum(X, E):
+    """For each point the sum of the points joined to it by the edges E (a fast scatter-add: bincount, not add.at)."""
+    n = len(X)
+    return np.stack([np.bincount(E[:, 0], weights=X[E[:, 1], k], minlength=n)
+                     + np.bincount(E[:, 1], weights=X[E[:, 0], k], minlength=n) for k in range(3)], axis=1)
+
+
+def _largest(D, fs, name='tongue'):
+    """The faces fs joined by shared points into islands: keep the biggest one only (a piece of leather is one piece;
+    a fragment cut off from it by the fields' cross-over is not part of it) and compact it. Returns (points, faces)."""
+    par = {}
+
+    def root(i):
+        while par.setdefault(i, i) != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+    for f in fs:
+        for i in f[1:]:
+            par[root(i)] = root(f[0])
+    count = {}
+    for f in fs:
+        count[root(f[0])] = count.get(root(f[0]), 0) + 1
+    big = max(count, key=count.get) if count else None
+    keep = [f for f in fs if root(f[0]) == big]
+    if len(keep) < len(fs):
+        print('boot: the %s was %d islands; kept the main one (%d faces), dropped %d faces'
+              % (name, len(count), len(keep), len(fs) - len(keep)))
+    return _compact(D, keep)
+
+
+def _main_run(mask, fs):
+    """The mask's points joined along the faces fs into runs: keep the longest run only (a label is one edge run,
+    not a run with a stray fragment beside it). Returns the mask."""
+    mask = np.asarray(mask, bool)
+    par = {}
+
+    def root(i):
+        while par.setdefault(i, i) != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+    for f in fs:
+        on = [i for i in f if mask[i]]
+        for i in on[1:]:
+            par[root(i)] = root(on[0])
+    idx = np.nonzero(mask)[0]
+    if len(idx) == 0:
+        return mask
+    cnt = {}
+    for i in idx:
+        cnt[root(int(i))] = cnt.get(root(int(i)), 0) + 1
+    big = max(cnt, key=cnt.get)
+    out = np.zeros(len(mask), bool)
+    for i in idx:
+        out[i] = root(int(i)) == big
+    return out
+
+
 def _sole(edge, z_welt, r):
     """The sole: a slab under the upper's cut edge (its points, edge), its upper face at z_welt, wider than the upper
     all round by the welt, its rims eased. Returns (points, faces, seam_d, seam_u, the welt's row of stitches: a
@@ -389,11 +448,33 @@ def cut_lace(D, faces, f, r, weights, lift_on):
     Dt, ft = _compact(*fit.trim(*fit.trim(*fit.trim(*fit.trim(D, faces, lambda A: tw(A) - np.abs(side(A))),
                                                     lambda A: front(A)), lambda A: -vs(A)),
                                 lambda A: zt - A[:, 5] - TONGUE_CORNER * tw(A) * (np.abs(side(A)) / tw(A)) ** 6))
+    Dt, ft = _largest(Dt, ft)                          # (one piece: no fragment of the tongue's region cut off from it)
     lt = np.zeros(len(Dt))
     Vt = lift_on(Dt, lt)
     pieces.append(dict(name='tongue', V=Vt, F=ft, up=(0, 0, 1), lift=lt,
                        edges={'C': np.abs(vs(Dt)) < NEAR, 'H': np.abs(np.abs(side(Dt)) - tw(Dt)) < NEAR},
                        sd=np.full(len(Dt), FAR), su=np.zeros(len(Dt)), W=Dt[:, 9:]))
+    rows = [p for p in pieces if p['name'].endswith(' shaft') and 'eyelets' in p]
+    if len(rows) == 2:
+        # (the two rows pair by height: a row that starts lower (a panel reaching lower over the foot) loses its lowest
+        # eyelets until the rows stand level, then both are cut to the same count at the top)
+        za, zb_ = (np.asarray(p['V'])[p['eyelets'], 2] for p in rows)
+        best = None
+        for k in range(-8, 9):                          # (k > 0: drop the first row's lowest k; k < 0: the second's)
+            a_ = za[max(k, 0):]
+            b_ = zb_[max(-k, 0):]
+            m = min(len(a_), len(b_))
+            if m < 4:
+                continue
+            cost = float(np.abs(a_[:m] - b_[:m]).mean()) + 0.02 * abs(len(a_) - len(b_))
+            if best is None or cost < best[0]:
+                best = (cost, k, m)
+        if best:
+            _, k, m = best
+            rows[0]['eyelets'] = rows[0]['eyelets'][max(k, 0):][:m]
+            rows[1]['eyelets'] = rows[1]['eyelets'][max(-k, 0):][:m]
+            print('boot: the eyelet rows paired by height: %d a side, the first row lost its lowest %d, the second its lowest %d '
+                  '(rows %.2f apart in height on average)' % (m, max(k, 0), max(-k, 0), best[0]))
     return pieces
 
 
@@ -476,10 +557,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
     lift = np.zeros(n)
     for _ in range(160):
-        acc = np.zeros_like(X)
-        np.add.at(acc, E[:, 0], X[E[:, 1]])
-        np.add.at(acc, E[:, 1], X[E[:, 0]])
-        lap = acc / np.maximum(deg, 1)[:, None] - X
+        lap = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, r['bridge'] - lift)
         lift += out
         X += Nr * out[:, None]
@@ -557,10 +635,10 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         on = np.abs(vamp_f(Dv)) < NEAR
         throat = np.abs(side_f(Dv)) < tongue_w
         pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), lift=np.zeros(len(Dv)), lasted=True, edges={
-            'A inner': on & ~throat & (side_f(Dv) < 0), 'A outer': on & ~throat & (side_f(Dv) > 0), 'C': on & throat,
+            'A inner': on & ~throat & (side_f(Dv) < 0), 'A outer': on & ~throat & (side_f(Dv) > 0), 'C': _main_run(on & throat, fv),
             'E': np.abs(Dv[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dv)) < NEAR}))
         # the toe cap: ahead of its seam, its back edge lapped over the vamp
-        Dc, fc = _compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap']))
+        Dc, fc = _largest(*_compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap'])), name='toe cap')
         add(lift_on(Dc, 1.1 * tl), fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
         pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), lift=np.full(len(Dc), 1.1 * tl), lasted=True,
                            edges={'E': np.abs(Dc[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dc) + r['lap']) < NEAR}))

@@ -35,6 +35,7 @@ leg's ankle centre, y = 0), and the foot is set so its joint lies between the ma
 build(s, FL, floor, cx) returns a closed bmesh of the foot and its toes; MARKS[s] holds its landmarks (world
 coordinates, model units) for the gauge and the boots."""
 import math
+import os
 
 import bmesh
 import numpy as np
@@ -323,7 +324,46 @@ def build(s, FL, floor, cx, y_ankle=0.0, n=40):
     _loft(bm, rings)
     tl, xs, t_mt = toes(FL, s, cx, y0, floor, rows, dorsal(FL, chk['ball_top']))
     m = 16
-    for C, ww, zt, zb in tl:
+    if os.environ.get('FOOT_FORM', 'bare') == 'shod':
+        # the foot as it is inside a shoe: the five toes held together as one forepart (what a shoemaker's last
+        # carries ahead of the ball: Golding, The Manufacture of Boots and Shoes, ch. IV, the last's forepart is one
+        # form over all the toes). At each station along the foot the forepart is the toes' own envelope: from the
+        # hallux's inner edge to the outermost toe still there, the highest top and the lowest pad, so it is no
+        # bigger than the toes; a boot's toe room is the boot's to add. (EXPERIMENTAL: the section's shape and the
+        # smoothing length)
+        ys = np.linspace(max(C[0, 1] for C, _, _, _ in tl), min(C[-1, 1] for C, _, _, _ in tl), 40)
+        env = []
+        for yv in ys:
+            xi, xo, zt_, zb_ = [], [], [], []
+            for C, ww, zt, zb in tl:
+                if C[-1, 1] <= yv <= C[0, 1]:
+                    f = lambda a: float(np.interp(-yv, -C[:, 1], a))
+                    xc_, w_ = f(C[:, 0]), f(ww)
+                    xi.append(s * (xc_ - cx) + 0.5 * w_); xo.append(s * (xc_ - cx) - 0.5 * w_)
+                    zt_.append(f(zt)); zb_.append(f(zb))
+            env.append((max(xi), min(xo), max(zt_), min(zb_)))
+        env = np.array(env)
+        ker = np.exp(-0.5 * (np.arange(-4, 5) / 1.6) ** 2); ker /= ker.sum()
+        pad = np.pad(env, ((4, 4), (0, 0)), mode='edge')
+        env = np.stack([np.convolve(pad[:, k], ker, mode='valid') for k in range(4)], 1)
+        # (the tip: a round over the last of the length, in plan and in profile, as each toe's own tip is)
+        d_tip = (ys - ys[-1]) / max(0.45 * (env[:, 0] - env[:, 1]).max(), 1e-6)
+        rt = np.maximum(np.sqrt(np.clip(1 - (1 - np.minimum(d_tip, 1.0)) ** 2, 0.0, 1.0)), 0.12)
+        rr = []
+        for (xi_, xo_, t_, b_), yv, r_ in zip(env, ys, rt):
+            xm, hw = 0.5 * (xi_ + xo_), 0.5 * (xi_ - xo_) * r_
+            c_ = b_ + 0.45 * (t_ - b_)
+            t_, b_ = c_ + (t_ - c_) * r_, c_ - (c_ - b_) * r_
+            a = np.linspace(0, 2 * np.pi, n, endpoint=False)
+            ca, sa = np.cos(a), np.sin(a)
+            xx = hw * np.sign(ca) * np.abs(ca) ** 0.8          # (squarer than an ellipse: a row of toes, not a tube)
+            zz = np.where(sa >= 0, c_ + (t_ - c_) * np.abs(sa) ** 0.8, c_ - (c_ - b_) * np.abs(sa) ** 0.6)
+            rr.append(np.stack([cx + s * (xm + xx), np.full(n, yv), zz], 1))
+        _loft(bm, rr)
+        tl_loft = []
+    else:
+        tl_loft = tl
+    for C, ww, zt, zb in tl_loft:
         rr = []
         for c, w_, t_, b_ in zip(C, ww, zt, zb):
             a = np.linspace(0, 2 * np.pi, m, endpoint=False)

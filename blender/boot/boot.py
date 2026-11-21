@@ -18,6 +18,8 @@ for d in ('hose', 'vest', 'sorceress_pendant', 'shared', 'base'):
 os.environ.setdefault('HEAD_GLB', '')
 os.environ.setdefault('NO_DRESS', '1')
 os.environ.setdefault('NO_ACC', '1')
+# (inside a boot the toes are held together as one forepart: the body's feet are built shod, see foot.py)
+os.environ.setdefault('FOOT_FORM', 'shod')
 import bpy  # noqa: E402
 import female  # noqa: E402
 import hose  # noqa: E402
