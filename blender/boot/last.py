@@ -370,6 +370,7 @@ def _sole(edge, z_welt, r):
     return V, F, sd, su, path
 
 
+TOE_BRIDGE = 0.5     # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
 TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.34, 0.06, 0.40     # (shares of the shin's width: see cut_lace)
 
 
@@ -448,9 +449,26 @@ def cut_lace(D, faces, f, r, weights, lift_on):
                        edges={'C': np.abs(vs(Dt)) < NEAR, 'H': np.abs(np.abs(side(Dt)) - tw(Dt)) < NEAR},
                        sd=np.full(len(Dt), FAR), su=np.zeros(len(Dt)), W=Dt[:, 9:]))
     rows = [p for p in pieces if p['name'].endswith(' shaft') and 'eyelets' in p]
-    n_pair = min(len(p['eyelets']) for p in rows) if rows else 0
-    for p in rows:                                     # (the two rows pair from the bottom: an eyelet with no partner
-        p['eyelets'] = p['eyelets'][:n_pair]           # holds no lace and is left off)
+    if len(rows) == 2:
+        # (the two rows pair by height: a row that starts lower (a panel reaching lower over the foot) loses its lowest
+        # eyelets until the rows stand level, then both are cut to the same count at the top)
+        za, zb_ = (np.asarray(p['V'])[p['eyelets'], 2] for p in rows)
+        best = None
+        for k in range(-8, 9):                          # (k > 0: drop the first row's lowest k; k < 0: the second's)
+            a_ = za[max(k, 0):]
+            b_ = zb_[max(-k, 0):]
+            m = min(len(a_), len(b_))
+            if m < 4:
+                continue
+            cost = float(np.abs(a_[:m] - b_[:m]).mean()) + 0.02 * abs(len(a_) - len(b_))
+            if best is None or cost < best[0]:
+                best = (cost, k, m)
+        if best:
+            _, k, m = best
+            rows[0]['eyelets'] = rows[0]['eyelets'][max(k, 0):][:m]
+            rows[1]['eyelets'] = rows[1]['eyelets'][max(-k, 0):][:m]
+            print('boot: the eyelet rows paired by height: %d a side, the first row lost its lowest %d, the second its lowest %d '
+                  '(rows %.2f apart in height on average)' % (m, max(k, 0), max(-k, 0), best[0]))
     return pieces
 
 
@@ -532,12 +550,16 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # the foot's hollows bridged
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
     lift = np.zeros(n)
-    for _ in range(160):
+    # (a boot's toe box is one smooth shape, not five toes: in the toe region the leather may bridge the gaps between
+    # the toes by a good deal more than it does a hollow elsewhere (EXPERIMENTAL: the gap's depth is measured off the
+    # new foot, about 1 cm), and the bridging runs on until the toe box is smooth)
+    bridge = r['bridge'] + TOE_BRIDGE * toe
+    for _ in range(360):
         acc = np.zeros_like(X)
         np.add.at(acc, E[:, 0], X[E[:, 1]])
         np.add.at(acc, E[:, 1], X[E[:, 0]])
         lap = acc / np.maximum(deg, 1)[:, None] - X
-        out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, r['bridge'] - lift)
+        out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, bridge - lift)
         lift += out
         X += Nr * out[:, None]
     # and never nearer the skin than the gap
