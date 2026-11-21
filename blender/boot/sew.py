@@ -598,7 +598,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
         chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 2, 2))
-    for sd, T, wig in ((-1.0, 8.5, 1.6), (1.0, 7.0, -1.3)):                          # (the tails)
+    for sd, T, wig in ((-1.0, 10.2, 2.9), (1.0, 8.4, -2.4)):                          # (the tails)
         u = np.linspace(0.0, 1.0, 56)
         aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.6 * u) * u)
         vv = -T * u
@@ -661,7 +661,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         if k_ < 2:
             strand(c, rl)
         else:
-            run(c, rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((np.linspace(0, 1, len(c)) - 0.9) / 0.1, 0, 1)))
+            run(c, 1.5 * rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((np.linspace(0, 1, len(c)) - 0.9) / 0.1, 0, 1)))   # 3 mm across, a standard round lace
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
@@ -670,7 +670,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
-DRAPE = dict(bend=2e-4, friction=0.6, steps=600, g=0.7, loops=False, gap=3.2, iters=200)         # the bow's settling (see lacing)
+DRAPE = dict(bend=2e-4, friction=0.6, steps=600, g=0.7, loops=False, gap=3.8, iters=200)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
