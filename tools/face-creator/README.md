@@ -24,3 +24,13 @@ One fix was made when combining: the pores' colour-coded check read `bumpMap` in
 `#ifdef USE_BUMPMAP`. three.js declares that sampler only when the material has a bump map
 (`bumpmap_pars_fragment`), and the skin's bump texture is attached a few frames after the first compile, so the first
 compile failed ("'bumpMap' : undeclared identifier"). The read is now guarded; the look is unchanged.
+
+Two more fixes after combining (`apply-shade-fix.py`, `apply-eye-makeup.py`, each documented in its docstring):
+
+- **The upper lip's dark trapezoid.** The baked cavity shade measured index neighbours 2 and 7 grid steps away, with
+  weights tuned on the old 600-column grid; on the nose's 300-column hybrid grid and the mouth's loops those steps
+  are different distances, so the upper lip and the sides of the nose went dark. It is now measured in world space
+  (area-weighted discs of 0.07 and 0.25 units, the old calibration). The key light's shadow also had a 0.55 mm
+  penumbra; it is now PCF radius 4 (1.5 mm), from the Blender key's size (24 across at about 64).
+- **The Ranger's eye make-up.** A mulberry-brown shadow (#6e4652) opposite her green iris and beside her copper hair,
+  and a tapered plum-brown liner (#3a2228, 0.8 to 2.4 mm at liner 1) with a short wing, as for a round, open eye.

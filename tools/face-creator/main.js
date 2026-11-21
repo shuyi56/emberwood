@@ -67,7 +67,7 @@ var DEFAULTS = {
   skinTone: '#cf9f84', flushTone: '#cc8070', flushAmt: 1, noseFlush: 1, coolUnder: 1, freckles: 1, blotch: 1, texture: 1, oil: 1, sss: 1,
   hair: true, hairTone: '#7e4c34', hairStyle: 'ranger', hairEnds: 1,
   // makeup
-  shadow: '#463c38', shadowStrength: 1, shadowInner: 1, smoke: 1, lower: 1, liner: 0.4, wing: 0,
+  shadow: '#6e4652', shadowStrength: 1.15, shadowInner: 1, smoke: 1, lower: 1, liner: 0.75, wing: 0.15, linerTone: '#3a2228',      // (the Ranger's eyes: apply-eye-makeup.py)
   lashUp: 110, lashLen: 1, lashLean: 1, lashCurl: 0.18, lashFuzz: 260, lashThick: 1, lashLow: 55,
   blushTone: '#d77a7c', blush: 0, contour: 0, highlight: 0
 };
@@ -1323,6 +1323,48 @@ function carveMouth(pos, uv, uv1, front, plain) {
 }
 
 var POS = null, FRONT = null;
+/* the shut-in shade's cavity term, measured in world space (combine thread, 2026-11-21): for each point, the
+   area-weighted mean of the surface within a disc of radius r round it, minus the point, along its normal, at each
+   [radius, weight]; surfaces facing away are left out. It does not depend on how the mesh is laid out (the nose's
+   hybrid grid, the mouth's loops), only on the shape. Radii 0.07 and 0.25 give the old 600-column grid's step-2 and
+   step-7 readings (r = 2h). */
+function cavityWorld(pos, nrm, idx, scales) {
+  var n = pos.length / 3, area = new Float32Array(n), out = new Float32Array(n), q, a, b, c;
+  for (q = 0; q < idx.length; q += 3) {
+    a = idx[q]; b = idx[q + 1]; c = idx[q + 2];
+    var ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    var vx = pos[c * 3] - pos[a * 3], vy = pos[c * 3 + 1] - pos[a * 3 + 1], vz = pos[c * 3 + 2] - pos[a * 3 + 2];
+    var ar = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 3;
+    area[a] += ar; area[b] += ar; area[c] += ar;
+  }
+  var R = 0; scales.forEach(function (s) { R = Math.max(R, s[0]); });
+  var cells = new Map(), key = function (x, y, z) { return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791); };
+  for (var k = 0; k < n; k++) {
+    if (!area[k]) continue;
+    var h = key(Math.floor(pos[k * 3] / R), Math.floor(pos[k * 3 + 1] / R), Math.floor(pos[k * 3 + 2] / R)), L = cells.get(h);
+    if (!L) cells.set(h, L = []); L.push(k);
+  }
+  var S = scales.length, sw = new Float64Array(S), sx = new Float64Array(S), sy = new Float64Array(S), sz = new Float64Array(S);
+  for (k = 0; k < n; k++) {
+    if (!area[k]) continue;
+    var px = pos[k * 3], py = pos[k * 3 + 1], pz = pos[k * 3 + 2], nx = nrm[k * 3], ny = nrm[k * 3 + 1], nz = nrm[k * 3 + 2];
+    var cx = Math.floor(px / R), cy = Math.floor(py / R), cz = Math.floor(pz / R), e;
+    for (e = 0; e < S; e++) { sw[e] = sx[e] = sy[e] = sz[e] = 0; }
+    for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++) {
+      var C = cells.get(key(cx + dx, cy + dy, cz + dz)); if (!C) continue;
+      for (var t = 0; t < C.length; t++) {
+        var m = C[t];
+        if (nrm[m * 3] * nx + nrm[m * 3 + 1] * ny + nrm[m * 3 + 2] * nz <= 0) continue;
+        var ox = pos[m * 3] - px, oy = pos[m * 3 + 1] - py, oz = pos[m * 3 + 2] - pz, d2 = ox * ox + oy * oy + oz * oz, w = area[m];
+        for (e = 0; e < S; e++) if (d2 <= scales[e][0] * scales[e][0]) { sw[e] += w; sx[e] += w * ox; sy[e] += w * oy; sz[e] += w * oz; }
+      }
+    }
+    var occ = 0;
+    for (e = 0; e < S; e++) if (sw[e] > 0) occ += scales[e][1] * (sx[e] * nx + sy[e] * ny + sz[e] * nz) / sw[e];
+    out[k] = clamp(occ, 0, 1);
+  }
+  return out;
+}
 function buildHeadGeometry() {
   var n = NR * NS, pos = new Float32Array(n * 3), uv = new Float32Array(n * 2), uv1 = new Float32Array(n * 2), front = new Float32Array(n);
   buildFrontGrid();
@@ -1475,19 +1517,12 @@ function buildHeadGeometry() {
   // shut-in shade (the 'skin fx' occlusion, cheaply): how far each point lies below its neighbours, at two sizes,
   // plus the cool shade under the jaw and down the throat; baked into the vertex colour as a multiplier
   var BLK = new Uint8Array(NR * NS);
+  var CAV = cavityWorld(pos, nrm, idx, [[0.07, 70], [0.25, 22]]);
   (SOCK ? SOCK.parts : []).concat(MOUTH ? [MOUTH] : []).forEach(function (b) { for (var bj = b.j0 + 1; bj < b.j1; bj++) for (var bi = b.i0 + 1; bi < b.i1; bi++) BLK[bj * NS + bi] = 1; });
   var col = new Float32Array(n * 3), sss = new Float32Array(n), base = hex(P.skinTone), cool = [164 / 207, 138 / 159, 126 / 132];
   for (j = 0; j < NR; j++) for (i = 0; i < NS; i++) {
     k = j * NS + i;
-    var occ = 0;
-    [[2, 70], [7, 22]].forEach(function (st) {
-      var s = st[0], jm = Math.max(0, j - s), jp = Math.min(NR - 1, j + s), im = (i - s + NS) % NS, ip = (i + s) % NS;
-      var ax = 0, ay = 0, az = 0;
-      [jm * NS + i, jp * NS + i, j * NS + im, j * NS + ip].forEach(function (m) { if (BLK[m] && !BLK[k]) m = k; ax += pos[m * 3]; ay += pos[m * 3 + 1]; az += pos[m * 3 + 2]; });
-      ax = ax / 4 - pos[k * 3]; ay = ay / 4 - pos[k * 3 + 1]; az = az / 4 - pos[k * 3 + 2];
-      occ += st[1] * (ax * nrm[k * 3] + ay * nrm[k * 3 + 1] + az * nrm[k * 3 + 2]);
-    });
-    occ = clamp(occ, 0, 1);
+    var occ = CAV[k];      // (world-space discs: see cavityWorld)
     var w = pos[k * 3 + 1] / HH, down = clamp((-nrm[k * 3 + 1] - P.jawShade0) / P.jawShadeRange, 0, 1) * clamp((0.3 - w) / 0.2, 0, 1) * P.jawShadeAmt;
     var cold = clamp(down + clamp((0.02 - w) / 0.1, 0, 1) * 0.7, 0, 1) * 0.5;
     var kk = clamp(occ * 1.3, 0, 1);
@@ -1524,13 +1559,7 @@ function buildHeadGeometry() {
   if (MOUTH) {
     var Rn = MOUTH.R, nbm = MOUTH.nb;
     for (var v = 0; v < MOUTH.slots.length; v++) {
-      var kk = MOUTH.slots[v], rr = v <= MOUTH.nh ? 0 : 1 + Math.floor((v - MOUTH.nh - 1) / nbm), tt = v <= MOUTH.nh ? v : (v - MOUTH.nh - 1) % nbm, occ = 0;
-      [[2, 70], [7, 22]].forEach(function (st) {
-        var s = st[0], ax = 0, ay = 0, az = 0;
-        [MOUTH.vid(rr - s, tt), MOUTH.vid(rr + s, tt), MOUTH.vid(rr, tt - s), MOUTH.vid(rr, tt + s)].forEach(function (mm) { ax += pos[mm * 3]; ay += pos[mm * 3 + 1]; az += pos[mm * 3 + 2]; });
-        ax = ax / 4 - pos[kk * 3]; ay = ay / 4 - pos[kk * 3 + 1]; az = az / 4 - pos[kk * 3 + 2];
-        occ += st[1] * (ax * nrm[kk * 3] + ay * nrm[kk * 3 + 1] + az * nrm[kk * 3 + 2]);
-      });
+      var kk = MOUTH.slots[v], occ = CAV[kk];      // (the same world-space discs as the grid's)
       var k2 = clamp(occ, 0, 1) * 1.3; k2 = clamp(k2, 0, 1);
       sss[kk] = 0; col[kk * 3] = 1 - 0.32 * k2; col[kk * 3 + 1] = 1 - 0.37 * k2; col[kk * 3 + 2] = 1 - 0.37 * k2;
     }
@@ -2147,15 +2176,20 @@ function paintLashes(eyes) {
       stroke(clamp(u1, -1, 1), ed + (r() - 0.3) * 0.02 * (top2 ? 1 : -1), 0.35 * sm(-0.9, 1.0, u1) + 0.55 * normal(r), (0.02 + 0.05 * r()) * (top2 ? 1 : 0.6) * P.lashLen, 0.5, 0.003 * P.lashThick, top2, 0.18 + 0.12 * r(), 5);
     }
     // the smoky liner along the upper lid, and an optional wing past the outer corner
+    // (a band along the upper lash line, tapered: 0.8 mm in the inner third to 2.4 mm at the outer corner at liner 1,
+    // fading in from the inner corner; the eye's units are about 20 mm, so 1 mm is 0.05: apply-eye-makeup.py)
     if (P.liner > 0) {
-      tc.lineWidth = 0.016 * PXU * E.k * (0.6 + P.liner); tc.strokeStyle = 'rgba(20,13,14,' + (0.4 + 0.6 * Math.max(0, P.liner - 0.4)).toFixed(3) + ')';
+      var lt = hex(P.linerTone || '#140d0e'), la = clamp(0.45 + 0.6 * P.liner, 0, 0.92);
+      tc.fillStyle = 'rgba(' + lt[0] + ',' + lt[1] + ',' + lt[2] + ',' + la.toFixed(3) + ')';
+      var lw = function (uu) { return Math.max(0.006, P.liner * (0.04 + 0.08 * sm(-0.3, 1.0, uu)) * sm(-1.0, -0.7, uu)); };
       tc.beginPath();
-      for (var k2 = 0; k2 <= 60; k2++) { var uu = -0.96 + 1.96 * k2 / 60, p2 = pt(uu, lidTop(uu) + 0.006); if (k2 === 0) tc.moveTo(p2[0], p2[1]); else tc.lineTo(p2[0], p2[1]); }
-      tc.stroke();
+      for (var k2 = 0; k2 <= 80; k2++) { var uu = -0.97 + 1.97 * k2 / 80, p2 = pt(uu, lidTop(uu) - 0.004); if (k2 === 0) tc.moveTo(p2[0], p2[1]); else tc.lineTo(p2[0], p2[1]); }
+      for (k2 = 80; k2 >= 0; k2--) { var uq = -0.97 + 1.97 * k2 / 80, p3 = pt(uq, lidTop(uq) + lw(uq)); tc.lineTo(p3[0], p3[1]); }
+      tc.closePath(); tc.fill();
     }
     if (P.wing > 0) {
       var L = 0.32 * P.wing, ang = 0.42, w0 = 0.03 * (0.5 + P.liner);
-      tc.fillStyle = 'rgba(20,13,14,0.9)'; tc.beginPath();
+      var wt = hex(P.linerTone || '#140d0e'); tc.fillStyle = 'rgba(' + wt[0] + ',' + wt[1] + ',' + wt[2] + ',0.9)'; tc.beginPath();
       var a0 = pt(0.72, lidTop(0.72) + w0 * 0.8); tc.moveTo(a0[0], a0[1]);
       for (k2 = 0; k2 <= 16; k2++) { var t2 = k2 / 16, uu2 = 0.72 + (1.0 - 0.72) * t2; var q2 = pt(uu2, lidTop(uu2) + w0 * (0.8 + 0.4 * t2)); tc.lineTo(q2[0], q2[1]); }
       var tipp = pt(1.0 + L * Math.cos(ang) / RX, L * Math.sin(ang) + 0.02); tc.lineTo(tipp[0], tipp[1]);
@@ -2290,7 +2324,7 @@ function paintFace(eyes, geoVersion) {
   fctx.putImageData(faceImg, 0, 0); LM.x.putImageData(LM.img, 0, 0);
   var bk = keyFor(['browColor', 'browThick', 'browArch', 'browHeight', 'browLen', 'browDensity', 'tilt'], geoVersion);
   if (LAYER_KEYS.brow !== bk) { paintBrows(eyes); LAYER_KEYS.brow = bk; }
-  var lk = keyFor(['lashUp', 'lashLen', 'lashLean', 'lashCurl', 'lashFuzz', 'lashThick', 'lashLow', 'liner', 'wing', 'seed'], geoVersion);
+  var lk = keyFor(['lashUp', 'lashLen', 'lashLean', 'lashCurl', 'lashFuzz', 'lashThick', 'lashLow', 'liner', 'linerTone', 'wing', 'seed'], geoVersion);
   if (LAYER_KEYS.lash !== lk) { paintLashes(eyes); LAYER_KEYS.lash = lk; }
   fctx.drawImage(browLayer, 0, 0);
   fctx.drawImage(lashLayer, 0, 0);
@@ -2308,7 +2342,7 @@ renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;      // (PCF: the radius below sets the penumbra; PCFSoft ignores it)
 renderer.localClippingEnabled = true;
 var scene = new THREE.Scene();
 var camera = new THREE.PerspectiveCamera(20, 1.25, 1, 200);
@@ -2321,7 +2355,7 @@ scene.background = null;
 var hemi = new THREE.HemisphereLight(0xf5ebe2, 0x6b5148, 0.55); scene.add(hemi);
 var key = new THREE.DirectionalLight(0xfff1e4, 2.6); key.position.set(-9, 12, 16); key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = -7; key.shadow.camera.right = 7; key.shadow.camera.top = 7; key.shadow.camera.bottom = -7;
-key.shadow.camera.near = 1; key.shadow.camera.far = 60; key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.shadow.radius = 3;
+key.shadow.camera.near = 1; key.shadow.camera.far = 60; key.shadow.bias = -0.0004; key.shadow.normalBias = 0.03; key.shadow.radius = 4;      // (penumbra 2 x 4 texels = 1.5 mm: the figure's key, 24 across at 64, is 0.375 of its distance across; the nose's shadow lies 3-5 mm below the wing (Fernando 2005, PCSS))
 key.target.position.set(0, 0.5 * HH, 0); scene.add(key); scene.add(key.target);
 var rim = new THREE.DirectionalLight(0xf4f0ea, 0.6); rim.position.set(4, 14, -20); scene.add(rim);
 var fill = new THREE.DirectionalLight(0xffe2d2, 0.9); fill.position.set(10, 2, 12); scene.add(fill);
@@ -6592,7 +6626,10 @@ var FACES = {
     browRidge: 0.8, sockets: 0.8, mouthWidth: 0.94, lipUpper: 0.7, lipLower: 0.75, open: 0.78, tilt: 0.085,
     // (her skin and make-up: the in-game fair-warm tone with its freckles, a fresh flush, a soft rose blush on the round
     // cheeks, barely-there shadow and a clear balm on the lips)
-    flushAmt: 1.0, blush: 0.25, blushTone: '#e08a8c', shadowStrength: 0.55, liner: 0.2, lipGloss: 0.35 },
+    flushAmt: 1.0, blush: 0.25, blushTone: '#e08a8c', shadowStrength: 0.55, liner: 0.2, lipGloss: 0.35,
+    // (her eyes, defined for her colouring: a mulberry-brown shadow opposite her green iris and beside her copper hair, a plum-brown
+    // liner tapering out to a short wing past the outer corner, as for a round, open eye: apply-eye-makeup.py)
+    shadow: '#6e4652', shadowStrength: 1.15, liner: 0.75, linerTone: '#3a2228', wing: 0.15 },
   // (Rogue: a narrow fox face, a slim jaw, a neat tapered chin, high cheekbones, a long fine nose, tilted narrow eyes)
   'Rogue': { jawWidth: -0.1, jawDef: 1.6, jawSharp: 1.0, jawAngle: 0.2, jawUnder: 0.1, chinProj: 1.3, chinWidth: 0.82, chinHeight: 1.06, chinTaper: 0.3, cheekWidth: -0.01,
     cheekbones: 1.8, cbHeight: 0.014, apples: 0.9, cheekFull: 0.8, noseProj: 1.15, noseWidth: 0.88, noseLen: 0.005, tipBall: 0.65, nostrils: 0.8,
@@ -6644,7 +6681,7 @@ FACES.Sorceress = { jawWidth: -0.08, jawDef: 1.3, jawSharp: 1.25, jawAngle: 0.2,
   lipstick: '#5c1e3a', lipstickAmt: 0.9, contour: 0.5, highlight: 0.35,
   browColor: '#1e161e', browThick: 0.7, browArch: 1.7, browHeight: 0.04, browLen: 1.1, browDensity: 1.4 };
 IRIS_RAMPS.sorceress = [[34, 16, 56], [70, 36, 120], [112, 64, 176], [156, 110, 216], [204, 170, 238]];      // (violet, paler toward the pupil)
-var FACE_KEYS = MESH_KEYS.concat(['ramp', 'hairStyle', 'hairTone', 'shadow', 'shadowStrength', 'shadowInner', 'smoke', 'lower', 'liner', 'wing', 'lashLen', 'lashUp',
+var FACE_KEYS = MESH_KEYS.concat(['ramp', 'hairStyle', 'hairTone', 'shadow', 'shadowStrength', 'shadowInner', 'smoke', 'lower', 'liner', 'linerTone', 'wing', 'lashLen', 'lashUp',
   'lipstick', 'lipstickAmt', 'lipGloss', 'blush', 'blushTone', 'contour', 'highlight', 'skinTone', 'flushTone', 'lipTone', 'flushAmt', 'noseFlush', 'coolUnder', 'sss', 'freckles', 'blotch', 'oil', 'browColor', 'browThick', 'browArch', 'browHeight', 'browLen', 'browDensity']);      // (a face's make-up goes back to the ranger's too)
 var CUR_FACE = null;
 function markFace() { document.querySelectorAll('[data-face]').forEach(function (b) { var on = b.dataset.face === CUR_FACE; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }); }
