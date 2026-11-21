@@ -9,4 +9,6 @@ import heel  # noqa: E402
 
 
 def build():
+    # (set on every build: a render worker that keeps its scene loaded resets the environment between jobs)
+    os.environ['HEEL_PARTS'] = '0'
     return heel.build()
