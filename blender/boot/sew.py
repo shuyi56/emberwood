@@ -582,12 +582,13 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
                 pts[1:-1] = 0.25 * pts[:-2] + 0.5 * pts[1:-1] + 0.25 * pts[2:]
         strand(pts, rad)
     t_ = np.linspace(0.0, 1.0, 14)
-    for E in (E0, E1):                                     # (each end from its hole up to the knot)
-        pts = [onto((1 - u) * E + u * K0, 1.05 * rl) for u in t_]
+    for E, sd_ in ((E0, -1.0), (E1, 1.0)):                 # (each end from its hole up to its own point under the knot)
+        KE = K0 + ex * sd_ * 0.3 * cm - ey * 0.35 * cm
+        pts = [onto((1 - u) * E + u * KE, 1.05 * rl) for u in t_]
         run(pts, rl * np.minimum(1.0, 0.6 + 5 * t_))
-    run([at(-0.6 + 1.2 * u, 0.0, 1.6) for u in np.linspace(0, 1, 7)], 2.1 * rl)          # (the knot, bigger: a bulb 1.2 cm wide)
-    run([at(-0.4 + 0.8 * u, -0.45 + 0.9 * u, 2.2) for u in np.linspace(0, 1, 5)], 1.6 * rl)   # (its turn across)
-    run([at(-0.4 + 0.8 * u, 0.45 - 0.9 * u, 2.2) for u in np.linspace(0, 1, 5)], 1.6 * rl)    # (the second turn: a double knot)
+    th = np.linspace(0.0, 2 * np.pi * 1.5, 40)               # (the knot: one tube looping 1.5 turns, rising where it crosses itself)
+    strand(np.array([at(0.5 * np.cos(th_ + 0.6), 0.3 * np.sin(th_ + 0.6), 1.9 + 0.9 * np.sin(1.3 * th_))
+                     for th_ in th]), 1.45 * rl)
     # the loops and tails are laid out by hand (a bow's shape), then let fall: the local cloth solver (fabric.py) runs
     # each as a chain of ties (the cord's length kept, a soft bend) pinned at the knot, under gravity, held off the
     # leather by the cord's radius and thickness, so they hang and settle as a cord does on a boot. (EXPERIMENTAL
@@ -597,13 +598,13 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
         ph = np.linspace(0.0, 2 * np.pi, 34)
         bx = 0.5 * Ll * (1 - np.cos(ph))
-        by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
-        chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
+        by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2))) - 0.5 * ph / (2 * np.pi)   # (its two ends 0.5 cm apart)
+        chains.append((np.array([at(sd * (0.45 + ca * x - sa * y), 0.25 + sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 5, 5))
     for sd, T, out in ((-1.0, 13.5, 4.0), (1.0, 11.0, 3.4)):                           # (the tails: out over the leather, then down)
         u = np.linspace(0.0, 1.0, 56)
-        aa = sd * out * (1 - (1 - u) ** 2.5)
-        vv = -T * u
+        aa = sd * (0.3 + out * (1 - (1 - u) ** 2.5))
+        vv = -0.5 - T * u
         chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 5, 0))   # free ends hang low
     if DRAPE:
         import fabric
@@ -628,8 +629,17 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         fb.pin(pin)
         gap = DRAPE['gap'] * rl + tl                             # rides over the cords it crosses
 
+        owner = np.concatenate([np.full(len(c), k_) for k_, (c, _, _) in enumerate(chains)])
+        dmin = 2.3 * rl                                      # (two cords lie at least a cord's width apart: no cord passes through another)
+
         def body(x):
             out, touch = x.copy(), np.zeros(len(x), dtype=bool)
+            dd = x[:, None, :] - x[None, :, :]
+            dl = np.linalg.norm(dd, axis=2)
+            near = (dl < dmin) & (owner[:, None] != owner[None, :])
+            if near.any():
+                push = np.where(near[:, :, None], dd / np.maximum(dl, 1e-9)[:, :, None] * ((dmin - dl) * 0.5)[:, :, None], 0.0)
+                out += push.sum(axis=1)
             for i in range(len(x)):
                 hit = tree.find_nearest(tuple(x[i]), 6.0 * gap + 0.5)
                 if hit[0] is None:
@@ -639,7 +649,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
                     nrm = -nrm
                 sd_ = (x[i] - np.array(hit[0])) @ nrm
                 if sd_ < gap:
-                    out[i] = x[i] + nrm * (gap - sd_)
+                    out[i] += nrm * (gap - sd_)
                     touch[i] = True
             return out, touch
         moved0 = fb.pos.copy()
