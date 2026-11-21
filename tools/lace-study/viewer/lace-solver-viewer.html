@@ -88,7 +88,7 @@ canvas.sect { width: 100%; height: 190px; display: block; }
       <div class="row" style="justify-content: space-between">
         <h2>Show</h2>
         <div class="modes" id="modes">
-          <button data-mode="lace" aria-pressed="true">Lace</button>
+          <button data-mode="lace" aria-pressed="true">Cloth</button>
           <button data-mode="parts" aria-pressed="false">Colour code</button>
           <button data-mode="strain" aria-pressed="false">Strain</button>
           <button data-mode="clay" aria-pressed="false">Clay</button>
@@ -1136,6 +1136,11 @@ const LACE = {
   cotton:   { weight: 0.050, thickness: 0.0003, bendingLength: 0.010, fill: 0.55, shear: 4e-5, hinge: 3e-1, damping: 0.03, friction: 0.3 },
   silk:     { weight: 0.040, thickness: 0.00025, bendingLength: 0.009, fill: 0.5, shear: 4e-5, hinge: 3e-1, damping: 0.03, friction: 0.25 },
   starched: { weight: 0.058, thickness: 0.0003, bendingLength: 0.025, fill: 0.55, shear: 2e-5, hinge: 4e-2, damping: 0.04, friction: 0.4 },
+  // not lace: a skirt-weight worsted wool for the pleated skirt (plain cloth, no net, no scallop). Worsted suiting
+  // and skirting run about 250 to 300 g/m2 and 0.4 to 0.6 mm; its bending length is set between the project's silk
+  // (1.2 cm, measured) and its coat wool (4 cm, fabric-core.js), inside the Peirce flexometer's 1.6 to 6.35 cm
+  // range for ordinary fabrics (Sanad and Cassidy 2016): an estimate, like the lace's
+  wool:     { weight: 0.28, thickness: 0.0005, bendingLength: 0.025, fill: 1.0, shear: 1e-5, hinge: 1e-2, damping: 0.03, friction: 0.5, plain: true },
 };
 
 // The pattern of the lace on the flat strip: 0 net, 1 motif, 2 cordonnet (the outline thread and the scalloped
@@ -1369,11 +1374,11 @@ function buildStrip(over = {}) {
   const idx = (c, r) => c * rows + r;
   const n = cols * rows, flat = new Float64Array(2 * n), part = new Uint8Array(n);
   for (let c = 0; c < cols; c++) {
-    const u = prof.uAt[c], edge = scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
+    const u = prof.uAt[c], edge = mat.plain ? p.depth : scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
     for (let r = 0; r < rows; r++) {
       const v = edge * r / (rows - 1), i = idx(c, r);
       flat[2 * i] = u; flat[2 * i + 1] = v;
-      part[i] = lacePart(u, v, p.depth, p.scallop, p.scallopDepth);
+      part[i] = mat.plain ? (v < (p.headingWidth ?? 0.35) ? PART.heading : PART.net) : lacePart(u, v, p.depth, p.scallop, p.scallopDepth);
     }
   }
   // the flat sheet first: the threads' lengths, the hinges and the bend's rest are the pattern's, as cut
@@ -1427,6 +1432,12 @@ function buildStrip(over = {}) {
   const folded = creaseCols.map((c) => foldAngle(f, idx, c, 0, span(c)));
   const creases = creaseCols.map((c, k) => ({ col: c, folded: folded[k] }));
   f.tether();
+  if (p.mount === 'skirt' && p.hipRadius == null) {
+    // (the hips just inside the pleats' inner layer at the yoke: a body cutting into the pleats as hung tears them)
+    let rin = Infinity;
+    for (let c = 0; c < cols; c++) { const i = idx(c, 0); rin = Math.min(rin, Math.hypot(f.pos[3 * i], f.pos[3 * i + 2])); }
+    p.hipRadius = rin - 0.3;
+  }
   return { f, p, mat, prof, cols, rows, idx, flat, part, pins, creases, creaseCols, span, B, body: bodyFn(p) };
 }
 
@@ -1462,13 +1473,16 @@ function mean(a) { let s = 0; for (const v of a) s += v; return s / (a.length ||
 
 // Where the stitching holds the top edge, and how the strip hangs from it as laid out: (x, z) the edge's point in
 // its pleat's shape, v how far down the strip
+const isRound = (p) => p.mount === 'cuff' || p.mount === 'collar' || p.mount === 'skirt';
+
 function mountFn(p, prof) {
   const F = prof.finished;
-  if (p.mount === 'cuff' || p.mount === 'collar') {
+  if (isRound(p)) {
     // round a circle the finished length round (an engageante sewn into a sleeve's end; a frill on a neckband),
     // z outward; the cuff hangs down, the collar stands up
     // (each step along the edge turns the angle by its run over the radius it lies at, so the threads keep their
     // cut lengths at every radius; the heading's radius is found so the edge closes round once)
+    // (a skirt hangs from its hip yoke as a cuff hangs from a sleeve)
     const xz = prof.xz, up = p.mount === 'collar' ? 1 : -1;
     const angles = (R) => { const a = [0]; for (let c = 1; c < xz.length; c++) a.push(a[c - 1] + (xz[c][0] - xz[c - 1][0]) / (R + 0.5 * (xz[c][1] + xz[c - 1][1]))); return a; };
     let R = F / (2 * Math.PI);
@@ -1498,6 +1512,14 @@ function bodyFn(p) {
   if (p.mount === 'cuff') {
     const R = p.cuffRadius * 0.7;
     return (q) => { const r = Math.hypot(q[0], q[2]); if (r >= R + 0.05 || r < 1e-6) return false; const k = (R + 0.05) / r; q[0] *= k; q[2] *= k; return true; };
+  }
+  if (p.mount === 'skirt' && !p.noBody) {
+    // the hips under a skirt sewn to a hip yoke (its heading at the hip line, y 0): round just inside the pleats'
+    // inner layer for the top 15 cm (hipRadius, set by buildStrip), tapering by 14% to 40 cm down (the thighs, taken
+    // together), then nothing
+    const R = p.hipRadius ?? 0.93 * p.cuffRadius;
+    const at = (y) => (y > 2 ? 0 : y > -15 ? R : y > -40 ? R * (1 - 0.14 * (-15 - y) / 25) : 0);
+    return (q) => { const rb = at(q[1]); if (!rb) return false; const r = Math.hypot(q[0], q[2]); if (r >= rb + 0.1 || r < 1e-6) return false; const k = (rb + 0.1) / r; q[0] *= k; q[2] *= k; return true; };
   }
   if (p.mount === 'jabot') {
     return (q) => { if (q[2] > -0.1 + 0.1 * 0 && q[2] >= 0) return false; if (q[2] >= 0) return false; q[2] = 0; return true; };
@@ -1569,7 +1591,7 @@ function creaseHold(S) {
 // spread (how far the row reaches round or along), ripple (how far it swings in and out of its mean line), lobes
 // (the waves it makes), kink (the sharpest turn between two segments that is not an authored crease)
 function sections(S, shares = [0, 0.25, 0.5, 0.75, 1]) {
-  const { f, cols, rows, idx, p } = S, x = f.pos, round = p.mount === 'cuff' || p.mount === 'collar';
+  const { f, cols, rows, idx, p } = S, x = f.pos, round = isRound(p);
   const out = [];
   for (const s of shares) {
     const r = Math.min(rows - 1, Math.round(s * (rows - 1)));
@@ -1606,7 +1628,7 @@ function sections(S, shares = [0, 0.25, 0.5, 0.75, 1]) {
 function contourFlags(S, sec, st) {
   const flags = [];
   for (const s of sec) {
-    if (s.share > 0.2 && s.rippleRel < 0.01 && (S.p.mount === 'cuff' || S.p.mount === 'collar')) flags.push(`section ${s.share}: perfectly round (ripple ${(100 * s.rippleRel).toFixed(2)}%)`);
+    if (s.share > 0.2 && s.rippleRel < 0.01 && isRound(S.p)) flags.push(`section ${s.share}: perfectly round (ripple ${(100 * s.rippleRel).toFixed(2)}%)`);
     if (s.share > 0.2 && s.ripple < 0.02 && S.p.mount === 'band') flags.push(`section ${s.share}: flat, no ripple`);
     if (s.kinkDeg > 60) flags.push(`section ${s.share}: kink ${s.kinkDeg.toFixed(0)} deg off a crease`);
   }
@@ -1627,7 +1649,7 @@ function cacheKey(S) {
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-return { U, SOLVER, LACE, PART, partWeight, partStiff, scallopEdge, lacePart, PLEATS, pleatProfile, DEFAULTS, buildStrip, setPress, foldAngle, mountFn, bodyFn, frame, strains, energies, creaseHold, sections, contourFlags, cacheKey };
+return { U, SOLVER, LACE, PART, partWeight, partStiff, scallopEdge, lacePart, PLEATS, pleatProfile, DEFAULTS, buildStrip, setPress, foldAngle, isRound, mountFn, bodyFn, frame, strains, energies, creaseHold, sections, contourFlags, cacheKey };
 })();
 __m['presets'] = (() => {
 // The solver viewer's scenes. Each preset builds a cloth on the project's fabric solver and says which of its
@@ -1694,6 +1716,7 @@ const lace = {
     const bodies = [];
     if (v.mount === 'cuff') bodies.push({ type: 'cylinder', r: S.p.cuffRadius * 0.7, y0: -v.depth - 6, y1: 4 });
     if (v.mount === 'collar') bodies.push({ type: 'cylinder', r: S.p.cuffRadius * 0.82, y0: -6, y1: v.depth * 0.3 });
+    if (v.mount === 'skirt') bodies.push({ type: 'cylinder', r: S.p.hipRadius, y0: -15, y1: 3 }, { type: 'cylinder', r: S.p.hipRadius * 0.93, y0: -40, y1: -15 });
     if (v.mount === 'jabot') bodies.push({ type: 'plane', z: 0, w: v.depth * 2.5, h: v.finished + 4, y: -v.finished / 2 });
     const scene = {
       S, f, tris: Uint32Array.from(f.tris), uv, parts, partNames: LACE_PARTS.names, partColors: LACE_PARTS.colors,
@@ -1706,16 +1729,16 @@ const lace = {
       measure() {
         const ch = L.creaseHold(S);
         const out = [];
-        if (S.creaseCols.length) out.push(['Folds near the heading', `${ch.topDeg.toFixed(0)}°`], ['Folds at the scallop', `${ch.bottomDeg.toFixed(0)}°`]);
+        if (S.creaseCols.length) out.push([v.mount === 'skirt' ? 'Folds at the yoke' : 'Folds near the heading', `${ch.topDeg.toFixed(0)}°`], [v.mount === 'skirt' ? 'Folds at the hem' : 'Folds at the scallop', `${ch.bottomDeg.toFixed(0)}°`]);
         const sec = L.sections(S, [0.5, 1]);
-        const round = v.mount === 'cuff' || v.mount === 'collar';
-        out.push([round ? 'Flare at the scallop' : 'Spread at the scallop', round ? `${(sec[1].mean / S.p.cuffRadius).toFixed(2)}× the heading` : `${sec[1].spread.toFixed(1)} cm`]);
-        out.push(['Ripple at the scallop', `${sec[1].ripple.toFixed(2)} cm`], ['Waves at the scallop', `${sec[1].lobes}`]);
+        const round = L.isRound(v), edge = v.mount === 'skirt' ? 'hem' : 'scallop';
+        out.push([round ? `Flare at the ${edge}` : `Spread at the ${edge}`, round ? `${(sec[1].mean / S.p.cuffRadius).toFixed(2)}× the heading` : `${sec[1].spread.toFixed(1)} cm`]);
+        out.push([`Ripple at the ${edge}`, `${sec[1].ripple.toFixed(2)} cm`], [`Waves at the ${edge}`, `${sec[1].lobes}`]);
         return out;
       },
       sections() {
         const sec = L.sections(S, [0, 0.25, 0.5, 0.75, 1]);
-        return { round: v.mount === 'cuff' || v.mount === 'collar', jabot: v.mount === 'jabot', lines: sec.map((s) => ({ label: `${Math.round(s.share * 100)}%`, pts: s.pts })) };
+        return { edge: v.mount === 'skirt' ? 'hem' : 'scallop', round: L.isRound(v), jabot: v.mount === 'jabot', lines: sec.map((s) => ({ label: `${Math.round(s.share * 100)}%`, pts: s.pts })) };
       },
       flags(st) { return L.contourFlags(S, L.sections(S), st); },
       live(key, val) {
@@ -1734,6 +1757,39 @@ const lace = {
       },
     };
     return scene;
+  },
+};
+
+// ------------------------------------------------------------------ the pleated skirt
+// The lace strip's build, as a knee-length skirt: worsted wool knife- or box-pleated onto a hip yoke and hung over
+// the hips (study.mjs, skirt-knife). Pressed hard by default: at press 0.7 the pleats' inner layers sag onto the hips
+// and the contact tears them.
+const skirt = {
+  id: 'skirt', name: 'Pleated skirt',
+  note: 'A knee-length wool skirt, cut at the pleat\'s length ratio, pleated onto a hip yoke and hung over the hips. Ease the press off to watch the pleats open and fall onto the hips; the bend sets how crisply they hang.',
+  params: [
+    { key: 'kind', label: 'Pleat', type: 'select', options: [['knife', 'Knife'], ['box', 'Box']], value: 'knife' },
+    { key: 'press', label: 'Press (heat set)', min: 0, max: 1, step: 0.05, value: 1, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.8, max: 5, step: 0.05, value: null, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, scale: 100, fmt: (v) => v.toFixed(1) },
+    { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
+    { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 2, max: 8, step: 0.5, value: 3, fmt: (v) => v.toFixed(1) },
+    { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 1, max: 6, step: 0.5, value: 3, fmt: (v) => v.toFixed(1) },
+    { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0) },
+    { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 50, fmt: (v) => v.toFixed(0) },
+    { key: 'res', label: 'Mesh spacing', unit: 'cm', min: 0.5, max: 2, step: 0.25, value: 1, fmt: (v) => v.toFixed(2) },
+    { key: 'stretchK', label: 'Threads held in the bend solve', min: 0, max: 600, step: 10, value: 300, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'passes', label: 'Bend solve passes', min: 1, max: 6, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'substepHz', label: 'Steps a second', min: 120, max: 960, step: 60, value: 240, live: true, fmt: (v) => v.toFixed(0) },
+  ],
+  build(v) {
+    // (the mesh at most a third of the pleat's width: a 3 cm knife pleat solves clean at 1 cm, 0.8% worst stretch,
+    // and comes apart at 1.25 cm, where the fold's bridge column is too wide a share of each layer)
+    const sc = lace.build({ ...v, res: Math.min(v.res, v.pitch / 3, v.pleatDepth / 3), mount: 'skirt', lace: 'wool', headingWidth: 1.0 });
+    sc.partNames = ['wool', '', '', 'yoke seam (stitched)', 'pressed fold'];   // (no lace parts in plain cloth)
+    sc.info.unshift(['Cloth', 'worsted wool']);
+    return sc;
   },
 };
 
@@ -1984,7 +2040,7 @@ const collar = {
   },
 };
 
-const PRESETS = [lace, drape, fold, collar];
+const PRESETS = [lace, skirt, drape, fold, collar];
 
 // the strain of every thread against its cut length, per point (the largest of its threads) and overall
 function strainOf(scene) {
@@ -2043,7 +2099,15 @@ function laceTexture(scene) {
   const g = cv.getContext('2d');
   g.clearRect(0, 0, cv.width, cv.height);
   if (!scene.S) { g.fillStyle = '#e9e4da'; g.fillRect(0, 0, cv.width, cv.height); }
-  else {
+  else if (scene.S.mat.plain) {
+    // plain cloth (the skirt's worsted wool): a 2/2 twill's diagonal ribs, a few millimetres apart
+    g.fillStyle = '#56607a'; g.fillRect(0, 0, cv.width, cv.height);
+    g.strokeStyle = 'rgba(255,255,255,0.07)'; g.lineWidth = Math.max(1, pxPerCm * 0.08);
+    const step = Math.max(3, pxPerCm * 0.25);
+    g.beginPath();
+    for (let x = -cv.height; x < cv.width; x += step) { g.moveTo(x, cv.height); g.lineTo(x + cv.height, 0); }
+    g.stroke();
+  } else {
     const p = scene.S.p, img = g.createImageData(cv.width, cv.height), d = img.data;
     for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
       const u = x / pxPerCm, v = y / pxPerCm, edge = L.scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
@@ -2223,9 +2287,9 @@ function rebuild() {
 
 function legend() {
   const sc = state.scene, el = $('legend');
-  if (state.mode === 'parts') el.innerHTML = sc.partNames.map((n, k) => `<div><span class="sw" style="background:${sc.partColors[k]}"></span>${n}</div>`).join('');
+  if (state.mode === 'parts') el.innerHTML = sc.partNames.map((n, k) => n ? `<div><span class="sw" style="background:${sc.partColors[k]}"></span>${n}</div>` : '').join('');
   else if (state.mode === 'strain') el.innerHTML = '<div>Thread stretch against the cut</div><div class="ramp"></div><div class="row" style="justify-content:space-between;font-family:var(--f-data);font-size:11px"><span>0%</span><span>5%+</span></div>';
-  else el.innerHTML = state.mode === 'clay' ? '<div>Clay: form only</div>' : '<div>Lace: net, motifs, cordonnet</div>';
+  else el.innerHTML = state.mode === 'clay' ? '<div>Clay: form only</div>' : (sc.S && sc.S.mat.plain ? '<div>Worsted wool, twill</div>' : '<div>Lace: net, motifs, cordonnet</div>');
 }
 for (const b of $('modes').querySelectorAll('button')) b.onclick = () => {
   state.mode = b.dataset.mode;
@@ -2349,7 +2413,7 @@ function drawSections() {
   });
   g.font = '10px JetBrains Mono, monospace';
   S.lines.forEach((ln, k) => { g.fillStyle = cols[k % cols.length]; g.fillText(`${ln.label}`, 8 + k * 40, 12); });
-  g.fillStyle = css('--muted'); g.fillText(S.jabot ? 'from the front: 0% stitched line … 100% scallop' : 'from above: 0% heading … 100% scallop', 8, H - 4);
+  g.fillStyle = css('--muted'); g.fillText(S.jabot ? `from the front: 0% stitched line … 100% ${S.edge || 'scallop'}` : `from above: 0% heading … 100% ${S.edge || 'scallop'}`, 8, H - 4);
   const st = state.lastStrain || strainOf(sc);
   const flags = sc.flags ? sc.flags({ max: st.max }) : [];
   flagsEl.className = flags.length ? 'flags' : 'flags ok';

@@ -63,7 +63,25 @@ fastest point is under 2e-4 cm a step for 20 frames (or 600 frames). Every solve
 | cuff gather (2 cm stitch) | 6.4 / 2.2 % | soft | 1.06 | sound; stretch spots in the tight folds |
 | jabot knife | 8.9 / 2.3 % | 157° / 120° | spreads 4× | droops into falling folds; the kink check misreads a frill hanging across its section plane |
 | jabot gather | 8.5 / 3.2 % | soft | spreads 5× | as the jabot knife |
+| skirt knife (wool, press 1, 0.75 cm) | 1.06 / 0.58 % | 176° / 176° | 1.00 | sound |
 | collar flute (standing, starched) | 56 / 22 % | — | — | fails: a 4 cm standing frill never settles, at 240 or 480 Hz, with 1 or 3 held rows |
+
+## The pleated skirt
+
+A knee-length skirt in worsted wool (280 g/m², 0.5 mm, bending length 2.5 cm: worsted skirting runs 250–300 g/m²;
+the bending length sits between the project's silk at 1.2 cm and its coat wool at 4 cm, an estimate), knife-pleated
+onto a hip yoke 96 cm round, 50 cm from the hip line to the hem, pleats 3 cm wide and 3 cm deep (`skirt-knife`).
+It hangs over the hips (a cylinder just inside the pleats' inner layer for 15 cm, tapering 14% to the thighs).
+
+- Hard-pressed (press 1) it settles clean: 1.06% worst stretch, 0.58% p99, folds 176° at the yoke and at the hem,
+  no flare (a pleated skirt on a yoke hangs straight). Mesh 0.75 cm, 21,775 points.
+- At press 0.7 the inner layers sag onto the hips and the contact tears them (26% worst). Pleated wool skirts are
+  heat-set permanently, so the hard press is the right model, and the contact is the thing to fix before softer pleats.
+- The mesh must be at most a third of the pleat: at 1 cm it settles at 0.8%, at 1.25 cm it comes apart (the fold's
+  bridge column is too large a share of each layer). A narrower bridge than a column fails here as on the lace (37%).
+- The bridge leaves a gap between the layers as wide as a column, so the pleats lean like tiles and the ratio comes
+  out 2.56 (at 0.75 cm) instead of 3.
+- The bench's "Pleated skirt" scene runs it at 1 cm (11,526 points, a few frames a second).
 
 ## What matters (the sweep, cuff knife and cuff gather as the bases)
 

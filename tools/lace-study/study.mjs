@@ -34,6 +34,10 @@ export const CASES = {
   'cuff-gather':    { kind: 'gather', mount: 'cuff', ratio: 2.0, stitch: 2.0, finished: 24, depth: 6, res: 0.3 },
   'jabot-gather':   { kind: 'gather', mount: 'jabot', ratio: 2.0, stitch: 2.0, finished: 20, depth: 6, res: 0.3 },
   'jabot-knife':    { kind: 'knife', mount: 'jabot', pitch: 1.5, pleatDepth: 1.5, finished: 20, depth: 6, res: 0.3, press: 0.6 },
+  // the pleated skirt: worsted wool knife-pleated onto a hip yoke (96 cm round the hips), 50 cm from the hip line to
+  // the hem (a knee-length skirt with a 20 cm yoke), pleats 3 cm wide and 3 cm deep, hard-pressed (at press 0.7 the
+  // inner layers sag onto the hips and the contact tears them 26%; at 1, 0.8% worst)
+  'skirt-knife':    { kind: 'knife', mount: 'skirt', lace: 'wool', pitch: 3, pleatDepth: 3, finished: 96, depth: 50, rows: 67, res: 0.75, press: 1, headingWidth: 1.0 },
   'collar-flute':   { kind: 'flute', mount: 'collar', radius: 0.35, finished: 36, depth: 4, res: 0.3, press: 0.8, lace: 'starched' },
 };
 
@@ -75,7 +79,7 @@ export function solve(name, o, { fresh = false } = {}) {
   // cache only a sound solve: settled, not blown up
   const sound = settled != null && !flags.some((f) => f.startsWith('blew up'));
   if (from === 'solve' && sound) fs.writeFileSync(file, JSON.stringify({ key, name, o, pos: Array.from(S.f.pos), frames, settled, curve }));
-  const round = o.mount === 'cuff' || o.mount === 'collar';
+  const round = L.isRound(o);
   return {
     S, name, key, from, file: sound || from === 'cache' ? file : null, frames, settled, msPerFrame: ms,
     numbers: {

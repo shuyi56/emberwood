@@ -107,15 +107,20 @@ def build(d, look):
         ob.data.materials.append(material('clay', CLAY))
     # the lace is a sheet a third of a millimetre thick: shown with a little thickness so both sides shade
     mod = ob.modifiers.new('thick', 'SOLIDIFY')
-    mod.thickness = 0.03
+    mod.thickness = 0.05 if d['mat'].get('plain') else 0.03
     mod.offset = 0
-    # what it hangs on: the forearm in a cuff, the neck in a collar, the chest behind a jabot
+    # what it hangs on: the forearm in a cuff, the neck in a collar, the hips in a skirt, the chest behind a jabot
     o = d['o']
     if o['mount'] in ('cuff', 'collar'):
         r = o.get('cuffRadius', o['finished'] / (2 * math.pi)) * (0.7 if o['mount'] == 'cuff' else 0.82)
         h = o['depth'] + 8
         bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=h, location=(0, 0, -h / 2 + 3 if o['mount'] == 'cuff' else 0))
         bpy.context.object.data.materials.append(material('body', BODY))
+    elif o['mount'] == 'skirt':
+        # the hips under the yoke, then the thighs taken together
+        for r, z0, z1 in ((o['hipRadius'], -15, 3), (o['hipRadius'] * 0.93, -40, -15)):
+            bpy.ops.mesh.primitive_cylinder_add(radius=r, depth=z1 - z0, location=(0, 0, (z0 + z1) / 2))
+            bpy.context.object.data.materials.append(material('body', BODY))
     elif o['mount'] == 'jabot':
         bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0.05, -o['finished'] / 2))
         pl = bpy.context.object

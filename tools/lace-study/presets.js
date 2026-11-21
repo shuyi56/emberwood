@@ -63,6 +63,7 @@ const lace = {
     const bodies = [];
     if (v.mount === 'cuff') bodies.push({ type: 'cylinder', r: S.p.cuffRadius * 0.7, y0: -v.depth - 6, y1: 4 });
     if (v.mount === 'collar') bodies.push({ type: 'cylinder', r: S.p.cuffRadius * 0.82, y0: -6, y1: v.depth * 0.3 });
+    if (v.mount === 'skirt') bodies.push({ type: 'cylinder', r: S.p.hipRadius, y0: -15, y1: 3 }, { type: 'cylinder', r: S.p.hipRadius * 0.93, y0: -40, y1: -15 });
     if (v.mount === 'jabot') bodies.push({ type: 'plane', z: 0, w: v.depth * 2.5, h: v.finished + 4, y: -v.finished / 2 });
     const scene = {
       S, f, tris: Uint32Array.from(f.tris), uv, parts, partNames: LACE_PARTS.names, partColors: LACE_PARTS.colors,
@@ -75,16 +76,16 @@ const lace = {
       measure() {
         const ch = L.creaseHold(S);
         const out = [];
-        if (S.creaseCols.length) out.push(['Folds near the heading', `${ch.topDeg.toFixed(0)}°`], ['Folds at the scallop', `${ch.bottomDeg.toFixed(0)}°`]);
+        if (S.creaseCols.length) out.push([v.mount === 'skirt' ? 'Folds at the yoke' : 'Folds near the heading', `${ch.topDeg.toFixed(0)}°`], [v.mount === 'skirt' ? 'Folds at the hem' : 'Folds at the scallop', `${ch.bottomDeg.toFixed(0)}°`]);
         const sec = L.sections(S, [0.5, 1]);
-        const round = v.mount === 'cuff' || v.mount === 'collar';
-        out.push([round ? 'Flare at the scallop' : 'Spread at the scallop', round ? `${(sec[1].mean / S.p.cuffRadius).toFixed(2)}× the heading` : `${sec[1].spread.toFixed(1)} cm`]);
-        out.push(['Ripple at the scallop', `${sec[1].ripple.toFixed(2)} cm`], ['Waves at the scallop', `${sec[1].lobes}`]);
+        const round = L.isRound(v), edge = v.mount === 'skirt' ? 'hem' : 'scallop';
+        out.push([round ? `Flare at the ${edge}` : `Spread at the ${edge}`, round ? `${(sec[1].mean / S.p.cuffRadius).toFixed(2)}× the heading` : `${sec[1].spread.toFixed(1)} cm`]);
+        out.push([`Ripple at the ${edge}`, `${sec[1].ripple.toFixed(2)} cm`], [`Waves at the ${edge}`, `${sec[1].lobes}`]);
         return out;
       },
       sections() {
         const sec = L.sections(S, [0, 0.25, 0.5, 0.75, 1]);
-        return { round: v.mount === 'cuff' || v.mount === 'collar', jabot: v.mount === 'jabot', lines: sec.map((s) => ({ label: `${Math.round(s.share * 100)}%`, pts: s.pts })) };
+        return { edge: v.mount === 'skirt' ? 'hem' : 'scallop', round: L.isRound(v), jabot: v.mount === 'jabot', lines: sec.map((s) => ({ label: `${Math.round(s.share * 100)}%`, pts: s.pts })) };
       },
       flags(st) { return L.contourFlags(S, L.sections(S), st); },
       live(key, val) {
@@ -103,6 +104,39 @@ const lace = {
       },
     };
     return scene;
+  },
+};
+
+// ------------------------------------------------------------------ the pleated skirt
+// The lace strip's build, as a knee-length skirt: worsted wool knife- or box-pleated onto a hip yoke and hung over
+// the hips (study.mjs, skirt-knife). Pressed hard by default: at press 0.7 the pleats' inner layers sag onto the hips
+// and the contact tears them.
+const skirt = {
+  id: 'skirt', name: 'Pleated skirt',
+  note: 'A knee-length wool skirt, cut at the pleat\'s length ratio, pleated onto a hip yoke and hung over the hips. Ease the press off to watch the pleats open and fall onto the hips; the bend sets how crisply they hang.',
+  params: [
+    { key: 'kind', label: 'Pleat', type: 'select', options: [['knife', 'Knife'], ['box', 'Box']], value: 'knife' },
+    { key: 'press', label: 'Press (heat set)', min: 0, max: 1, step: 0.05, value: 1, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'bendingLength', label: 'Bending length', unit: 'cm', min: 0.8, max: 5, step: 0.05, value: null, live: true, fmt: (v) => v.toFixed(2) },
+    { key: 'gravity', label: 'Gravity', unit: 'm/s²', min: 0, max: 20, step: 0.1, value: 9.81, live: true, scale: 100, fmt: (v) => v.toFixed(1) },
+    { key: 'damping', label: 'Damping', min: 0, max: 0.3, step: 0.005, value: 0.03, live: true, fmt: (v) => v.toFixed(3) },
+    { key: 'pitch', label: 'Pleat width', unit: 'cm', min: 2, max: 8, step: 0.5, value: 3, fmt: (v) => v.toFixed(1) },
+    { key: 'pleatDepth', label: 'Pleat depth', unit: 'cm', min: 1, max: 6, step: 0.5, value: 3, fmt: (v) => v.toFixed(1) },
+    { key: 'finished', label: 'Round the hips', unit: 'cm', min: 80, max: 120, step: 2, value: 96, fmt: (v) => v.toFixed(0) },
+    { key: 'depth', label: 'Hip line to hem', unit: 'cm', min: 25, max: 80, step: 1, value: 50, fmt: (v) => v.toFixed(0) },
+    { key: 'res', label: 'Mesh spacing', unit: 'cm', min: 0.5, max: 2, step: 0.25, value: 1, fmt: (v) => v.toFixed(2) },
+    { key: 'stretchK', label: 'Threads held in the bend solve', min: 0, max: 600, step: 10, value: 300, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'passes', label: 'Bend solve passes', min: 1, max: 6, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'iterations', label: 'Constraint walks a step', min: 1, max: 12, step: 1, value: 4, live: true, fmt: (v) => v.toFixed(0) },
+    { key: 'substepHz', label: 'Steps a second', min: 120, max: 960, step: 60, value: 240, live: true, fmt: (v) => v.toFixed(0) },
+  ],
+  build(v) {
+    // (the mesh at most a third of the pleat's width: a 3 cm knife pleat solves clean at 1 cm, 0.8% worst stretch,
+    // and comes apart at 1.25 cm, where the fold's bridge column is too wide a share of each layer)
+    const sc = lace.build({ ...v, res: Math.min(v.res, v.pitch / 3, v.pleatDepth / 3), mount: 'skirt', lace: 'wool', headingWidth: 1.0 });
+    sc.partNames = ['wool', '', '', 'yoke seam (stitched)', 'pressed fold'];   // (no lace parts in plain cloth)
+    sc.info.unshift(['Cloth', 'worsted wool']);
+    return sc;
   },
 };
 
@@ -353,7 +387,7 @@ const collar = {
   },
 };
 
-export const PRESETS = [lace, drape, fold, collar];
+export const PRESETS = [lace, skirt, drape, fold, collar];
 
 // the strain of every thread against its cut length, per point (the largest of its threads) and overall
 export function strainOf(scene) {

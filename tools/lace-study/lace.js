@@ -44,6 +44,11 @@ export const LACE = {
   cotton:   { weight: 0.050, thickness: 0.0003, bendingLength: 0.010, fill: 0.55, shear: 4e-5, hinge: 3e-1, damping: 0.03, friction: 0.3 },
   silk:     { weight: 0.040, thickness: 0.00025, bendingLength: 0.009, fill: 0.5, shear: 4e-5, hinge: 3e-1, damping: 0.03, friction: 0.25 },
   starched: { weight: 0.058, thickness: 0.0003, bendingLength: 0.025, fill: 0.55, shear: 2e-5, hinge: 4e-2, damping: 0.04, friction: 0.4 },
+  // not lace: a skirt-weight worsted wool for the pleated skirt (plain cloth, no net, no scallop). Worsted suiting
+  // and skirting run about 250 to 300 g/m2 and 0.4 to 0.6 mm; its bending length is set between the project's silk
+  // (1.2 cm, measured) and its coat wool (4 cm, fabric-core.js), inside the Peirce flexometer's 1.6 to 6.35 cm
+  // range for ordinary fabrics (Sanad and Cassidy 2016): an estimate, like the lace's
+  wool:     { weight: 0.28, thickness: 0.0005, bendingLength: 0.025, fill: 1.0, shear: 1e-5, hinge: 1e-2, damping: 0.03, friction: 0.5, plain: true },
 };
 
 // The pattern of the lace on the flat strip: 0 net, 1 motif, 2 cordonnet (the outline thread and the scalloped
@@ -277,11 +282,11 @@ export function buildStrip(over = {}) {
   const idx = (c, r) => c * rows + r;
   const n = cols * rows, flat = new Float64Array(2 * n), part = new Uint8Array(n);
   for (let c = 0; c < cols; c++) {
-    const u = prof.uAt[c], edge = scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
+    const u = prof.uAt[c], edge = mat.plain ? p.depth : scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
     for (let r = 0; r < rows; r++) {
       const v = edge * r / (rows - 1), i = idx(c, r);
       flat[2 * i] = u; flat[2 * i + 1] = v;
-      part[i] = lacePart(u, v, p.depth, p.scallop, p.scallopDepth);
+      part[i] = mat.plain ? (v < (p.headingWidth ?? 0.35) ? PART.heading : PART.net) : lacePart(u, v, p.depth, p.scallop, p.scallopDepth);
     }
   }
   // the flat sheet first: the threads' lengths, the hinges and the bend's rest are the pattern's, as cut
@@ -335,6 +340,12 @@ export function buildStrip(over = {}) {
   const folded = creaseCols.map((c) => foldAngle(f, idx, c, 0, span(c)));
   const creases = creaseCols.map((c, k) => ({ col: c, folded: folded[k] }));
   f.tether();
+  if (p.mount === 'skirt' && p.hipRadius == null) {
+    // (the hips just inside the pleats' inner layer at the yoke: a body cutting into the pleats as hung tears them)
+    let rin = Infinity;
+    for (let c = 0; c < cols; c++) { const i = idx(c, 0); rin = Math.min(rin, Math.hypot(f.pos[3 * i], f.pos[3 * i + 2])); }
+    p.hipRadius = rin - 0.3;
+  }
   return { f, p, mat, prof, cols, rows, idx, flat, part, pins, creases, creaseCols, span, B, body: bodyFn(p) };
 }
 
@@ -370,13 +381,16 @@ function mean(a) { let s = 0; for (const v of a) s += v; return s / (a.length ||
 
 // Where the stitching holds the top edge, and how the strip hangs from it as laid out: (x, z) the edge's point in
 // its pleat's shape, v how far down the strip
+export const isRound = (p) => p.mount === 'cuff' || p.mount === 'collar' || p.mount === 'skirt';
+
 export function mountFn(p, prof) {
   const F = prof.finished;
-  if (p.mount === 'cuff' || p.mount === 'collar') {
+  if (isRound(p)) {
     // round a circle the finished length round (an engageante sewn into a sleeve's end; a frill on a neckband),
     // z outward; the cuff hangs down, the collar stands up
     // (each step along the edge turns the angle by its run over the radius it lies at, so the threads keep their
     // cut lengths at every radius; the heading's radius is found so the edge closes round once)
+    // (a skirt hangs from its hip yoke as a cuff hangs from a sleeve)
     const xz = prof.xz, up = p.mount === 'collar' ? 1 : -1;
     const angles = (R) => { const a = [0]; for (let c = 1; c < xz.length; c++) a.push(a[c - 1] + (xz[c][0] - xz[c - 1][0]) / (R + 0.5 * (xz[c][1] + xz[c - 1][1]))); return a; };
     let R = F / (2 * Math.PI);
@@ -406,6 +420,14 @@ export function bodyFn(p) {
   if (p.mount === 'cuff') {
     const R = p.cuffRadius * 0.7;
     return (q) => { const r = Math.hypot(q[0], q[2]); if (r >= R + 0.05 || r < 1e-6) return false; const k = (R + 0.05) / r; q[0] *= k; q[2] *= k; return true; };
+  }
+  if (p.mount === 'skirt' && !p.noBody) {
+    // the hips under a skirt sewn to a hip yoke (its heading at the hip line, y 0): round just inside the pleats'
+    // inner layer for the top 15 cm (hipRadius, set by buildStrip), tapering by 14% to 40 cm down (the thighs, taken
+    // together), then nothing
+    const R = p.hipRadius ?? 0.93 * p.cuffRadius;
+    const at = (y) => (y > 2 ? 0 : y > -15 ? R : y > -40 ? R * (1 - 0.14 * (-15 - y) / 25) : 0);
+    return (q) => { const rb = at(q[1]); if (!rb) return false; const r = Math.hypot(q[0], q[2]); if (r >= rb + 0.1 || r < 1e-6) return false; const k = (rb + 0.1) / r; q[0] *= k; q[2] *= k; return true; };
   }
   if (p.mount === 'jabot') {
     return (q) => { if (q[2] > -0.1 + 0.1 * 0 && q[2] >= 0) return false; if (q[2] >= 0) return false; q[2] = 0; return true; };
@@ -477,7 +499,7 @@ export function creaseHold(S) {
 // spread (how far the row reaches round or along), ripple (how far it swings in and out of its mean line), lobes
 // (the waves it makes), kink (the sharpest turn between two segments that is not an authored crease)
 export function sections(S, shares = [0, 0.25, 0.5, 0.75, 1]) {
-  const { f, cols, rows, idx, p } = S, x = f.pos, round = p.mount === 'cuff' || p.mount === 'collar';
+  const { f, cols, rows, idx, p } = S, x = f.pos, round = isRound(p);
   const out = [];
   for (const s of shares) {
     const r = Math.min(rows - 1, Math.round(s * (rows - 1)));
@@ -514,7 +536,7 @@ export function sections(S, shares = [0, 0.25, 0.5, 0.75, 1]) {
 export function contourFlags(S, sec, st) {
   const flags = [];
   for (const s of sec) {
-    if (s.share > 0.2 && s.rippleRel < 0.01 && (S.p.mount === 'cuff' || S.p.mount === 'collar')) flags.push(`section ${s.share}: perfectly round (ripple ${(100 * s.rippleRel).toFixed(2)}%)`);
+    if (s.share > 0.2 && s.rippleRel < 0.01 && isRound(S.p)) flags.push(`section ${s.share}: perfectly round (ripple ${(100 * s.rippleRel).toFixed(2)}%)`);
     if (s.share > 0.2 && s.ripple < 0.02 && S.p.mount === 'band') flags.push(`section ${s.share}: flat, no ripple`);
     if (s.kinkDeg > 60) flags.push(`section ${s.share}: kink ${s.kinkDeg.toFixed(0)} deg off a crease`);
   }
