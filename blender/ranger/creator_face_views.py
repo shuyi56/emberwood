@@ -82,6 +82,8 @@ def scene_reset():
     sc.cycles.samples = args.samples
     sc.cycles.use_denoising = bool(args.denoise)
     sc.render.resolution_x = sc.render.resolution_y = args.size
+    if hasattr(sc.render.image_settings, 'media_type'):      # (newer builds pick the kind of file before its format)
+        sc.render.image_settings.media_type = 'IMAGE'
     sc.render.image_settings.file_format = 'PNG'
     sc.view_settings.view_transform = 'Standard'
     cam_d = bpy.data.cameras.new('cam')
