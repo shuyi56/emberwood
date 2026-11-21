@@ -247,10 +247,11 @@ PART_HALF = 0.004         # STYLE: the part's half-width, HH (about 1 mm), as th
 BANG_EX = 0.213                    # HH: the outer canthus. Farkas' women: intercanthal 31.8 mm (the creator's alar
                                    # note) and a 30.7 mm eye fissure put the canthus 46.6 mm out; the fissure's centre,
                                    # 31.3 mm, sits on the creator's pupil (30.7 mm), so the two agree
-BANG_DEPTH_MM = 60.0               # the section's depth on the part behind the hairline, from the ground truth: the
-                                   # Face Creator's Ranger roots its curtain bangs 60 mm back along the part (at z 0.98,
-                                   # y -0.125). [MBG]'s 1 to 1.5 in (25-38 mm) gave too little hair to cover the brow
-                                   # ([CC]: start further back for fuller bangs)
+BANG_DEPTH_MM = 90.0               # the section's depth on the part behind the hairline. The Face Creator roots its
+                                   # curtain bangs 60 mm back along the part (at z 0.98, y -0.125), which gave 2,970
+                                   # hairs and read as thin (John); 90 mm gives 4,900 (EXPERIMENTAL: deeper adds no
+                                   # more, the section reaches the end of the part). [MBG]'s 1 to 1.5 in (25-38 mm)
+                                   # gave too little hair to cover the brow ([CC]: start further back for fuller bangs)
 BANG_GUIDE_X = 4                   # guide density in the bangs against the rest
 Z_CHEEK = 0.415                    # HH: the cheekbone's height in the creator (main.js, the cheekbones' gaussian)
 Z_CHIN_LOCK = 0.0                  # HH: the chin, [OGL]'s shortest length for the outer pieces
@@ -339,6 +340,74 @@ FRAME_TH = 0.9                     # rad: the face-framing hair combed with the 
                                    # temples, |theta| under about 52 deg)
 FRAME_PULL = 0.3
 FRAME_ON_Z = 0.15                  # HH: the framing hair is laid on the face down to the jaw, then falls
+
+
+TRACE_JOIN_M = 0.03                # m: a traced bang leaves its own root and joins its creator strand over this length
+
+
+def creator_bangs(style_path):
+    """The creator's curtain bangs: its strands rooted on the part at the front of the head (all from the part's
+    front, z > 0.95), each side ordered across the fan by how far out it lies at the brow (z 0.85)."""
+    import gzip
+    d = json.load(gzip.open(style_path))
+    out = {-1.0: [], 1.0: []}
+    for st in d['strands']:
+        p = np.array(st['p'], float).reshape(-1, 3)
+        if not (p[0, 1] < -0.1 and p[0, 2] > 0.95):
+            continue
+        k = np.argmin(np.abs(p[:, 2] - 0.85))
+        if p[:, 2].min() > 0.84:
+            continue
+        out[1.0 if p[k, 0] >= 0 else -1.0].append((abs(p[k, 0]), p))
+    return {s: [q for _, q in sorted(v, key=lambda a: a[0])] for s, v in out.items()}
+
+
+def resample(p, seg_hh, n):
+    """A polyline at the rod's segment length, n nodes, carried on straight past its end; and its length (HH)."""
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(p, axis=0), axis=1))]
+    u = np.arange(n) * seg_hh
+    q = np.stack([np.interp(u, s, p[:, k]) for k in range(3)], 1)
+    past = u > s[-1]
+    if past.any():
+        t = p[-1] - p[-2]; t /= np.linalg.norm(t)
+        q[past] = p[-1] + (u[past] - s[-1])[:, None] * t
+    return q, s[-1]
+
+
+def trace_bangs(roots, t, side, bangs, seg_hh, S, rng_seed=17):
+    """Each bang laid along the creator's own bangs, in order across the fan: the guides of a side ranked by how far
+    from the part they are rooted, the creator's strands ranked by how far out they lie at the brow, and each guide
+    following the blend of the two strands at its rank from where it passes nearest the root. It leaves its own root
+    and joins that path over TRACE_JOIN_M, so the curtain fans out as evenly as the creator's (pulling each bang onto its nearest creator
+    strand gathered many onto the same few and left gaps between them). Returns the paths and their lengths."""
+    X = np.zeros((len(roots), S + 1, 3)); L = np.zeros(len(roots))
+    rng = np.random.default_rng(rng_seed)
+    s = np.arange(S + 1) * seg_hh
+    w = np.clip(1 - s * HH_M / TRACE_JOIN_M, 0, 1)
+    w = w * w * (3 - 2 * w)
+    for sd in (-1.0, 1.0):
+        gi = np.where(side == sd)[0]
+        if not len(gi):
+            continue
+        n2 = 2 * S + 2
+        C = [resample(p, seg_hh, n2) for p in bangs[sd]]
+        order = gi[np.argsort(t[gi] + 0.02 * rng.random(len(gi)))]
+        q = (np.arange(len(order)) + 0.5) / len(order) * (len(C) - 1)
+        for g, qq in zip(order, q):
+            a = int(np.floor(qq)); b = min(a + 1, len(C) - 1); f = qq - a
+            path = (1 - f) * C[a][0] + f * C[b][0]
+            # the bang takes up its strand where the strand passes nearest its root (a root out on the hairline joins
+            # its strand part way down, one at the part joins it at the start), the rest of the strand from there
+            k0 = int(np.argmin(np.linalg.norm(path[:S] - roots[g], axis=1)))
+            # a root back on the part first lies forward over the scalp to where its strand starts, at the rod's
+            # segment length (laid on the scalp by push_out afterwards), then follows the strand
+            gap = np.linalg.norm(path[k0] - roots[g])
+            npre = int(np.ceil(gap / seg_hh))
+            pre = roots[g] + (path[k0] - roots[g]) * (np.arange(npre) / max(npre, 1))[:, None]
+            full = np.concatenate([pre, path[k0:]], 0)[:S + 1]
+            X[g] = full + (roots[g] - full[0])[None] * w[:, None]
+            L[g] = max(3 * seg_hh, (1 - f) * C[a][1] + f * C[b][1] - k0 * seg_hh + npre * seg_hh)
+    return X, L
 
 
 def comb_bangs(surf, col, roots, d0, sweep, comb, seg_hh, S, field=None, out=None, pull=None, lie_hh=None):
@@ -915,9 +984,12 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         P = {k: np.array(P[k]) for k in ('X_uncut', 'X', 'lengths')}
     if bangs:
         # the bangs are combed, not solved: their paths come from the combing pass and are never settled
-        Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S, field)
         if field is not None:
-            Xb, bang_len = Xb
+            # traced: laid along the creator's bangs in order across the fan, kept clear of the head
+            Xb, bang_len = trace_bangs(roots[bang], bt[bang], bside[bang], creator_bangs(trace), seg_hh, S)
+            Xb = push_out(col, Xb, layer.subset(bang))
+        else:
+            Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S, field)
         solve &= ~bang
         P['X_uncut'][bang] = Xb
     if field is not None:
