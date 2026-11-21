@@ -77,6 +77,7 @@ print('anatomy canon: H %.2f F %.2f floor %.2f hip joint %.2f knee %.2f crotch %
 VOXEL = float(os.environ.get('ANAT_VOXEL', '0.14'))
 ARM_SPREAD = 0.42
 K_HIP = float(os.environ.get('K_HIP', '2.0'))
+K_ANKLE_BACK = float(os.environ.get('K_ANKLE_BACK', '0.9'))   # (the same fillet behind the shin's front)
 K_ANKLE = float(os.environ.get('K_ANKLE', '1.2'))   # (the leg into the foot: a wide fillet, the front of the ankle one curve with the instep)
 ANKLE_FRONT_ITERS = int(os.environ.get('ANKLE_FRONT_ITERS', '0'))
 FOOT_SMOOTH = int(os.environ.get('FOOT_SMOOTH', '60'))
@@ -671,7 +672,9 @@ def fuse_lower():
     kh = K_HIP * _ssn(33.0, 30.5, z) * _ssn(CANON['crotch'] - 4.7, CANON['crotch'] - 1.7, z) * np.maximum(1.0 - _ssn(2.2, 4.2, ax), _ssn(1.0, 2.5, co[:, 1]) * (1.0 - _ssn(5.3, 6.1, ax)))
     # (only between the legs and over the groin: at the hip the thigh and the pelvis share one outline, and a smooth
     # union of two surfaces lying on each other swells out by a quarter of its width, a saddlebag round the hip)
-    ka = K_ANKLE * _ssn(FLOOR_Z + 7.5, FLOOR_Z + 5.5, z)
+    ka = (K_ANKLE_BACK + (K_ANKLE - K_ANKLE_BACK) * _ssn(0.3, -0.5, co[:, 1])) * _ssn(FLOOR_Z + 7.5, FLOOR_Z + 5.5, z)
+    # (the wide round only at the front of the ankle: round the heel and the ankle's sides it swelled the heel by 4 mm
+    # where the leg and the foot run side by side, and the heel derived from the foot came out 0.7 cm lower)
     near_h = (kh > 1e-3) & (np.abs(dB - dL) < kh) & (np.minimum(dB, dL) < 0.3)
     near_a = (ka > 1e-3) & (np.abs(dL - dF) < ka) & (np.minimum(dL, dF) < 0.3)
     cand = np.nonzero(near_h | near_a)[0]
