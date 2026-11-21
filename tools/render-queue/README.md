@@ -385,7 +385,8 @@ stay as they are. The numbers are `PEN` in `rq.py`.
 ## What the render machine needs installed
 
 Besides Blender (`bpy`), the petticoat's pattern code needs the Python packages `shapely` and `triangle`, and the
-draft topology check needs `scipy` (`pip install shapely triangle scipy`). #339 failed on 2026-11-21 for want of scipy. On 2026-11-19 the machine had neither, and the first four flow checks of the riding
+draft topology check needs `scipy` (`pip install shapely triangle scipy`). #339 failed on 2026-11-21 for want of scipy. After a failure that came from the machine and not the request, delete the job's `results/<key>-failed` folder: the queue
+remembers failed requests and fails an identical one at once (#341 did, until the folder was moved away). On 2026-11-19 the machine had neither, and the first four flow checks of the riding
 skirt over the petticoat (#252 to #254, #256) failed on `ModuleNotFoundError`. They are installed in the running
 container now, but a fresh container needs them again: put the line in the environment's setup script.
 
