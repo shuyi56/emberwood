@@ -5,6 +5,10 @@
 //
 //   node tools/face-creator/dump-face.cjs <face-creator.html> <out dir> [face preset] [settings JSON]
 //
+// For Blender the face's painted mottle is off (texture 0, blotch 0), as export-head.js does for the game: those fields
+// are balanced by the creator's own light, and under Cycles' light they read as a blotchy grey-green mottle (renders
+// #317 and #318). The pore relief and the lip lines are their own maps and stay. MOTTLE=1 keeps the creator's paint.
+//
 // Writes <out>/face.json (meshes and numbers), the maps as PNGs beside it, and creator-front.png (the creator's own
 // render of the front, for reference).
 const { chromium } = require('playwright');
@@ -23,7 +27,8 @@ const fs = require('fs'), path = require('path');
     await p.waitForTimeout(400);
     await p.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 900000 });
   }
-  if (extra) await p.evaluate((x) => { Object.assign(__fc.P, JSON.parse(x)); __fc.update(); }, extra);
+  const FOR_BLENDER = process.env.MOTTLE === '1' ? {} : { texture: 0, blotch: 0 };
+  await p.evaluate((x) => { Object.assign(__fc.P, x[0], x[1] ? JSON.parse(x[1]) : {}); __fc.update(); }, [FOR_BLENDER, extra || null]);
   // (the layered skin's first bake runs after the load; the lip map and the pore tile are drawn with the face)
   await p.waitForFunction(() => !(__fc.P.skinLayers > 0) || __skin.B.done, null, { timeout: 900000 });
   await p.waitForFunction(() => __skin.head.material.bumpMap && __skin.U.lipMap.value, null, { timeout: 900000 });
