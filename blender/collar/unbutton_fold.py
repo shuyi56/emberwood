@@ -3,7 +3,11 @@ the bodice", with a camp-collar shirt). The lapel is no drafted piece: it is the
 top button that stays done up. Each front is opened down the centre-front edge to the break, and the cloth between
 the fold line (neck point N to break B), the front's edge and the neckline is turned back on the fold.
 
-    python3 blender/collar/unbutton_fold.py BUILD.blend FOLD.pkl OUT.blend ['{"roll": 0.4, "bow": 0.3, "lap": 0.61}']
+    python3 blender/collar/unbutton_fold.py BUILD.blend FOLD.pkl OUT.blend ['{"roll": 0.4, "bow": 0.3, "lap": 0.61, "foot": null}']
+
+`foot` is the height the fold comes down to: the top button left done up. Left out, the front is unbuttoned fully
+(John: "unbutton fully let curve fall") and the fold runs to the hem; the front buttons are then taken off (undone,
+they sit on the turned-back side of the under front).
 
   the fronts  her right front laps over her left by `lap` (the button stand): its edge runs down x = +lap, her left
               front's down x = -lap, both from the neckline to the break.
@@ -61,52 +65,75 @@ def yfront(q):
     q = np.atleast_2d(q); dr, jr = kr.query(q, k=8); wg = 1 / (dr + 0.05) ** 2
     return ysk(q) + (g_[jr] * wg).sum(1) / wg.sum(1)
 import bmesh
-lapw = opt.get('lap', 0.61); nsub = opt.get('n', 44)
-lapv = np.zeros(len(W), bool); geo = []
-# 1. the fronts behind the fold, laid back on the body, and their edges put on the crease
+M = F['M']
+lapw = opt.get('lap', 0.61); nsub = opt.get('n', 60)
+zfoot = opt.get('foot') if opt.get('foot') is not None else float(M['z_hem_front'])
+full = opt.get('foot') is None
+Ns = []
+for L in F['folded']:
+    N, B = np.asarray(L['roll'], float); Ns.append(N if N[1] > B[1] else B)
+sides = []
+for N in Ns:
+    sgn = 1.0 if N[0] < 0 else -1.0                   # (her right front, N at x < 0, laps to +x and lies on top)
+    Bf = np.array([sgn * lapw, zfoot]); ln = np.linalg.norm(Bf - N); u = (Bf - N) / ln
+    nrm = np.array([-u[1], u[0]]); nrm = nrm if nrm[0] * sgn > 0 else -nrm        # toward the V
+    sides.append(dict(N=N, B=Bf, u=u, n=nrm, ln=ln, sgn=sgn))
+top = [s_ for s_ in sides if s_['sgn'] > 0][0]; und = [s_ for s_ in sides if s_['sgn'] < 0][0]
+zx = top['N'][1] + top['u'][1] * (0 - top['N'][0]) / top['u'][0]         # where the upper front's fold crosses the centre
+print('unbutton_fold: folds from the neck points (+-%.2f, %.2f) down to z %.2f (%s); they cross at z %.2f'
+      % (abs(top['N'][0]), top['N'][1], zfoot, 'the hem: fully unbuttoned' if full else 'the top button done up', zx))
+def bowdev(t):
+    t = np.clip(t, 0, 1); return bow * 6.75 * t * t * (1 - t)            # (falls: fullest two thirds of the way down)
+# 1. the drafted lapels out; the cloth in the V out; the fronts behind each fold laid on the body, their edges on the crease
+lapv = np.zeros(len(W), bool)
 for k, L in enumerate(F['folded']):
-    flat, pos, lap = np.asarray(L['flat'], float), np.asarray(L['pos'], float).copy(), np.asarray(L['lap'], bool)
-    j, ok = maps[k]
-    N, B = np.asarray(L['roll'], float)
-    if N[1] < B[1]: N, B = B, N
-    sgn = 1.0 if N[0] < 0 else -1.0                   # (her right front, N at x < 0, laps to +x)
-    Bf = np.array([sgn * lapw, min(B[1], min(np.asarray(L_['roll'], float)[:, 1].min() for L_ in F['folded']))])   # the fold's true foot: the top button
-    ln = np.linalg.norm(Bf - N); u = (Bf - N) / ln; nrm = np.array([-u[1], u[0]])
-    sd = (flat - N) @ nrm
-    if sd[lap].mean() < 0: nrm, sd = -nrm, -sd
-    T_ = np.asarray(L['T']); rim = np.zeros(len(flat), bool)
-    for a_, b__ in ((0, 1), (1, 2), (2, 0)):
-        e0, e1 = T_[:, a_], T_[:, b__]
-        rim[e1[lap[e0] & ~lap[e1]]] = True; rim[e0[lap[e1] & ~lap[e0]]] = True      # front points sewn to a lapel point
-    fr = ~lap
-    sdf = np.where(rim, 0.0, np.minimum(sd, -0.01))
-    X = flat - (sd - sdf)[:, None] * nrm[None]
-    tl = ((X - N) @ u) / ln; dev = bow * 4 * np.clip(tl, 0, 1) * (1 - np.clip(tl, 0, 1))
-    X = X + (dev * np.clip(1 + sdf / band, 0, 1))[:, None] * nrm[None]
-    H = rollh(tl)
-    wf = np.clip(1 + sdf / band, 0, 1); wf = wf * wf * (3 - 2 * wf)
-    yf = yfront(X[fr]); yf = np.where(np.isfinite(yf), yf, pos[fr, 1])
-    new = pos.copy()
-    new[fr, 0], new[fr, 2] = X[fr, 0], X[fr, 1]
-    new[fr, 1] = (1 - wf[fr]) * pos[fr, 1] + wf[fr] * yf - 0.5 * H[fr] * wf[fr] ** 2
-    W[j[ok & fr]] = new[ok & fr]
-    lapv[j[ok & lap]] = True
-    geo.append((N, Bf, B, u, nrm, ln, sgn, new[rim & fr]))
-    print('unbutton_fold: front %d: fold from (%.2f, %.2f) to (%.2f, %.2f); %d front points laid back, %d on the crease' % (k, N[0], N[1], Bf[0], Bf[1], fr.sum(), (rim & fr).sum()))
-for i in np.nonzero(~lapv)[0] if False else []: pass
-# write the fronts, take the drafted lapels out
-for k in range(len(F['folded'])):
-    j, ok = maps[k]
-for i in range(len(W)):
-    b.data.vertices[i].co = W[i] @ inv[:3, :3].T + inv[:3, 3]
+    j, ok = maps[k]; lapv[j[ok & np.asarray(L['lap'], bool)]] = True
+q = W[:, [0, 2]]
+frontz = (W[:, 1] < M['yc']) & (W[:, 2] > zfoot - 0.2) & (W[:, 2] < top['N'][1] + 0.7)
+sT, sU = (q - top['N']) @ top['n'], (q - und['N']) @ und['n']
+inV = frontz & ~lapv & (sT > 0) & (sU > 0) & (W[:, 2] > zx) & (W[:, 2] < top['N'][1] + 0.05)
+kill = lapv | inV
 bm = bmesh.new(); bm.from_mesh(b.data); bm.verts.ensure_lookup_table()
-bmesh.ops.delete(bm, geom=[v for v in bm.verts if lapv[v.index]], context='VERTS')
+edge_ = np.zeros(len(W), bool)
+for v in bm.verts:
+    if kill[v.index]:
+        for e in v.link_edges:
+            o_ = e.other_vert(v)
+            if not kill[o_.index]: edge_[o_.index] = True
+for s_, sd_, mine in ((top, sT, frontz & (sU > -1e9)), (und, sU, frontz & (W[:, 2] > zx - 0.3))):
+    N, u, nrm, ln = s_['N'], s_['u'], s_['n'], s_['ln']
+    sel = mine & ~kill & (sd_ > -band) & (sd_ < 0.3) & (W[:, 2] < N[1] + 0.3)
+    if s_ is und: sel &= sT > -0.05                   # (her left front only: not her right front's cloth)
+    else: sel &= (sU > -0.05) | (W[:, 2] < zx)
+    on = sel & edge_ & (np.abs(sd_) < 0.3)
+    # (the front's cut edge is tucked just behind the crease and under it: the lapel's own first row, a clean line of
+    # the new mesh, is the edge that shows; the cut's staircase is hidden by it)
+    sdf = np.where(on, -0.04, np.minimum(sd_, -0.05))
+    X = q - (sd_ - sdf)[:, None] * nrm[None]
+    tl = ((X - N) @ u) / ln
+    wf = np.clip(1 + sdf / band, 0, 1); wf = wf * wf * (3 - 2 * wf)
+    X = X + (bowdev(tl) * wf)[:, None] * nrm[None]
+    H = rollh(tl)
+    ii = np.nonzero(sel)[0]
+    yf = yfront(X[ii]); yf = np.where(np.isfinite(yf), yf, W[ii, 1])
+    W[ii, 1] = (1 - wf[ii]) * W[ii, 1] + wf[ii] * yf - 0.5 * H[ii] * wf[ii] ** 2 + 0.03 * on[ii]
+    W[ii, 0], W[ii, 2] = X[ii, 0], X[ii, 1]
+    s_['crease3'] = W[np.nonzero(on)[0]].copy()
+    print('unbutton_fold: %s front: %d points laid back behind the fold, %d on the crease' % ('upper' if s_ is top else 'under', len(ii), on.sum()))
+for v in bm.verts: v.co = tuple(W[v.index] @ inv[:3, :3].T + inv[:3, 3])
+bmesh.ops.delete(bm, geom=[v for v in bm.verts if kill[v.index]], context='VERTS')
 bm.to_mesh(b.data); bm.free(); b.data.update()
+print('unbutton_fold: %d drafted lapel points and %d points in the V taken out' % (lapv.sum(), inV.sum()))
+if full:                                              # undone, the front buttons sit on the turned-back side: off
+    for o in bpy.data.objects:
+        if o.name.startswith('Redingote bodice') and o.name.endswith('buttons'):
+            bb = bmesh.new(); bb.from_mesh(o.data); ow = np.array(o.matrix_world)
+            dead = [v for v in bb.verts if (np.array(v.co[:]) @ ow[:3, :3].T + ow[:3, 3])[1] < M['yc']]
+            bmesh.ops.delete(bb, geom=dead, context='VERTS'); bb.to_mesh(o.data); bb.free(); o.data.update()
 W2 = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
 allV = np.vstack([W2, SV]); n0 = len(W2)
 polys = [tuple(p.vertices) for p in b.data.polygons] + [tuple(i + n0 for i in p) for p in SP]
 bvh = BVHTree.FromPolygons([Vector(p) for p in allV], polys)
-zx = max(g[2][1] for g in geo)                        # where her right front crosses her left front's fold
 def grid(A, Bq, Cq, n):
     P, T, idx = [], [], {}
     for i in range(n + 1):
@@ -117,24 +144,20 @@ def grid(A, Bq, Cq, n):
             T.append((idx[(i, jx)], idx[(i + 1, jx)], idx[(i, jx + 1)]))
             if jx < n - i - 1: T.append((idx[(i + 1, jx)], idx[(i + 1, jx + 1)], idx[(i, jx + 1)]))
     return np.array(P), np.array(T)
+# 2. the lapels: each front's own corner (N, the front edge's top T on the neckline, the fold's foot), turned back
 newV, newF = [], []
-for k, (N, Bf, B, u, nrm, ln, sgn, crease3) in enumerate(geo):
-    zT = N[1] + opt.get('neck_rise', 0.0)
-    Tp = np.array([sgn * lapw, zT])                   # the front edge's top, on the neckline
+for k, s_ in enumerate((top, und)):
+    N, Bf, u, nrm, ln, sgn, crease3 = s_['N'], s_['B'], s_['u'], s_['n'], s_['ln'], s_['sgn'], s_['crease3']
+    Tp = np.array([sgn * lapw, N[1]])
     P, T = grid(N, Tp, Bf, nsub)
-    if abs(B[1] - Bf[1]) > 0.05:                      # the under front: cut off where the upper front crosses its fold
-        keep = P[:, 1] >= zx - 1e-6
-        # (points below the crossing are drawn up onto its level rather than cut: the lapel ends in a clean edge there)
-        P = np.where(keep[:, None], P, np.column_stack([P[:, 0], np.full(len(P), zx)]))
-        a2 = np.abs(0.5 * ((P[T[:, 1]] - P[T[:, 0]])[:, 0] * (P[T[:, 2]] - P[T[:, 0]])[:, 1] - (P[T[:, 1]] - P[T[:, 0]])[:, 1] * (P[T[:, 2]] - P[T[:, 0]])[:, 0]))
-        T = T[a2 > 1e-7]
-    sd = (P - N) @ nrm
-    if sd.mean() < 0: sd = -sd; nrm = -nrm
-    sd = np.maximum(sd, 0)
-    tl = ((P - N) @ u) / ln; tc = np.clip(tl, 0, 1); dev = bow * 4 * tc * (1 - tc)
-    X = P - 2 * sd[:, None] * nrm[None] + (dev * np.exp(-(sd / opt.get('bow_over', 1.5)) ** 2))[:, None] * nrm[None]
+    if s_ is und:                                     # the under front: cut off where the upper front crosses its fold
+        P = np.where((P[:, 1] >= zx)[:, None], P, np.column_stack([P[:, 0], np.full(len(P), zx)]))
+        e1, e2 = P[T[:, 1]] - P[T[:, 0]], P[T[:, 2]] - P[T[:, 0]]
+        T = T[np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0]) > 1e-7]
+    sd = np.maximum((P - N) @ nrm, 0)
+    tl = ((P - N) @ u) / ln
+    X = P - 2 * sd[:, None] * nrm[None] + (bowdev(tl) * np.exp(-(sd / opt.get('bow_over', 1.5)) ** 2))[:, None] * nrm[None]
     H = rollh(tl); yfx = yfront(X)
-    kc = cKDTree(crease3[:, [0, 2]]) if len(crease3) else None
     Q = np.zeros((len(P), 3))
     for i in range(len(P)):
         r = np.clip(sd[i] / tw, 0, 1); r = r * r * (3 - 2 * r)
@@ -147,24 +170,29 @@ for k, (N, Bf, B, u, nrm, ln, sgn, crease3) in enumerate(geo):
         p = np.array(hit[0][:]) + n * off
         g = np.clip(sd[i] / 0.3, 0, 1)
         Q[i] = (1 - g) * np.array([X[i, 0], min(ya, p[1]), X[i, 1]]) + g * p
-    # the crease's own points: sewn to the front's edge there
-    cz = np.nonzero(sd < 1e-9)[0]
-    if kc is not None and len(cz):
-        dc, jc = kc.query(X[cz], k=2); wg = 1 / (dc + 1e-3)
-        Q[cz, 1] = (crease3[jc][:, :, 1] * wg).sum(1) / wg.sum(1) - 0.5 * t0
+    # the lapel is one smooth sheet: it does not follow each wrinkle of what it lies on. Its depth is faired hard, then
+    # brought forward wherever that would sink it into the ground; twice.
     nb = [set() for _ in range(len(P))]
     for t_ in T:
         for q_ in range(3): nb[t_[q_]].add(int(t_[(q_ + 1) % 3])); nb[t_[q_]].add(int(t_[(q_ + 2) % 3]))
-    w = np.clip(sd / 0.12, 0, 1); idx = np.nonzero((w > 1e-3) & np.array([len(x) > 0 for x in nb]))[0]
-    for r in range(opt.get('fair', 40)):
-        A = np.array([Q[list(nb[i])][:, 1].mean() for i in idx]); Q[idx, 1] += 0.6 * w[idx] * (A - Q[idx, 1])
+    cz = np.nonzero(sd < 1e-9)[0]                     # the crease's own points: over the front's edge there
+    if len(crease3) > 2 and len(cz):
+        dc, jc = cKDTree(crease3[:, [0, 2]]).query(X[cz], k=2); wg = 1 / (dc + 1e-3)
+        Q[cz, 1] = (crease3[jc][:, :, 1] * wg).sum(1) / wg.sum(1) - 0.03 - t0
+    ground = Q[:, 1].copy()
+    w = np.clip(sd / 0.08, 0, 1); idx = np.nonzero((w > 1e-3) & np.array([len(x) > 0 for x in nb]))[0]
+    for rep in range(opt.get('sheet', 3)):
+        for r in range(opt.get('fair', 120)):
+            A = np.array([Q[list(nb[i])][:, 1].mean() for i in idx]); Q[idx, 1] += 0.7 * w[idx] * (A - Q[idx, 1])
+        Q[idx, 1] = np.minimum(Q[idx, 1], ground[idx])
+    for r in range(15):
+        A = np.array([Q[list(nb[i])][:, 1].mean() for i in idx]); Q[idx, 1] += 0.5 * w[idx] * (A - Q[idx, 1])
     base = len(W2) + sum(len(v) for v in newV)
     newV.append(Q); newF += [tuple(int(i) + base for i in t_) for t_ in T]
-    print('unbutton_fold: lapel %d: front edge at x %+.2f, its top at z %.2f; %.1f cm wide at the neckline; %d points, standing up to %.2f off the front'
-          % (k, sgn * lapw, zT, 2.62 * sd.max(), len(P), (H * rollprof(sd)).max()))
+    print('unbutton_fold: %s lapel: %.1f cm wide at the neckline, %.1f cm long; standing up to %.2f off the front'
+          % ('upper' if s_ is top else 'under', 2.62 * sd.max(), 2.62 * (P[:, 1].max() - P[:, 1].min()), (H * rollprof(sd)).max()))
 bm = bmesh.new(); bm.from_mesh(b.data)
-vs = [bm.verts.new(tuple(q @ inv[:3, :3].T + inv[:3, 3])) for Q in newV for q in Q]
-bm.verts.ensure_lookup_table(); nold = len(W2)
+vs = [bm.verts.new(tuple(q_ @ inv[:3, :3].T + inv[:3, 3])) for Q in newV for q_ in Q]
 allv = list(bm.verts)
 for f in newF:
     try: bm.faces.new([allv[i] for i in f])
