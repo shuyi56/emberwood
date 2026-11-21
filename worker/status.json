@@ -1,8 +1,24 @@
 {
-    "state":  "READY",
-    "job":  null,
+    "state":  "RUNNING views-e86564b4038d",
+    "job":  {
+                "key":  "views-e86564b4038d",
+                "branch":  "render-jobs",
+                "sha":  "7a07fb10efdba799ee00bc6ce5a7aae1486d9497",
+                "quality":  "check",
+                "command":  [
+                                "blender/base/rq_views.py",
+                                "--figure",
+                                "boot",
+                                "--mannequin",
+                                "--head",
+                                "--angles",
+                                "front",
+                                "--size",
+                                "300"
+                            ]
+            },
     "pending":  [
-
+                    "views-e86564b4038d"
                 ],
     "recent":  [
                    {
