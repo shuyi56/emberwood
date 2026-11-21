@@ -67,8 +67,18 @@ elif FIG == 'redingote_bodice':
         q = col[np.abs(col[:, 2] - zz) < 0.1]
         if len(q):
             edge.append([x0, float(q[:, 1].min()), float(zz)])
+    try:                        # the build's own break (on the top button), where collar.py has it
+        sys.path.insert(0, os.path.join(ROOT, 'blender', 'collar'))
+        import collar
+        brk = getattr(collar, 'break_z', None)
+        for k, (_, L) in getattr(collar, 'STYLES', {}).items():
+            if k in T.LAPEL_DROP and 'drop' in L:
+                T.LAPEL_DROP[k] = L['drop']
+    except ImportError:
+        brk = None
+    print('draft topo: break from %s' % ('collar.break_z' if brk else 'the drafted drop'), flush=True)
     for st in opt('--styles', ','.join(T.LAPEL_DROP)).split(','):
-        dr = T.bodice_draft(M, dict(bodice.RATIOS), sorted(zs, reverse=True), np.array(edge), st)
+        dr = T.bodice_draft(M, dict(bodice.RATIOS), sorted(zs, reverse=True), np.array(edge), st, break_z=brk)
         T.write(dr, OUT, stem='draft-topo-bodice-' + st.split()[0])
 else:
     print('draft topo: no adapter for the figure %s (boot, redingote_bodice)' % FIG, flush=True)

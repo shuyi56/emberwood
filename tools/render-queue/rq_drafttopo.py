@@ -195,11 +195,13 @@ LAPEL_DROP = {'buttoned to the neck': None, 'turned': 1.60, 'notch': 1.35, 'mode
 LAPEL_CLEAR = 0.15
 
 
-def bodice_draft(M, ratios, buttons_z, edge, style='buttoned to the neck', strain=None):
+def bodice_draft(M, ratios, buttons_z, edge, style='buttoned to the neck', strain=None, break_z=None):
     """The redingote bodice's closing: the front edge from the neck to the front's point (edge: points top to bottom),
     the buttons on it (their heights, as bodice.py set them), the lapel's break for the style (the buttons above it,
     and within LAPEL_CLEAR w under it, cut away as collar.open_front does), the bust and waist lines, and the strain
-    along the edge where a solve has measured one. Arc lengths are measured down the edge from the neck."""
+    along the edge where a solve has measured one. Arc lengths are measured down the edge from the neck. break_z: the
+    build's own break rule (collar.break_z(z_nominal, M), which sets the break on the top button), called with the
+    drafted drop's height; without it the drafted drop is the break."""
     w = M['w']
     E = np.asarray(edge, float)
     s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(E, axis=0), axis=1))]
@@ -208,6 +210,8 @@ def bodice_draft(M, ratios, buttons_z, edge, style='buttoned to the neck', strai
         return float(np.interp(-z, -E[:, 2], s))
     drop = LAPEL_DROP[style]
     zb = None if drop is None else M['z_neck_front'] - drop * w
+    if zb is not None and break_z is not None:
+        zb = float(break_z(zb, M))
     bz = [z for z in buttons_z if zb is None or z <= zb - LAPEL_CLEAR * w]
     clos = dict(name='front closing (%s)' % style, edge=E, buttons=[s_at(z) for z in bz],
                 break_s=None if zb is None else s_at(zb), neck_s=0.0 if zb is None else None,
