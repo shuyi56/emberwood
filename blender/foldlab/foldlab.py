@@ -27,6 +27,9 @@ import time
 
 import numpy as np
 
+GORGE_NEAREST = __import__('os').environ.get('GORGE_NEAREST', '1') != '0'
+GORGE_REACH = 0.35          # (in units: five rows of the lapel's mesh)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'shared'))
 import fabric as xf      # noqa: E402
@@ -51,8 +54,27 @@ def capture(pkl, out):
         lap = np.asarray(L['lap'], bool)
         np.savez(os.path.join(out, 'lapel%d.npz' % k), flat=L['flat'], T=L['T'], lap=lap, roll=L['roll'],
                  strip=L['pos'][~lap], built=L['pos'], B=B, N=N, poly=poly, bodyP=bP, bodyN=bN, w=d['M']['w'],
-                 report=L['report'])
+                 report=L['report'], **bust_of(d))
         print('lapel %d: %d points (%d on the lapel), %d triangles, chest %d points' % (k, len(lap), lap.sum(), len(L['T']), len(bP)))
+
+
+def bust_of(d):
+    """The whole bust and chest under both lapels, as the build has it, for the sheets (John, 2026-11-21: "add the
+    proper shape of the bust"): the bodice's front with its chest canvas (its lapels left out) and the skin under it,
+    from the waist to the neck. The fold itself meets the build's own chest (bodyP, the part within reach of the
+    lapel); this is the rest of it, so the lapel is seen against the whole breast and not a strip of it."""
+    from scipy.spatial import cKDTree
+    M = d['M']
+    V = np.asarray(d['V'])
+    lp = np.vstack([np.asarray(L['pos'])[np.asarray(L['lap'], bool)] for L in d['folded']])
+    keep = cKDTree(lp).query(V)[0] > 1e-4
+    sk = np.asarray(d['skinP'])
+
+    def front(P):
+        return (P[:, 1] < M['yc']) & (np.abs(P[:, 0]) < 7.5) & (P[:, 2] > M.get('z_waist', 39.0)) & (P[:, 2] < M['z_neck_side'] + 1.0)
+    out = dict(bust_cloth=V[keep & front(V)], bust_skin=sk[front(sk)],
+               bust_M=np.array([M.get('apex_x', np.nan), M.get('apex_z', M.get('z_bust', np.nan)), M.get('z_bust', np.nan), M['yc']]))
+    return out
 
 
 # ------------------------------------------------------------------ one try
@@ -264,7 +286,20 @@ def run(cap, S, log=print, _pre=None):
             mv_ = np.nonzero(mv_)[0] if mv_.dtype == bool else mv_
             dq_ = tg_[:, [0, 2]] - N
             tq_ = np.clip(dq_ @ gv / (gv @ gv), 0, 1)
-            hit_ = (np.linalg.norm(dq_ - tq_[:, None] * gv[None], axis=1) < 0.08) & rimv[mv_] & past[mv_]
+            dl_ = np.linalg.norm(dq_ - tq_[:, None] * gv[None], axis=1)
+            hit_ = (dl_ < 0.08) & rimv[mv_] & past[mv_]
+            if GORGE_NEAREST:
+                # (on a long roll the turn's own cloth carries the lapel's top edge further from the drafted gorge than
+                # 0.08, and the hold found 0 to 3 points (modern draft): the collar then sat crumpled over a lapel with no
+                # notch. The gorge seam is sewn along its whole length, so each stretch of it, a row apart, takes the rim
+                # point past the turn nearest it, up to GORGE_REACH away)
+                cand_ = np.nonzero(rimv[mv_] & past[mv_])[0]
+                if len(cand_):
+                    for q_ in np.linspace(0.0, 1.0, max(2, int(np.linalg.norm(gv) / 0.07)) + 1):
+                        dd_ = np.linalg.norm(dq_[cand_] - q_ * gv[None], axis=1)
+                        j_ = int(np.argmin(dd_))
+                        if dd_[j_] < GORGE_REACH:
+                            hit_[cand_[j_]] = True
             sewn[mv_[hit_]] = True
             tg_ = tg_[hit_].copy()
             if len(tg_):
@@ -297,7 +332,8 @@ def run(cap, S, log=print, _pre=None):
                        round(float(st.min()), 1), round(float(st.max()), 1)],
                height_past=[round(float(np.percentile(ht[past], 50)), 3), round(float(ht[past].max()), 3)],
                sewn=int(sewn.sum()), points=len(flat), tape=tape_len, curl_hinges=curl_n if S.get('stitch_R') else 0)
-    return dict(X=X, flat=flat, T=T, lap=lap, past=past, ht=ht, roll=roll, nperp=nperp, u=u, B=B, N=N, poly=poly,
+    bust = {k_: C[k_] for k_ in ('bust_cloth', 'bust_skin', 'bust_M') if k_ in C}
+    return dict(X=X, flat=flat, T=T, lap=lap, past=past, ht=ht, roll=roll, nperp=nperp, u=u, B=B, N=N, poly=poly, bust=bust,
                 res=res, segs=segs, edges=(e, l0, l1, onlap), bodyP=bodyP, bodyN=bodyN, measure=m, report=str(rep))
 
 
@@ -358,14 +394,41 @@ def sheet(R, path, title):
     fig, axs = plt.subplots(2, 3, figsize=(15, 9.5))
     # 1: front view, lapel by height off the chest
     a = axs[0, 0]
+    bu = R.get('bust') or {}
+    if 'bust_cloth' in bu:
+        # (the bust under it: the chest's depth in front view, a line every 0.25 units forward, the apex marked)
+        import matplotlib.tri as mtri
+        Pc = bu['bust_cloth']
+        Pc = Pc[np.abs(Pc[:, 0]) < np.abs(X[:, 0]).max() + 2.0]
+        tr = mtri.Triangulation(Pc[:, 0], Pc[:, 2])
+        xy = np.column_stack([Pc[:, 0], Pc[:, 2]])
+        el = np.max([np.linalg.norm(xy[tr.triangles[:, i]] - xy[tr.triangles[:, (i + 1) % 3]], axis=1) for i in range(3)], axis=0)
+        tr.set_mask(el > 0.35)
+        dep = -(Pc[:, 1] - bu['bust_M'][3])
+        a.tricontourf(tr, dep, levels=np.arange(np.floor(dep.min() * 4) / 4, dep.max() + 0.25, 0.25), cmap='Greys', alpha=0.45)
+        a.tricontour(tr, dep, levels=np.arange(np.floor(dep.min() * 4) / 4, dep.max() + 0.25, 0.25), colors='0.35', linewidths=0.5)
+        ax_, az_ = bu['bust_M'][:2]
+        for sx in (-1, 1):
+            a.plot(sx * ax_, az_, 'r+', ms=12, mew=2)
     a.tripcolor(X[:, 0], X[:, 2], T, facecolors=np.array([ht[t].mean() if lap[t].all() else np.nan for t in T]), cmap='viridis', vmin=0, vmax=0.6)
     tri_strip = np.array([not lap[t].all() for t in T])
     a.triplot(X[:, 0], X[:, 2], T[tri_strip], lw=0.2, color='0.6')
-    a.set_aspect('equal'); a.set_title('front view: lapel height off the chest (0 to 0.6 units)')
+    a.set_aspect('equal'); a.set_title('front view: lapel height off the chest (0 to 0.6 units)\nover the bust: grey lines every 0.25 forward, + the apex' if 'bust_cloth' in bu else 'front view: lapel height off the chest (0 to 0.6 units)')
     # 2: side view (y, z)
     a = axs[0, 1]
     a.scatter(-X[lap, 1], X[lap, 2], s=1, c=ht[lap], cmap='viridis', vmin=0, vmax=0.6)
-    a.scatter(-R['bodyP'][:, 1], R['bodyP'][:, 2], s=0.2, c='0.75')
+    if 'bust_cloth' in bu:
+        # (the section through the apex on this lapel's side: the bodice with its canvas and the skin, whole height)
+        sx = np.sign(np.median(X[lap, 0]))
+        xa = sx * bu['bust_M'][0]
+        for Pq, col, lb in ((bu['bust_skin'], 'tab:orange', 'skin'), (bu['bust_cloth'], '0.45', 'bodice + canvas')):
+            m_ = np.abs(Pq[:, 0] - xa) < 0.06
+            o_ = np.argsort(Pq[m_, 2])
+            a.plot(-Pq[m_, 1][o_], Pq[m_, 2][o_], '.', ms=1.5, color=col, label='%s, through the apex' % lb)
+        a.axhline(bu['bust_M'][1], color='r', lw=0.5)
+        a.legend(fontsize=7, loc='lower left')
+    else:
+        a.scatter(-R['bodyP'][:, 1], R['bodyP'][:, 2], s=0.2, c='0.75')
     a.set_aspect('equal'); a.set_title('side view (front to the right)')
     # 3: sections across the roll at 25, 50, 75 % of its length
     a = axs[0, 2]
