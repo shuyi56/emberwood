@@ -79,3 +79,34 @@ and Blender's cloth (`blender/chemise/solver.py`).
 - `Folds.bake(passes=)`: hinge walks per step. More passes do not move a fold that geometry blocks (G1).
 - `Folds.bake(correct=True)`: at rest but off target, the hinges' rests are scaled by the shortfall, up to 178
   degrees. A fold that closes past target on a curved front is this correction meeting G1, not a hinge fault.
+
+## S5. Cloth near an open sheet's edge stays stretched and never relaxes (missing feature, fixed)
+
+- Symptom: strain freezes early (the collar: 5/95 % of -17/+30 by step 500, the same at step 2000) while the
+  fastest point keeps moving a steady amount each step. Smaller steps, friction 0, `planes=8` do not change it.
+  Without the body the same mesh and pins settle to -5/+14. The strain sits where the cloth is in the air just past
+  the edge of a cloth collider (a collar's stand above the bodice's neckline rim).
+- Cause: `MeshBody` takes the nearest sample's plane as the surface. A bodice is an open sheet, and past its rim the
+  nearest sample is a rim point whose plane carries on as an endless wall. Cloth behind that wall's extension, in
+  free air above the neckline, is pushed out of it every step, and the ties pull it back. It is not the solver
+  failing to relax: the body itself holds the cloth stretched. Relaxing in contact works (a sheet started 50 %
+  stretched round a cylinder relaxes to -0.3/0.9 % in 1000 steps with the body on).
+- Fix: `MeshBody(..., tangent=1.5 * spacing)` for any body built from an open sheet (cloth as a collider). The push
+  is full while the point's foot on the nearest sample's plane lies within `tangent` of the sample and fades to
+  nothing at twice that (a hard cut made points on the line chatter in and out of the push). Test (`blender/shared/test_sheet_edge.py`, a strip 0.2 behind a bodice's plane above its rim):
+  5/95 % -17.4/46.3 and worst 127 % before, -0.1/0.1 and worst 0.3 % with `tangent=0.075` (samples every 0.05).
+  Default off, so closed bodies (skin) do not change.
+- Check for it: if the strain does not move between step 500 and step 2000 while the fastest point stays steady, run
+  once with the body and print which points the body touches. Touched points beyond a collider's rim are this.
+
+On the real collar (round 11) the edge fix was not the main cause. Strain 5/95 %: skin only -14.9/+20.8 and settled;
+bodice only -20.4/+28.2 and moving; with one sign for the normals (below) and the fade, bodice only -16.7/+25.8. What is left is the
+pattern: surplus stand cloth pressed on the skin, and seam pins set inside the gap. A frozen strain with a still
+sheet is the room, not the solver. Two more findings from it:
+
+- Normals of a cloth collider must have one sign for the whole mesh. Flipping each vertex's normal to face away
+  from the neck axis left 130 edges with opposed normals around the neckline and shoulders (z 48 to 50), where the
+  surface faces up and the test is a coin toss. With one sign for the mesh (it is wound alike), the worst strain
+  went from 241 % to 127 % and the fastest point from 0.21 to 0.11.
+- About 20 points lying in the plane of the bodice's top edge (depth 0, z 50.8 to 52) still move about 0.1 a step.
+  That is cloth sitting on the rim itself. It does not change the 5/95 numbers.
