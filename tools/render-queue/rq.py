@@ -348,6 +348,16 @@ def load(raw=False):
             s = json.load(f)
     except FileNotFoundError:
         s = {"next": 1, "requests": []}
+    if SERVING:
+        # the serving machine reads the shared folder through a mount that lags its own writes (2026-11-21: a stale
+        # read numbered two requests #337 and the first one vanished): its own latest copy wins when it is newer
+        try:
+            with open(os.path.join(WORK, "queue.local.json")) as f:
+                loc = json.load(f)
+            if loc.get("seq", 0) > s.get("seq", 0):
+                s = loc
+        except (OSError, ValueError):
+            pass
     s.setdefault("ready", []); s.setdefault("sheet_due", False); s.setdefault("sheets_done", {})
     # what this process saw, so save() can tell its own changes from other processes' (a three-way merge)
     s["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in s.get(k, [])} for k in _LISTS},
@@ -391,7 +401,8 @@ def _merge_inbox(s):
 def admit(s, r):
     """Put a request that arrived in the inbox into the queue: number it, drop a waiting request it replaces, mark the
     intent it answers."""
-    r["id"] = s["next"]
+    r["id"] = max([s["next"]] + [o["id"] + 1 for o in s["requests"]])
+    s["next"] = r["id"]
     outs = r["outputs"]
     for o in s["requests"]:   # coalescing: a newer request for the same piece replaces one still waiting
         # (the same thread and branch following the branch tip, or the same branch asking for the same views and
@@ -503,6 +514,7 @@ def save(s):
                     s["next"] = max(s["next"], max(r["id"] for r in s["requests"]) + 1)
             except (OSError, ValueError, KeyError):
                 pass
+            s["seq"] = s.get("seq", 0) + 1
             data = json.dumps({k: v for k, v in s.items() if not k.startswith("_")}, separators=(",", ":"))
             with open(os.path.join(WORK, "queue.local.json"), "w") as f:
                 f.write(data)
@@ -512,6 +524,7 @@ def save(s):
             with open(STATE) as f:
                 if f.read() == data:
                     w = json.loads(data)        # what the file holds now is this process's new base
+                    orig["seq"] = w["seq"]
                     orig["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in w.get(k, [])} for k in _LISTS},
                                      "top": {k: json.dumps(v, sort_keys=True) for k, v in w.items()
                                              if k not in _LISTS and not k.startswith("_")}}
