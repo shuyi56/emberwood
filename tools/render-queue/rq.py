@@ -734,6 +734,11 @@ def plan(fetch=True):
         tip = r["sha"] or git("rev-parse", "--verify", "--quiet", f"origin/{r['branch']}", check=False).stdout.strip()
         if not tip:
             r["state"], r["why"] = "conflict", "branch not found on origin"; held.append(r); continue
+        if r["sha"] and git("cat-file", "-e", f"{tip}^{{commit}}", check=False).returncode:
+            # (2026-11-21: a pinned sha that is not in the repository crashed serve in merge-tree and every waiting
+            #  request stood still for 25 min: hold that request with the reason, the others go on)
+            r["state"], r["why"] = "conflict", f"commit {tip[:10]} is not on origin: push it, or the sha is mistyped"
+            held.append(r); continue
         r["tip"] = tip
         # a request keeps the main it was first planned on, so a merge to main mid-request does not re-render it
         if r.get("base_for") != tip:
