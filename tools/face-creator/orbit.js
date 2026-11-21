@@ -188,7 +188,7 @@ function orbitSkinField(S, headY, box, M, nh) {
   span = oBlur(span, ny, nx, nb25);
   for (k = 0; k < N; k++) Hh[k] = Hh[k] + (span[k] - Hh[k]) * osm(0, 6 * e, edge[k]);
   var wu = oBlur(nearUp, ny, nx, Math.max(2, Math.round(2.0 * e / h)));
-  var reach = new Float64Array(N), fixed = new Uint8Array(N), core = new Uint8Array(N), Dl = new Float64Array(N);
+  var reach = new Float64Array(N), fixed = new Uint8Array(N), core = new Uint8Array(N), Dl = new Float64Array(N), Dm = new Float64Array(N);
   for (k = 0; k < N; k++) {
     // (deeper toward the corners: the canthi are tied back to the bone, the inner one deepest, so there the lid
     // follows the ball down instead of bridging to the face's plane. Held near the plane, the inner third of the
@@ -196,7 +196,7 @@ function orbitSkinField(S, headY, box, M, nh) {
     var sul = (1.5 + 1.0 * wu[k]) * e + (2.5 + 2.5 * osm(0.5 * S.a, -0.5 * S.a, X[k] - S.cx - S.xc)) * e * (1 - osm(0.0, 0.85, along[k]));
     var Lb = L[k], wmed = osm(0.5 * S.a, -0.5 * S.a, X[k] - S.cx - S.xc) * (1 - osm(0.0, 0.85, along[k]));
     L[k] = -osmax(-L[k], -(Hh[k] + sul), 4.0 * e);
-    L[k] += (Lb - L[k]) * wmed;      // (the inner corner: the lid apposed to the ball down to the canthus, the lacrimal lake small: apply-inner-corner.py)
+    Dm[k] = (Lb - L[k]) * wmed * (1 - osm(0.5 * e, 2.0 * e, dist[k]));      // (the inner corner: the lid apposed to the ball down to the canthus, the lacrimal lake small; added to the surface below: apply-inner-corner.py, apply-inner-corner-blend.py)
     reach[k] = (wu[k] * S.crease + (1 - wu[k]) * 0.8 * S.lower_fold) * (0.3 + 0.7 * Math.pow(along[k], 0.6));
     core[k] = dist[k] <= reach[k] - 2.5 * e ? 1 : 0;
     fixed[k] = core[k] || out0[k];
@@ -209,6 +209,10 @@ function orbitSkinField(S, headY, box, M, nh) {
     Y[k] = Hh[k] + Dl[k];
     Y[k] = L[k] + (Y[k] - L[k]) * osm(reach[k] - 2.5 * e, reach[k] + 2.5 * e, dist[k]);
   }
+  // (the inner corner's extra depth, taken at the margin, softened and faded out over 8e, so the skin beside the corner
+  // slopes down with the lid instead of stepping: apply-inner-corner-blend.py)
+  var DmB = oBlur(Dm, ny, nx, Math.max(2, Math.round(1.5 * e / h)));
+  for (k = 0; k < N; k++) Y[k] += DmB[k] * (1 - osm(1.0 * e, 8 * e, dist[k]));
   var Yb = oBlur(Y, ny, nx, nb25), r = S.r;
   for (k = 0; k < N; k++) {
     Y[k] = Y[k] + (Yb[k] - Y[k]) * (1 - out0[k]) * osm(1.5 * e, 3.5 * e, dist[k]);

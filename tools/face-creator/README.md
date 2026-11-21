@@ -39,3 +39,8 @@ Two more fixes after combining (`apply-shade-fix.py`, `apply-eye-makeup.py`, eac
   there, so over the inner 4.5 mm its margin stood up to 10 mm off the ball. Toward the inner corner the lid now lies
   on the ball down to the canthus (lids apposed to the globe; the canthus separated from it only by the small
   lacrimal lake and the caruncle).
+- **The skin below the inner corner** (`apply-inner-corner-blend.py`, run after `apply-inner-corner.py`; mirrored in
+  `blender/shared/orbit.py`). The inner-corner fix put the ball's depth back into the lid depth, which the corner's
+  narrow 5e hand-over band gave back to the face at once, so below the canthus the lid stepped down beside the nose.
+  The extra depth is now taken at the margin and added to the surface with a fade over 8e, so the skin slopes into the
+  canthus with the lid.

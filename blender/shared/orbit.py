@@ -377,8 +377,11 @@ def skin_field(S, head_y, box, M, nh, step=None):
     # caruncle separate from the eyeball (StatPearls, Lateral Canthoplasty; Elsevier, Medial angle of eye). Held to the
     # face's plane there, the margin stood 10 mm off the ball and the skin showed through it from 3/4: the clamp is
     # eased out on the corner's own weight. tools/face-creator/apply-inner-corner.py)
+    # (the extra depth is taken only at the margin and added to the surface after the hand-over, faded out over 8e:
+    # put back into L, it was handed to the face over the corner's narrow 5e band and stepped down beside the nose.
+    # tools/face-creator/apply-inner-corner-blend.py)
     w_med = smooth(0.5 * S['a'], -0.5 * S['a'], xl - S['xc']) * (1 - smooth(0.0, 0.85, along))
-    L = L + (L_bed - L) * w_med
+    Dm = (L_bed - L) * w_med * (1 - smooth(0.5 * e, 2.0 * e, dist))
     reach = (wu * S['crease'] + (1 - wu) * 0.8 * S['lower_fold']) * (0.3 + 0.7 * along ** 0.6)
     # the fill is held to the lid well inside the lid's reach, then the lid hands over to it across a band
     # 3 mm wide (a hard edge to the held cells drew the reach's outline as a ridge)
@@ -395,6 +398,7 @@ def skin_field(S, head_y, box, M, nh, step=None):
     Y = Hh + Dl
     hand = smooth(reach - 2.5 * e, reach + 2.5 * e, dist)
     Y = L + (Y - L) * hand
+    Y = Y + _blur(Dm, max(2, int(round(1.5 * e / h)))) * (1 - smooth(1.0 * e, 8 * e, dist))
     Y = Y + (_blur(Y, nb_) - Y) * (1 - outside) * smooth(1.5 * e, 3.5 * e, dist) * (1 - smooth(0, 6 * h, np.minimum.reduce([X - x0, x1 - X, Z - z0, z1 - Z])) * 0)
     # the crease of the upper lid and the soft fold under the lower lid, fading toward the corners and the border
     corner = smooth(0.0, 0.3, np.clip(1 - np.abs((xl - S['xc']) / S['a']), 0, 1))
