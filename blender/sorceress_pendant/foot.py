@@ -151,7 +151,9 @@ def dorsal(FL, ball_top):
     zc = float(np.interp(tc, tg, sm)) + r
     arc = np.where(tg >= tc, -np.inf,
                    np.where(tg >= tf, zc - np.sqrt(np.clip(r * r - ((tc - tg) * FL) ** 2, 0, None)), zc + 3.0 * (tf - tg) * FL))
-    arc = np.where(tg < tf - 0.08, -np.inf, arc)                 # (behind that the leg covers it)
+    arc = np.minimum(arc, zc + 0.08 * FL)                        # (only a short way up: the ankle fillet takes it on)
+    arc = np.where(tg < tf - 0.05, -np.inf, arc)                 # (behind that the leg covers it)
+    # (run higher, the tall rings stood out of the narrow shin above the ankle and folded the skin, renders 333-334)
     sm = np.maximum(sm, arc)
     g2 = np.exp(-0.5 * (np.arange(-60, 61) * dt / (0.3 * SMOOTH)) ** 2)
     sm = np.convolve(np.pad(sm, 60, mode='edge'), g2 / g2.sum(), mode='valid')
