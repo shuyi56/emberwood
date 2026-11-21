@@ -304,6 +304,49 @@ def bang_sweep(t, side):
     return v / np.linalg.norm(v, axis=1, keepdims=True)
 
 
+BANG_ROOT_LIFT_MM = 6.0            # the dried root's volume off the forehead, eased to the skin over the first 3 cm
+                                   # (EXPERIMENTAL; [OGL] dries "from the roots for volume")
+BANG_LIE_MM = 1.0                  # where the combed bang lies off the skin below that
+
+
+def comb_bangs(surf, col, roots, d0, sweep, comb, seg_hh, S):
+    """The combing pass: the bangs are combed into their style and laid on the face, as a brush lays them, instead of
+    being left to gravity (a lone hair holds a shape only over its 4.5 cm elastogravity length, so a solve lets a
+    swept bang fall straight). Each step heads from the comb out toward the temple, then down beside the eye, and is
+    laid on the skin at the root lift easing to BANG_LIE_MM."""
+    import torch
+    G = len(roots)
+    X = np.zeros((G, S + 1, 3)); X[:, 0] = roots; X[:, 1] = roots + d0 * seg_hh
+    d = d0.copy()
+    side = np.sign(sweep[:, 0])
+    out = np.c_[side * 0.55, -0.2 * np.ones(G), -0.8 * np.ones(G)]      # (down over the brow's corner as much as out)
+    for k in range(2, S + 1):
+        s_m = k * seg_hh * HH_M
+        t1 = SF.sm(0.0, BANG_OUT_M, s_m); t2 = SF.sm(BANG_OUT_M, BANG_SWEEP_M, s_m)
+        want = (comb * (1 - t1) + out * t1) * (1 - t2) + sweep * t2
+        d = 0.5 * d + 0.5 * want
+        d /= np.linalg.norm(d, axis=1, keepdims=True)
+        x = X[:, k - 1] + d * seg_hh
+        lie = (BANG_LIE_MM + (BANG_ROOT_LIFT_MM - BANG_LIE_MM) * (1 - SF.sm(0.0, 0.03, s_m))) / SF.HH_MM
+        on = x[:, 2] > 0.2
+        if on.any():                      # laid on the skin: moved along the radius to the lie height, in or out,
+            # then out of the collider where it stands over the skin (it bridges the eye socket, as a comb does)
+            import torch
+            q = x[on] - SF.CENTRE; u = q / np.linalg.norm(q, axis=1, keepdims=True)
+            x[on] = SF.CENTRE + u * (surf.radius(u) + lie)[:, None]
+            pen = col.head_depth(torch.tensor(x[on], dtype=torch.float64)).numpy()
+            x[on] = x[on] + u * np.maximum(pen + lie, 0)[:, None]
+        dd = x - X[:, k - 1]
+        d = dd / np.linalg.norm(dd, axis=1, keepdims=True)
+        X[:, k] = X[:, k - 1] + d * seg_hh                  # (each step kept one segment long)
+        on = X[:, k, 2] > 0.2
+        if on.any():                      # (and never left inside: over the socket the step may stretch a little)
+            q = X[on, k] - SF.CENTRE; u = q / np.linalg.norm(q, axis=1, keepdims=True)
+            pen = col.head_depth(torch.tensor(X[on, k], dtype=torch.float64)).numpy()
+            X[on, k] += u * np.maximum(pen + 0.2 / SF.HH_MM, 0)[:, None]
+    return X
+
+
 def bang_set(X, bang):
     """The set: each bang is dried round the brush into the styled shape (the first guess: over the brow, round and
     out to the cheekbone); once cool it keeps SET_KEEP of that shape's curvature, never tighter than the brush.
@@ -616,11 +659,22 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X = np.zeros((len(idx), S + 1, 3)); Dn = D.copy()
         if (~solve).any():
             X[~solve] = P['X_uncut'][~solve] if mask is None else np.nan_to_num(P['X'][~solve])
+        if not solve.any():
+            return X, Dn
         m = None if mask is None else mask[solve]
         Xs, Ds = settle(roots[solve], d0[solve], D[solve], n_hairs[solve], seg_hh, col, iters=iters, layer=layer.subset(solve),
                         log=log, kb0=None if kb0 is None else kb0[solve], mask=m)
         X[solve] = Xs; Dn[solve] = Ds
         return X, Dn
+    if bangs:
+        # the bangs are combed, not solved: their paths come from the combing pass and are never settled
+        Xb = comb_bangs(surf, col, roots[bang], d0[bang], sweep[bang], comb[bang], seg_hh, S)
+        solve &= ~bang
+        if reuse is None:
+            P = {'X_uncut': np.zeros((len(idx), S + 1, 3)), 'X': np.zeros((len(idx), S + 1, 3)),
+                 'lengths': np.zeros(len(idx), int)}
+        P = {k: np.array(P[k]) for k in ('X_uncut', 'X', 'lengths')}
+        P['X_uncut'][bang] = Xb
     t0 = time.time()
     X, D = settle_some(D)
     if (~solve).any():
@@ -638,8 +692,11 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             lengths[g] = max(3, below[0])
     mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
     if (~solve).any():
-        lengths[~solve] = P['lengths'][~solve]
+        reused = ~solve & ~bang
+        lengths[reused] = P['lengths'][reused]
         mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
+    if bangs:
+        P['X'][bang] = Xb                 # (the combed bangs, cut below by the mask)
     X2, D = settle_some(D, mask)
     t2 = time.time()
     X2[:, 1:][mask == 0] = np.nan
