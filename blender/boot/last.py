@@ -370,6 +370,7 @@ def _sole(edge, z_welt, r):
     return V, F, sd, su, path
 
 
+TOE_SMOOTH = 120     # (passes of Taubin smoothing over the toe box)
 TOE_BRIDGE = 0.5     # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
 TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.34, 0.06, 0.40     # (shares of the shin's width: see cut_lace)
 
@@ -562,6 +563,15 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, bridge - lift)
         lift += out
         X += Nr * out[:, None]
+    # the toe box: the leather over the toes is one smooth shape, so the toes' lobes (their tips, their domes) are
+    # smoothed away over the toe region by Taubin's filter (a pass that smooths and a pass that swells back, so the
+    # box does not shrink), weighted by the toe region's mask; EXPERIMENTAL: the passes' count is judged by eye
+    for _ in range(TOE_SMOOTH):
+        for lam in (0.5, -0.53):
+            acc = np.zeros_like(X)
+            np.add.at(acc, E[:, 0], X[E[:, 1]])
+            np.add.at(acc, E[:, 1], X[E[:, 0]])
+            X += (lam * toe)[:, None] * (acc / np.maximum(deg, 1)[:, None] - X)
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
     pushed = 0
