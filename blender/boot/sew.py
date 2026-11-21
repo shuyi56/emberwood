@@ -583,28 +583,28 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         strand(pts, rad)
     t_ = np.linspace(0.0, 1.0, 14)
     for E, sd_ in ((E0, -1.0), (E1, 1.0)):                 # (each end from its hole up to its own point under the knot)
-        KE = K0 + ex * sd_ * 0.3 * cm - ey * 0.35 * cm
+        KE = K0 + ex * sd_ * 0.4 * cm - ey * 0.5 * cm
         pts = [onto((1 - u) * E + u * KE, 1.05 * rl) for u in t_]
         run(pts, rl * np.minimum(1.0, 0.6 + 5 * t_))
     th = np.linspace(0.0, 2 * np.pi * 1.5, 40)               # (the knot: one tube looping 1.5 turns, rising where it crosses itself)
-    strand(np.array([at(0.5 * np.cos(th_ + 0.6), 0.3 * np.sin(th_ + 0.6), 1.9 + 0.9 * np.sin(1.3 * th_))
-                     for th_ in th]), 1.45 * rl)
+    strand(np.array([at(0.75 * np.cos(th_ + 0.6), 0.45 * np.sin(th_ + 0.6), 2.2 + 1.1 * np.sin(1.3 * th_))
+                     for th_ in th]), 1.7 * rl)
     # the loops and tails are laid out by hand (a bow's shape), then let fall: the local cloth solver (fabric.py) runs
     # each as a chain of ties (the cord's length kept, a soft bend) pinned at the knot, under gravity, held off the
     # leather by the cord's radius and thickness, so they hang and settle as a cord does on a boot. (EXPERIMENTAL
     # settings: a waxed lace's stiffness is a guess.)
     chains = []                                            # (points, pinned count at the start, at the end)
-    for sd, ang, Ll in ((-1.0, -22.0, 4.6), (1.0, -16.0, 4.0)):                           # (the loops)
+    for sd, ang, Ll in ((-1.0, -22.0, 5.6), (1.0, -16.0, 5.0)):                           # (the loops)
         ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
         ph = np.linspace(0.0, 2 * np.pi, 34)
         bx = 0.5 * Ll * (1 - np.cos(ph))
-        by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2))) - 0.5 * ph / (2 * np.pi)   # (its two ends 0.5 cm apart)
-        chains.append((np.array([at(sd * (0.45 + ca * x - sa * y), 0.25 + sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
+        by = 0.44 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2))) - 0.6 * ph / (2 * np.pi)   # (its two ends 0.6 cm apart)
+        chains.append((np.array([at(sd * (0.6 + ca * x - sa * y), 0.3 + sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 5, 5))
     for sd, T, out in ((-1.0, 13.5, 4.0), (1.0, 11.0, 3.4)):                           # (the tails: out over the leather, then down)
         u = np.linspace(0.0, 1.0, 56)
-        aa = sd * (0.3 + out * (1 - (1 - u) ** 2.5))
-        vv = -0.5 - T * u
+        aa = sd * (0.4 + out * (1 - (1 - u) ** 2.5))
+        vv = -0.7 - T * u
         chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 5, 0))   # free ends hang low
     if DRAPE:
         import fabric
