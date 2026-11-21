@@ -6,3 +6,4 @@ dist/
 public/sprites/
 __pycache__/
 *.blend1
+public/_local/
