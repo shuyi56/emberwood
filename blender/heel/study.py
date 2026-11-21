@@ -109,7 +109,9 @@ def measure(P, N, foot, ankle):
     f['mt1'] = np.array([prof[i1, 2] if side < 0 else prof[i1, 1], hy - prof[i1, 0] * L])
     f['mt5'] = np.array([prof[i5, 1] if side < 0 else prof[i5, 2], hy - prof[i5, 0] * L])
     f['ball_w'] = float(np.nanmax(prof[band, 2] - prof[band, 1]))
-    q = F[np.abs(F[:, 1] - (hy - SEAT_POINT * L)) < 0.06]       # (the heel's breadth at the seat point)
+    # (the heel's breadth at the seat point, under the ankle bones: the malleoli are wider than the heel and stand
+    # over the seat, not in it)
+    q = F[(np.abs(F[:, 1] - (hy - SEAT_POINT * L)) < 0.06) & (F[:, 2] < F[:, 2].min() + 0.1 * L)]
     f['heel_w'] = float(np.ptp(q[:, 0]))
     f['seat_y'] = hy - SEAT_POINT * L
     f['joint_y'] = hy - JOINT * L
