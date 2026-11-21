@@ -585,20 +585,21 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
     for E in (E0, E1):                                     # (each end from its hole up to the knot)
         pts = [onto((1 - u) * E + u * K0, 1.05 * rl) for u in t_]
         run(pts, rl * np.minimum(1.0, 0.6 + 5 * t_))
-    run([at(-0.35 + 0.7 * u, 0.0, 1.25) for u in np.linspace(0, 1, 5)], 1.35 * rl)       # (the knot)
+    run([at(-0.6 + 1.2 * u, 0.0, 1.6) for u in np.linspace(0, 1, 7)], 2.1 * rl)          # (the knot, bigger: a bulb 1.2 cm wide)
+    run([at(-0.4 + 0.8 * u, -0.45 + 0.9 * u, 2.2) for u in np.linspace(0, 1, 5)], 1.6 * rl)   # (its turn across)
     # the loops and tails are laid out by hand (a bow's shape), then let fall: the local cloth solver (fabric.py) runs
     # each as a chain of ties (the cord's length kept, a soft bend) pinned at the knot, under gravity, held off the
     # leather by the cord's radius and thickness, so they hang and settle as a cord does on a boot. (EXPERIMENTAL
     # settings: a waxed lace's stiffness is a guess.)
     chains = []                                            # (points, pinned count at the start, at the end)
-    for sd, ang, Ll in ((-1.0, 16.0, 2.9), (1.0, 24.0, 2.5)):                           # (the loops)
+    for sd, ang, Ll in ((-1.0, 16.0, 3.8), (1.0, 24.0, 3.3)):                           # (the loops)
         ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
-        ph = np.linspace(0.0, 2 * np.pi, 26)
+        ph = np.linspace(0.0, 2 * np.pi, 34)
         bx = 0.5 * Ll * (1 - np.cos(ph))
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
         chains.append((np.array([at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
                                  for x, y, p_ in zip(bx, by, ph)]), 2, 2))
-    for sd, T, out in ((-1.0, 10.2, 3.6), (1.0, 8.4, 3.1)):                           # (the tails: out over the leather, then down)
+    for sd, T, out in ((-1.0, 13.5, 4.0), (1.0, 11.0, 3.4)):                           # (the tails: out over the leather, then down)
         u = np.linspace(0.0, 1.0, 56)
         aa = sd * out * (1 - (1 - u) ** 2.5)
         vv = -T * u
@@ -615,6 +616,9 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             m = len(c)
             fb.tie(np.arange(at0, at0 + m - 1), np.arange(at0 + 1, at0 + m))
             fb.tie(np.arange(at0, at0 + m - 2), np.arange(at0 + 2, at0 + m), DRAPE['bend'])
+            if p1 == 2:                                          # a loop: a waxed lace holds its curve, so far ties keep it
+                for k_ in (4, 8):
+                    fb.tie(np.arange(at0, at0 + m - k_), np.arange(at0 + k_, at0 + m), DRAPE['loop_hold'])
             if p1 == 2 and not DRAPE['loops']:
                 pin += list(range(at0, at0 + m))                     # a loop keeps its hand-laid shape
             else:
@@ -672,7 +676,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
-DRAPE = dict(bend=2e-4, friction=0.9, steps=80, g=0.2, loops=False, gap=3.8, iters=200)         # the bow's settling (see lacing)
+DRAPE = dict(bend=2e-4, friction=0.9, steps=80, g=0.2, loops=True, loop_hold=2e-6, gap=3.8, iters=200)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
