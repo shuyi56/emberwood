@@ -377,15 +377,6 @@ def _sole(edge, z_welt, r):
     return V, F, sd, su, path
 
 
-TOE_SMOOTH = 120     # (passes of Taubin smoothing over the toe box)
-TOE_ALLOW = 0.045    # (the box's tip beyond the longest toe, a share of H: about 1.1 cm, a thumb's width)
-TOE_SLICE_BACK = 0.6 # (units behind the ball: the slice the box is sized from)
-TOE_TAPER = 2.2      # (the exponent of the plan's and the height's taper to the tip)
-TOE_SECT = 2.6       # (the exponent of the section: 2 an ellipse, more a squarer box)
-H_CM = 2.619         # (cm per unit)
-TOE_SWELL = 4        # (rounds of spreading the toe box's clearance shortfall)
-TOE_SPREAD = 40      # (neighbour passes that spread it)
-TOE_BRIDGE = 0.5    # (units: how much deeper than elsewhere the leather may bridge the gaps between the toes)
 TONGUE_UNDER, TONGUE_OVER, TONGUE_CORNER = 0.34, 0.06, 0.40     # (shares of the shin's width: see cut_lace)
 
 
@@ -565,88 +556,13 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # the foot's hollows bridged
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
     lift = np.zeros(n)
-    # (a boot's toe box is one smooth shape, not five toes: in the toe region the leather may bridge the gaps between
-    # the toes by a good deal more than it does a hollow elsewhere (EXPERIMENTAL: the gap's depth is measured off the
-    # new foot, about 1 cm), and the bridging runs on until the toe box is smooth)
-    bridge = r['bridge'] + TOE_BRIDGE * toe
-    for _ in range(360):
+    for _ in range(160):
         lap = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
-        out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, bridge - lift)
+        out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, r['bridge'] - lift)
         lift += out
         X += Nr * out[:, None]
-    # the toe box, drafted as a shape of its own and not smoothed out of the toes: a superellipse section whose width
-    # and height are the foot's at the ball (the toes' outer extent, over the ball's slice) and which tapers to a
-    # rounded tip a toe allowance beyond the longest toe (a thumb's width, TOE_ALLOW, the usual fitting rule; the
-    # exponents of the section and the taper are EXPERIMENTAL, judged by eye). Its size is then lifted as one factor
-    # until every toe is inside, so the box stands clear of the toes without taking their lobes.
-    top = np.clip((Nr[:, 2] + 0.2) / 0.6, 0.0, 1.0)
-    wd = toe * top * (toe > 0.02)
-    for sgn_ in (-1, 1):
-        side = X0[:, 0] * sgn_ > 0
-        ids = np.nonzero((wd > 0) & side)[0]
-        if not len(ids):
-            continue
-        zone_all = np.nonzero((z < M['ankle_z']) & (toe > 0.02) & side)[0]
-        y_tip = float(X[zone_all, 1].min()) - TOE_ALLOW * H          # (the box's tip: ahead of the longest toe)
-        y_b = y_ball + TOE_SLICE_BACK
-        sb = np.nonzero((abs(X[:, 1] - y_b) < 0.3) & (z < M['ankle_z']) & side)[0]
-        cx0 = float(0.5 * (X[sb, 0].min() + X[sb, 0].max()))
-        a0 = float(0.5 * (X[sb, 0].max() - X[sb, 0].min()))
-        zb = float(X[sb, 2].min()) + 0.15
-        b0 = float(X[sb, 2].max()) - zb
-        def prof(yv):
-            s_ = np.clip((yv - y_tip) / max(y_b - y_tip, 1e-6), 0.0, 1.0)
-            return (1.0 - (1.0 - s_) ** TOE_TAPER) ** (1.0 / TOE_TAPER)
-        def shape(yv, th, k):
-            f = prof(yv)
-            a, b = np.maximum(a0 * f * k, 1e-3), np.maximum(b0 * f * k, 1e-3)
-            q = TOE_SECT
-            return (np.abs(np.cos(th) / a) ** q + np.abs(np.sin(th) / b) ** q) ** (-1.0 / q)
-        # (the centre line runs with the foot's: the slice's own middle, not a straight one)
-        cen = {}
-        for yv in np.unique(np.round(X[ids, 1] / 0.25) * 0.25):
-            al = np.nonzero((abs(X[:, 1] - yv) < 0.15) & (z < M['ankle_z']) & side)[0]
-            cen[yv] = float(0.5 * (X[al, 0].min() + X[al, 0].max())) if len(al) > 3 else cx0
-        yk = np.round(X[ids, 1] / 0.25) * 0.25
-        cxs = np.array([cen[v] for v in yk])
-        dx, dz = X[ids, 0] - cxs, X[ids, 2] - zb
-        th, rh = np.arctan2(dz, dx), np.hypot(dx, dz)
-        k = 1.0
-        for _ in range(40):
-            over = rh / shape(X[ids, 1], th, k)
-            if over.max() <= 1.0 or k > 1.3:
-                break
-            k *= min(over.max(), 1.04)
-        tgt = shape(X[ids, 1], th, k)
-        newr = rh * (1 - wd[ids]) + tgt * wd[ids]
-        X[ids, 0] = cxs + newr * np.cos(th)
-        X[ids, 2] = zb + newr * np.sin(th)
-        log('boot: the toe box drafted: %.1f cm wide, %.1f high at the ball, its tip %.1f cm beyond the longest toe, size factor %.2f'
-            % (2 * a0 * H_CM, b0 * H_CM, TOE_ALLOW * H * H_CM, k))
-    # the toe box: the leather over the toes is one smooth shape, so the toes' lobes (their tips, their domes) are
-    # smoothed away over the toe region by Taubin's filter (a pass that smooths and a pass that swells back, so the
-    # box does not shrink), weighted by the toe region's mask; EXPERIMENTAL: the passes' count is judged by eye
-    for _ in range(0):
-        for lam in (0.5, -0.53):
-            X += (lam * toe)[:, None] * (_nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X)
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
-    # over the toe box the clearance is made up as one swell, not toe by toe: where the smoothed box dips to a toe's
-    # dome, the shortfall is spread (a running maximum of the shortfall and its neighbours' mean) over the region and
-    # the box is carried out by that, so the pushing below has nothing left to carve the lobes back with
-    # (EXPERIMENTAL: the rounds and the spread are judged by eye)
-    zone = toe > 0.02
-    for _ in range(TOE_SWELL):
-        short = np.zeros(n)
-        for i in np.nonzero(zone)[0]:
-            loc, nrm, _, d = tree.find_nearest(X[i])
-            if loc is not None:
-                short[i] = max(r['gap'] - float(np.dot(X[i] - np.array(loc), np.array(nrm))), 0.0)
-        if short.max() < 1e-4:
-            break
-        for _ in range(TOE_SPREAD):
-            short = np.where(zone, np.maximum(short, _nbr_sum(np.repeat(short[:, None], 3, 1), E)[:, 0] / np.maximum(deg, 1)), 0.0)
-        X += Nr * (short * zone)[:, None]
     pushed = 0
     for i in range(n):
         loc, nrm, _, d = tree.find_nearest(X[i])
