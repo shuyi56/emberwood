@@ -1,0 +1,1 @@
+{"key":"views-0465a251e52e","branch":"render-jobs","sha":"ccdf3f0e7b77ca47137327d6c3e632d576e59ea2","quality":"check","command":["blender/base/rq_views.py","--figure","heelboot","--mannequin","--clay-only","--angles","profile","--size","300"]}
