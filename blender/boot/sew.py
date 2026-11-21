@@ -593,9 +593,9 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
         by = 0.36 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2)))
         pts = [at(sd * (ca * x - sa * y), sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_)) for x, y, p_ in zip(bx, by, ph)]
         strand(np.array(pts), rl)
-    for sd, T, wig in ((-1.0, 7.4, 0.8), (1.0, 5.8, -0.6)):                           # (the tails)
-        u = np.linspace(0.0, 1.0, 22)
-        aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.4 * u) * u)
+    for sd, T, wig in ((-1.0, 12.5, 1.3), (1.0, 9.5, -1.0)):                          # (the tails)
+        u = np.linspace(0.0, 1.0, 34)
+        aa = sd * (2.7 * (1 - np.exp(-4.0 * u)) + 0.5 * u + wig * np.sin(np.pi * 1.6 * u) * u)
         vv = -T * u + 1.1 * np.sin(np.pi * u) * 0.0
         pts = [at(a, v, 1.1 + 0.2 * uu) for a, v, uu in zip(aa, vv, u)]
         run(pts, rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((u - 0.9) / 0.1, 0, 1)))
