@@ -240,6 +240,11 @@ def comb_ranger(F, roots_idx):
     back -= N * (N * back).sum(1, keepdims=True)
     back /= np.linalg.norm(back, axis=1, keepdims=True)
     out = out * (1 - tuck)[:, None] + back * tuck[:, None]
+    # behind the crown the whorl's flow turns forward on one side; a long fall is brushed back there, so no hair
+    # rooted behind the crown crosses it and drops over the face (two guides did before this)
+    fwd = ~front & (out[:, 1] < 0.1)
+    out[fwd, 1] = 0.1
+    out[fwd] += back[fwd] * 0.3
     out -= N * (N * out).sum(1, keepdims=True)
     out /= np.linalg.norm(out, axis=1, keepdims=True)
     # roots inside the part itself are bare scalp
