@@ -594,7 +594,7 @@ def fold_front(o, outlines, M, bodyP, bodyN, L_=LAPEL, log=print):
             fab.pos[:] = got['pos']
             rep = str(got['report']) + ' (from the fold cache)'
         else:
-            rep = F.bake(body=body, log=lambda *a_: None, **L_.get('bake', {}))
+            rep = F.bake(body=body, log=lambda *a_: None, sheet=False, **L_.get('bake', {}))   # (sheet=False: the lapels' sheet is contours.py here)
             os.makedirs(fo.cache_dir(), exist_ok=True)
             np.savez(cfile, pos=fab.pos, report=str(rep))
         log('collar: front %d: lapel extension of %d points on %d roll points (roll %.2f long on the cloth, %.2f in front view), turned back by the fold hinges: %s'
@@ -1015,7 +1015,7 @@ def build():
     sub = o.modifiers.new('smooth', 'SUBSURF')
     sub.levels = sub.render_levels = 1
     sol = o.modifiers.new('thickness', 'SOLIDIFY')
-    sol.thickness = 0.07 * M['w']
+    sol.thickness = _bodice.RATIOS['thickness'] * M['w']       # (the bodice's own cloth: the collar is as thick as the lapels it meets)
     sol.offset = 0
     for c in bpy.data.objects:                       # (the buttons above the break: the front is open there)
         if c.name.startswith('Redingote bodice') and c.name.endswith('buttons'):
