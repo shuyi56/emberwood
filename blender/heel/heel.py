@@ -201,6 +201,10 @@ def pose_body(body, feet, ths, up):
     for mo in list(body.modifiers):
         if mo.type == 'ARMATURE':
             body.modifiers.remove(mo)
+    # (off the rig, the body no longer turns with the figure's root: parent it there, as it stands)
+    mw = body.matrix_world.copy()
+    body.parent = female.FIG['root']
+    body.matrix_world = mw
 
 
 def build():
