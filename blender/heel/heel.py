@@ -241,9 +241,10 @@ def build():
         ths[side], outs[side] = np.radians(o['theta_deg']), (d, o)
         print('heel %s: %s' % (side, S.summary(f, d, o)), flush=True)
     d0 = outs['R'][0]
-    pose_body(body, feet, ths, d0['insole'] + d0['sole'])
-    for side, (d, o) in outs.items():
-        build_heel(side, feet[side][0], d, o, H)
+    if os.environ.get('HEEL_PARTS', '1') != '0':     # (HEEL_PARTS=0: the bare foot, flat on the floor)
+        pose_body(body, feet, ths, d0['insole'] + d0['sole'])
+        for side, (d, o) in outs.items():
+            build_heel(side, feet[side][0], d, o, H)
     RESULT.update(feet=feet, outs=outs, k=k, e=e, h=h, bare=bare)
     if os.environ.get('HEEL_DUMP'):
         np.savez(os.environ['HEEL_DUMP'], P=P, N=N, maskR=feet['R'][3], maskL=feet['L'][3],
