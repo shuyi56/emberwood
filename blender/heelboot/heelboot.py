@@ -37,6 +37,7 @@ M_LIFT_A = female.mat_def(88, 'heel lift, light', female.ramp(0x70503a, 0.1), 0.
 M_LIFT_B = female.mat_def(89, 'heel lift, dark', female.ramp(0x62442c, 0.1), 0.3, surface='leather', closeup='leather')
 M_TOP_LIFT = female.mat_def(90, 'heel top lift', female.ramp(0x221d1a, 0.08), 0.45)
 WELD = 0.03                  # the stack's seat stands this far up into the sole, so the two are one solid
+SEAT_OUT = 0.06              # how far the sole stands out past the counter round the heel seat (about 1.5 mm)
 TAPER = 0.05                 # the stack closes in this share of its size from the seat down to the tread
 
 
@@ -68,10 +69,12 @@ def join_heel(side, lift):
         env = np.maximum(env, np.roll(env, -2))                # (a point's width either way: no notch between bins)
         r3 = np.linalg.norm(Sv[3 * na:4 * na, :2] - c2, axis=1)
         welt = boot.last.RATIOS['welt'] * boot.hose.MEASURES['H']
-        f = np.maximum(1.0, (env + welt) / r3)
+        # (a close seat: the welt ends at the breast, and round the heel the sole and the stack are trimmed nearly
+        # flush with the counter, SEAT_OUT past it, as a bootmaker finishes a heel seat. John, 2026-11-21: the ledge
+        # standing out at the back)
+        f = np.maximum((r3 - welt + SEAT_OUT) / r3, (env + SEAT_OUT) / r3)
         for _ in range(3):
             f = (np.roll(f, 1) + 2 * f + np.roll(f, -1)) / 4
-        f = np.maximum(f, 1.0)
         back = np.clip((Sv[3 * na:4 * na, 1] - (y_br - 1.2)) / 1.2, 0, 1)
         f = 1.0 + (f - 1.0) * back * back * (3 - 2 * back)     # (only behind the breast, eased in ahead of it)
         for k_ in range(5):
