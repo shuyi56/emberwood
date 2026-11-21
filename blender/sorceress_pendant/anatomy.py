@@ -30,6 +30,9 @@ from mathutils.kdtree import KDTree
 import female
 
 ON = os.environ.get('ANATOMY', '1') != '0'
+# The foot: 'measured' builds it from the measured proportions of the female foot (foot.py), with the ankle joint
+# at its measured height (John, 2026-11-21); 'old' keeps the first hand-set foot and the rig's ankle at 3.4.
+FOOT_MODEL = os.environ.get('FOOT_MODEL', 'measured')
 # ---------------------------------------------------------------- the canon: every size from the head
 # The head as it sits on the body (the Face Creator's head, and the mannequin's fitted to the same size) is the
 # unit. H is its height, chin to crown; F the face, hairline to chin, 5/6 of H (Richer's and the classical canon).
@@ -57,12 +60,27 @@ HIP_JOINT = FLOOR_Z + 4.0 * HEAD if LONG else female.HIP_Z
 if not LONG:
     CANON['crotch'] = 26.2
     CANON['thigh'] = female.THIGH
+MEASURED_FOOT = FOOT_MODEL == 'measured'
+if MEASURED_FOOT:
+    import foot as _foot
+    # the ankle joint's centre at the middle of the two malleoli (Wu et al. 2002, the ISB's joint centre), at their
+    # measured heights (Hajaghazadeh 2018: 0.247 and 0.275 of the foot's length)
+    ANKLE_H = 0.5 * (_foot.R['lat_mall'] + _foot.R['med_mall']) * CANON['foot']
+    # the ball's reach in front of the ankle (the rocker the walk lifts the heel about): the metatarsal heads'
+    # middle, Lee 2014's 0.728 and 0.658 of the length from the heel, less the heel's 0.206 behind the joint
+    FOOT_BALL_M = (0.5 * (_foot.R['ball_len'] + _foot.R['out_ball_len'])
+                   - 0.5 * (_foot.R['heel_lat_mall'] + _foot.R['heel_med_mall'])) * CANON['foot']
+else:
+    ANKLE_H = 3.4
 print('anatomy canon: H %.2f F %.2f floor %.2f hip joint %.2f knee %.2f crotch %.2f' % (
     HEAD, FACE, FLOOR_Z, HIP_JOINT, HIP_JOINT - 2 * HEAD, CANON['crotch']), flush=True)
 VOXEL = float(os.environ.get('ANAT_VOXEL', '0.14'))
 ARM_SPREAD = 0.42
 K_HIP = float(os.environ.get('K_HIP', '2.0'))
-K_ANKLE = float(os.environ.get('K_ANKLE', '0.9'))
+K_ANKLE_BACK = float(os.environ.get('K_ANKLE_BACK', '0.9'))   # (the same fillet behind the shin's front)
+K_ANKLE = float(os.environ.get('K_ANKLE', '1.2'))   # (the leg into the foot: a wide fillet, the front of the ankle one curve with the instep)
+ANKLE_FRONT_ITERS = int(os.environ.get('ANKLE_FRONT_ITERS', '0'))
+FOOT_SMOOTH = int(os.environ.get('FOOT_SMOOTH', '60'))
 CUT_Z = 46.0           # the upper body's skin is kept above this; the pelvis is built from here down
 KEEP_Z = 47.0          # above this the new skin is put back exactly on the upper body's
 
@@ -198,6 +216,11 @@ def patch():
         # (the bare foot is longer than a boot and has no toe joint, so it rolls up nearly over the tips of its toes
         # to push off: rolling over a boot's ball put the toes 1.9 into the floor; at 5.8 they stay within 0.1 of it)
         female.FOOT_BALL = 5.8
+    elif MEASURED_FOOT:
+        # (the ankle joint at its measured height: the shin longer by what the ankle comes down, the slack kept)
+        female.ANKLE_Z = FLOOR_Z + ANKLE_H
+        female.SHIN = 13.8 + (3.4 - ANKLE_H)
+        female.FOOT_BALL = FOOT_BALL_M
 
 
 # ---------------------------------------------------------------- pelvis
@@ -333,7 +356,7 @@ def pelvis_point(z, phi):
 # ---------------------------------------------------------------- legs
 HZ = female.HIP_Z
 TH = HZ - (HIP_JOINT - CANON['thigh'])            # the rig's hip pivot down to the canon's knee
-SH = (HIP_JOINT - CANON['thigh']) - (FLOOR_Z + 3.4) if LONG else female.SHIN
+SH = (HIP_JOINT - CANON['thigh']) - (FLOOR_Z + 3.4) if LONG else (13.8 + (3.4 - ANKLE_H) if MEASURED_FOOT else female.SHIN)
 # (local z from the hip pivot, outer, inner, front and back radius, centre x out from the midline)
 _CR = CANON['crotch'] - HZ          # (the crotch, local)
 
@@ -389,8 +412,14 @@ def leg_point(z, phi, s):
     # the inner thigh's teardrop above the knee (vastus medialis)
     x += s * 0.18 * math.exp(-((z + TH - 1.8) / 1.3) ** 2) * max(0.0, -out) * max(0.0, c + 0.3)
     # the ankle bones: the inner one higher and further forward than the outer
-    ab = 0.16 * math.exp(-((z + TH + SH - 0.1) / 0.5) ** 2) * max(0.0, -out) ** 4
-    ab += 0.16 * math.exp(-((z + TH + SH + 0.4) / 0.5) ** 2) * max(0.0, out) ** 4
+    # (measured: each half the malleoli's height difference either side of the joint, Hajaghazadeh 2018)
+    if MEASURED_FOOT:
+        dm = 0.5 * (_foot.R['med_mall'] - _foot.R['lat_mall']) * CANON['foot']
+        z_in, z_out = z + TH + SH - 0.2 - dm, z + TH + SH - 0.2 + dm        # (0.2: the shin's slack past the joint)
+    else:
+        z_in, z_out = z + TH + SH - 0.1, z + TH + SH + 0.4
+    ab = 0.16 * math.exp(-(z_in / 0.5) ** 2) * max(0.0, -out) ** 4
+    ab += 0.16 * math.exp(-(z_out / 0.5) ** 2) * max(0.0, out) ** 4
     x -= s * ab * (1 if out > 0 else -1)
     return x, y
 
@@ -593,7 +622,10 @@ def fuse_lower():
     pv = female.loft_fn([48.0 - 0.2 * i for i in range(int((48.0 - CANON['crotch']) / 0.2) + 1)], pelvis_point, n=64)
     pv = _closed(pv)
     legs = [_closed(leg_bm(s)) for s in (1, -1)]
-    feet = [_closed(foot_bm(s)) for s in (1, -1)]
+    if MEASURED_FOOT:
+        feet = [_closed(_foot.build(s, CANON['foot'], FLOOR_Z, -s * 2.8 * UNIT, 0.0)) for s in (1, -1)]
+    else:
+        feet = [_closed(foot_bm(s)) for s in (1, -1)]
     # trees for the fillet
     t_body = _tree(_merge([up, pv]))
     t_leg = _tree(_merge(legs))
@@ -640,7 +672,9 @@ def fuse_lower():
     kh = K_HIP * _ssn(33.0, 30.5, z) * _ssn(CANON['crotch'] - 4.7, CANON['crotch'] - 1.7, z) * np.maximum(1.0 - _ssn(2.2, 4.2, ax), _ssn(1.0, 2.5, co[:, 1]) * (1.0 - _ssn(5.3, 6.1, ax)))
     # (only between the legs and over the groin: at the hip the thigh and the pelvis share one outline, and a smooth
     # union of two surfaces lying on each other swells out by a quarter of its width, a saddlebag round the hip)
-    ka = K_ANKLE * _ssn(FLOOR_Z + 7.5, FLOOR_Z + 5.5, z)
+    ka = (K_ANKLE_BACK + (K_ANKLE - K_ANKLE_BACK) * _ssn(0.3, -0.5, co[:, 1])) * _ssn(FLOOR_Z + 7.5, FLOOR_Z + 5.5, z)
+    # (the wide round only at the front of the ankle: round the heel and the ankle's sides it swelled the heel by 4 mm
+    # where the leg and the foot run side by side, and the heel derived from the foot came out 0.7 cm lower)
     near_h = (kh > 1e-3) & (np.abs(dB - dL) < kh) & (np.minimum(dB, dL) < 0.3)
     near_a = (ka > 1e-3) & (np.abs(dL - dF) < ka) & (np.minimum(dL, dF) < 0.3)
     cand = np.nonzero(near_h | near_a)[0]
@@ -669,6 +703,22 @@ def fuse_lower():
         w2 = relax(w[:, None].repeat(3, 1), np.full(n, 1.0), 2)[:, 0]
         co = relax(co, 0.8 * np.clip(w2 * 1.5, 0, 1), 4)
         co = project(co, cand, steps=4)
+    # (the feet: the voxels and the fillet's projection onto the faceted parts leave ripples on the gently sloping
+    # instep, seen in its curvature; a shrink-free (Taubin) smoothing over the feet takes them out without thinning
+    # the toes)
+    if MEASURED_FOOT:
+        # (gentle steps, 0.5 and -0.53, and a wide fade to the shin: full steps with a short fade tore the shin
+        # skin where the weight fell off, render 333)
+        wf = _ssn(FLOOR_Z + 7.0, FLOOR_Z + 3.0, co[:, 2])
+        for _ in range(2 * FOOT_SMOOTH):
+            co = relax(co, 0.5 * wf, 1)
+            co = relax(co, -0.53 * wf, 1)
+        # (the front of the ankle: where the shin comes down onto the instep the union leaves a crease; the skin
+        # there is relaxed as one patch, like the seat, so the shin runs into the instep as one concave line)
+        az, ay, ax_ = co[:, 2] - FLOOR_Z, co[:, 1], np.abs(np.abs(co[:, 0]) - 2.8 * UNIT)
+        wa = _ssn(2.2, 2.9, az) * (1.0 - _ssn(4.6, 5.4, az)) * _ssn(-0.3, -0.9, ay) * (1.0 - _ssn(-3.6, -4.3, ay)) \
+            * (1.0 - _ssn(1.1, 1.7, ax_))
+        co = relax(co, 0.9 * wa, ANKLE_FRONT_ITERS)
     # the seat smoothed as one surface: where the thigh's back comes out of the pelvis, the cleft and the fold
     # under the seat are eased by relaxing the skin over the whole back of the hips (a soft-edged patch)
     seat = _ssn(0.3, 1.8, co[:, 1]) * _ssn(CANON['crotch'] - 4.0, CANON['crotch'] - 1.0, z) * (1.0 - _ssn(34.0, 37.0, z))

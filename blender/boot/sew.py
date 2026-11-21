@@ -554,7 +554,131 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
             wob = 1 + 0.07 * np.sin(2 * np.pi * (s[:, 0] * rng.uniform(1, 2.5) + rng.uniform()))
             ends = np.minimum(1.0, 0.55 + 6 * np.minimum(s[:, 0], 1 - s[:, 0]))      # (the cord thins into the hole)
             strand(path, rl * wob * ends * (1.05 if j == 0 else 1.0))
-    # (the two ends are tucked in at the top holes: no loose ends hang over the panels)
+    # the finish at the top: the two ends come out of the top holes and are tied in a small bow over the opening, its
+    # loops spread over the panels and its two tails of unequal length draped down over them, outside the eyelet rows
+    # so they do not lie across the cords below. (EXPERIMENTAL: no source gives a bow's proportions; the one rule
+    # found, realmenrealstyle.com's "if the ends of the bow reach past the edge of the shoe, your laces are too
+    # long", is kept: nothing here goes past the boot's front. Sizes in cm, about 2.6 cm to the unit.)
+    cm = 1.0 / 2.619
+    E0, E1 = Pi[n - 1], Po[n - 1]
+    K0 = 0.5 * (E0 + E1)
+    hk = tree.find_nearest(tuple(K0))
+    NK = np.array(hk[1])
+    if NK @ Nv[list(o.data.polygons[hk[2]].vertices)].mean(axis=0) < 0:
+        NK = -NK
+    ex = (E1 - E0) - NK * ((E1 - E0) @ NK)
+    ex /= max(np.linalg.norm(ex), 1e-9)
+    ey = np.array([0.0, 0.0, 1.0]) - NK * NK[2]
+    ey /= max(np.linalg.norm(ey), 1e-9)
+    K0 = K0 + ey * 0.55 * cm                               # (the knot a little above the top pair of holes)
+
+    def at(a, v, off=1.05):                                # (a point a cm across and v cm up from the knot, on the leather)
+        return onto(K0 + ex * a * cm + ey * v * cm, off * rl)
+
+    def run(pts, rad):
+        pts = np.array(pts)
+        if len(pts) > 3:
+            for _ in range(2):
+                pts[1:-1] = 0.25 * pts[:-2] + 0.5 * pts[1:-1] + 0.25 * pts[2:]
+        strand(pts, rad)
+    t_ = np.linspace(0.0, 1.0, 14)
+    for E, sd_ in ((E0, -1.0), (E1, 1.0)):                 # (each end from its hole up to its own point under the knot)
+        KE = K0 + ex * sd_ * 0.4 * cm - ey * 0.5 * cm
+        pts = [onto((1 - u) * E + u * KE, 1.05 * rl) for u in t_]
+        run(pts, rl * np.minimum(1.0, 0.6 + 5 * t_))
+    th = np.linspace(0.0, 2 * np.pi * 1.5, 40)               # (the knot: one tube looping 1.5 turns, rising where it crosses itself)
+    strand(np.array([at(0.75 * np.cos(th_ + 0.6), 0.45 * np.sin(th_ + 0.6), 2.2 + 1.1 * np.sin(1.3 * th_))
+                     for th_ in th]), 1.7 * rl)
+    # the loops and tails are laid out by hand (a bow's shape), then let fall: the local cloth solver (fabric.py) runs
+    # each as a chain of ties (the cord's length kept, a soft bend) pinned at the knot, under gravity, held off the
+    # leather by the cord's radius and thickness, so they hang and settle as a cord does on a boot. (EXPERIMENTAL
+    # settings: a waxed lace's stiffness is a guess.)
+    chains = []                                            # (points, pinned count at the start, at the end)
+    for sd, ang, Ll in ((-1.0, -22.0, 5.6), (1.0, -16.0, 5.0)):                           # (the loops)
+        ca, sa = np.cos(np.radians(ang)), np.sin(np.radians(ang))
+        ph = np.linspace(0.0, 2 * np.pi, 34)
+        bx = 0.5 * Ll * (1 - np.cos(ph))
+        by = 0.44 * Ll * np.sin(ph) * np.sqrt(np.abs(np.sin(ph / 2))) - 0.6 * ph / (2 * np.pi)   # (its two ends 0.6 cm apart)
+        chains.append((np.array([at(sd * (0.6 + ca * x - sa * y), 0.3 + sa * x + ca * y, 1.1 + 0.3 * np.sin(0.5 * p_))
+                                 for x, y, p_ in zip(bx, by, ph)]), 5, 5))
+    for sd, T, out in ((-1.0, 13.5, 4.0), (1.0, 11.0, 3.4)):                           # (the tails: out over the leather, then down)
+        u = np.linspace(0.0, 1.0, 56)
+        aa = sd * (0.4 + out * (1 - (1 - u) ** 2.5))
+        vv = -0.7 - T * u
+        chains.append((np.array([at(a_, v_, 1.1 + 0.2 * uu) for a_, v_, uu in zip(aa, vv, u)]), 5, 0))   # free ends hang low
+    if DRAPE:
+        import fabric
+        import time as _t
+        t0 = _t.time()
+        pts = np.concatenate([c[0] for c in chains])
+        fb = fabric.Fabric(pts, dict(bend=DRAPE['bend'], stretch=0.0, friction=DRAPE['friction'], iterations=DRAPE['iters'],
+                                          gravity=(0.0, 0.0, -375.0 * DRAPE['g'])))
+        at0, pin = 0, []
+        for c, p0, p1 in chains:
+            m = len(c)
+            fb.tie(np.arange(at0, at0 + m - 1), np.arange(at0 + 1, at0 + m))
+            fb.tie(np.arange(at0, at0 + m - 2), np.arange(at0 + 2, at0 + m), DRAPE['bend'])
+            if p1:                                               # a loop: a waxed lace holds its curve, so far ties keep it
+                for k_ in (4, 8):
+                    fb.tie(np.arange(at0, at0 + m - k_), np.arange(at0 + k_, at0 + m), DRAPE['loop_hold'])
+            if p1 and not DRAPE['loops']:
+                pin += list(range(at0, at0 + m))                     # a loop keeps its hand-laid shape
+            else:
+                pin += list(range(at0, at0 + p0)) + list(range(at0 + m - p1, at0 + m))
+            at0 += m
+        fb.pin(pin)
+        gap = DRAPE['gap'] * rl + tl                             # rides over the cords it crosses
+
+        owner = np.concatenate([np.full(len(c), k_) for k_, (c, _, _) in enumerate(chains)])
+        dmin = 2.3 * rl                                      # (two cords lie at least a cord's width apart: no cord passes through another)
+
+        def body(x):
+            out, touch = x.copy(), np.zeros(len(x), dtype=bool)
+            dd = x[:, None, :] - x[None, :, :]
+            dl = np.linalg.norm(dd, axis=2)
+            near = (dl < dmin) & (owner[:, None] != owner[None, :])
+            if near.any():
+                push = np.where(near[:, :, None], dd / np.maximum(dl, 1e-9)[:, :, None] * ((dmin - dl) * 0.5)[:, :, None], 0.0)
+                out += push.sum(axis=1)
+            for i in range(len(x)):
+                hit = tree.find_nearest(tuple(x[i]), 6.0 * gap + 0.5)
+                if hit[0] is None:
+                    continue
+                nrm = np.array(hit[1])
+                if nrm @ Nv[list(o.data.polygons[hit[2]].vertices)].mean(axis=0) < 0:
+                    nrm = -nrm
+                sd_ = (x[i] - np.array(hit[0])) @ nrm
+                if sd_ < gap:
+                    out[i] += nrm * (gap - sd_)
+                    touch[i] = True
+            return out, touch
+        moved0 = fb.pos.copy()
+        steps = fb.settle(body, h=1.0 / 120.0, most=DRAPE['steps'], tol=2e-4, damping=0.4)
+        d = np.linalg.norm(fb.pos - moved0, axis=1)
+        log('boot lacing %s: the bow let fall by the cloth solver in %d steps (%.1f s): the tails and loops moved %.2f cm on average, %.2f at most'
+            % (o.name, steps, _t.time() - t0, d.mean() * 2.619, d.max() * 2.619))
+        at0 = 0
+        for k_, (c, p0, p1) in enumerate(chains):
+            if k_ >= 2:
+                q = fb.pos[at0:at0 + len(c)]
+                L0 = np.linalg.norm(np.diff(c, axis=0), axis=1).sum()
+                L1 = np.linalg.norm(np.diff(q, axis=0), axis=1).sum()
+                log('boot lacing %s: free end %d: %.1f cm laid, %.1f cm after the solve (reach down %.1f cm)'
+                    % (o.name, k_ - 1, L0 * 2.619, L1 * 2.619, (q[0, 2] - q[:, 2].min()) * 2.619))
+                log('boot lacing %s: free end %d: %.1f cm out from its start laid, %.1f after the solve'
+                    % (o.name, k_ - 1, np.linalg.norm(c[-1, :2] - c[0, :2]) * 2.619, np.linalg.norm(q[-1, :2] - q[0, :2]) * 2.619))
+            at0 += len(c)
+        at0 = 0
+        out = []
+        for c, p0, p1 in chains:
+            out.append(fb.pos[at0:at0 + len(c)].copy())
+            at0 += len(c)
+        chains = [(q, c[1], c[2]) for q, c in zip(out, chains)]
+    for k_, (c, p0, p1) in enumerate(chains):
+        if k_ < 2:
+            strand(c, rl)
+        else:
+            run(c, 1.5 * rl * np.minimum(1.0, 1.0 - 0.25 * np.clip((np.linspace(0, 1, len(c)) - 0.9) / 0.1, 0, 1)))   # 3 mm across, a standard round lace
     lace = _on_boot(o, np.array(LV), LF, o.name.replace('Boot', 'Boot lace'), cord, rig)
     log('boot lacing %s: %d eyelets a side, %d crossings of the lace' % (o.name, n, 2 * (n - 1)))
     return eyelets, lace
@@ -563,6 +687,7 @@ def lacing(o, pieces, rig=None, ratios=None, H=None, metal=None, cord=None, log=
 # the tongue's top, where it stands free above the panels, turned forward over a rolled fold (folds.py), as a
 # worn tongue's top falls forward off the shin: its angle, the roll's radius, and the line's height over the
 # panels' top edge (shares of the tongue's height above it)
+DRAPE = dict(bend=2e-4, friction=0.9, steps=80, g=0.2, loops=True, loop_hold=1e-7, gap=3.8, iters=200)         # the bow's settling (see lacing)
 TONGUE_BEND = dict(angle=28.0, radius=0.45, at=0.15)
 
 
