@@ -78,8 +78,11 @@ def grow_children(F, Gm, n, seed=5):
         th = SF.theta(Q)
         return np.where(np.abs(th) < SPLIT, np.where(Q[:, 0] < SF.AXIS[0], 1, 2), 0)
     gl, cl = lock(R), lock(root)
+    if 'lock' in Gm:                      # the groom's own locks (with the bangs): a child takes its nearest guide's
+        gl = Gm['lock'].astype(int)
+        cl = gl[cKDTree(R).query(root)[1]]
     d = np.zeros((n, 3)); nb = np.zeros((n, 3), int)
-    for g in (0, 1, 2):
+    for g in np.unique(gl):
         gi = np.where(gl == g)[0]; ci = np.where(cl == g)[0]
         if len(ci):
             dd, kk = cKDTree(R[gi]).query(root[ci], k=3)

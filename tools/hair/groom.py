@@ -1,7 +1,7 @@
 """The groom (hair rebuild, foundations 3 to 6): real strands on the measured scalp, settled under their own weight by
 a rod model, with a mass and volume budget, and a style written as operations on the natural fall.
 
-    python3 tools/hair/groom.py HEAD.json.gz OUT_DIR [--guides 2400] [--style ranger]
+    python3 tools/hair/groom.py HEAD.json.gz OUT_DIR [--guides 2400] [--style ranger] [--reuse OLD/groom.npz]
     python3 tools/hair/groom.py --selftest OUT_DIR         the cantilever check of the rod model
 
 Units: head heights (HH) for geometry, as scalp_field.py; SI inside the energy (1 HH = 0.219 m).
@@ -114,7 +114,7 @@ class Colliders:
 
 
 # ---------------------------------------------------------------------------------------------------- the rod
-def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, layer=None):
+def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, layer=None, kb0=None):
     """Total energy (J) of the guides. D: free segment directions (G, S-1, 3), unnormalised; d0: the clamped first
     segment along the follicle (G, 3). Positions are built by walking the unit directions, so the length is exact.
     mask (G, S): 1 for segments the guide still has after the cut, 0 past its end (they weigh and bend nothing).
@@ -127,7 +127,16 @@ def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, 
     ds = seg_hh * HH_M
     n = n_hairs[:, None]
     cos = (d[:, 1:] * d[:, :-1]).sum(-1)
-    E_b = (n * HAIR_EI / ds * (1 - cos) * mask[:, 1:]).sum()
+    if kb0 is None:
+        e_b = 1 - cos
+    else:
+        # set hair (the bangs): bending measured from a rest curvature, with the discrete curvature binormal
+        # kb = 2 d_(i-1) x d_i / (1 + d_(i-1).d_i) of [BER08]; |kb|^2 / 2 is 1 - cos to second order, so a guide with
+        # no set (kb0 = 0) has the same energy as the others
+        kb = 2 * torch.cross(d[:, :-1], d[:, 1:], dim=-1) / (1 + cos)[..., None]
+        set_ = (kb0.abs().sum(-1) > 0).to(kb.dtype)
+        e_b = set_ * 0.5 * ((kb - kb0) ** 2).sum(-1) + (1 - set_) * (1 - cos)
+    E_b = (n * HAIR_EI / ds * e_b * mask[:, 1:]).sum()
     E_g = (n * HAIR_W * ds * X[..., 2] * HH_M * mask).sum()
     P = X.reshape(-1, 3)
     o = layer(X).reshape(-1) if layer is not None else 0.0
@@ -137,7 +146,7 @@ def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, 
 
 
 def settle(roots, d0, D_init, n_hairs, seg_hh, col, iters=400, k_contact=(1e3, 1e4, 1e5), mask=None, layer=None,
-           log=None):
+           log=None, kb0=None):
     """Static equilibrium by minimising the energy (L-BFGS), the contact stiffened in steps (continuation) so the
     first steps can move hair out of the colliders without the penalty freezing the solve. Returns the settled
     nodes (G, S+1, 3) in HH and the directions."""
@@ -145,6 +154,7 @@ def settle(roots, d0, D_init, n_hairs, seg_hh, col, iters=400, k_contact=(1e3, 1
     t = lambda a: torch.tensor(a, dtype=torch.float64)
     R, d0t, nt = t(roots), t(d0), t(n_hairs)
     mk = t(mask) if mask is not None else None
+    kb = t(kb0) if kb0 is not None else None
     D = t(D_init).requires_grad_(True)
     scale = 1.0 / (HAIR_W * SEG_M * 1e-3 * max(1.0, float(np.mean(n_hairs))))   # energies of order 1 for the optimiser
     for k in np.atleast_1d(k_contact):
@@ -153,12 +163,12 @@ def settle(roots, d0, D_init, n_hairs, seg_hh, col, iters=400, k_contact=(1e3, 1
 
         def closure():
             opt.zero_grad()
-            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer)
+            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer, kb)
             (E * scale).backward()
             return E
         opt.step(closure)
         with torch.no_grad():
-            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer)
+            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer, kb)
         if log is not None:
             log.append(dict(k=float(k), E=E.item(), bend=parts[0], grav=parts[1], contact=parts[2]))
     X = X.numpy()
@@ -219,6 +229,95 @@ def ranger_cut_z(th):
 
 PART_BACK_Z = 0.97        # STYLE: the centre part runs from the trichion back to the top of the head
 PART_HALF = 0.004         # STYLE: the part's half-width, HH (about 1 mm), as the knotted bun's pe(z) at the hairline
+
+
+# ---------------------------------------------------------------------------------------------------- curtain bangs
+# [BTC] behindthechair.com, "The cheekbone guide for cutting soft custom curtain bangs": a triangular section split
+#       down the middle, overdirected across the face and cut to follow the cheekbone, opening the bridge of the nose,
+#       finished with a round brush.
+# [CC]  curlcentric.com, "How to cut curtain bangs": the section's base from the outer corner of one eye to the other
+#       (never wider than the brows), its apex where the head begins to slope forward to the forehead; straight hair
+#       cut to "cheekbone height or just below".
+# [MBG] mindbodygreen.com, "How to style curtain bangs": 1 to 1.5 inches of hair each side of the part; the shortest
+#       piece at or just below the cheekbones; round brush, dried away from the face.
+# [OGL] ogleschool.edu, "A step-by-step guide for curtain bangs": the longest pieces no shorter than the chin; dried
+#       from the roots for volume, each side away from the centre, the brush rolled under and outward.
+BANG_EX = 0.213                    # HH: the outer canthus. Farkas' women: intercanthal 31.8 mm (the creator's alar
+                                   # note) and a 30.7 mm eye fissure put the canthus 46.6 mm out; the fissure's centre,
+                                   # 31.3 mm, sits on the creator's pupil (30.7 mm), so the two agree
+BANG_DEPTH_MM = 32.0               # the section's depth on the part behind the hairline: [MBG]'s 1 to 1.5 inches each
+                                   # side of the part, front to back (its middle, 1.25 in)
+BANG_GUIDE_X = 4                   # guide density in the bangs against the rest
+Z_CHEEK = 0.415                    # HH: the cheekbone's height in the creator (main.js, the cheekbones' gaussian)
+Z_CHIN_LOCK = 0.0                  # HH: the chin, [OGL]'s shortest length for the outer pieces
+BANG_EXIT = 45.0                   # deg: the roots dried up off the forehead ([OGL] "from the roots for volume").
+                                   # EXPERIMENTAL: no measured root angle after a blow-dry
+BANG_SWEEP_M = 0.10               # m: the length over which the dried bang turns from the comb to its end direction,
+                                   # about the brush's circumference (EXPERIMENTAL)
+BANG_OUT_M = 0.04                  # m: the first move, out toward the temple (EXPERIMENTAL)
+BRUSH_R_MM = 19.0                  # the round brush's radius (a 1.5 inch brush), EXPERIMENTAL: common size, unmeasured
+SET_KEEP = 0.5                     # share of the brush's curvature the hair keeps once cool (the water / hydrogen-bond
+                                   # set), EXPERIMENTAL
+# [BER08] Bergou, Wardetzky, Robinson, Audoly & Grinspun 2008, "Discrete elastic rods": the curvature binormal.
+
+
+def bang_section(F, idx, surf):
+    """The bangs' roots: [CC]'s triangle, its base on the hairline between the outer canthi, its apex on the part.
+    Returns (in the section, t: 0 at the part to 1 at the triangle's edge, the side -1 / +1)."""
+    P = F['P'][idx]
+    tr = F['landmarks']['trichion']
+    # the apex: BANG_DEPTH_MM up the midline from the trichion, measured along the scalp
+    el = np.radians(np.linspace(5, 85, 801))
+    U = np.c_[np.zeros_like(el), -np.cos(el), np.sin(el)]
+    Pm = surf.point(U)
+    i0 = np.argmin(np.linalg.norm(Pm - tr, axis=1))
+    arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(Pm[i0:], axis=0), axis=1))] * SF.HH_MM
+    apex = Pm[i0 + np.argmin(np.abs(arc - BANG_DEPTH_MM))]
+    # elevation of each root seen from the skull's centre, on the face side
+    elev = lambda X: np.arctan2(X[:, 2] - SF.CENTRE[2], -(X[:, 1] - SF.CENTRE[1]))
+    e_h, e_a = elev(tr[None])[0], elev(apex[None])[0]
+    f = np.clip((e_a - elev(P)) / (e_a - e_h), 0, None)          # 0 at the apex, 1 at the hairline (and below)
+    half = BANG_EX * np.minimum(f, 1.0)
+    inside = (np.abs(P[:, 0]) <= half) & (P[:, 1] < SF.CENTRE[1]) & (elev(P) <= e_a) & (F['mask'][idx] > 0.5)
+    t = np.clip(np.abs(P[:, 0]) / BANG_EX, 0, 1)
+    return inside, t, np.where(P[:, 0] >= 0, 1.0, -1.0), apex
+
+
+def bang_comb(F, idx, t, side):
+    """Dried each side away from the centre: forward over the brow and down, turned outward more the further the
+    root sits from the part, so the curtain opens on the bridge of the nose ([BTC], [OGL])."""
+    N = F['N'][idx]
+    v = np.c_[side * (0.25 + 0.9 * t), -np.ones(len(t)), -0.6 * np.ones(len(t))]
+    v -= N * (N * v).sum(1, keepdims=True)
+    return v / np.linalg.norm(v, axis=1, keepdims=True)
+
+
+def bang_cut_z(t):
+    """Shortest beside the part at the cheekbone ([CC], [MBG]), longer outward, the outer edge at the chin ([OGL])."""
+    return Z_CHEEK + (Z_CHIN_LOCK - Z_CHEEK) * t ** 1.3
+
+
+def bang_sweep(t, side):
+    """Where the dried bang points at its end: down the side of the face, a little out, to the cheekbone ([BTC],
+    [OGL]); pointed further out it leaves the face and stands in the air."""
+    v = np.c_[side * (0.25 + 0.15 * t), -0.1 * np.ones(len(t)), -np.ones(len(t))]
+    return v / np.linalg.norm(v, axis=1, keepdims=True)
+
+
+def bang_set(X, bang):
+    """The set: each bang is dried round the brush into the styled shape (the first guess: over the brow, round and
+    out to the cheekbone); once cool it keeps SET_KEEP of that shape's curvature, never tighter than the brush.
+    Returned as rest curvature binormals [BER08]."""
+    kb0 = np.zeros((X.shape[0], X.shape[1] - 2, 3))
+    cap = 2 * math.tan(0.5 * SEG_M / (BRUSH_R_MM / 1000.0))
+    for g in np.where(bang)[0]:
+        T = np.diff(X[g], axis=0); T /= np.linalg.norm(T, axis=1, keepdims=True)     # S segments, S - 1 joints
+        c = (T[:-1] * T[1:]).sum(1)
+        kb = 2 * np.cross(T[:-1], T[1:]) / (1 + c)[:, None] * SET_KEEP
+        m = np.linalg.norm(kb, axis=1, keepdims=True)
+        kb0[g] = kb * np.minimum(1, cap / np.maximum(m, 1e-12))
+        kb0[g][m[:, 0] < 1e-9] = 1e-9                 # (marks the guide as set even where it is straight)
+    return kb0
 
 
 def comb_ranger(F, roots_idx):
@@ -358,7 +457,7 @@ def body_y_extent(body, x, z, side, ny=321):
     return np.where(any_, y, np.nan)
 
 
-def initial_paths(surf, body, roots, d0, comb, seg_hh, S, lift):
+def initial_paths(surf, body, roots, d0, comb, seg_hh, S, lift, sweep=None):
     """A first guess outside the colliders: out along the follicle, over the head along the comb while turning down
     (pushed out of the head, plus the layer lift), then plumb down; below the chin it is kept in front of the body
     for hair rooted in front of the ear and behind it for the rest (the creator's S.SPLIT), never laid out over the
@@ -372,6 +471,14 @@ def initial_paths(surf, body, roots, d0, comb, seg_hh, S, lift):
         s = k * seg_hh
         turn = SF.sm(0.0, 0.3, s)
         want = comb * (1 - turn) + np.array([0, 0, -1.0]) * turn
+        if sweep is not None:              # styled hair (the bangs): from the comb round to its own end direction
+            # (dried in two moves: out toward the temple over the first part of the length, then down beside the
+            # eye, so the curtain opens on the face and still lies on it)
+            sw = ~np.isnan(sweep[:, 0])
+            L1 = BANG_OUT_M / HH_M
+            t1 = SF.sm(0.0, L1, s); t2 = SF.sm(L1, BANG_SWEEP_M / HH_M, s)
+            out = np.c_[np.sign(sweep[sw, 0]) * 0.85, -0.2 * np.ones(sw.sum()), -0.5 * np.ones(sw.sum())]
+            want[sw] = (comb[sw] * (1 - t1) + out * t1) * (1 - t2[None] if np.ndim(t2) else 1 - t2) + sweep[sw] * t2
         d = 0.6 * d + 0.4 * want
         d /= np.linalg.norm(d, axis=1, keepdims=True)
         x = X[:, k - 1] + d * seg_hh
@@ -425,6 +532,13 @@ class Layers:
         self.rc = torch.tensor(self.root_cum, dtype=torch.float64)
         self.cy = torch.tensor(2 * (self.col + 0.0) / (self.NB - 1) - 1, dtype=torch.float64)
 
+    def subset(self, sel):
+        """The same layers for some of the guides (the per-guide column and root depth taken with them)."""
+        import copy
+        o = copy.copy(self)
+        o.cy, o.rc = self.cy[self.torch.tensor(sel)], self.rc[self.torch.tensor(sel)]
+        return o
+
     def __call__(self, X):
         t = self.torch
         G, S = X.shape[:2]
@@ -439,14 +553,38 @@ class Layers:
         return float(self.cum.max()) * SF.HH_MM
 
 
-def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=None):
+def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=None, bangs=True, reuse=None):
+    """reuse: a previous groom.npz. The guides do not act on each other (no hair-hair contact; the layer is a fixed
+    function of the roots), so a guide with the same root and the same style as in that groom settles to the same
+    place: it is copied, and only the rest (here the bangs, while they are being styled) are solved."""
     idx, total = pick_roots(F, n_guides)
     comb, keep = comb_ranger(F, idx)
     keep &= ear_depth_np(F["P"][idx]) < -0.025          # no hair grows on the ear or the bare skin right round it
     idx, comb = idx[keep], comb[keep]
     n_hairs = np.full(len(idx), total / len(idx))
+    bang = np.zeros(len(idx), bool)
+    if bangs:
+        # the bangs get BANG_GUIDE_X times the guide density (their shape is in fewer, shorter hairs), each guide
+        # standing for proportionally fewer hairs, so the bangs' hair count is the scalp's
+        b0 = bang_section(F, idx, surf)[0]
+        allb = np.where(bang_section(F, np.arange(len(F['P'])), surf)[0])[0]
+        allb = allb[~np.isin(allb, idx)]
+        allb = allb[comb_ranger(F, allb)[1]]                    # (not in the part itself)
+        extra = np.random.default_rng(11).choice(allb, size=min(len(allb), (BANG_GUIDE_X - 1) * int(b0.sum())), replace=False)
+        hb = b0.sum() * total / len(idx)
+        idx = np.r_[idx, extra]
+        comb = np.r_[comb, comb_ranger(F, extra)[0]]
+        bang = bang_section(F, idx, surf)[0]
+        n_hairs = np.full(len(idx), total / (len(idx) - (len(extra))))
+        n_hairs[bang] = hb / bang.sum()
     roots = F['P'][idx] + F['N'][idx] * 0.0005
+    _, bt, bside, _ = bang_section(F, idx, surf)
+    if bangs:
+        comb[bang] = bang_comb(F, idx[bang], bt[bang], bside[bang])
     d0 = follicle_dirs(F, idx, comb)
+    if bangs:
+        a = math.radians(BANG_EXIT)
+        d0[bang] = math.cos(a) * comb[bang] + math.sin(a) * F['N'][idx[bang]]
     seg_hh = SEG_M / HH_M
     layer = Layers(roots, n_hairs)
     # grow everything long enough for the cut, settle, cut on the settled hair, settle again
@@ -454,23 +592,63 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     S = int(math.ceil(need.max() / seg_hh)) + 1
     lift0 = np.array([float(np.interp(z, np.linspace(layer.Z0, layer.Z1, layer.NZ), layer.cum[c])) for z, c in
                       zip(roots[:, 2], layer.col)])
-    D = initial_paths(surf, body, roots, d0, comb, seg_hh, S, 0.5 * lift0.mean())
+    sweep = None
+    if bangs:
+        sweep = np.full((len(idx), 3), np.nan)
+        sweep[bang] = bang_sweep(bt[bang], bside[bang])
+    D = initial_paths(surf, body, roots, d0, comb, seg_hh, S, 0.5 * lift0.mean(), sweep)
     col = Colliders(surf, body)
     d0 = clear_follicles(roots, d0, F['N'][idx], seg_hh, col, layer)
+    kb0 = None
+    if bangs:
+        dd = np.concatenate([d0[:, None], D], 1)
+        X0 = np.concatenate([roots[:, None], roots[:, None] + np.cumsum(dd * seg_hh, 1)], 1)
+        kb0 = bang_set(X0, bang)
+    solve = np.ones(len(idx), bool)
+    if reuse is not None:
+        P = np.load(reuse)
+        same = (len(P['roots']) == len(roots)) and P['X_uncut'].shape[1] == S + 1
+        if same:
+            solve = bang | ~np.all(np.abs(P['roots'] - roots) < 1e-9, axis=1)
+        print('reuse: %d of %d guides copied' % ((~solve).sum(), len(idx)) if same else 'reuse: groom differs, full solve')
+
+    def settle_some(D, mask=None):
+        X = np.zeros((len(idx), S + 1, 3)); Dn = D.copy()
+        if (~solve).any():
+            X[~solve] = P['X_uncut'][~solve] if mask is None else np.nan_to_num(P['X'][~solve])
+        m = None if mask is None else mask[solve]
+        Xs, Ds = settle(roots[solve], d0[solve], D[solve], n_hairs[solve], seg_hh, col, iters=iters, layer=layer.subset(solve),
+                        log=log, kb0=None if kb0 is None else kb0[solve], mask=m)
+        X[solve] = Xs; Dn[solve] = Ds
+        return X, Dn
     t0 = time.time()
-    X, D = settle(roots, d0, D, n_hairs, seg_hh, col, iters=iters, layer=layer, log=log)
+    X, D = settle_some(D)
+    if (~solve).any():
+        Xu = P['X_uncut'][~solve]
+        dd = np.diff(Xu[:, 1:], axis=1)
+        D[~solve] = dd / np.linalg.norm(dd, axis=-1, keepdims=True)
     t1 = time.time()
     endz = ranger_cut_z(SF.theta(X[:, -1]))
+    if bangs:
+        endz[bang] = bang_cut_z(bt[bang])
     lengths = np.full(len(idx), S)
     for g in range(len(idx)):
         below = np.where(X[g, 1:, 2] < endz[g])[0]
         if len(below):
             lengths[g] = max(3, below[0])
     mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
-    X2, D = settle(roots, d0, D, n_hairs, seg_hh, col, iters=iters, layer=layer, mask=mask, log=log)
+    if (~solve).any():
+        lengths[~solve] = P['lengths'][~solve]
+        mask = (np.arange(S)[None] < lengths[:, None]).astype(float)
+    X2, D = settle_some(D, mask)
     t2 = time.time()
     X2[:, 1:][mask == 0] = np.nan
-    return dict(roots=roots, idx=idx, X=X2, X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
+    # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
+    # 3 / 4 the bangs right / left
+    th = SF.theta(roots)
+    lock = np.where(np.abs(th) < SPLIT, np.where(roots[:, 0] < SF.AXIS[0], 1, 2), 0)
+    lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
+    return dict(roots=roots, idx=idx, X=X2, lock=lock, bang=bang.astype(np.int8), X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
                 layer_max_mm=layer.max_mm(), seg_hh=seg_hh, d0=d0, comb=comb, times=(t1 - t0, t2 - t1))
 
 
@@ -487,7 +665,8 @@ def main():
     F = SF.build(surf)
     body = json.load(gzip.open(head))['bodies']['mannequin']
     log = []
-    Gm = build_groom(surf, F, body, n_guides=n, log=log)
+    reuse = a[a.index('--reuse') + 1] if '--reuse' in a else None
+    Gm = build_groom(surf, F, body, n_guides=n, log=log, reuse=reuse)
     np.savez_compressed(os.path.join(out, 'groom.npz'), **{k: v for k, v in Gm.items() if isinstance(v, np.ndarray)})
     rep = dict(guides=int(len(Gm['idx'])), hairs=int(Gm['total']), hairs_per_guide=round(float(Gm['n_hairs'][0]), 1),
                elastogravity_cm=round(ELASTOGRAVITY_M * 100, 2), layer_max_mm=round(Gm['layer_max_mm'], 2),
