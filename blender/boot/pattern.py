@@ -39,7 +39,12 @@ def flatten(piece):
     me.uv_layers.new(name='flat')
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0.0)
+    # (pressed flat with the least stretch: a piece that is a plain wrap keeps its lengths, and what will not lie
+    # flat is gathered where the last is doubly curved; the angle-based unwrap spread it over the whole piece)
+    try:
+        bpy.ops.uv.unwrap(method='MINIMUM_STRETCH', margin=0.0, iterations=60)
+    except TypeError:
+        bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=0.0)
     bpy.ops.object.mode_set(mode='OBJECT')
     uv = np.zeros((len(V), 2))
     lay = me.uv_layers['flat'].data

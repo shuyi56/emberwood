@@ -38,7 +38,7 @@ MEASURES = {}
 # A madder red, the commonest dye for good hose: dulled and a little brown, as a wool dyed in the piece is.
 WOOL = dict(colour=(0.165, 0.036, 0.028), pitch=0.028, wale=4, relief=0.5, rough=0.86, sheen=0.45, mottle=0.10,
             seam_ridge=0.07, eyelets=10)
-M_WOOL = female.mat_def(74, 'hose wool', female.ramp(0x7c3328, 0.1), 0.0, surface='twill', closeup='hose')
+M_WOOL = female.mat_def(74, 'hose wool', female.ramp(0xa83a30, 0.1), 0.0, surface='twill', closeup='hose')
 
 
 def wool_closeup(name, P=WOOL):
