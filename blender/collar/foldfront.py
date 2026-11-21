@@ -41,7 +41,7 @@ if opt.get('recipe'):
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
 # before it is kept as the ground truth (lapel-ground-truth/truth.npz: pass '{"truth": path}' to measure against it,
 # '{"cusp": 0}' to build it again)
-if 'cusp' not in opt and 'bow' not in opt: opt['cusp'] = [0.7, 0.7]
+if 'cusp' not in opt and 'bow' not in opt: opt['cusp'] = [0.55, 0.7]
 bpy.ops.wm.open_mainfile(filepath=blend)
 b = bpy.data.objects['Redingote bodice']
 M = {k[7:]: b[k] for k in b.keys() if k.startswith('bodice_')}
@@ -201,6 +201,19 @@ if outline:
         s['Dfun'] = Dfun
         print('foldfront: front %d: cut to the traced lapel: point %.2f of the way down the fold, %.1f cm out; %d points, %d faces of its own cloth'
               % (s['layer'], OT[1, 0], 2.62 * OT[1, 1] * Lc, len(tt) - nc, nf))
+    # the seam between the lapel and the rest of its front must be whole. Where a point of the front's cut edge was not
+    # counted as on the line (it sat a hair off it), the lapel was joined to its neighbours past it and a slit was left
+    # open in the cloth: the dark ticks beside the top button. Every small hole along the line is closed.
+    if opt.get('close_slits', 'bow' not in opt):
+        cvs = set(v for r_ in rec for v in r_[0]); newv = set(info)
+        be = [e for e in bm.edges if len(e.link_faces) == 1 and any(v in cvs for v in e.verts)
+              and not all(v in newv for v in e.verts)]
+        nf0 = len(bm.faces); bmesh.ops.holes_fill(bm, edges=be, sides=opt.get('slit_sides', 8))
+        for f_ in list(bm.faces)[nf0:]:
+            for v in f_.verts:
+                if v not in info and v not in cvs: pass
+        bmesh.ops.recalc_face_normals(bm, faces=[f_ for f_ in bm.faces if any(v in cvs for v in f_.verts)]) if opt.get('slit_recalc') else None
+        print('foldfront: %d slits along the roll lines closed (%d open edges looked at)' % (len(bm.faces) - nf0, len(be)))
     bm.verts.index_update(); bm.verts.ensure_lookup_table(); bm.faces.ensure_lookup_table(); bm.normal_update()
     W = world(); L_ = np.array([v[lay] for v in bm.verts]); q = W[:, [0, 2]]; nV = len(W)
     for si, s in enumerate(sides):
@@ -262,6 +275,9 @@ for s in (und, top):                                  # the under front first: t
     # out of the flat front like a cone instead of pinching shut.
     if opt.get('cusp'):
         c0, fl = opt['cusp']; rr = rr + ss01(c0, min(c0 + 0.12, 1.0), t) * (np.maximum(rr, r0 * fl * (1 - 0.7 * pr)) - rr)
+        # and over the very last of it the radius opens right out, so the needle-thin end of the lapel is hardly turned
+        # at all: folded hard over, cloth that thin and this thick made a spike and a dark notch at the foot
+        if opt.get('cusp_end'): e0, Re = opt['cusp_end']; rr = rr + ss01(e0, 1.0, t) ** 2 * np.maximum(Re - rr, 0)      # (tried: it tore the front beside the button; off)
     arc = np.pi * rr; ang = np.minimum(d, arc) / rr
     ex = rr * np.sin(ang); hh = rr * (1 - np.cos(ang))
     rest = np.maximum(d - arc, 0)
@@ -305,7 +321,7 @@ for s in (und, top):                                  # the under front first: t
             A = np.array([Y[nb[int(i)]].mean() for i in ii]); Y[ii] += 0.7 * wgt * (A - Y[ii])
         Y[ii] = np.minimum(Y[ii], lim)
     if cover is not None:                             # under the upper front: pressed flat behind it
-        cy = cover(X); under_ = np.isfinite(cy); Y[ii[under_]] = np.maximum(Y[ii[under_]], cy[under_] + opt.get('under_gap', 0.02))
+        cy = cover(X); under_ = np.isfinite(cy); Y[ii[under_]] = np.maximum(Y[ii[under_]], cy[under_] + opt.get('under_gap', 0.02 if 'bow' in opt else th + 0.02))
         print('foldfront: %d of the under lapel\'s points lie under the upper front, pressed behind it' % under_.sum())
     # pressed (John: "press the right lapel", the one on the right of the picture: her left): past the roll the lapel is
     # laid down onto the front, to the cloth's own thickness; the roll at the break is left as it is
@@ -327,6 +343,20 @@ for s in (und, top):                                  # the under front first: t
     print('foldfront: front %d: the lapel stands %.2f off the front on average, %.2f at most (the cloth alone is %.2f)' % (s['layer'], gap.mean(), gap.max(), out_side + lie))
     new = np.column_stack([X[:, 0], Y[ii], X[:, 1]])
     W[ii] = (1 - g_)[:, None] * W[ii] + g_[:, None] * new
+    # the fold's end. Turned hard over right down to its needle point, the cloth flipped face within a millimetre: a
+    # spike and a dark notch at the foot, the worst strain on the front. The turn now runs out before the foot: the
+    # cloth bends round the same radius through an angle that falls from the half turn to nothing (a true part turn:
+    # a blend of flat and turned cloth passes through the line itself and crushes the cloth onto it), and the last of
+    # the tail lies flat in the front's own plane.
+    if opt.get('cusp') and opt.get('cusp_open'):          # (tried and left off: the part-turned tail stood out as a wing)
+        a_, b_ = opt['cusp_open']; go = 1 - ss01(a_, b_, t)
+        Th = np.pi * go; a1 = np.minimum(d, rr * Th) / rr; run = np.maximum(d - rr * Th, 0)
+        exp_ = rr * np.sin(a1) + run * np.cos(Th); hp = rr * (1 - np.cos(a1)) + run * np.sin(Th)
+        Xp = s['C'][ii] + exp_[:, None] * s['nl'][ii]; Yp = yc_t - hp
+        back = (exp_ < d) & (Th > np.pi / 2); Yp = np.where(back, np.minimum(Yp, W[ii, 1] + 0 * Yp), Yp)
+        wf = ss01(0.85, 1.0, go)[:, None]
+        W[ii] = (1 - wf) * np.column_stack([Xp[:, 0], Yp, Xp[:, 1]]) + wf * W[ii]
+        s['turn'] = (t.copy(), np.degrees(Th), d.copy())
     # the strain of the turned cloth: each edge's length as it lies against its length as cut (flat, on the roll line's
     # own measure). Turning cloth over a curved line and laying it on a round chest cannot keep every length.
     inset = s['fold'] | s['crease']
@@ -346,6 +376,17 @@ for s in (und, top):                                  # the under front first: t
     print('foldfront: front %d: %d of its own points turned back on the roll line (%d on the line); the lapel %.1f cm wide, the roll %.1f cm high'
           % (s['layer'], len(ii), len(ci), 2.62 * d.max(), 2.62 * 2 * rr.max()))
 for v in bm.verts: v.co = tuple(W[v.index] @ inv[:3, :3].T + inv[:3, 3])
+# the foot of each fold: where the roll line runs out into the front's edge the cut left faces with no area, facing the
+# wrong way; given the cloth's thickness they stood out as a spike with a dark notch beside it. They are taken out.
+if opt.get('clean_foot', 'bow' not in opt):
+    ne0 = len(bm.faces)
+    for s_ in sides:
+        Bf = np.array([s_['Cd'][-1, 0], s_['Cd'][-1, 1]]) if 'Cd' in s_ else None
+        if Bf is None: continue
+        near = [e for e in bm.edges if all(np.hypot(W[v.index, 0] - Bf[0], W[v.index, 2] - Bf[1]) < opt.get('foot_reach', 0.35) and W[v.index, 1] < yc for v in e.verts)]
+        bmesh.ops.dissolve_degenerate(bm, dist=opt.get('foot_dist', 0.012), edges=near)
+    bm.verts.index_update(); bm.normal_update()
+    print('foldfront: the feet of the folds cleaned: %d faces with no area taken out' % (ne0 - len(bm.faces)))
 bm.to_mesh(b.data); bm.free()
 for p in b.data.polygons: p.use_smooth = True
 b.data.update()
@@ -359,6 +400,10 @@ if opt.get('buttons', True):
     if belly: cx, cz = top['Cd'][:, 0], top['Cd'][:, 1]
     zcross = float(np.interp(0.0, cx * np.sign(cx[-1] - cx[0]), cz))
     z1 = zcross - rb - opt.get('break_over', 0.45); z0 = M['z_hem_front'] + 0.55 * w
+    # John: "move down the top button and let more strain transfer": the top button sits clear below the foot of the
+    # fold, so the fold runs out into the front over its whole length before anything holds the cloth
+    if opt.get('button_under_foot', None if 'bow' in opt else 0.15) is not None:
+        z1 = min(z1, foot - rb - opt.get('button_under_foot', 0.15))
     nbt = max(2, int(round((z1 - z0) / step)) + 1)
     Wb = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
     fb = BVHTree.FromPolygons([Vector(p) for p in Wb], [tuple(p.vertices) for p in b.data.polygons])
@@ -369,6 +414,33 @@ if opt.get('buttons', True):
         h = fb.ray_cast(Vector((0.0, -40.0, float(z))), Vector((0, 1, 0)))
         if h[0] is None: continue
         base = len(P_); P_ += [tuple(p + np.array([0.0, h[0][1] - out_side - 0.05 * rb, z])) for p in bv]; F_ += [[i + base for i in f] for f in bf]
+    # what the buttons impose (John: "measure properly the strain imposed by buttons"). A button holds both fronts
+    # together at one point, flat. So at each button: how much fold is left at its height (it should be none: a button
+    # set where the cloth is still turning fights the fold), how much turned cloth lies under its footprint, the gap
+    # between the two fronts under it against the cloth's thickness, and the strain of the cloth around it.
+    zb = np.linspace(z1, z0, nbt); Wf = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
+    Lb = np.array([d_.value for d_ in b.data.attributes['front_layer'].data])
+    def surf(layer, z):
+        P = [tuple(p.vertices) for p in b.data.polygons if all(Lb[i] == layer for i in p.vertices)]
+        return BVHTree.FromPolygons([Vector(p) for p in Wf], P).ray_cast(Vector((0.0, -40.0, float(z))), Vector((0, 1, 0)))[0]
+    rep = []
+    for k_, z in enumerate(zb[:3] if belly else []):
+        row = dict(z=float(z))
+        for s_ in sides:
+            tz = float(np.interp(z, s_['Cd'][::-1, 1], np.linspace(1, 0, len(s_['Cd'])))) if z > foot else 1.0
+            tt_, th_, dd_ = s_.get('turn', (s_['lapel_t'], np.full(len(s_['lapel_t']), 180.0), np.ones(len(s_['lapel_t']))))
+            near = np.abs(tt_ - tz) < 0.03
+            row['turn%d' % s_['layer']] = float(th_[near].max()) if z > foot and near.any() else 0.0
+            lp = s_['lapel_pts']; row['under%d' % s_['layer']] = int(((lp[:, 0] ** 2 + (lp[:, 2] - z) ** 2) < (1.15 * rb) ** 2).sum())
+            m_ = s_['strain']['mid']; nr = (m_[:, 0] ** 2 + (m_[:, 2] - z) ** 2) < (2.5 * rb) ** 2
+            row['st%d' % s_['layer']] = (float(np.abs(s_['strain']['st'][nr]).mean()), float(np.abs(s_['strain']['st'][nr]).max()), int(nr.sum())) if nr.any() else (0.0, 0.0, 0)
+        h1, h2 = surf(1, z), surf(2, z); row['gap'] = float(h2[1] - h1[1]) if h1 is not None and h2 is not None else float('nan')
+        rep.append(row)
+        print('foldfront: button %d at z %.2f: fold left at its height %.0f / %.0f degrees (upper / under front); turned cloth under its footprint %d / %d points; '
+              'strain of the cloth within 2.5 radii: upper mean |%.1f%%| worst |%.1f%%| (%d edges), under mean |%.1f%%| worst |%.1f%%| (%d edges); the fronts %.2f apart there (the cloth is %.2f)'
+              % (k_ + 1, z, row['turn1'], row['turn2'], row['under1'], row['under2'], 100 * row['st1'][0], 100 * row['st1'][1], row['st1'][2],
+                 100 * row['st2'][0], 100 * row['st2'][1], row['st2'][2], row['gap'], th))
+    json.dump(rep, open(out + '.buttons.json', 'w'), indent=1)
     me = bpy.data.meshes.new('Redingote bodice buttons'); me.from_pydata(P_, [], F_); me.update()
     for p in me.polygons: p.use_smooth = True
     old = bpy.data.objects.get('Redingote bodice buttons')
