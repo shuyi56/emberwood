@@ -138,15 +138,80 @@ def pattern(fold_pkl, collar_pkl, cap_dir, k, S):
     jX = s_[np.argmin(np.linalg.norm(des[s_] - X3, axis=1))]
     jG = s_[np.argmax(np.abs(UV[s_, 0]))]
     best = None
+    rr_ = np.nonzero((kind == 'r') & hs)[0]
+    jR = rr_[np.argmax(np.abs(UV[rr_, 0]))]                       # (the collar's roll at its front end)
+    nxt = rr_[(np.abs(UV[rr_, 0]) < np.abs(UV[jR, 0]) - 0.4) & (np.abs(UV[rr_, 0]) > np.abs(UV[jR, 0]) - 0.8)]
     for refl in (1, -1):
         U = UV * np.array([refl, 1.0])
-        v1, v2 = U[jG] - U[jX], Gp - Np
-        th = math.atan2(v2[1], v2[0]) - math.atan2(v1[1], v1[0])
-        R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-        Q = (U - U[jX]) @ R.T + Np
-        n2 = np.array([-v2[1], v2[0]])
-        if ((Q[hs] - Np) @ n2).mean() * ((flat[lap] - Np) @ n2).mean() < 0:
-            best = Q
+        if S.get('place', 'roll') == 'roll':
+            # (drafted on the lapel's roll line run on, as the tailor drafts the collar: its roll leaves the neck point
+            # on the lapel's roll's own line, no corner between them; John: "it's crumpling because of the edge you cut")
+            v1 = U[nxt].mean(0) - U[jR]
+            v2 = (Np - flat[np.nonzero(~lap)[0]][np.argmin(np.linalg.norm(flat[~lap] - B, axis=1))]) if False else (N - B)
+            th = math.atan2(v2[1], v2[0]) - math.atan2(v1[1], v1[0])
+            R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+            Q = (U - U[jR]) @ R.T + Np
+        else:
+            v1, v2 = U[jG] - U[jX], Gp - Np
+            th = math.atan2(v2[1], v2[0]) - math.atan2(v1[1], v1[0])
+            R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+            Q = (U - U[jX]) @ R.T + Np
+        # (the fall on the flap's side of the roll: the side the outer edge lies on, against the lapel's flap)
+        oc = Q[(kind == 'o') & hs].mean(0) - Np
+        fl = flat[lap].mean(0) - Np
+        cr_ = lambda a: a[0] * u[1] - a[1] * u[0]
+        if S.get('place', 'roll') == 'roll':
+            ok_ = np.sign(cr_(Q[(kind == 's') & hs].mean(0) - Q[(kind == 'o') & hs].mean(0))) == np.sign(cr_(-fl)) if False else True
+            # fall side check in the collar's own roll frame: outer edge to the left of the roll's way iff the flap is
+            rw = Q[nxt].mean(0) - Np
+            side_o = np.sign(rw[0] * oc[1] - rw[1] * oc[0])
+            side_f = np.sign(u[0] * fl[1] - u[1] * fl[0])
+            if side_o == side_f:
+                best = Q
+        else:
+            n2 = np.array([-v2[1], v2[0]])
+            if ((Q[hs] - Np) @ n2).mean() * ((flat[lap] - Np) @ n2).mean() < 0:
+                best = Q
+    if S.get('place', 'roll') == 'roll' and S.get('turn_frac') != 1.0:
+        # (drafted on the roll line run on, the collar's fall front lies over the lapel's top: the two cannot both be
+        # cut from one cloth there (that is why a tailor cuts the collar apart). So the collar is turned from where its
+        # gorge meets the lapel's toward the roll's own line only as far as its fall clears the lapel's flap: the
+        # smallest corner in the roll a one-piece cut allows. The rest of the corner is rounded off along the roll.)
+        Ug = None
+        for refl in (1, -1):
+            U = UV * np.array([refl, 1.0])
+            v1, v2 = U[jG] - U[jX], Gp - Np
+            th = math.atan2(v2[1], v2[0]) - math.atan2(v1[1], v1[0])
+            R = np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+            Qg = (U - U[jX]) @ R.T + Np
+            n2 = np.array([-v2[1], v2[0]])
+            if ((Qg[hs] - Np) @ n2).mean() * ((flat[lap] - Np) @ n2).mean() < 0:
+                Ug = Qg
+        cTq = CT[hs[CT].all(1)]
+        # the angle between the two placements, about N' (both kept the same handedness)
+        def ang_of(Qx):
+            d_ = Qx[nxt].mean(0) - Qx[jR]
+            return math.atan2(d_[1], d_[0])
+        dth = (ang_of(best) - ang_of(Ug) + math.pi) % (2 * math.pi) - math.pi
+        fbest = 0.0
+        for f in np.linspace(0, 1, 41):
+            a_ = f * dth
+            R = np.array([[math.cos(a_), -math.sin(a_)], [math.sin(a_), math.cos(a_)]])
+            Qf = (Ug - Np) @ R.T + Np
+            cp_ = shapely.union_all([shapely.Polygon(Qf[t]) for t in cTq]).buffer(1e-4)
+            ov = cp_.intersection(flap).area
+            if ov < S.get('overlap_ok', 0.03):
+                fbest = f
+            else:
+                break
+        if S.get('turn_frac') is not None:
+            fbest = float(S['turn_frac'])
+        a_ = fbest * dth
+        R = np.array([[math.cos(a_), -math.sin(a_)], [math.sin(a_), math.cos(a_)]])
+        best = (Ug - Np) @ R.T + Np
+        log_place = 'collar turned %.0f of the %.0f degrees from the gorge toward the roll line (fall clear of the lapel)' % (math.degrees(a_), math.degrees(dth))
+    else:
+        log_place = 'collar placed %s' % S.get('place')
     Q = best
     cT = CT[hs[CT].all(1)]
     cpoly = shapely.union_all([shapely.Polygon(Q[t]) for t in cT]).buffer(1e-4).buffer(-1e-4)
@@ -154,7 +219,7 @@ def pattern(fold_pkl, collar_pkl, cap_dir, k, S):
     piece = shapely.unary_union([flap, cpoly]).buffer(0.02).buffer(-0.02).difference(strip.buffer(0.3 * h))
     if piece.geom_type != 'Polygon':
         piece = max(piece.geoms, key=lambda g: g.area)
-    log = []
+    log = [log_place]
     # the lapel's outer edge (P' to B') bowed out over the bust
     if S['belly'] > 0:
         Bp = flat[rl[np.argmin(np.linalg.norm(flat[rl] - B, axis=1))]]
@@ -397,6 +462,12 @@ def solve(Pt, S, log=print):
     log('start: strain 5/95 %.1f %.1f worst %.1f %.1f' % (*np.percentile(s0, [5, 95]), s0.min(), s0.max()))
     for k in range(1, S['steps'] + 1):
         fab.step(hh, body, neutral=True)
+        if S.get('guide'):                              # (the hand: the free cloth drawn toward the start shape, less and less)
+            gk = S['guide'] * (1 - k / S['steps'])
+            fr = fab.w > 0
+            fab.pos[fr] += gk * (D[fr] - fab.pos[fr])
+        if 'cb' in Pt and Pt['cb'].any():               # (the centre back stays on the middle: the other half mirrors it)
+            fab.pos[Pt['cb'], 0] = 0.0
         lam = np.zeros(len(Hc))
         for _ in range(4):
             Fh._walk(Hc, rest, comp, hh, batches, lam)
