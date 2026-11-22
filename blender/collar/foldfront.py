@@ -255,6 +255,11 @@ for s in (und, top):                                  # the under front first: t
     # the under front's lapel lies on its own front (it runs on under the upper front, which covers its foot); the
     # upper front's on whatever is under it by then
     ground = caster(top['fold'] | und['fold'], (2, 0)) if s is und else caster(top['fold'])
+    # John: "the right lapel is tearing when it crosses the left, reduce the force it pushes from the right". The
+    # upper lapel was laid on whatever a ray met, the other lapel included, so at the crossing it climbed a second
+    # thickness over cloth that already lies a whole layer below it: pushed out from underneath, stretched to three
+    # times its length at that point. It lies on its own front; the other lapel passes under it and pushes nothing.
+    if s is top and opt.get('cross_ease', 'bow' not in opt): ground = caster(top['fold'] | und['fold'])
     cover = caster(top['fold'], (1,)) if s is und else None
     ii = np.nonzero(s['fold'])[0]; ci = np.nonzero(s['crease'])[0]
     if not len(ii): continue
@@ -321,7 +326,17 @@ for s in (und, top):                                  # the under front first: t
             A = np.array([Y[nb[int(i)]].mean() for i in ii]); Y[ii] += 0.7 * wgt * (A - Y[ii])
         Y[ii] = np.minimum(Y[ii], lim)
     if cover is not None:                             # under the upper front: pressed flat behind it
-        cy = cover(X); under_ = np.isfinite(cy); Y[ii[under_]] = np.maximum(Y[ii[under_]], cy[under_] + opt.get('under_gap', 0.02 if 'bow' in opt else th + 0.02))
+        cy = cover(X); under_ = np.isfinite(cy)
+        if opt.get('cross_ease', 'bow' not in opt) and 'Cd' in top:
+            # and the lapel that goes under does not drop behind the upper front in one step at its edge (a step of a
+            # whole thickness over one edge of the mesh: the tear): it slides under over a short run, hidden by the
+            # upper lapel's roll
+            edge_ = np.vstack([top['Cd'], np.column_stack([np.full(40, top['Cd'][-1, 0]), np.linspace(top['Cd'][-1, 1], top['Cd'][-1, 1] - 3.0, 40)])])
+            de_ = cKDTree(edge_).query(X)[0]; r_e = ss01(0.0, opt.get('cross_run', 0.4), de_)
+            tgt = np.maximum(Y[ii], np.where(under_, cy, -1e9) + th + 0.02)
+            Y[ii] = Y[ii] + np.where(under_, r_e, 0.0) * (tgt - Y[ii])
+        else:
+            Y[ii[under_]] = np.maximum(Y[ii[under_]], cy[under_] + opt.get('under_gap', 0.02 if 'bow' in opt else th + 0.02))
         print('foldfront: %d of the under lapel\'s points lie under the upper front, pressed behind it' % under_.sum())
     # pressed (John: "press the right lapel", the one on the right of the picture: her left): past the roll the lapel is
     # laid down onto the front, to the cloth's own thickness; the roll at the break is left as it is
