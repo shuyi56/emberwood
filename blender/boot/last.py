@@ -742,8 +742,10 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # (r['shaft_gap']: the hose and the leather's own lining, no air) from r['shaft_gap_by'] over it. The foot's gap
     # carried up the leg stood the shaft 8 mm off it all round, a tube 5 cm wider than the leg
     gap_ = np.full(n, r['gap'])
+    if r.get('heel_gap'):                              # (the quarters and the counter, behind the instep: closer too)
+        gap_ += (r['heel_gap'] - r['gap']) * _ss(M['toe_y'] + 0.50 * L, M['toe_y'] + 0.70 * L, y)
     if r.get('shaft_gap'):
-        gap_ += (r['shaft_gap'] - r['gap']) * _ss(M['ankle_z'] + 0.25 * r['shaft_gap_by'], M['ankle_z'] + r['shaft_gap_by'], z)
+        gap_ += (r['shaft_gap'] - gap_) * _ss(M['ankle_z'] + 0.25 * r['shaft_gap_by'], M['ankle_z'] + r['shaft_gap_by'], z)
     # a sock-fit last (RATIOS['drape'] passes, 0 for none): the whole last drawn taut over the foot and the leg, as a
     # stocking is: smoothed (a Laplacian step) and put back out to the gap from the skin, in turn, so the toes'
     # ridges and the step where the shaft's table meets the foot over the ankle are spanned by one smooth surface

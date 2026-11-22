@@ -60,6 +60,10 @@ THROAT_LINE = 0.90           # the front line from the vamp to the top: the stra
 THROAT_FROM = 0.30           # the vamp point, where that curve leaves the foot: this share of the length behind the toe
 SHAFT_GAP = 0.013            # x H: the shaft's least room off the skin, a sock fit's (the hose and the lining, no air);
 SHAFT_GAP_BY = 0.16          # reached this far over the ankle's joint, x H (the foot's own gap below: ROOM)
+HEEL_GAP = 0.024             # x H: the least room off the skin behind the instep (the quarters and the counter drawn in
+                             # with the shaft: the foot's 0.034 there left the heel a bulb under a close shaft)
+SEAT_WALL = 0.6              # the upper's lowest band (units over the sole) stood out to the sole's rim round the heel
+                             # seat: a last has a feather edge there, the foot's heel is a ball and left a ledge
 SHAFT_CUT = 0.90             # the shaft is cut to this share of the leg's girth and stretches onto it (Red Wing's pull-on
                              # boot, US 12108833: the narrowest girth of the shaft stretches "at least one inch", 2.5 cm
                              # on a 22 cm leg). The model is the worn, stretched shape; entry() prints the cut girth
@@ -353,6 +357,62 @@ def bend_at_ball(o, band, like=None, log=print):
     return X, W, names
 
 
+def seat_wall(o, sole, y_br, band, out, log=print):
+    """The upper stood on the sole round the heel seat. The last is drawn over the foot, and a foot's heel is a
+    ball: the leather turns in under it before it meets the sole, and the sole, cut to the counter's fullest, is
+    left standing out as a ledge with a shadow over it (John: a gap on the soles). A last's seat has a feather
+    edge: the counter comes down to the sole nearly upright. So behind the breast (y_br, eased in from 1.2 ahead)
+    the upper's lowest band (band, units over the sole) is let out toward the sole's upper rim less `out`, wholly
+    at the sole and not at all at the band's top. Never drawn in."""
+    Sv = np.array([(sole.matrix_world @ v.co)[:] for v in sole.data.vertices])
+    c = Sv[-2:, :2].mean(0)
+    zt = float(Sv[:, 2].max())
+    top = Sv[Sv[:, 2] > zt - 1e-3]
+    a_s = np.arctan2(top[:, 0] - c[0], -(top[:, 1] - c[1]))
+    r_s = np.linalg.norm(top[:, :2] - c, axis=1)
+    na = 144
+    bins = np.floor((a_s + np.pi) / (2 * np.pi) * na).astype(int) % na
+    rim = np.array([r_s[bins == b].max() if (bins == b).any() else np.nan for b in range(na)])
+    ok = ~np.isnan(rim)
+    k_ = np.arange(na)
+    rim = np.interp(k_, np.concatenate([k_[ok] - na, k_[ok], k_[ok] + na]), np.tile(rim[ok], 3))
+    mw = o.matrix_world
+    X = np.array([(mw @ v.co)[:] for v in o.data.vertices])
+    ang = np.arctan2(X[:, 0] - c[0], -(X[:, 1] - c[1]))
+    rr = np.linalg.norm(X[:, :2] - c, axis=1)
+    ai = (ang + np.pi) / (2 * np.pi) * na - 0.5
+    i0 = np.floor(ai).astype(int)
+    f_ = ai - i0
+    tgt = rim[i0 % na] * (1 - f_) + rim[(i0 + 1) % na] * f_ - out
+    h = X[:, 2] - zt
+    t = np.clip(h / band, 0.0, 1.0)
+    b_ = np.clip((X[:, 1] - (y_br - 1.2)) / 1.2, 0.0, 1.0)
+    w = (1.0 - t * t * (3 - 2 * t)) * b_ * b_ * (3 - 2 * b_)
+    # (one push for each direction, the outer face's own need at the sole, so the zip's guard and the turned-in
+    # margin behind the face move with it and the layers keep their order; eased round the seat; 0.45 at most)
+    low = h < 0.15
+    ub = np.floor((ang + np.pi) / (2 * np.pi) * na).astype(int) % na
+    env = np.array([rr[low & (ub == b)].max() if (low & (ub == b)).any() else np.nan for b in range(na)])
+    ok = ~np.isnan(env)
+    env = np.interp(k_, np.concatenate([k_[ok] - na, k_[ok], k_[ok] + na]), np.tile(env[ok], 3))
+    push = np.clip(rim - out - env, 0.0, 0.45)
+    for _ in range(4):
+        push = (np.roll(push, 1) + 2 * push + np.roll(push, -1)) / 4
+    add = (push[i0 % na] * (1 - f_) + push[(i0 + 1) % na] * f_) * w
+    X[:, :2] += (X[:, :2] - c) / np.maximum(rr, 1e-6)[:, None] * add[:, None]
+    inv = mw.inverted()
+    from mathutils import Vector
+    for v, x in zip(o.data.vertices, X):
+        if add[v.index] > 0:
+            v.co = inv @ Vector(x)
+    if 'rest' in o.data.attributes:
+        Z = np.array([v.co[:] for v in o.data.vertices])
+        o.data.attributes['rest'].data.foreach_set('vector', Z.ravel())
+    o.data.update()
+    log('zipboot %s: the upper stood on the sole round the seat: %d points let out, %.2f at most (%.1f cm)'
+        % (o.name, int((add > 1e-4).sum()), float(add.max()), float(add.max()) * 165 / 63))
+
+
 def set_at_pitch(o, M, passes, log=print):
     """Set the boot's leather at the heel's pitch, as a boot is lasted: on a last that already stands at the heel's
     height (Golding, The Manufacture of Boots and Shoes: the last carries the pitch, and the upper is drawn smooth
@@ -419,7 +479,7 @@ def build():
     boot.last.RATIOS.update(toe_box=TOE_BOX, toe_sq=TOE_SQ, toe_front=TOE_FRONT, toe_wall=TOE_WALL,
                             toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=4.0, sole_toe=0.7, toe_ease=TOE_EASE, toe_spare=0.08, toe_sweep=TOE_SWEEP, toe_bow=TOE_BOW, toe_side=TOE_SIDE)   # (the sole's outline kept square at the toe)
     boot.last.RATIOS['welt'] = WELT
-    boot.last.RATIOS.update(shaft_gap=SHAFT_GAP, shaft_gap_by=SHAFT_GAP_BY)
+    boot.last.RATIOS.update(shaft_gap=SHAFT_GAP, shaft_gap_by=SHAFT_GAP_BY, heel_gap=HEEL_GAP)
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
     female.TURNOUT_AT_HIP = TURNOUT_AT_HIP
@@ -434,6 +494,10 @@ def build():
     bpy.context.view_layer.update()
     for side in 'RL':
         o = bpy.data.objects['Boot.' + side]
+        lifts = [l_ for l_ in bpy.data.objects if l_.name.startswith('Heel ') and l_.name.endswith('.' + side)]
+        if SEAT_WALL and lifts and bpy.data.objects.get('Boot sole.' + side) is not None:
+            y_br = min(float((l_.matrix_world @ v.co)[1]) for l_ in lifts for v in l_.data.vertices)
+            seat_wall(o, bpy.data.objects['Boot sole.' + side], y_br, SEAT_WALL, SEAT_OUT + 0.05)
         if BEND:
             up_ = bend_at_ball(o, BEND)
             if bpy.data.objects.get('Boot sole.' + side) is not None:
