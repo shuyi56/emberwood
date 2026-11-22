@@ -45,6 +45,10 @@ Any option after `recipe` overrides it, for example `'{"recipe": "traced_lapel",
 9. **Relax as cloth** (`relax`, 1500 rounds). Every edge of the turned cloth is drawn back toward its length in the
    flat cut. Stretch is resisted fully, compression at 0.7. The roll line is held, the cloth may not sink into what
    it lies on, and a light hold keeps the placed shape. This halves the strain.
+   **The cusp is solved first, always** (`cusp_first`, 400 rounds, only the last 30% of the fold let go), then the
+   full run. Read its line before anything else: it should bring the worst edge at the cusp under about 25%. If it
+   does not, the cusp is wrongly placed and the full run will not rescue it. It does not change where the full run
+   ends up; it is the early check.
 10. **Pin the buttons and measure** (`button_pin`). During relaxation the front round the foot is let go and the
     cloth under each button is held; the pull on the held cloth is the load on that button. The fitted front is put
     back afterwards (`keep_front`).
@@ -118,3 +122,18 @@ Both lapels are pressed alike. 12 buttons run from under the break to the hem, s
 and no fold is left at any button. Two things do not carry over: the habit's break sits at the neck pit because its
 lapel joins a separate standing collar (the model's is 0.12 lower, on a collarless neckline), and the collar itself
 is not part of this recipe.
+
+### The top of the fold
+
+John: "bend the top more, too much strain on the left." By the neck the roll line climbs the slope of the shoulder,
+where the cloth runs back as fast as it runs up, so the line is far longer there than it looks from the front. Two
+settings in `classical_lapel` deal with it:
+
+- `metric3d`: cut lengths along the fold are taken in the cloth's own measure (the roll line's real length), not its
+  front view. Held to the short front-view measure, the top of the lapel could never lie easy against its own line.
+- `top_out` [0.5, 0.8]: the roll keeps a full radius over the top half of the fold. It used to shrink to under half
+  by the neck, and pressing shrank it again.
+
+Worst stretched edge at the top of her right lapel: +67% before, about +31% after. `traced_lapel` does not use either
+setting, so the approved wide lapel is unchanged.
+

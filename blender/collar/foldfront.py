@@ -50,7 +50,7 @@ RECIPES = {
 #   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
 RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
-                                  press={'left': 0.85, 'right': 0.85})
+                                  press={'left': 0.85, 'right': 0.85}, top_out=[0.5, 0.8], metric3d=True)
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
@@ -302,6 +302,11 @@ for s in (und, top):                                  # the under front first: t
         # and over the very last of it the radius opens right out, so the needle-thin end of the lapel is hardly turned
         # at all: folded hard over, cloth that thin and this thick made a spike and a dark notch at the foot
         if opt.get('cusp_end'): e0, Re = opt['cusp_end']; rr = rr + ss01(e0, 1.0, t) ** 2 * np.maximum(Re - rr, 0)      # (tried: it tore the front beside the button; off)
+    # the top of the fold (John: "bend the top more, too much strain on the left"): by the neck the roll used to shrink
+    # to under half its radius, and pressing shrank it again, so the widest part of a lapel whose point sits at the top
+    # was creased hard over a round neck. top_out [how far down, floor] keeps a full bend there.
+    if opt.get('top_out'):
+        t1_, ft_ = opt['top_out']; rr = rr + (1 - ss01(t1_ * 0.6, t1_, t)) * (np.maximum(rr, np.minimum(r0 * ft_, wloc / np.pi * 0.9 + 0.01)) - rr)
     arc = np.pi * rr; ang = np.minimum(d, arc) / rr
     ex = rr * np.sin(ang); hh = rr * (1 - np.cos(ang))
     rest = np.maximum(d - arc, 0)
@@ -399,6 +404,21 @@ for s in (und, top):                                  # the under front first: t
                    if inset[e.verts[0].index] and inset[e.verts[1].index]])
     ea = np.unique(np.sort(ea, axis=1), axis=0)
     l0 = np.linalg.norm(flat2[ea[:, 0]] - flat2[ea[:, 1]], axis=1)
+    if opt.get('metric3d') and 'C' in s and len(ci) > 3:
+        # the cut lengths in the cloth's own measure. The flat cut was measured in the front view, but by the neck the
+        # roll line climbs the slope of the shoulder, where the cloth runs back as fast as it runs up: the line itself
+        # is up to 1.7 times longer there than its front view. Held to the short measure the top of the lapel could
+        # never lie easy against the line it is joined to (John: "bend the top more, too much strain on the left").
+        # Lengths along the fold are scaled by how much longer the line really is at that height.
+        oc = ci[np.argsort(tl[ci])]; tc = tl[oc]; P3 = W[oc]
+        s3 = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(P3, axis=0), axis=1))]); s2 = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(P3[:, [0, 2]], axis=0), axis=1))])
+        tg = np.linspace(0, 1, 41); g3 = np.gradient(np.interp(tg, tc, s3), tg) / np.maximum(np.gradient(np.interp(tg, tc, s2), tg), 1e-6)
+        g3 = np.convolve(np.pad(g3, 2, mode='edge'), np.ones(5) / 5, mode='valid')
+        ge = np.interp(0.5 * (np.clip(s['tl'][ea[:, 0]], 0, 1) + np.clip(s['tl'][ea[:, 1]], 0, 1)), tg, g3)
+        dl_ = flat2[ea[:, 1]] - flat2[ea[:, 0]]; nm = 0.5 * (s['nl'][ea[:, 0]] + s['nl'][ea[:, 1]]); nm /= np.maximum(np.linalg.norm(nm, axis=1), 1e-9)[:, None]
+        acr = (dl_ * nm).sum(axis=1); alo = dl_[:, 0] * nm[:, 1] - dl_[:, 1] * nm[:, 0]
+        l0 = np.sqrt((ge * alo) ** 2 + acr ** 2)
+        print('foldfront: front %d: the roll line is up to %.2f times its front-view length (by the neck); cut lengths along the fold scaled to match' % (s['layer'], g3.max()))
     # the cloth relaxed (John: "do the cloth relaxation"). The rules above place the lapel; they do not keep its lengths.
     # Here every edge of the turned cloth is drawn back toward its length as cut, all at once and over and over, the
     # way cloth settles: stretch is resisted hard, compression less (cloth gives by easing), the fold line is held, the
@@ -436,24 +456,43 @@ for s in (und, top):                                  # the under front first: t
         kk_ = np.clip(d / (arc + 0.35), 0, 1); kk_ = kk_ * kk_ * (3 - 2 * kk_); clear = (out_side + lie) * kk_
         mob = free[ii] > 0
         nbi = [np.array(nb[int(i)]) for i in ii]
-        for r_ in range(it_):
-            dv = Pr[B_] - Pr[A_]; ln_ = np.maximum(np.linalg.norm(dv, axis=1), 1e-9); Cn = ln_ - L0
-            kq = np.where(Cn > 0, ks_, kc_); wa, wb = free[A_], free[B_]; ws = np.maximum(wa + wb, 1e-9)
-            cor = (kq * Cn / ln_ / ws)[:, None] * dv
-            dP = np.zeros_like(Pr); cnt = np.zeros(len(Pr))
-            np.add.at(dP, A_, wa[:, None] * cor); np.add.at(dP, B_, -wb[:, None] * cor); np.add.at(cnt, A_, 1); np.add.at(cnt, B_, 1)
-            Pr += rx.get('omega', 1.3) * dP / np.maximum(cnt, 1)[:, None]
-            Pr[ii] += anch * free[ii][:, None] * (P0[ii] - Pr[ii])
-            if r_ % 4 == 3:                                   # (bending: the move itself is kept smooth, so the cloth eases and does not crinkle)
-                dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbi]); Pr[ii] += rx.get('bend', 0.25) * free[ii][:, None] * (av - dl[ii])
-            if len(jj):
-                Pr[jj] += rx.get('body_anchor', 0.002) * (P0[jj] - Pr[jj])
-                Pr[jj, 1] = P0[jj, 1]                          # (the front lies on the body: it may slide, it may not buckle off it; let go in depth it crinkled beside the fold)
-                if r_ % 4 == 3:
-                    dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbj]); Pr[jj] += rx.get('bend', 0.25) * (av - dl[jj])
-            if r_ % 10 == 9 or r_ == it_ - 1:                 # (and it may not sink into what it lies on)
-                g2 = ground(Pr[ii][:, [0, 2]]); okg = np.isfinite(g2) & mob & (g2 < yc_t + opt.get('fell', 0.15))
-                Pr[ii[okg], 1] = np.minimum(Pr[ii[okg], 1], g2[okg] - clear[okg])
+        # the cusp first (John: "run a quick solver specifically, run always the cusp before the full run"). The foot
+        # of the fold carries the most strain in the least cloth; solved together with the whole lapel it is the last
+        # place to settle and the rest settles round its error. A short pass with only the cusp let go comes first,
+        # then the full run starts from a cusp that already lies easy.
+        free_all = free.copy(); tfree = np.zeros(len(W)); tfree[ii] = t
+        cq = rx.get('cusp_first', {}); c_from = (cq or {}).get('from', 0.7)
+        cmask = np.zeros(len(W)); cmask[ii] = (t > c_from).astype(float)
+        if len(jj): cmask[jj] = 1.0
+        def cstrain():
+            dv = Pr[B_] - Pr[A_]; sn = np.linalg.norm(dv, axis=1) / L0 - 1; cm = (cmask[A_] > 0) & (cmask[B_] > 0) & (free_all[A_] + free_all[B_] > 0)
+            return 100 * np.abs(sn[cm]).mean(), 100 * np.percentile(np.abs(sn[cm]), 95), 100 * np.abs(sn[cm]).max()
+        phases = ([('cusp', cq.get('iters', 400), cmask)] if cq is not None else []) + [('full', it_, np.ones(len(W)))]
+        for ph_, it_p, msk in phases:
+            c0_ = cstrain()
+            free = free_all * msk; mob = free[ii] > 0
+            for r_ in range(it_p):
+                dv = Pr[B_] - Pr[A_]; ln_ = np.maximum(np.linalg.norm(dv, axis=1), 1e-9); Cn = ln_ - L0
+                kq = np.where(Cn > 0, ks_, kc_); wa, wb = free[A_], free[B_]; ws = np.maximum(wa + wb, 1e-9)
+                cor = (kq * Cn / ln_ / ws)[:, None] * dv
+                dP = np.zeros_like(Pr); cnt = np.zeros(len(Pr))
+                np.add.at(dP, A_, wa[:, None] * cor); np.add.at(dP, B_, -wb[:, None] * cor); np.add.at(cnt, A_, 1); np.add.at(cnt, B_, 1)
+                Pr += rx.get('omega', 1.3) * dP / np.maximum(cnt, 1)[:, None]
+                Pr[ii] += anch * free[ii][:, None] * (P0[ii] - Pr[ii])
+                if r_ % 4 == 3:                                   # (bending: the move itself is kept smooth, so the cloth eases and does not crinkle)
+                    dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbi]); Pr[ii] += rx.get('bend', 0.25) * free[ii][:, None] * (av - dl[ii])
+                if len(jj):
+                    Pr[jj] += rx.get('body_anchor', 0.002) * (P0[jj] - Pr[jj])
+                    Pr[jj, 1] = P0[jj, 1]                          # (the front lies on the body: it may slide, it may not buckle off it; let go in depth it crinkled beside the fold)
+                    if r_ % 4 == 3:
+                        dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbj]); Pr[jj] += rx.get('bend', 0.25) * (av - dl[jj])
+                if r_ % 10 == 9 or r_ == it_p - 1:                 # (and it may not sink into what it lies on)
+                    g2 = ground(Pr[ii][:, [0, 2]]); okg = np.isfinite(g2) & mob & (g2 < yc_t + opt.get('fell', 0.15))
+                    Pr[ii[okg], 1] = np.minimum(Pr[ii[okg], 1], g2[okg] - clear[okg])
+            c1_ = cstrain()
+            print('foldfront: front %d, %s solve (%d rounds): strain at the cusp mean |%.1f%%| to |%.1f%%|, 95%% under |%.1f%%| to |%.1f%%|, worst |%.0f%%| to |%.0f%%|'
+                  % (s['layer'], 'the quick cusp' if ph_ == 'cusp' else 'the full', it_p, c0_[0], c1_[0], c0_[1], c1_[1], c0_[2], c1_[2]))
+        free = free_all
         if pin.any():
             dv = Pr[B_] - Pr[A_]; ln_ = np.maximum(np.linalg.norm(dv, axis=1), 1e-9); sn = (ln_ - L0) / L0
             ua = pin[A_] & ~pin[B_]; ub = pin[B_] & ~pin[A_]
@@ -478,6 +517,8 @@ for s in (und, top):                                  # the under front first: t
     tm = 0.5 * (s['tl'][ea[:, 0]] + s['tl'][ea[:, 1]])[okl]
     s['strain'] = dict(st=st, mid=0.5 * (W[ea[:, 0]] + W[ea[:, 1]])[okl], t=tm)
     cusp = tm > opt.get('cusp_from', 0.8)
+    topm = tm < opt.get('top_to', 0.25)
+    if topm.any(): print('foldfront: front %d: strain at the top of the fold (the first quarter): mean |%.1f%%|, 95%% under |%.1f%%|, worst %+.1f%% / %+.1f%%' % (s['layer'], 100 * np.abs(st[topm]).mean(), 100 * np.percentile(np.abs(st[topm]), 95), 100 * st[topm].min(), 100 * st[topm].max()))
     print('foldfront: front %d: strain over %d edges: mean |%.1f%%|, 95%% under |%.1f%%|, worst %+.1f%% / %+.1f%%; at the cusp (the last fifth of the fold) mean |%.1f%%|, worst %+.1f%% / %+.1f%%'
           % (s['layer'], len(st), 100 * np.abs(st).mean(), 100 * np.percentile(np.abs(st), 95), 100 * st.min(), 100 * st.max(),
              100 * np.abs(st[cusp]).mean(), 100 * st[cusp].min(), 100 * st[cusp].max()))
