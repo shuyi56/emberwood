@@ -50,7 +50,7 @@ RECIPES = {
 #   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
 RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
-                                  press={'left': 0.85, 'right': 0.85}, top_out=[0.5, 0.8], metric3d=True)
+                                  press={'left': 0.85, 'right': 0.85}, top_out=[0.5, 0.8], metric3d=True, flap=[0.7, 1.4])
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
@@ -287,6 +287,13 @@ for s in (und, top):                                  # the under front first: t
     # bends back toward the chest on a wide arc so its edge lies on the front
     pr = (opt.get('press') if 'press' in opt else ({} if 'bow' in opt else {'left': 0.85})).get('left' if s['layer'] == 2 else 'right', 0.0)
     rr = r0 * np.clip((1 - t) / 0.12, 0.15, 1) * np.clip((t + 0.05) / 0.1, 0.4, 1)
+    # John: "let stress transfer down, let the point above the top button flap". The point of the fold was ironed down
+    # and held like the rest of the lapel, so everything the fold could not keep was packed into a knot at the break.
+    # flap [from, roll]: from that share of the fold down the lapel is not pressed, its roll is left full so the point
+    # stands free, the relaxation does not hold it to where it was put, and the front under it keeps what it took up
+    # (the buttons hold it), so the load runs on down to the top button.
+    flapw = ss01(opt['flap'][0] - 0.15, opt['flap'][0], t) if opt.get('flap') else np.zeros(len(t))
+    pr = pr * (1 - flapw)
     rr = rr * (1 - 0.7 * pr)                           # (pressed: the roll itself is ironed lower, so the lapel lies flat from the fold out)
     rr = np.minimum(rr, wloc / np.pi * 0.9 + 0.01)
     # the cusp (John: "soften the folding near the cusp, too sharp"): toward the foot the roll used to shrink to a
@@ -298,6 +305,7 @@ for s in (und, top):                                  # the under front first: t
         # John: "you need to bend out a bit more the left lapel" (the one on the left of the picture, the upper front's,
         # along its tail under the crossing): its roll is fuller there, so it stands out over what passes beneath it
         if s is top: fl = opt.get('tail_out', 1.3)
+        if opt.get('flap'): fl = max(fl, opt['flap'][1])
         rr = rr + ss01(c0, min(c0 + 0.12, 1.0), t) * (np.maximum(rr, r0 * fl * (1 - 0.7 * pr)) - rr)
         # and over the very last of it the radius opens right out, so the needle-thin end of the lapel is hardly turned
         # at all: folded hard over, cloth that thin and this thick made a spike and a dark notch at the foot
@@ -364,7 +372,7 @@ for s in (und, top):                                  # the under front first: t
         print('foldfront: %d of the under lapel\'s points lie under the upper front, pressed behind it' % under_.sum())
     # pressed (John: "press the right lapel", the one on the right of the picture: her left): past the roll the lapel is
     # laid down onto the front, to the cloth's own thickness; the roll at the break is left as it is
-    if pr:
+    if np.any(pr):
         wp = pr * ss01(0.0, opt.get('press_over', 0.7), d - arc); Y[ii] = Y[ii] + wp * ((gy - out_side - lie) - Y[ii])
     if opt.get('cusp'):
         # the cloth's own reach: a point d from the line along the cloth cannot stand further off the line than d. Where
@@ -478,7 +486,7 @@ for s in (und, top):                                  # the under front first: t
                 dP = np.zeros_like(Pr); cnt = np.zeros(len(Pr))
                 np.add.at(dP, A_, wa[:, None] * cor); np.add.at(dP, B_, -wb[:, None] * cor); np.add.at(cnt, A_, 1); np.add.at(cnt, B_, 1)
                 Pr += rx.get('omega', 1.3) * dP / np.maximum(cnt, 1)[:, None]
-                Pr[ii] += anch * free[ii][:, None] * (P0[ii] - Pr[ii])
+                Pr[ii] += anch * (free[ii] * (1 - flapw))[:, None] * (P0[ii] - Pr[ii])
                 if r_ % 4 == 3:                                   # (bending: the move itself is kept smooth, so the cloth eases and does not crinkle)
                     dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbi]); Pr[ii] += rx.get('bend', 0.25) * free[ii][:, None] * (av - dl[ii])
                 if len(jj):
@@ -511,7 +519,7 @@ for s in (und, top):                                  # the under front first: t
         W[:] = Pr
         # the front round the foot was let go to measure what the buttons carry; it moved a tenth of a millimetre, and
         # even that showed as a crinkle beside the fold, so the front itself is put back as fitted
-        if len(jj) and rx.get('keep_front', True): W[jj] = P0[jj]
+        if len(jj) and rx.get('keep_front', not opt.get('flap')): W[jj] = P0[jj]
     l1 = np.linalg.norm(W[ea[:, 0]] - W[ea[:, 1]], axis=1)
     okl = l0 > 1e-4; st = l1[okl] / l0[okl] - 1
     tm = 0.5 * (s['tl'][ea[:, 0]] + s['tl'][ea[:, 1]])[okl]

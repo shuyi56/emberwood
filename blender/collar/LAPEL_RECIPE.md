@@ -137,3 +137,12 @@ settings in `classical_lapel` deal with it:
 Worst stretched edge at the top of her right lapel: +67% before, about +31% after. `traced_lapel` does not use either
 setting, so the approved wide lapel is unchanged.
 
+### The point above the top button
+
+John: "let stress transfer down, let the point above the top button flap." `flap` [0.7, 1.4] in `classical_lapel`:
+over the last 30% of the fold the lapel is not pressed, its roll is left full (1.4 of the roll radius), the
+relaxation does not hold it to where it was put, and the front under it keeps what it took up while the buttons hold
+it. The knot at the break opens into a free point. Strain at the cusp falls from 9.4% to 3.8% mean on her left front
+and from 6.0% to 4.6% on her right; the pull on her right front's top button rises from 0.021 to 0.027, which is the
+load arriving there.
+
