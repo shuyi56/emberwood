@@ -48,6 +48,10 @@ const CENTRE = [0, 0.56 * HH, -0.06 * HH];        // the skull's centre in the p
 const HAIR_MM = 0.07;                             // SOURCED: a scalp hair is 50-100 um across (Robbins, Chemical and Physical
                                                   // Behavior of Human Hair, ch. 9); the middle of that range
 const HEAD_MM = 219;                              // one head height in mm (scalp_field.HH_MM)
+const STRAND_TWIST = 0.7;                         // STYLE: rad each strand's normal is turned round it, either way
+const STRAND_LIGHT = 0.85;                        // STYLE: the strands' paint against the hair colour: less light, so the
+                                                  // lit side does not wash the strands into one flat sheet (cards: 0.8)
+const STRAND_ROUGH = 0.6;                         // STYLE: a soft sheen along the lit strands (0.8 read matte and flat)
 const PX_WORLD = { value: 0.002 };                // one pixel's width at unit depth: set each frame from the camera
 function cutTexture() {
   const W = 256, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -146,19 +150,27 @@ function buildStyle(asset, tone, creatorMat) {
   const side = new Float32Array(np * 2), wid = new Float32Array(np * 2), vc = new Float32Array(np * 6), idx = [];
   let k = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (const c of cnt) {
-    const b = 0.8 + 0.4 * rnd();
+    const b = 0.8 + 0.4 * rnd(), twist = (2 * rnd() - 1) * STRAND_TWIST;
+    const tc = Math.cos(twist), ts = Math.sin(twist);
     for (let j = 0, sj = 0; j < c; j++) {
       const q = k + j, a0 = k + Math.max(0, j - 1), a1 = k + Math.min(c - 1, j + 1), t = j / (c - 1);
       if (j) sj += Math.hypot(P[3 * q] - P[3 * q - 3], P[3 * q + 1] - P[3 * q - 2], P[3 * q + 2] - P[3 * q - 1]);
       let tx = P[3 * a1] - P[3 * a0], ty = P[3 * a1 + 1] - P[3 * a0 + 1], tz = P[3 * a1 + 2] - P[3 * a0 + 2];
       const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
       const ox = P[3 * q] - CENTRE[0], oy = P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = P[3 * q + 2] - CENTRE[2];
-      const ol = Math.hypot(ox, oy, oz) || 1;
+      // the normal: out from the head but square to the strand (a hair is lit across, never along it, as in
+      // Kajiya-Kay's hair model), then turned round the strand by its own twist: so each wave, bend and lock catches
+      // the light by its own direction, where the head's shape alone lit the whole fall as one smooth shell
+      const od = ox * tx + oy * ty + oz * tz;
+      let nx = ox - od * tx, ny = oy - od * ty, nz = oz - od * tz;
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+      const ol = 1; const ox2 = nx * tc + bx * ts, oy2 = ny * tc + by * ts, oz2 = nz * tc + bz * ts;
       const shade = b * shadeAt(sj, t);
       for (let e = 0; e < 2; e++) {
         const v = 2 * q + e;
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
-        nrm[3 * v] = ox / ol; nrm[3 * v + 1] = oy / ol; nrm[3 * v + 2] = oz / ol;
+        nrm[3 * v] = ox2; nrm[3 * v + 1] = oy2; nrm[3 * v + 2] = oz2;
         side[v] = e ? 1 : -1; wid[v] = wHair * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
         vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade;
       }
@@ -172,8 +184,8 @@ function buildStyle(asset, tone, creatorMat) {
   sg.setAttribute('strandW', new THREE.BufferAttribute(wid, 1)); sg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
   sg.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
   sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
-  const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: 0.8,
-    metalness: 0, envMapIntensity: 0.25 });
+  const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: STRAND_ROUGH,
+    metalness: 0, envMapIntensity: 0.15 });
   strandMat.onBeforeCompile = sh => {
     sh.uniforms.pxWorld = PX_WORLD;
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\n' +
@@ -183,7 +195,9 @@ function buildStyle(asset, tone, creatorMat) {
         'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
         'mvPosition.xyz += sd * ( 0.5 * max( strandW, -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
-    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';')
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );');
   };
   parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
   group.add(parts.strands);
