@@ -172,3 +172,22 @@ repeated on more than one garment. The reviewer applies them once John merges th
   drafting it as part of the front panel with a fold line.
 - **Fix:** Draft the lapel as the folded-back part of the front panel (roll line, break point, return), solve the
   fold, and check the 3/4 view for a flap standing off the chest before sending it.
+
+## P015 Colours that touch but do not separate
+
+- **Seen:** 2026-11-20: a near-black lace darkened the tongue; a first linen replacement matched the brass eyelets' hue
+- **Spot:** Run tools/render-review/colorcheck.py FIGURE before a render that changes a material colour: it flags touching parts with a small lightness gap and the same hue, and a cord darker than the shadow of what it lies on
+- **Fix:** Pick the colour from the check's table, not by eye: keep dL 12+ or dE 25+, and 20 degrees of hue when the values are close; a lace over a dark opening must be lighter than the surface's shadow tone
+
+## R008 Hair guides placed or combed without a check against the scalp and the face
+
+- **Seen:** 11 of the day's 17 hair rejections, all on one thread (2026-11-21, 18:38 to 20:21Z, logged by the thread
+  itself): guides rooted behind the crown that flipped forward over the face, bang guides planted on bare skin in front
+  of it, sideburn guides whose first segment ended 5 mm inside the head, and four bang rounds (hung straight like a
+  sheet, then swept out like antennae, then the inner tips still over the pupil, then dipped 15 mm into the eye socket).
+- **Spot:** The diff plants, combs or sets hair guides (a bang section, a part, a sideburn, a framing lock) and the
+  first render of the round is the first time anyone looks at where they ended up.
+- **Fix:** Before the render, check each guide numerically: its root lies inside the hair-bearing scalp mask, its first
+  segment clears the skin, and no node lies inside the eye socket; for bangs compare the inner tip's |x| with the pupil's
+  and the bang's outward angle with the head's width at that height, and fix the set in one pass from a styled target
+  shape instead of one parameter per round.

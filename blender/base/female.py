@@ -313,12 +313,13 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
         crease = _math(nt, 'MULTIPLY', ridge, band)
         # scuffs: pale, rough patches at the toe, heel and the ankle bones, broken up by scratches
         sc_ = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=3.2, Detail=6.0, Roughness=0.75)
-        scuff = _node(nt, 'ShaderNodeMapRange', Value=sc_.outputs['Fac'], **{'From Min': 0.56, 'From Max': 0.7}).outputs['Result']
+        scuff = _node(nt, 'ShaderNodeMapRange', Value=sc_.outputs['Fac'], **{'From Min': 0.64, 'From Max': 0.76}).outputs['Result']
         low = _node(nt, 'ShaderNodeMapRange', Value=zc, **{'From Min': 2.6, 'From Max': 0.8}).outputs['Result']
         scuff = _math(nt, 'MULTIPLY', scuff, _math(nt, 'MULTIPLY_ADD', low, 0.75, 0.25))
-        wear = _math(nt, 'MAXIMUM', _math(nt, 'MULTIPLY', crease, 0.8), scuff)
-        c1 = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', wear, 0.6), A=base.outputs['Result'])
-        c1.inputs['B'].default_value = (*[lerp(a, b, 0.4) for a, b in zip(light, lighter)], 1)
+        wear = _math(nt, 'MAXIMUM', _math(nt, 'MULTIPLY', crease, 0.35), scuff)
+        # (worn leather goes a duller, warmer tan, a little lighter than the hide: never the pale grey of dust or paint)
+        c1 = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', wear, 0.3), A=base.outputs['Result'])
+        c1.inputs['B'].default_value = (*[lerp(a, b, 0.3) for a, b in zip(mid, light)], 1)
         # mud and wet: the foot darkened, fading up the shaft along a wavering tide line
         tide = _node(nt, 'ShaderNodeTexNoise', Vector=rest.outputs['Vector'], Scale=1.1, Detail=2.0)
         # (kept low, on the foot below the welt's top and up over the toe, with a clean edge, not a smeared fade)
@@ -330,13 +331,16 @@ def leather_closeup(nt, bsdf, out, rmp, suede=False):
                       _node(nt, 'ShaderNodeMapRange', Value=tz, **{'From Min': 1.55, 'From Max': 1.25}).outputs['Result'])
         cw_ = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', mud, 0.45), A=c1.outputs['Result'])
         cw_.inputs['B'].default_value = (*[c * 0.6 for c in deep], 1)
-        col = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', caked, 0.8), A=cw_.outputs['Result'])
-        col.inputs['B'].default_value = (0.11, 0.09, 0.07, 1)
+        # (caked mud is the leather's own colour gone darker, not a fixed grey-brown that reads pale on dark hide)
+        dk = _node(nt, 'ShaderNodeVectorMath', 'SCALE', Vector=cw_.outputs['Result'], Scale=0.55)
+        col = _node(nt, 'ShaderNodeMix', Factor=_math(nt, 'MULTIPLY', caked, 0.7), A=cw_.outputs['Result'])
+        nt.links.new(dk.outputs['Vector'], col.inputs['B'])
         mud = _math(nt, 'MAXIMUM', mud, caked)
-        h = _math(nt, 'MULTIPLY_ADD', peb.outputs['Distance'], 0.7, _math(nt, 'MULTIPLY', fine.outputs['Fac'], 0.5))
+        # (the grain is a fine, shallow pebble: smooth calf at this distance, not hammered)
+        h = _math(nt, 'MULTIPLY_ADD', peb.outputs['Distance'], 0.35, _math(nt, 'MULTIPLY', fine.outputs['Fac'], 0.25))
         h = _math(nt, 'MULTIPLY_ADD', pore, -0.45, h)
-        h = _math(nt, 'MULTIPLY_ADD', ridge, _math(nt, 'MULTIPLY', band, 2.2), h)
-        h = _math(nt, 'MULTIPLY_ADD', caked, 0.8, h)
+        h = _math(nt, 'MULTIPLY_ADD', ridge, _math(nt, 'MULTIPLY', band, 0.6), h)      # (the folds are in the leather itself; the texture's ridges only hint at them)
+        h = _math(nt, 'MULTIPLY_ADD', caked, 0.25, h)
     # shut-in places go darker (between the cuff and the shaft, under the stitching, where the foot meets the sole)
     ao = _node(nt, 'ShaderNodeAmbientOcclusion', Distance=0.8)
     ao.samples = 8
@@ -1322,6 +1326,18 @@ def box(sx, sy, sz):
 HEAD_H, HEAD_Z = 8.6, 54.2          # head height and the height of the chin
 HEAD_NECK_Z = -0.13                      # the head's sculpt runs down the neck to here (inside the collar), in head heights
 HIP_Z, SH_Z, ANKLE_Z = 31.0, 49.0, 3.4
+# The toes' joint (the metatarsophalangeal axis) of a foot with a toe bone: (how far ahead of the ankle, how high), or None
+# for the feet whose toes are part of the foot (the boots' lasts, the painted sheets). anatomy.patch sets it.
+TOE_JOINT = None
+# A heel under the foot (the heel study's walk): how far the foot is held pitched toes-down in the walk, radians. 0 for a bare
+# foot or a flat sole. heel.build sets it, with the figure raised by the sole's thickness.
+HEEL_PITCH = 0.0
+# and the points of its sole that meet the floor, (forward of the ankle, height over it) in the foot's own frame: the
+# heel's rear tread edge and the ball under the sole. HEEL_UP is how far the figure is raised on the sole. With these
+# set, locked_foot stands the ankle at the height that puts the lowest of those points on the floor at the foot's pitch.
+HEEL_CONTACT = None
+HEEL_AXIS = None      # the toe joint (forward of the ankle, height over it) and how far the sole's bottom hangs under it
+HEEL_UP = 0.0
 THIGH, SHIN = 14.0, 13.8            # hip -> knee -> ankle, a touch longer than straight so the knee stays soft
 UPPER, FORE = 9.8, 9.8              # the elbow halfway down the arm, level with the waist
 LEG_X, SH_X = 3.3, 5.75
@@ -2003,6 +2019,15 @@ def leg_weights(side):
         # shin -> foot across the ankle: the boot is one piece from the shaft into the foot, so the bend is spread over
         # the instep and the heel (a band 2.6 deep) instead of pinching in a single ring where the foot folds up
         foot = _smooth(az + 1.6, az - 1.0, co.z)
+        if TOE_JOINT:
+            # the toes ahead of the metatarsal heads take the toe bone, eased over a little more than a toe's width
+            # (narrow under the sole, so the ball's pad stays with the foot; wide over the top, where the skin has to
+            # slide over the joint: a narrow band there was squashed to a tenth of its area as the toes bent)
+            zt = 1.0 - _smooth(1.2, 0.5, co.z)
+            ya, yb = -TOE_JOINT[0] + 0.25 + 0.65 * zt, -TOE_JOINT[0] - 0.85 - 1.15 * zt
+            toe = _smooth(ya, yb, co.y)
+            return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot * (1 - toe),
+                    f'Toe.{side}': lower * foot * toe}
         return {f'Thigh.{side}': 1 - lower, f'Shin.{side}': lower * (1 - foot), f'Foot.{side}': lower * foot}
     return w
 
@@ -2040,6 +2065,7 @@ def build_rig(body):
         segs = [('Thigh', (lx, 0, HIP_Z), (lx, 0, HIP_Z - THIGH)),
                 ('Shin', (lx, 0, HIP_Z - THIGH), (lx, 0, HIP_Z - THIGH - SHIN)),
                 ('Foot', (lx, 0, ANKLE_Z), (lx, -3.0, 0.5)),
+                *((('Toe', (lx, -TOE_JOINT[0], TOE_JOINT[1]), (lx, -TOE_JOINT[0] - 1.8, TOE_JOINT[1])),) if TOE_JOINT else ()),
                 ('UpperArm', (ax, 0.2, SH_Z), (ax, 0.2, SH_Z - UPPER)),
                 ('Forearm', (ax, 0.2, SH_Z - UPPER), (ax, 0.2, SH_Z - UPPER - FORE)),
                 ('Hand', (ax, 0.2, SH_Z - UPPER - FORE), (ax, 0.2, SH_Z - UPPER - FORE - 2.5))]
@@ -2180,7 +2206,7 @@ def resplit_neck():
                     gs[n].remove([v.index])
 
 
-PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
+PIVOT_OF = {'Thigh': 'Hip', 'Shin': 'Knee', 'Foot': 'Ankle', 'Toe': 'Toe', 'UpperArm': 'Shoulder', 'Forearm': 'Elbow', 'Hand': 'Wrist',
             'Pelvis': 'Pelvis', 'Chest': 'Chest', 'Cervical': 'Cervical', 'Midneck': 'Midneck', 'Neck': 'Head'}
 
 
@@ -3779,16 +3805,9 @@ LIP_TEX = {}
 LIP_X0, LIP_X1, LIP_Z0, LIP_Z1 = -0.12, 0.12, 0.165, 0.305     # the lip patch's extent, in head heights (real z)
 
 
-def lip_painting(W=576, H=336):
-    """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
-    (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
-    lip: a dusty rose a few shades deeper and redder than the skin, never a pink. The upper lip, turned down away
-    from the light, a shade deeper than the lower; the lower lip fuller and a little lighter across its middle,
-    where it catches the light; both darkening into the line between them and the corners, where they tuck in.
-    The upper lip's edge (the vermilion border) is crisp, with the faint pale rim of skin just above it that gives
-    the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
-    across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
-    a hard point."""
+def _lip_forms(W, H):
+    """The lips' forms on the lip patch's grid (H x W), from mouth_relief: across (x, in the sculpt's own across),
+    the warped height w, the line between the lips zl, each lip's edge, and how far across each lip a point lies."""
     xs = LIP_X0 + (np.arange(W) + 0.5) / W * (LIP_X1 - LIP_X0)
     zr = LIP_Z1 - (np.arange(H) + 0.5) / H * (LIP_Z1 - LIP_Z0)
     zw = np.array([FACE_WARP(z) for z in zr])               # (mouth_relief is laid out in the warped heights)
@@ -3815,6 +3834,22 @@ def lip_painting(W=576, H=336):
     # how far down each lip lies, 0 at the line between them, 1 at its outer edge
     tu = np.clip((w - zl) / np.maximum(top - zl, 1e-4), 0, 1)
     tl = np.clip((zl - w) / np.maximum(zl - bot, 1e-4), 0, 1)
+    return dict(x=x, w=w, ax=ax, sm=sm, zl=zl, top=top, bot=bot, upper=upper, lower=lower, lip=lip, tu=tu, tl=tl)
+
+
+def lip_painting(W=576, H=336):
+    """The lips' colour as an RGBA array (H x W, sRGB 0-1, the first row at LIP_Z1), laid over the sculpted mouth
+    (mouth_relief) in its own warped coordinates, so the colour follows the forms exactly. A natural, unpainted
+    lip: a dusty rose a few shades deeper and redder than the skin, never a pink. The upper lip, turned down away
+    from the light, a shade deeper than the lower; the lower lip fuller and a little lighter across its middle,
+    where it catches the light; both darkening into the line between them and the corners, where they tuck in.
+    The upper lip's edge (the vermilion border) is crisp, with the faint pale rim of skin just above it that gives
+    the mouth its drawn line; the lower lip's edge is soft and melts into the skin. Fine vertical creases run
+    across both lips, a breath darker. The colour thins out toward the corners so the mouth ends in skin, not in
+    a hard point."""
+    F = _lip_forms(W, H)
+    x, w, ax, sm, zl, top, bot = F['x'], F['w'], F['ax'], F['sm'], F['zl'], F['top'], F['bot']
+    upper, lower, lip, tu, tl = F['upper'], F['lower'], F['lip'], F['tu'], F['tl']
     L = LIP_COLOURS
     MID = np.array(L.get('MID', [178, 104, 96]), dtype=np.float32)      # the lip's own tone: a dusty rose on her warm skin
     UP = np.array(L.get('UP', [162, 90, 84]), dtype=np.float32)         # the upper lip, a shade deeper
@@ -3849,6 +3884,51 @@ def lip_painting(W=576, H=336):
     return np.concatenate([np.clip(col, 0, 255) / 255, np.clip(a, 0, 1)[..., None]], axis=2).astype(np.float32)
 
 
+def lip_layer_maps(W=576, H=336):
+    """The lips' two layers' map on the lip patch (H x W x 4, 0-1, first row at LIP_Z1): red, how wet the surface is
+    (most along the parting and on the lower lip's middle, drying toward the border and the corners); green, the
+    grooves of the lip print (mostly vertical, fanning wider toward the border, each with its own depth and length,
+    LIP_PITCH_MM apart at the parting, measured from the head); blue, the dry flakes toward the border. The same
+    pattern as the Face Creator's lipFurrow and lipAt (tools/face-creator/apply-lip-layers.py)."""
+    import skin_layers as SLm
+    F = _lip_forms(W, H)
+    x, w, ax, sm, upper, lower, lip, tu, tl = F['x'], F['w'], F['ax'], F['sm'], F['upper'], F['lower'], F['lip'], F['tu'], F['tl']
+    up = (upper > lower).astype(np.float64)
+    t = np.where(up > 0, tu, tl)
+    head_mm = HEAD_H * SLm.MM_PER_UNIT
+    SP = SLm.LIP_PITCH_MM / head_mm / FACE['mouthWidth']       # (x is across in head heights over the mouth's width)
+    moist = np.where(up > 0, 0.6 * sm(0.45, 0.1, tu), sm(0.85, 0.35, tl)) * sm(0.075, 0.03, ax) * lip
+
+    def h(k, s_):
+        v = np.sin(k * 12.9898 + s_ * 78.233) * 43758.5453
+        return v - np.floor(v)
+    s = x / (1 + 0.45 * t)
+    ph = s / SP + 0.35 * _fbm2(x * 40 + 3 * up, t * 1.6, 61, 2)
+    k = np.floor(ph) + 1000 * up
+    f = ph - np.floor(ph)
+    r1, r2, r3 = h(k, 71), h(k, 73), h(k, 75)
+    t0, t1 = 0.06 + 0.35 * r2 * r2, 0.72 + 0.28 * r3
+    g = np.exp(-((f - 0.5 - 0.28 * (r3 - 0.5)) / (0.15 + 0.07 * r1)) ** 2) * (0.2 + 0.8 * r1 * r1) * sm(t0, t0 + 0.12, t) * sm(t1, t1 - 0.15, t)
+    groove = np.clip(g, 0, 1) * (lip > 0.01)
+    fm = SLm.LIP_FLAKE_MM / head_mm
+    fn = 0.6 * _fbm2(x * FACE['mouthWidth'] / fm, w / (0.7 * fm), 91, 2) + 0.4 * _fbm2(x * FACE['mouthWidth'] / (0.5 * fm), w / (0.4 * fm), 93, 2)
+    flake = sm(0.15, 0.55, fn) * sm(0.45, 0.95, t) * (1 - moist) * (lip > 0.01)
+    return np.stack([np.clip(moist, 0, 1), groove, np.clip(flake, 0, 1), np.ones_like(moist)], axis=2).astype(np.float32)
+
+
+def lip_layers_image():
+    if 'layers' in LIP_TEX:
+        return LIP_TEX['layers']
+    px = lip_layer_maps()
+    H, W = px.shape[:2]
+    img = bpy.data.images.new('lip layers', W, H, alpha=False)
+    img.colorspace_settings.name = 'Non-Color'
+    img.pixels.foreach_set(px[::-1].ravel())
+    img.pack()
+    LIP_TEX['layers'] = img
+    return img
+
+
 def lip_image():
     if 'img' in LIP_TEX:
         return LIP_TEX['img']
@@ -3863,24 +3943,35 @@ def lip_image():
 
 def lip_paint(head, tree, NU=120, NV=70, off=0.018):
     """The lips' colour (lip_painting) on a thin skin of the face over the mouth: a grid of the patch, each point
-    cast straight back onto the finished head and lifted a hair off it, like the eyeshadow. A touch glossier than
-    the skin round it, as lips are, but not wet."""
+    cast straight back onto the finished head and lifted a hair off it, like the eyeshadow. Its material is the lips'
+    two layers (skin_layers.lip_material)."""
     m = bpy.data.materials.new('lip paint')
     m.use_nodes = True
     nt = m.node_tree
     for n in list(nt.nodes):
         nt.nodes.remove(n)
     out = nt.nodes.new('ShaderNodeOutputMaterial')
-    p = nt.nodes.new('ShaderNodeBsdfPrincipled')
     tex = nt.nodes.new('ShaderNodeTexImage')
     tex.image = lip_image()
     tex.interpolation = 'Cubic'
     tex.extension = 'EXTEND'
-    nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
-    nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
-    p.inputs['Roughness'].default_value = 0.55       # (0.42 read as wet lipstick)
-    p.inputs['Specular IOR Level'].default_value = 0.3
-    nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    lay = nt.nodes.new('ShaderNodeTexImage')
+    lay.image = lip_layers_image()
+    lay.interpolation = 'Cubic'
+    lay.extension = 'EXTEND'
+    # (two layers, skin_layers.lip_material: a smooth pink under layer with a short red scatter, and a rougher coat
+    # on top with the grooves and flakes in its own normal, wet at the parting and dry at the border. It was one
+    # flat Principled at roughness 0.55.)
+    import skin_layers
+    if os.environ.get('LIP_LAYERS', '1') == '0':      # (the flat lips, for a before/after: face_views.py --lips flat)
+        p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        nt.links.new(tex.outputs['Color'], p.inputs['Base Color'])
+        nt.links.new(tex.outputs['Alpha'], p.inputs['Alpha'])
+        p.inputs['Roughness'].default_value = 0.55
+        p.inputs['Specular IOR Level'].default_value = 0.3
+        nt.links.new(p.outputs['BSDF'], out.inputs['Surface'])
+    else:
+        skin_layers.lip_material(nt, out, tex, lay)
     m.surface_render_method = 'BLENDED'
     bm = bmesh.new()
     uvl = bm.loops.layers.uv.new('UVMap')
@@ -4027,7 +4118,9 @@ def build_legs(pelvis, leg):
         x = -s * LEG_X
         hip = empty(f'Hip.{side}', (x, 0, 0), pelvis)
         kn = empty(f'Knee.{side}', (0, 0, -THIGH), hip)
-        empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
+        an = empty(f'Ankle.{side}', (0, 0, -SHIN), kn)
+        if TOE_JOINT:
+            empty(f'Toe.{side}', (0, -TOE_JOINT[0], TOE_JOINT[1] - ANKLE_Z), an)
         leg(side, s, x, leg_weights(side))
 
 
@@ -4386,14 +4479,29 @@ def locked_foot(t):
     lifted most early on, as the toes leave the ground."""
     t %= 1.0
     a = AHEAD * STANCE_L * STRIDE
-    pitch = math.radians(cyclic(L_GAIT_FOOT, t))
+    pitch = math.radians(cyclic(L_GAIT_FOOT, t)) - HEEL_PITCH
     if t < STANCE_L:
-        return a - STRIDE * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+        return a - STRIDE * t + toe_roll(pitch), heel_ankle_z(pitch), pitch, True
     u = (t - STANCE_L) / (1 - STANCE_L)
     span = STRIDE * (1 - STANCE_L)
-    off = toe_roll(math.radians(cyclic(L_GAIT_FOOT, STANCE_L)))
+    off = toe_roll(math.radians(cyclic(L_GAIT_FOOT, STANCE_L)) - HEEL_PITCH)
     fwd = _hermite(a - STANCE_L * STRIDE + off, a, -0.25 * span, -0.15 * span, u)
-    return fwd, ANKLE_Z + foot_lift(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+    return fwd, heel_ankle_z(pitch) + SWING_LIFT * 6.75 * u * (1 - u) ** 2, pitch, False
+
+
+def heel_ankle_z(pitch):
+    """The ankle's height with the foot at this pitch (toes up positive) standing on the ground: ANKLE_Z over a bare foot's
+    heel or ball (foot_lift); over a heeled sole, the height that puts the lowest of HEEL_CONTACT on the floor."""
+    if HEEL_CONTACT is None:
+        return ANKLE_Z + foot_lift(pitch)
+    c, s = math.cos(pitch), math.sin(pitch)
+    low = max(-(b * c + a * s) for a, b in HEEL_CONTACT)
+    if HEEL_AXIS:
+        # (rolling onto the toes the toe bone turns the forefoot flat: the sole hangs its full depth under the toe joint;
+        # with the toes up it turns with the foot)
+        a, b, depth = HEEL_AXIS
+        low = max(low, -(b * c + a * s) + depth * (1.0 if pitch < 0 else c))
+    return -HEEL_UP + low
 
 
 def toe_roll(pitch):
@@ -4419,7 +4527,7 @@ def locked_hips(tr):
     lowered all round the cycle leaves every standing knee bent, a crouch.) The trailing leg, rolling up onto its
     ball to push off, carries no weight then and does not hold the body up."""
     key = (STRIDE, STANCE_L, AHEAD, SWING_LIFT, BOB_SOFT, BOB_BLUR, BOB_JOIN, L_PELVIS_TURN, PELVIS_LIST, FOOT_BALL,
-           tuple(L_GAIT_FOOT))
+           tuple(L_GAIT_FOOT), HEEL_PITCH, HEEL_UP, tuple(HEEL_CONTACT or ()), tuple(HEEL_AXIS or ()))
     if key not in _LOCKED_HIPS:
         n = 192
         reach = np.zeros(n)
@@ -4512,6 +4620,11 @@ def pose(col):
     carry_head(GAZE[0])
 
 
+# The idle's feet, each (forward of the hip, out from it, turned out in radians): the weight on the right leg under the
+# body, the left foot eased forward, out, and turned out. A figure may set its own (the heeled boots stand square).
+IDLE_STANCE = {'R': (-1.0, 0.0, 0.0), 'L': (4.6, 0.6, 0.35)}
+
+
 def pose_sheet(col, walking):
     ob = bpy.data.objects
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
@@ -4529,11 +4642,13 @@ def pose_sheet(col, walking):
         bob = 1.0 if col == 1 else 0.0
         turn = lst = sway = 0.0
     bob, sway = snap(bob), snap(sway)
-    ob['Body'].location = (sway, 0, -bob)
+    # (standing on a heel the whole body stands higher by what the heel lifts the ankle, the legs as straight as before)
+    rise = heel_ankle_z(-HEEL_PITCH) - ANKLE_Z if HEEL_CONTACT is not None and not walking else 0.0
+    ob['Body'].location = (sway, 0, rise - bob)
     ob['Body'].rotation_euler = (0, 0, 0)
     ob['Pelvis'].rotation_euler = (0, lst, turn)
     ob['Chest'].rotation_euler = (LEAN if walking else 0.0, -CHEST_TILT * lst, -CHEST_TURN * turn)
-    hip_z = HIP_Z - bob
+    hip_z = HIP_Z - bob + rise
 
     for side, s in (('R', 1), ('L', -1)):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
@@ -4550,17 +4665,18 @@ def pose_sheet(col, walking):
             roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * FOOT_X) / down))) - lst
         else:
             # hip-width stance: weight on the right leg, under the body; the left foot eased forward, out, and turned out
-            fwd = -1.0 if s > 0 else 4.6
-            out = 0.0 if s > 0 else 0.6
-            toe = 0.0 if s > 0 else 0.35
-            th, shn = leg_ik(hip_z, fwd, ANKLE_Z)
-            kb, pitch = th - shn, 0.0
+            fwd, out, toe = IDLE_STANCE['R' if s > 0 else 'L']
+            # (on a heel, HEEL_CONTACT: the foot stands pitched onto it, the ankle as high as the tread sets it)
+            pitch = -HEEL_PITCH if HEEL_CONTACT is not None else 0.0
+            th, shn = leg_ik(hip_z, fwd, heel_ankle_z(pitch) if HEEL_CONTACT is not None else ANKLE_Z)
+            kb = th - shn
         hip.location = (-s * (LEG_X + out), 0, 0)
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         # (the foot is held at its pitch from level: the ankle takes out the shin's lean, and the foot is turned
         # back against the pelvis's turn, so it points down the line of the walk)
         an.rotation_euler = (th - kb - pitch, 0, -s * toe - turn)
+        set_toe(side, pitch)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs
         if walking:
@@ -4599,6 +4715,21 @@ def _euler_m(e):
     ry = np.array([[cb, 0, sb], [0, 1, 0], [-sb, 0, cb]])
     rz = np.array([[cc, -sc, 0], [sc, cc, 0], [0, 0, 1]])
     return rz @ ry @ rx
+
+
+def set_toe(side, pitch, k=1.0):
+    """Bend the toes of a foot with a toe bone: when the foot is pitched toes-down (pitch < 0) to roll over its ball,
+    the toes stay as flat as the floor lets them (k = 1), eased off to k in the swing. A bend is the foot's pitch
+    taken back out at the toe joint."""
+    t = bpy.data.objects.get(f'Toe.{side}')
+    if t is not None:
+        t.rotation_euler = (min(0.0, pitch) * k, 0, 0)
+
+
+def swing_toe(u):
+    """How much of the push-off's toe bend the toes keep u (0-1) of the way through the swing: all of it as the foot
+    leaves the ground, 0.35 of it a quarter of the way on."""
+    return 0.35 + 0.65 * max(0.0, 1.0 - u / 0.25)
 
 
 def foot_level(pelvis, hip, knee, pitch, toe=0.0):
@@ -4646,6 +4777,7 @@ def pose_locked(col):
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * L_TOE_OUT)
+        set_toe(side, pitch, 1.0 if ground else swing_toe((t - STANCE_L) / (1 - STANCE_L)))
         a = ARM_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG)) - L_ARM_BACK
         fold = 0.5 + 0.5 * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - L_ELBOW_LAG))
         flick = L_WRIST + L_WRIST_SWING * math.cos(2 * math.pi * (t - 0.5 - L_ARM_LAG - 2 * L_ELBOW_LAG))
@@ -4715,15 +4847,16 @@ def run_foot(t):
     t %= 1.0
     S = run_stride()
     a = RUN_AHEAD * RUN_STANCE * S
-    pitch = math.radians(cyclic(R_GAIT_FOOT, t))
+    # (on a heel the foot is held pitched onto it, and stands as high as the tread sets it: see heel_ankle_z)
+    pitch = math.radians(cyclic(R_GAIT_FOOT, t)) - HEEL_PITCH
     if t < RUN_STANCE:
-        return a - S * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+        return a - S * t + toe_roll(pitch), heel_ankle_z(pitch), pitch, True
     u = (t - RUN_STANCE) / (1 - RUN_STANCE)
     L = THIGH + SHIN
-    off = math.radians(cyclic(R_GAIT_FOOT, RUN_STANCE))
-    keys = ([(0.0, a - RUN_STANCE * S + toe_roll(off), ANKLE_Z + foot_lift(off))]
+    off = math.radians(cyclic(R_GAIT_FOOT, RUN_STANCE)) - HEEL_PITCH
+    keys = ([(0.0, a - RUN_STANCE * S + toe_roll(off), heel_ankle_z(off))]
             + [(k, f * L, ANKLE_Z + z * L) for k, f, z in R_SWING]
-            + [(1.0, a, ANKLE_Z + foot_lift(math.radians(cyclic(R_GAIT_FOOT, 0.0))))])
+            + [(1.0, a, heel_ankle_z(math.radians(cyclic(R_GAIT_FOOT, 0.0)) - HEEL_PITCH))])
     # (a smooth curve through the keys that leaves the ground and meets it again at the ground's own pace)
     span = S * (1 - RUN_STANCE)
     tan = [(-0.3 * span, 0.8 * L)] + [((keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]),
@@ -4736,7 +4869,7 @@ def run_foot(t):
     v = (u - keys[i][0]) / d
     fwd = _hermite(keys[i][1], keys[i + 1][1], tan[i][0] * d, tan[i + 1][0] * d, v)
     z = _hermite(keys[i][2], keys[i + 1][2], tan[i][1] * d, tan[i + 1][1] * d, v)
-    return fwd, max(z, ANKLE_Z + foot_lift(pitch)), pitch, False
+    return fwd, max(z, heel_ankle_z(pitch)), pitch, False
 
 
 _RUN_HIPS = {}
@@ -4748,11 +4881,12 @@ def run_hips(tr):
     soft minimum with that reach, as in locked_hips), so a planted foot stays planted on a figure whose legs or feet
     are too short for the full rise at push-off."""
     key = (RUN_STRIDE, RUN_STANCE, RUN_AHEAD, RUN_SINK, RUN_RISE, R_PELVIS_TURN, R_PELVIS_LIST, FOOT_BALL, THIGH, SHIN,
-           ANKLE_Z, BOB_JOIN, tuple(R_HIPS), tuple(R_GAIT_FOOT))
+           ANKLE_Z, BOB_JOIN, tuple(R_HIPS), tuple(R_GAIT_FOOT), HEEL_PITCH, HEEL_UP, tuple(HEEL_CONTACT or ()),
+           tuple(HEEL_AXIS or ()))
     if key not in _RUN_HIPS:
         n = 192
         L = THIGH + SHIN
-        low = ANKLE_Z + math.sqrt(THIGH ** 2 + SHIN ** 2 + 2 * THIGH * SHIN * math.cos(math.radians(RUN_SINK)))
+        low = heel_ankle_z(-HEEL_PITCH) + math.sqrt(THIGH ** 2 + SHIN ** 2 + 2 * THIGH * SHIN * math.cos(math.radians(RUN_SINK)))
         want, reach = np.zeros(n), np.full(n, 1e3)
         for i in range(n):
             t = i / n
@@ -4819,6 +4953,7 @@ def pose_run(col):
         hip.rotation_euler = (-th, roll, 0)
         kn.rotation_euler = (kb, 0, 0)
         an.rotation_euler = foot_level((0, lst, turn), (-th, roll, 0), (kb, 0, 0), pitch, -s * R_TOE_OUT)
+        set_toe(side, pitch, 1.0 if ground else swing_toe((t - RUN_STANCE) / (1 - RUN_STANCE)))
         c = math.cos(2 * math.pi * (t - 0.5 - R_ARM_LAG))
         a = R_ARM_SWING * c - R_ARM_BACK
         sh.rotation_euler = (-a, s * (ARM_OUT + R_ARM_CLEAR + 0.06 * max(0.0, -a)), 0)

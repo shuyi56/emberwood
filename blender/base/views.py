@@ -154,6 +154,9 @@ def look_3d(samples):
     # light off the floor: big, warm and from below, so the shaded undersides (legs, jaw, the far side of the body)
     # keep some colour instead of going grey. It is not seen by the camera.
     area('Bounce', (-15, -70, -60), 30000, 120, (1.0, 0.72, 0.6), aim=(0, 0, 20)).visible_camera = False
+    # (a figure may dim or raise a light for its own views, by name: LIGHT_SCALE = {'Bounce': 0.25}. None does by default.)
+    for name, k in getattr(F, 'LIGHT_SCALE', {}).items():
+        bpy.data.objects[name].data.energy *= k
     cam_d = bpy.data.cameras.new('View')
     cam_d.clip_start, cam_d.clip_end = 1, 1000
     cam = bpy.data.objects.new('View', cam_d)
@@ -293,7 +296,7 @@ def walk(n, out, stem='walk', seconds=0.69, wide=1.0):
         if o.animation_data:
             o.animation_data_clear()
     floor = bpy.data.meshes.new('Walk floor')
-    fz = female.ANKLE_Z - 3.4      # (the sole is 3.4 under the ankle: the floor, wherever the figure's legs put it)
+    fz = female.ANKLE_Z - getattr(female, 'SOLE_UNDER_ANKLE', 3.4)   # (the sole is 3.4 under the ankle, or the measured foot's ankle height: the floor, wherever the figure's legs put it)
     floor.from_pydata([(-60, -60, fz), (60, -60, fz), (60, 60, fz), (-60, 60, fz)], [], [(0, 1, 2, 3)])
     fo = bpy.data.objects.new('Walk floor', floor)
     sc.collection.objects.link(fo)
