@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -747,6 +747,60 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         log('boot: the last drawn taut over the foot and leg (%d passes): it moved %.3f on average, %.3f at most'
             % (int(r['drape']), float(np.linalg.norm(Xs - X, axis=1).mean()), float(np.linalg.norm(Xs - X, axis=1).max())))
         X = Xs
+    # the throat fitted (r['throat_line'], None for none): a boot last is built up on the throat, above the instep
+    # ("the most important place is on the throat of the boot above the instep": a fitting tacked on there turns a
+    # shoe last into a boot last; leyuha, boot lasts vs shoe lasts), and the front of the pattern "should be nearly
+    # straight" from the vamp to the top (Golding, The Manufacture of Boots and Shoes, System No. 1). The leg's own
+    # front meets the foot's back at a corner, and leather cut to it turns there almost square. So seen from the
+    # side the front line is redrawn from the vamp point (r['throat_from'] of the foot's length behind the toe, on
+    # the foot's back) to the top's front as one curve: the chord, bowed into the corner by the share r['throat_line'] of
+    # the corner's depth (0: straight), and the front half of the last is drawn forward to it, never back.
+    if r.get('throat_line') is not None:
+        for sgn in (-1, 1):
+            zs_, C_, _ = shafts[sgn]
+            mine = X0[:, 0] * sgn > 0
+            cxp = np.interp(X[:, 2], zs_, C_[:, 0])
+            cyp = np.interp(X[:, 2], zs_, C_[:, 1])
+            mid = mine & (np.abs(X[:, 0] - cxp) < 0.5) & (X[:, 1] < cyp)
+            y_v = M['toe_y'] + r.get('throat_from', 0.42) * L
+            near = mid & (np.abs(X[:, 1] - y_v) < 0.15) & (X[:, 2] < M['ankle_z'] + 1.0)
+            if not near.any():
+                continue
+            z_v = float(X[near, 2].max())
+            top = mid & (np.abs(X[:, 2] - z_top) < 0.1)
+            if not top.any():
+                continue
+            A, V = np.array([float(X[top, 1].min()), z_top]), np.array([y_v, z_v])
+            S = float(np.linalg.norm(A - V))
+            ch = (A - V) / S
+            nr_ = np.array([ch[1], -ch[0]])                 # (square to the chord, out of the corner: forward and up)
+            if nr_[0] > 0:
+                nr_ = -nr_
+            q = X[:, 1:3] - V
+            sp, dp = q @ ch, q @ nr_
+            sb = np.linspace(0.0, S, 40)
+            prof = np.array([dp[mid & (np.abs(sp - sc) < 0.6 * S / 39)].max()
+                             if (mid & (np.abs(sp - sc) < 0.6 * S / 39)).any() else np.nan for sc in sb])
+            ok = ~np.isnan(prof)
+            sb, prof = sb[ok], np.minimum(prof[ok], 0.0)
+            prof[0] = prof[-1] = 0.0
+            kc_ = int(np.argmin(prof))
+            # (a curve from end to end, bowed into the corner by the share r['throat_line'] of its depth)
+            t_ = np.linspace(0, 1, 200)
+            ctrl = np.array([sb[kc_], 2.0 * r['throat_line'] * prof[kc_]])
+            bs = 2 * t_ * (1 - t_) * ctrl[0] + t_ ** 2 * S
+            bd = 2 * t_ * (1 - t_) * ctrl[1]
+            push = np.maximum(np.interp(sb, bs, bd) - prof, 0.0)
+            for _ in range(3):
+                push[1:-1] = 0.25 * push[:-2] + 0.5 * push[1:-1] + 0.25 * push[2:]
+            pp = np.interp(sp, sb, push, left=0.0, right=0.0)
+            depth = np.interp(sp, sb, prof) - dp               # (how far under the front line the point lies)
+            wgt = _ss(1.6, 0.2, depth) * _ss(z_welt + 0.3, z_welt + 0.9, X[:, 2]) * mine
+            X[:, 1:3] += (pp * wgt)[:, None] * nr_[None, :]
+            if sgn < 0:
+                log('boot: the throat fitted: the front line from the vamp point (z %.2f) to the top, the corner %.2f '
+                    'behind the chord drawn out by %.2f at most (%.1f cm)'
+                    % (z_v, float(-prof.min()), float(push.max()), float(push.max()) * 165 / 63))
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
     pushed = 0

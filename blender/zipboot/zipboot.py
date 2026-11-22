@@ -31,9 +31,15 @@ DESIGN = False               # the colour-coded draft
 ENTRY_CHECK = True
 DRAPE = 64                   # passes drawing the last taut over the foot and leg (last.build_boots: a sock fit)
 TOE_SHELL = 150              # passes turning the toe as one smooth box over the toes (last.build_boots)
-TOE_EXT = 0.10               # an almond toe: drawn this far past the toes, x the foot's length (the toe allowance;
+TOE_EXT = 0.12               # an almond toe: drawn this far past the toes, x the foot's length (the toe allowance;
                              # about 2.4 cm, a fashion last's. EXPERIMENTAL against the photo's slim toe)
-TOE_NARROW = 0.5             # and narrowed toward its point by this share at the tip (read off the photo's plan. EXPERIMENTAL)
+TOE_NARROW = 0.30            # and narrowed toward its point by this share at the tip (read off the photo's plan. EXPERIMENTAL)
+ROOM = {'room': 0.034, 'gap': 0.034}   # x H: the foot's room and the least room off the skin (the boot's own 0.022
+                             # and 0.024 drew the suede onto the foot until the toes and the instep showed: John, too tight)
+PITCH_SET = 40               # passes setting the leather at the heel's pitch (set_at_pitch; 0 for none)
+THROAT_LINE = 0.45           # the front line from the vamp to the top: the straight chord (Golding) bowed into the
+                             # leg-and-foot corner by this share of the corner's depth (last.build_boots). EXPERIMENTAL
+THROAT_FROM = 0.30           # the vamp point, where that curve leaves the foot: this share of the length behind the toe
 CREASE = False               # the ankle's bend set into the leather as folds (boot.CREASE): off for a first look
 
 M_TEETH = female.mat_def(91, 'zip coil', female.ramp(0x2a211c, 0.08), 0.35)
@@ -148,6 +154,82 @@ def entry(pieces, M, log=print):
     return dict(long_heel_cm=lh, top_cm=girth, ankle_cm=ankle, zip_cm=zl, open_cm=girth + 2 * zl)
 
 
+def _posed(o):
+    """The boot's points as the rig bends them (the leather's thickness left off)."""
+    dg = bpy.context.evaluated_depsgraph_get()
+    dg.update()
+    e = o.evaluated_get(dg)
+    me = e.to_mesh()
+    P = np.array([(o.matrix_world @ v.co)[:] for v in me.vertices])
+    e.to_mesh_clear()
+    return P
+
+
+def set_at_pitch(o, M, passes, log=print):
+    """Set the boot's leather at the heel's pitch, as a boot is lasted: on a last that already stands at the heel's
+    height (Golding, The Manufacture of Boots and Shoes: the last carries the pitch, and the upper is drawn smooth
+    over it). This boot is cut and sewn on the flat foot and the rig then pitches the foot onto the heel, which
+    pinches the leather behind the ankle and folds it in front. So the bent boot is smoothed where the ankle bends
+    (Taubin steps, which do not shrink it) and each point carried back through the rig's own bend at that point (its
+    Jacobian, found by moving the point a little each way), so the boot at rest is the shape that bends INTO the
+    smooth one. The stitches and whatever else rides on the boot take the nearest point's move."""
+    solid = [m for m in o.modifiers if m.type == 'SOLIDIFY' and m.show_viewport]
+    for m in solid:
+        m.show_viewport = False
+    me = o.data
+    n = len(me.vertices)
+    R = np.array([v.co[:] for v in me.vertices])
+
+    def put(X):
+        me.vertices.foreach_set('co', X.ravel())
+        me.update()
+        bpy.context.view_layer.update()
+    P = _posed(o)
+    eps = 0.01
+    J = np.zeros((n, 3, 3))
+    for k in range(3):
+        d = np.zeros(3)
+        d[k] = eps
+        put(R + d)
+        J[:, :, k] = (_posed(o) - P) / eps
+    put(R)
+    ed = np.array([e.vertices[:] for e in me.edges], dtype=np.int64)
+    deg = np.bincount(ed.ravel(), minlength=n).astype(float)
+
+    def avg(V):
+        return np.stack([np.bincount(ed[:, 0], weights=V[ed[:, 1], k], minlength=n)
+                         + np.bincount(ed[:, 1], weights=V[ed[:, 0], k], minlength=n) for k in range(3)], 1) \
+            / np.maximum(deg, 1)[:, None]
+    az = M['ankle_z']
+    z = R[:, 2]
+    s01 = lambda a, b, x: np.clip((x - a) / (b - a), 0, 1) ** 2 * (3 - 2 * np.clip((x - a) / (b - a), 0, 1))  # noqa: E731
+    w = s01(az - 2.6, az - 1.6, z) * (1.0 - s01(az + 1.4, az + 2.2, z)) * (deg > 2)   # (the ankle's band; edges held)
+    Q = P.copy()
+    for _ in range(int(passes)):
+        Q += (0.5 * w)[:, None] * (avg(Q) - Q)
+        Q += (-0.53 * w)[:, None] * (avg(Q) - Q)
+    dR = np.linalg.solve(J, (Q - P)[:, :, None])[:, :, 0]
+    put(R + dR)
+    for m in solid:
+        m.show_viewport = True
+    side = o.name.rsplit('.', 1)[-1]
+    from mathutils.kdtree import KDTree
+    kd = KDTree(n)
+    for i, p_ in enumerate(R):
+        kd.insert(p_, i)
+    kd.balance()
+    for r_ in bpy.data.objects:
+        if r_ is o or r_.type != 'MESH' or not r_.name.endswith('.' + side) or not r_.name.startswith('Boot stitches'):
+            continue
+        for v in r_.data.vertices:
+            v.co = v.co + type(v.co)(dR[kd.find(v.co)[1]])
+        r_.data.update()
+    mv = np.linalg.norm(Q - P, axis=1)
+    log('zipboot %s: set at the heel\'s pitch (%d passes): %d points moved, %.3f on average, %.3f at most'
+        % (o.name, int(passes), int((mv > 0.005).sum()), float(mv[mv > 0.005].mean()) if (mv > 0.005).any() else 0.0,
+           float(mv.max())), flush=True)
+
+
 def build():
     heelboot.STYLE, heelboot.HEEL_H = STYLE, HEEL_H
     boot.SHAFT = 'zip'
@@ -156,6 +238,8 @@ def build():
     boot.last.RATIOS['toe_shell'] = TOE_SHELL
     boot.last.RATIOS['toe_ext'], boot.last.RATIOS['toe_narrow'] = TOE_EXT, TOE_NARROW
     boot.CREASE = CREASE
+    boot.last.RATIOS.update(ROOM)
+    boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
     rig = bpy.data.objects.get('Rig')
@@ -167,6 +251,12 @@ def build():
     bpy.context.view_layer.update()
     for side in 'RL':
         o = bpy.data.objects['Boot.' + side]
+        if PITCH_SET:
+            root.location.z = up               # (as it stands on the heel)
+            bpy.context.view_layer.update()
+            set_at_pitch(o, boot.hose.MEASURES, PITCH_SET)
+            root.location.z = 0.0
+            bpy.context.view_layer.update()
         zipper.build(o, boot.last.PIECES[side], rig, L,
                      {'teeth': female.mat(M_TEETH), 'tape': female.mat(M_TAPE), 'metal': female.mat(M_METAL)})
     if ENTRY_CHECK:
