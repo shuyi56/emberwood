@@ -7,8 +7,8 @@ const HH = 8.6;                                   // the creator's units per hea
 const MODES = [['creator', 'Creator (sculpted locks)'], ['lod2', 'Groom: cards, LOD 2'], ['lod1', 'Groom: cards, LOD 1'],
   ['lod0', 'Groom: cards, LOD 0'], ['strands', 'Groom: strands']];
 const LOD_INDEX = { lod0: 0, lod1: 1, lod2: 2 };
-const SCALP_SHADE = 0.6;                          // STYLE: the scalp cap against the hair colour. (render.py draws it at 0.35, among far denser strands; lit
-                                                  // under cards, 0.35 read as dark holes between them)
+const SCALP_SHADE = 0.4;                          // STYLE: the scalp cap against the hair colour: the shade map's root (0.5) in
+                                                  // the shadow of the hair over it (render.py: 0.35)
 
 function bytes(b64) { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
 // head heights in the hair's frame (x across, y back, z up) to the page's units (x, y up, z toward the viewer)
@@ -23,8 +23,23 @@ function toPage(src, scale) {
 // creator's hair texture and bump map (hairField and paintHair in the creator; hairCapMat.map and .bumpMap here),
 // mapped onto each card where the card lies round the head, so neighbouring cards carry on the creator's locks.
 // The cut-out (each lock of the card ending at its own length, the soft root) is this file's own map, on uv1.
-const ROOT_DARK = 0.7;                            // STYLE: the root's value against the mid-length (strands and cards)
-const TIP_LIGHT = 1.25;                           // STYLE: the tip's value against the mid-length (strands)
+// The shade map: one value along every hair, multiplied into its colour, shared by the cards, the strands and the
+// scalp. It is the game hair "root" map (UE4 Photorealistic Character: "a mask which is used to change the color of
+// the hair from the root to the tip"; inZOI's DIRO map: "Hair root color and gradient starting point"), with the
+// per-strand ID (each strand a little lighter or darker) and the baked AO (creator_asset.py) beside it.
+// Dark at the root: the root lies under all the hair over it, so it gets the least light (self-shadowing: Yuksel &
+// Keyser, Deep Opacity Maps; Scheuermann 2004 stores it as per-vertex AO). Lighter toward the ends: scalp hair grows
+// about 1 cm a month (Wikipedia, Human hair growth), so the end of a 45 cm length is nearly four years old, and its
+// colour has been changed by that much sunlight, mainly UVA (Nogueira & Joekes 2004, via Nogueira et al. 2006), light
+// hair more than dark (Signori 2004, same review). No measured root-to-tip lightness was found: the amounts are STYLE.
+const ROOT_DARK = 0.5;                            // STYLE: the root against the mid-length
+const ROOT_CM = 4;                                // STYLE: how far from the root the darkening reaches
+const TIP_LIGHT = 1.35;                           // STYLE: the very end against the mid-length
+const TIP_FRAC = 0.45;                            // STYLE: the share of each hair's length that lightens toward its end
+const sstep = x => { x = Math.min(1, Math.max(0, x)); return x * x * (3 - 2 * x); };
+// s: distance from the root (page units); t: the share of the hair's length (0 root, 1 end)
+const shadeAt = (s, t) => (ROOT_DARK + (1 - ROOT_DARK) * sstep(s / (ROOT_CM * 10 * HH / HEAD_MM))) *
+  (1 + (TIP_LIGHT - 1) * sstep((t - (1 - TIP_FRAC)) / TIP_FRAC));
 const CLUMPS = 6;                                 // STYLE: locks across one card in the cut-out
 const ROOT_FADE = 0.05;                           // STYLE: the cut-out fades in over this much of the card at the root
 const TEX_V_HH = 1.6;                             // the creator's hair texture runs this many head heights down the hair
@@ -81,8 +96,7 @@ function cardAttributes(P, UV, AO) {
         uv0[2 * q] = u0 + (UV[2 * q] - 0.5) * du; uv0[2 * q + 1] = Math.min(1, s / (TEX_V_HH * HH));
         const ox = P[3 * q] - CENTRE[0], oy = P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = P[3 * q + 2] - CENTRE[2];
         const l = Math.hypot(ox, oy, oz) || 1; N[3 * q] = ox / l; N[3 * q + 1] = oy / l; N[3 * q + 2] = oz / l;
-        const v = UV[2 * q + 1], root = v < 0.35 ? ROOT_DARK + (1 - ROOT_DARK) * v / 0.35 : 1;
-        C[3 * q] = C[3 * q + 1] = C[3 * q + 2] = (AO ? AO[q] : 1) * root;
+        C[3 * q] = C[3 * q + 1] = C[3 * q + 2] = (AO ? AO[q] : 1) * shadeAt(s, UV[2 * q + 1]);
       }
     }
     start = i;
@@ -103,7 +117,7 @@ function buildStyle(asset, tone, creatorMat) {
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );');
   };
   // the scalp under the hair in the root colour, as render.py draws it (SCALP_SHADE), so no skin shows between hairs
-  const capMat = new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(SCALP_SHADE), roughness: 0.95, metalness: 0 });
+  const capMat = new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(SCALP_SHADE), roughness: 1, metalness: 0 });   // (fully rough, as UE's scalp: no stray highlight)
   asset.lods.forEach((L, i) => {
     const g = new THREE.BufferGeometry(), P = toPage(new Float32Array(bytes(L.pos)), 1), UV = new Float32Array(bytes(L.uv));
     const A = cardAttributes(P, UV, L.ao ? new Float32Array(bytes(L.ao)) : null);
@@ -133,13 +147,14 @@ function buildStyle(asset, tone, creatorMat) {
   let k = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (const c of cnt) {
     const b = 0.8 + 0.4 * rnd();
-    for (let j = 0; j < c; j++) {
+    for (let j = 0, sj = 0; j < c; j++) {
       const q = k + j, a0 = k + Math.max(0, j - 1), a1 = k + Math.min(c - 1, j + 1), t = j / (c - 1);
+      if (j) sj += Math.hypot(P[3 * q] - P[3 * q - 3], P[3 * q + 1] - P[3 * q - 2], P[3 * q + 2] - P[3 * q - 1]);
       let tx = P[3 * a1] - P[3 * a0], ty = P[3 * a1 + 1] - P[3 * a0 + 1], tz = P[3 * a1 + 2] - P[3 * a0 + 2];
       const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
       const ox = P[3 * q] - CENTRE[0], oy = P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = P[3 * q + 2] - CENTRE[2];
       const ol = Math.hypot(ox, oy, oz) || 1;
-      const shade = b * (t < 0.35 ? ROOT_DARK + (1 - ROOT_DARK) * t / 0.35 : 1 + (TIP_LIGHT - 1) * (t - 0.35) / 0.65);
+      const shade = b * shadeAt(sj, t);
       for (let e = 0; e < 2; e++) {
         const v = 2 * q + e;
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
