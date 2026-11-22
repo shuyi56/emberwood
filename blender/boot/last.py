@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -493,7 +493,9 @@ ZIP = {
                              # Cutting Step-by-Step), is folded under below it)
     'teeth_mm': 4.3,         # a #3 coil's teeth closed, across (UCAN Zippers, nylon coil: 4.3 mm)
     'tape_mm': 22.7,         # and its tape, both sides (UCAN: 22.7 mm)
-    'clear_mm': 1.0,         # the leather's folded edge stands this far off the teeth either side. EXPERIMENTAL
+    'clear_mm': 2.5,         # the leather's folded edge stands this far off the teeth either side, the tape showing
+                             # between: 1.0 left the coil buried under the edges, reading as torn leather (John: more
+                             # space). EXPERIMENTAL
     'fold_mm': 5.0,          # the zip's edges and the topline turned under (Pattern Cutting Step-by-Step: a 5 mm
                              # fold allowance)
     'guard_mm': 20.0,        # the zip guard behind the zip: a strip this wide, set 0.4 of it toward the front.
@@ -770,8 +772,24 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     if r.get('toe_shell'):
         tw = toe_w * _ss(z_welt, z_welt + 0.15, X[:, 2])
         X1 = X.copy()
-        for _ in range(int(r['toe_shell'])):
-            X += (0.5 * tw)[:, None] * (_nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X)
+        # the toe's shape seen from above (r['toe_ext'], r['toe_narrow']): an almond toe is drawn past the toes (the
+        # toe allowance, x L) and narrowed toward a point over the second toe; the push below keeps the toes clear,
+        # so the narrowing shows ahead of them and the toe box's sides stay where the toes need them
+        if r.get('toe_ext') or r.get('toe_narrow'):
+            for sgn in (-1, 1):
+                mine = (X0[:, 0] * sgn > 0) & (toe_w > 0)
+                if not mine.any():
+                    continue
+                tip = np.nonzero(mine)[0][np.argmin(X[mine, 1])]
+                y_tip, cx_ = X[tip, 1], X[tip, 0]
+                u = np.clip((y_ball - X[mine, 1]) / max(y_ball - y_tip, 1e-6), 0.0, 1.0)
+                wm = toe_w[mine]
+                X[mine, 0] += (cx_ + (X[mine, 0] - cx_) * (1.0 - r.get('toe_narrow', 0.0) * u ** 2) - X[mine, 0]) * wm
+                X[mine, 1] -= r.get('toe_ext', 0.0) * L * u ** 2 * wm
+        for _ in range(int(r['toe_shell'])):          # (along the ground at the welt too: z held there, for the sole)
+            dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+            X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
+            X[:, 2] += 0.5 * tw * dl[:, 2]
         need = np.zeros(n)
         for i in np.nonzero(tw > 0)[0]:
             loc, nrm, _, d = tree.find_nearest(X[i])
@@ -872,7 +890,8 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             p['start'] = k0
             k0 += len(p['V'])
         Vall = np.concatenate(V)
-        o = _object('%s.%s' % (name, side), Vall, F, np.concatenate(WW), names, body, rig, material,
+        Wall = np.concatenate(WW)
+        o = _object('%s.%s' % (name, side), Vall, F, Wall, names, body, rig, material,
                     np.concatenate(SD), np.concatenate(SU), thickness=tl, skive=3.0 * r['lap'])
         res[side] = o
         log('boot: %s, %d points: %s' % (o.name, len(Vall), ', '.join('%s %d' % (p['name'], len(p['V'])) for p in pieces)))

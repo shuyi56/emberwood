@@ -116,7 +116,7 @@ def build(o, pieces, rig, L, mats, log=print):
     for k, s in enumerate(np.arange(0.5 * p, arc[-1] - 0.5 * p, 0.5 * p)):
         c, t, a, n = frame(s)
         sd = 1.0 if k % 2 else -1.0
-        cc = c + a * sd * 0.19 * tw - n * 0.5 * tl          # (set in the gap, its face a little under the leather's)
+        cc = c + a * sd * 0.19 * tw - n * 0.35 * th         # (set in the gap on the tape, its face just proud of the leather's)
         bv, bf = _box(cc, t, a, n, 0.55 * p, 0.62 * tw, th)
         F += [[i + len(V) for i in f_] for f_ in bf]
         V += list(bv)

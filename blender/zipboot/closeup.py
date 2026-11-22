@@ -149,6 +149,10 @@ def main():
         for o in bpy.data.objects:
             if o.type == 'MESH':
                 o.hide_render = not mine(o)
+                if '--nosolid' in argv:               # (the leather's thickness off: a debugging view)
+                    for m_ in o.modifiers:
+                        if m_.type == 'SOLIDIFY':
+                            m_.show_render = m_.show_viewport = False
                 if '--rest' in argv:                  # (the boot as cut and sewn, before the rig bends it)
                     for m_ in o.modifiers:
                         if m_.type == 'ARMATURE':

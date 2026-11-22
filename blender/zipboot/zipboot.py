@@ -31,6 +31,9 @@ DESIGN = False               # the colour-coded draft
 ENTRY_CHECK = True
 DRAPE = 64                   # passes drawing the last taut over the foot and leg (last.build_boots: a sock fit)
 TOE_SHELL = 150              # passes turning the toe as one smooth box over the toes (last.build_boots)
+TOE_EXT = 0.10               # an almond toe: drawn this far past the toes, x the foot's length (the toe allowance;
+                             # about 2.4 cm, a fashion last's. EXPERIMENTAL against the photo's slim toe)
+TOE_NARROW = 0.5             # and narrowed toward its point by this share at the tip (read off the photo's plan. EXPERIMENTAL)
 CREASE = False               # the ankle's bend set into the leather as folds (boot.CREASE): off for a first look
 
 M_TEETH = female.mat_def(91, 'zip coil', female.ramp(0x2a211c, 0.08), 0.35)
@@ -151,6 +154,7 @@ def build():
     boot.last.RATIOS['top_over_welt'] = boot.last.ZIP['top_over_welt']
     boot.last.RATIOS['drape'] = DRAPE
     boot.last.RATIOS['toe_shell'] = TOE_SHELL
+    boot.last.RATIOS['toe_ext'], boot.last.RATIOS['toe_narrow'] = TOE_EXT, TOE_NARROW
     boot.CREASE = CREASE
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
