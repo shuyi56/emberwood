@@ -323,6 +323,8 @@ def build():
     female.pose(0)
     bpy.context.view_layer.update()
     print('heelboot: the standing foot was %.2f over the floor, let down onto it' % gap, flush=True)
+    # (the sheet's columns were keyed when the figure was built, before any of this: keyed again as she now stands)
+    female.key_sheet(root)
     if os.environ.get('HEELBOOT_CHECK'):       # (how each foot stands at the sheet's columns named: the idle is 0)
         stand_check([int(v) for v in os.environ['HEELBOOT_CHECK'].split(',')])
     return res

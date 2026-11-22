@@ -4642,11 +4642,13 @@ def pose_sheet(col, walking):
         bob = 1.0 if col == 1 else 0.0
         turn = lst = sway = 0.0
     bob, sway = snap(bob), snap(sway)
-    ob['Body'].location = (sway, 0, -bob)
+    # (standing on a heel the whole body stands higher by what the heel lifts the ankle, the legs as straight as before)
+    rise = heel_ankle_z(-HEEL_PITCH) - ANKLE_Z if HEEL_CONTACT is not None and not walking else 0.0
+    ob['Body'].location = (sway, 0, rise - bob)
     ob['Body'].rotation_euler = (0, 0, 0)
     ob['Pelvis'].rotation_euler = (0, lst, turn)
     ob['Chest'].rotation_euler = (LEAN if walking else 0.0, -CHEST_TILT * lst, -CHEST_TURN * turn)
-    hip_z = HIP_Z - bob
+    hip_z = HIP_Z - bob + rise
 
     for side, s in (('R', 1), ('L', -1)):
         hip, kn, an = ob[f'Hip.{side}'], ob[f'Knee.{side}'], ob[f'Ankle.{side}']
