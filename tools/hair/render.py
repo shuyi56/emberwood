@@ -174,6 +174,7 @@ class Canvas:
         return i, j, z, ok
 
 
+SKIN_SRGB = None                   # the character's skinTone in the creator (--skin), for the head in the full render
 SCALP_F = None                     # the scalp field (set in main): where hair grows, the skin is drawn in the root colour
 SCALP_SHADE = 0.35                 # the root colour against the hair's fill: the scalp under the hair is in its shade
 
@@ -199,6 +200,7 @@ def clay_backdrop(cv, surf, body, mode='clay'):
         q = HEAD_CLOUD[HEAD_CLOUD[:, 2] <= 0.2]
         nq = unit(np.c_[q[:, 0] - SF.AXIS[0], q[:, 1] - SF.AXIS[1], np.zeros(len(q))])
         Ph = np.r_[Ph, q]; Nh = np.r_[Nh, nq]
+    n_head = len(Ph)
     Pb, Nb = body_points(body)
     hairy = np.r_[hairy, np.zeros(len(Ph) - len(hairy) + len(Pb), bool)]
     P = np.r_[Ph, Pb]; N = np.r_[Nh, Nb]
@@ -216,6 +218,9 @@ def clay_backdrop(cv, surf, body, mode='clay'):
             ii, jj = np.clip(i + di, 0, cv.W - 1), np.clip(j + dj, 0, cv.H - 1)
             win = ok & (z <= zb[jj, ii] + 1e-9)
             col[jj[win], ii[win]] = (np.array([0.72, 0.70, 0.68]) * sh[win, None])
+            if mode == 'full' and SKIN_SRGB is not None:      # the character's skin on the head and neck
+                sw = win & (np.arange(len(P)) < n_head)
+                col[jj[sw], ii[sw]] = (np.array(SKIN_SRGB) / 255.0) ** 2.2 * sh[sw, None]
             hw = win & hairy
             root = (np.array(FILL_SRGB) / 255.0) ** 2.2 * SCALP_SHADE if mode == 'full' else np.array([0.3, 0.29, 0.28])
             col[jj[hw], ii[hw]] = root * sh[hw, None]
@@ -407,6 +412,10 @@ def main():
     if '--tone' in a:                      # the character's hairTone in the creator, e.g. 36251c (the Warden)
         h = a[a.index('--tone') + 1].lstrip('#')
         FILL_SRGB = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    global SKIN_SRGB
+    if '--skin' in a:                      # the character's skinTone in the creator, e.g. efcfb9 (the Warden)
+        h = a[a.index('--skin') + 1].lstrip('#')
+        SKIN_SRGB = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
     if '--melanin' in a:                   # eumelanin, pheomelanin [PBR4], e.g. 2.4,0.4 for a dark brown
         CE, CP = (float(v) for v in a[a.index('--melanin') + 1].split(','))
     HEAD_CLOUD = SF.load_head(head)
