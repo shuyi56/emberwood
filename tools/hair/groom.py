@@ -1354,6 +1354,169 @@ def creator_front(X, style_path, col=None, keep=None):
     return X
 
 
+# ---------------------------------------------------------------------------------------------------- the styling
+# How a stylist cuts and finishes long hair (sources: Sam Villa, "Long Layering and Face Framing" [SV]; Red Seal
+# hairdressing study guide, "Layering, Over-Direction & Guidelines" [RS]; Salon Today, "10 tips for cutting and blow
+# drying long layered hair" [ST]; Drybar, "Round Brush Hair Styling Technique" [DB]; Roz, "How to do a blowout" [RZ]):
+#   layers   cut at 90 degrees or more of elevation [RS]: the hair high on the head ends higher than the perimeter,
+#            only slightly shorter for long layers [RS], so the ends stack instead of ending on one blunt line
+#   framing  the face frame starts between the cheekbone and the jaw [SV] and steps longer away from the face [AS:
+#            American Salon, "How to cut face-framing layers"], cut and blown away from the face [SV][RZ]
+#   ends     rolled round the brush [RZ]: under at the back and sides, away from the face in front [RZ][DB]
+# Both grooms were cut one length (every root in a sector ended at the same height); the creator's own hair is
+# layered (its crown strands end 0.3 to 0.55 HH above its nape strands) and face framed (its front strands end at
+# the cheek, z 0.25, Ranger).
+STYLES = {
+    #            frame_z: the face frame's shortest piece (HH); frame_th: |theta| over which it steps to the perimeter;
+    #            layer_k: end rise per HH of root height above layer_z0; roll_deg: the ends' roll (0: none)
+    'ranger': dict(frame_z=0.25, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=15.0),   # CALIBRATED:
+              # creator Ranger front ends 0.26 (roots |th| .6-1), crown vs mid roots 1.2 HH per HH (sector 1.5-2.2)
+    'warden': dict(frame_z=-0.2, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=0.0),   # CALIBRATED:
+              # creator Warden front ends -0.2 to -0.3; layer_k kept at the Ranger's (its crown's 2.4 is a top
+              # layer of short strands over its shell); the waves are their own finish (no roll)
+}
+CUT_FALL = 1.5          # the plumb's weight against the line above, for a cut end
+CUT_TAIL = 5            # nodes (5 cm): a cut end straightened onto the line above it
+POINT_CUT_HH = 0.1      # HH: the stagger of the point-cut ends (about 2 cm), STYLE
+FRAME_MIN_Y = -0.12    # HH: the face frame is the hair rooted in front of this (the front hairline and temples)
+ROLL_FREE_HH = 0.06     # HH: an end rolls only where it hangs this far clear of the body and the head
+ROLL_M = 0.04          # m: the length of the end rolled round the brush (a 1.5 inch brush's half turn is ~6 cm)
+
+
+def style_cut(X, lengths, roots, keep, st):
+    """The layered, face-framed cut on the hair as it lies: each guide's end raised to the highest of its perimeter
+    (where it ends now), its face-frame line and its layer line, and cut where it reaches that height (only ever
+    shorter). Returns X, lengths."""
+    X = X.copy()
+    lengths = lengths.copy()
+    th = np.abs(SF.theta(roots))
+    end = np.array([x[~np.isnan(x[:, 0])][-1, 2] for x in X])
+    a, b = st['frame_th']
+    u = np.clip((th - a) / (b - a), 0, 1)
+    u = u * u * (3 - 2 * u)
+    frame = np.where(th < b, st['frame_z'] + (end - st['frame_z']) * u, -9.0)
+    # (the interior layers behind the face frame: in front, the frame's own line is the cut)
+    layer = end + st['layer_k'] * np.maximum(roots[:, 2] - st['layer_z0'], 0.0) * u
+    target = np.maximum.reduce([end, frame, layer])
+    # point cut [SV]: the shears into the ends at 45 degrees, so the ends of a section stagger instead of ending on
+    # one line (cut straight across, the face frame read as a shelf at the cheek)
+    jit = np.random.default_rng(23).random(len(X)) * POINT_CUT_HH
+    target = np.where(target > end + 1e-6, target - jit, target)
+    for g in range(len(X)):
+        if keep is not None and keep[g]:
+            continue
+        if target[g] <= end[g] + 1e-6:
+            continue
+        below = np.where(X[g, 1:, 2] < target[g])[0]
+        if len(below):
+            n = max(3, below[0])
+            X[g, n + 1:] = np.nan
+            lengths[g] = min(lengths[g], n)
+            # the cut end hangs on in the line above it: it was bent by the length below (swung back round the
+            # jaw), and cut at that bend it hooked out
+            T = min(CUT_TAIL, n - 3)
+            if T >= 2:
+                k0 = n - T
+                ref = X[g, k0] - X[g, k0 - 3]
+                ref /= max(np.linalg.norm(ref), 1e-12)
+                ref = ref + CUT_FALL * np.array([0.0, 0.0, -1.0])         # (and falls toward plumb, as cut hair does
+                ref /= max(np.linalg.norm(ref), 1e-12)                    # over its 4.5 cm elastogravity length)
+                for j in range(k0 + 1, n + 1):
+                    v = X[g, j] - X[g, j - 1]
+                    L = np.linalg.norm(v)
+                    X[g, j] = X[g, j - 1] + ref * L
+    return X, lengths
+
+
+def end_roll(X, roots, keep, deg, col=None):
+    """The ends rolled as a round brush leaves them: over the last ROLL_M each segment turns a little further, up to deg
+    at the tip, under (toward the body's axis) at the back and sides, away from the face for the face frame."""
+    if deg <= 0:
+        return X
+    X = X.copy()
+    G, S1, _ = X.shape
+    seg = SEG_M / HH_M
+    nroll = max(2, int(round(ROLL_M / SEG_M)))
+    th = np.abs(SF.theta(roots))
+    free = np.ones(G, bool)
+    if col is not None:
+        # (an end lying on the body or the cape cannot roll under: rolled, the push out stretched it down the back)
+        import torch
+        nn_ = (~np.isnan(X[..., 0])).sum(1)
+        tips = torch.tensor(X[np.arange(G), np.maximum(nn_ - 1, 0)], dtype=torch.float64)
+        dep = torch.maximum(col.body_depth(tips), col.head_depth(tips)).numpy()
+        free = dep < -ROLL_FREE_HH
+    tail = np.zeros((G, S1), bool)
+    seglen = np.zeros((G, S1 - 1))
+    for g in range(G):
+        if keep is not None and keep[g]:
+            continue
+        if not free[g]:
+            continue
+        n = int((~np.isnan(X[g, :, 0])).sum())
+        if n < nroll + 3:
+            continue
+        P = X[g, :n].copy()
+        D = np.diff(P, axis=0)
+        D /= np.linalg.norm(D, axis=1, keepdims=True)
+        tip = P[-1]
+        inward = np.array([SF.AXIS[0] - tip[0], SF.AXIS[1] - tip[1], 0.0])
+        inward /= max(np.linalg.norm(inward), 1e-9)
+        # (the face frame rolls away from the face: back, as it is blown [RZ]; rolled out sideways it flicked into a
+        # wing at the jaw)
+        if th[g] < 1.4:                  # (the face frame's ends are point cut and left: rolled, short pieces hooked)
+            continue
+        aim = inward
+        for j in range(nroll):
+            k = n - 1 - nroll + j
+            ang = math.radians(deg) * (j + 1) / nroll
+            d = D[k]
+            t = aim - (aim @ d) * d
+            tl = np.linalg.norm(t)
+            if tl < 1e-6:
+                continue
+            D[k] = math.cos(ang) * d + math.sin(ang) * t / tl
+        L = np.linalg.norm(np.diff(X[g, :n], axis=0), axis=1)     # (each segment keeps its own length)
+        k0 = n - 1 - nroll
+        P[k0 + 1:] = P[k0] + np.cumsum(D[k0:] * L[k0:, None], axis=0)
+        X[g, :n] = P
+        tail[g, k0 + 1:n] = True
+        seglen[g, :n - 1] = L
+    if col is not None and tail.any():
+        X = push_valid(col, X, mask=tail)
+        for g in np.where(tail.any(1))[0]:          # (pushed out, each rolled segment back to its own length)
+            k = np.where(tail[g])[0]
+            for j in k:
+                v = X[g, j] - X[g, j - 1]
+                X[g, j] = X[g, j - 1] + v / max(np.linalg.norm(v), 1e-12) * seglen[g, j - 1]
+    return X
+
+
+def push_valid(col, X, mask=None, margin_hh=1.0 / SF.HH_MM, steps=4):
+    """The nodes that exist (and are in mask) moved out of the head and the body along the depth's gradient (push_out
+    for cut guides: the colliders' grid lookups take no NaN)."""
+    import torch
+    X = X.copy()
+    m = ~np.isnan(X[..., 0])
+    m[:, 0] = False
+    if mask is not None:
+        m &= mask
+    g, k = np.where(m)
+    if not len(g):
+        return X
+    P = torch.tensor(X[g, k], dtype=torch.float64)
+    for fn in (col.head_depth, col.body_depth):
+        for _ in range(steps):
+            P.requires_grad_(True)
+            dep = fn(P)
+            gr_, = torch.autograd.grad(dep.clamp(min=0).sum(), P)
+            with torch.no_grad():
+                n = gr_ / gr_.norm(dim=1, keepdim=True).clamp(min=1e-12)
+                P = P - n * (dep + margin_hh).clamp(min=0)[:, None]
+    X[g, k] = P.detach().numpy()
+    return X
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -1591,6 +1754,12 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X2 = creator_front(X2, trace, col, keep=bang)
         X2 = comb_pass(X2, lk * 1000 + clump, col, cap, passes=2)        # (a light comb over the swung strands)
         X2 = relax_kinks(X2, col, cap, keep=bang)
+        # the styling: layered and face framed, point cut, the ends rolled (see STYLES)
+        st = STYLES['warden' if wavy else 'ranger']
+        X2, lengths = style_cut(X2, lengths, roots, bang, st)
+        X2 = push_valid(col, X2)
+        X2 = relax_kinks(X2, col, cap, keep=bang)
+        X2 = end_roll(X2, roots, bang, st['roll_deg'], col)
     if trace and not wavy:
         # the back cut on the creator's own length line where it is shorter: the creator's back ends at z -1.2, the
         # approved line's at -1.52 (CLAUDE.md: the creator overrides the measurement); the sides keep the approved line
