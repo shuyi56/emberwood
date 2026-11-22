@@ -37,6 +37,8 @@ M_LACE = female.mat_def(78, 'boot lace', female.ramp(0x2a2018, 0.1), 0.35)
 SHAFT = 'lace'               # the shaft sewn on the foot (last.SHAFTS)
 CREASE = True                # the ankle bent and the folds it makes set into the leather
 RELIEVE = ()                 # frames of the stride to let the leather out for where the hose is through it (last.relieve; off: it did not cut the through count, which may be a fault of the check's rays)
+TURNOUT_AT_HIP = True        # the stance's turn-out made in the hip (female.TURNOUT_AT_HIP): at the ankle it twisted the
+                             # shaft on the foot; the gauges read the left boot's two sides bending 1.3 units apart
 SEW = True                   # the pieces sewn by the solver, and their stitches; False: the pieces as cut on the last
 
 
@@ -46,6 +48,7 @@ def build():
         os.environ.setdefault('HEAD_CZ', '%.2f' % (0.5 * (knee + 1.0) - 0.8))
         os.environ.setdefault('HEAD_H', '%.2f' % (knee + 2.6))
     hose.VIEW, hose.FOOT = min(VIEW, 3), FOOT
+    female.TURNOUT_AT_HIP = TURNOUT_AT_HIP
     res = hose.build()
     body = bpy.data.objects['Skin body']
     rig = bpy.data.objects.get('Rig')

@@ -49,8 +49,36 @@ SHAPE = dict(h=1.77,        # cm, the rise at the seat point
              rake=0.0,      # the tread's middle in front of the seat point, a share of the block's tread length
              arch=0.39,     # the footbed's fill through the waist
              cup=1.0)       # and its cup round the heel
+# The heel's style (tools/heel/stylize.py): the optimizer's seat, height and tread kept as the baseline, and the body
+# between them given a flare (how the taper from the seat to the tread is spent: 1 straight, more spends it high, a
+# buttressed top) and a waist (a pinch at mid-height as a share of the seat, the tread flaring back out below it).
+# 'width' overrides SHAPE's tread width. John, 2026-11-22: the heel shape should be more stylized.
+STYLES = {
+    'block':     dict(width=None, flare=1.0, waist=0.00),
+    'waisted':   dict(width=None, flare=1.0, waist=0.12),
+    'pump':      dict(width=0.70, flare=1.2, waist=0.03),     # measured on John's reference pump
+    'ferragamo': dict(width=0.70, flare=2.2, waist=0.06),
+}
+STYLE = 'block'
+HEEL_H = None                # cm: the heel's height at the seat point, None for SHAPE's (the optimizer's)
+BEND_AT_BALL = True          # the leather's bend moved back to the ball (zipboot.bend_at_ball): on the heel the toes are
+                             # pitched 14 degrees and the hose's weights bent the toe cap mid-box (the gauges: 26% of
+                             # it squeezed over 5%). The zip boot sets it off and does its own
+SEAT_WALL = 0.6              # the upper's lowest band stood out to the sole's rim round the seat (zipboot.seat_wall), so
+                             # the sole is no ledge under a heel that turns in under the foot. The zip boot does its own
+RINGS_PER_LIFT = 4           # (the stack's side is one sanded curve: each lift drawn with this many rings)
+
+
+def taper(u, flare, waist):
+    """How far a section at u (0 at the seat, 1 on the tread) has gone from the seat's size to the tread's (0 to 1),
+    and the waist's pinch there as a share of the seat's size (stylize.section)."""
+    return 1.0 - (1.0 - u) ** flare, waist * 4.0 * u * (1.0 - u)
+
+
 WELD = 0.03                  # the stack's seat stands this far up into the sole, so the two are one solid
 SEAT_OUT = 0.06              # how far the sole stands out past the counter round the heel seat (about 1.5 mm)
+SEAT_BAND = 1.1              # the upper's outline the seat is let out to is taken over this height above the sole (the
+                             # counter's fullest; less, and the seat follows the upper where it meets the sole)
 
 
 def stack_material():
@@ -145,7 +173,7 @@ def join_heel(side, lift):
     c2 = Sv[-2:, :2].mean(0)
     if up_ is not None:
         Uv = np.array([(up_.matrix_world @ v.co)[:] for v in up_.data.vertices])
-        Uv = Uv[(Uv[:, 2] > Sv[:, 2].max() - 0.05) & (Uv[:, 2] < Sv[:, 2].max() + 1.1)]
+        Uv = Uv[(Uv[:, 2] > Sv[:, 2].max() - 0.05) & (Uv[:, 2] < Sv[:, 2].max() + SEAT_BAND)]
         ang = np.arctan2(Uv[:, 0] - c2[0], -(Uv[:, 1] - c2[1]))
         rr = np.linalg.norm(Uv[:, :2] - c2, axis=1)
         bins = np.floor((ang + np.pi) / (2 * np.pi) * na).astype(int) % na
@@ -191,6 +219,18 @@ def join_heel(side, lift):
     z_top = z_under + WELD
     h = z_top - tread(arc[:, 1])
     n = max(1, int(np.ceil(float(h.max()) / lift)))
+    GEO[side] = dict(arc=arc, cx=cx, y0=y0, yb=yb, z_top=z_top, h=h, n=n, k=k, lift=lift)
+    return stack(side)
+
+
+GEO = {}                     # each side's seat, tread plane and lift count, as join_heel found them (for restyle)
+
+
+def stack(side):
+    """The stack's lifts built on the seat join_heel found, in the current STYLE."""
+    g_ = GEO[side]
+    arc, cx, y0, yb, z_top, h, n, k, lift = (g_[q] for q in ('arc', 'cx', 'y0', 'yb', 'z_top', 'h', 'n', 'k', 'lift'))
+    tread = lambda y: k[0] * y + k[1]                          # noqa: E731
     mats = [female.mat(M_TOP_LIFT)] + [stack_material()] * (n - 1)
     arm = female.RIG['arm']
     out = []
@@ -204,20 +244,28 @@ def join_heel(side, lift):
     back_in = max(0.0, (d['seat_y'] + 0.5 * block) - (mid + 0.5 * SHAPE['length'] * block))
     front_in = max(0.0, (mid - 0.5 * SHAPE['length'] * block) - d['breast_y'])
 
+    st = STYLES[STYLE]
+    width = SHAPE['width'] if st['width'] is None else st['width']
+
     def level(kk):
         z = np.minimum(tread(arc[:, 1]) + kk * lift, z_top) if kk < n else np.full(m, z_top)
         u = np.clip((z_top - z) / max(float(h.max()), 1e-6), 0, 1)        # 0 at the seat, 1 on the tread
+        t, pinch = taper(u, st['flare'], st['waist'])
         xy = arc.copy()
-        xy[:, 0] = cx + (arc[:, 0] - cx) * (1.0 - (1.0 - SHAPE['width']) * u)
-        ya, yz = y0 + front_in * u, yb - back_in * u                       # (the breast and the back, at this height)
+        xy[:, 0] = cx + (arc[:, 0] - cx) * (1.0 - (1.0 - width) * t - pinch)
+        run = yb - y0
+        ya = y0 + front_in * t + 0.5 * pinch * run                         # (the breast and the back, at this height)
+        yz = yb - back_in * t - 0.5 * pinch * run
         xy[:, 1] = ya + (arc[:, 1] - y0) * (yz - ya) / (yb - y0)
         return np.column_stack([xy, z])
 
+    R = max(1, RINGS_PER_LIFT)
     for i in range(n):
-        lo, hi = level(i), level(i + 1)
-        V = np.concatenate([lo, hi])
-        F = [[a, (a + 1) % m, m + (a + 1) % m, m + a] for a in range(m)]
-        F += [list(range(m))[::-1], list(range(m, 2 * m))]
+        rings = [level(i + j / R) for j in range(R + 1)]
+        V = np.concatenate(rings)
+        F = [[r * m + a, r * m + (a + 1) % m, (r + 1) * m + (a + 1) % m, (r + 1) * m + a] for r in range(R) for a in range(m)]
+        F += [list(range(m))[::-1], list(range(R * m, (R + 1) * m))]
+        lo = rings[0]
         me = bpy.data.meshes.new('Heel lift %d.%s' % (i, side))
         me.from_pydata(V.tolist(), [], F)
         me.materials.append(mats[i])
@@ -225,7 +273,7 @@ def join_heel(side, lift):
         at.data.foreach_set('vector', V.ravel().astype(np.float32))
         at = me.attributes.new('stack_u', 'FLOAT', 'POINT')
         # (the height up the stack in lifts, true where the top lift is cut short at the seat)
-        at.data.foreach_set('value', np.concatenate([np.full(m, float(i)), i + (hi[:, 2] - lo[:, 2]) / lift]).astype(np.float32))
+        at.data.foreach_set('value', np.concatenate([i + (r_[:, 2] - lo[:, 2]) / lift for r_ in rings]).astype(np.float32))
         o = bpy.data.objects.new(me.name, me)
         bpy.context.scene.collection.objects.link(o)
         g = o.vertex_groups.new(name='Foot.' + side)
@@ -233,9 +281,20 @@ def join_heel(side, lift):
         mo = o.modifiers.new('rig', 'ARMATURE')
         mo.object = arm
         out.append(o)
-    print('heelboot %s: the heel joined to the sole: %d lifts, %.2f high at the back, %.2f at the breast, seat %.2f into the sole'
-          % (side, n, float(z_top - tread(yb)), float(z_top - tread(y0)), WELD), flush=True)
+    print('heelboot %s: the heel (%s) joined to the sole: %d lifts, %.2f high at the back, %.2f at the breast, seat %.2f into the sole'
+          % (side, STYLE, n, float(z_top - tread(yb)), float(z_top - tread(y0)), WELD), flush=True)
     return out
+
+
+def restyle(style):
+    """Rebuild both stacks in another style on the same seat and tread (no rebuild of the figure or the boot)."""
+    global STYLE
+    STYLE = style
+    for o in [o for o in bpy.data.objects if o.name.startswith('Heel lift ')]:
+        me = o.data
+        bpy.data.objects.remove(o, do_unlink=True)
+        bpy.data.meshes.remove(me)                     # (so the new lifts take the same names)
+    return {side: stack(side) for side in GEO}
 
 
 def stand_check(cols):
@@ -266,7 +325,7 @@ def build():
     os.environ['HEEL_PARTS'] = '1'
     os.environ['HEEL_WALK'] = '1'
     os.environ['FOOT_FORM'] = 'shod'
-    heel.H_SEAT, heel.ARCH_FILL, heel.CUP = SHAPE['h'], SHAPE['arch'], SHAPE['cup']
+    heel.H_SEAT, heel.ARCH_FILL, heel.CUP = (HEEL_H or SHAPE['h']), SHAPE['arch'], SHAPE['cup']
     res = heel.build()                         # the figure, the derived heel, the lifts on the foot's bones
     up = female.HEEL_UP
     root = female.FIG['root']
@@ -289,6 +348,20 @@ def build():
         if so is not None:
             so.data.materials.clear()
             so.data.materials.append(female.mat(M_SOLE))
+    if BEND_AT_BALL or SEAT_WALL:
+        sys.path.insert(0, os.path.join(HERE, '..', 'zipboot'))
+        import zipboot
+    for side in 'RL' if SEAT_WALL else ():          # (the upper stood on the sole round the seat: zipboot.seat_wall)
+        lifts = stacks.get(side) or []
+        if lifts and bpy.data.objects.get('Boot sole.' + side) is not None:
+            y_br = min(float((l_.matrix_world @ v.co)[1]) for l_ in lifts for v in l_.data.vertices)
+            zipboot.seat_wall(bpy.data.objects['Boot.' + side], bpy.data.objects['Boot sole.' + side], y_br,
+                              SEAT_WALL, 0.07)
+    if BEND_AT_BALL:
+        for side in 'RL':
+            up_ = zipboot.bend_at_ball(bpy.data.objects['Boot.' + side], zipboot.BEND)
+            if bpy.data.objects.get('Boot sole.' + side) is not None:
+                zipboot.bend_at_ball(bpy.data.objects['Boot sole.' + side], zipboot.BEND, like=up_)
     # (the lace and the eyelets in the leather's own tone, a shade down: near black, they drew a dark line down the
     # boot's front edge in every side view)
     for o in bpy.data.objects:
