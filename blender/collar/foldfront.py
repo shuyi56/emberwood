@@ -376,6 +376,27 @@ for s in (und, top):                                  # the under front first: t
         print('foldfront: front %d before relaxing: strain mean |%.1f%%|, 95%% under |%.1f%%|' % (s['layer'], 100 * np.abs(l1_[okr] / l0[okr] - 1).mean(), 100 * np.percentile(np.abs(l1_[okr] / l0[okr] - 1), 95)))
         A_, B_ = ea[okr, 0], ea[okr, 1]; L0 = l0[okr]
         free = np.zeros(len(W)); free[ii] = 1.0
+        # the buttons as real pins (John: "it needs to keep transfer load down, optimize the button position by
+        # measuring strain"). The front's own cloth round the foot of the fold is let go as well, fold line and all, so
+        # what the fold cannot keep runs out into the front; the cloth under each button is held, as a sewn button
+        # holds it, and what the held cloth is asked to carry is the load on that button.
+        jj = np.zeros(0, int); pin = np.zeros(len(W), bool)
+        if rx.get('button_pin', True):
+            Bf = s['Cd'][-1]; Rf = rx.get('reach', 1.8); rb_ = M['button'] * w
+            zb_ = opt.get('button_z', foot - rb_ - opt.get('button_under_foot', 0.33))
+            rB = np.hypot(W[:, 0] - Bf[0], W[:, 2] - Bf[1])
+            reg = (L_ == s['layer']) & (W[:, 1] < yc) & (rB < Rf) & ~s['fold']
+            for kb in range(4):
+                pin |= reg & (np.hypot(W[:, 0], W[:, 2] - (zb_ - kb * M['button_step'] * w)) < rb_)
+            pinl = s['fold'] & (np.hypot(W[:, 0], W[:, 2] - zb_) < rb_); pin |= pinl; free[pinl] = 0.0     # (turned cloth caught under the top button is held with it)
+            jj = np.nonzero(reg & (rB < Rf - 0.3) & ~pin)[0]; free[jj] = 1.0
+            inreg = reg | s['fold']
+            eb = np.array([(e.verts[0].index, e.verts[1].index) for e in bm.edges if inreg[e.verts[0].index] and inreg[e.verts[1].index]
+                           and (reg[e.verts[0].index] or reg[e.verts[1].index])])
+            both = s['fold'] | s['crease']; eb = eb[~(both[eb[:, 0]] & both[eb[:, 1]])]       # (the lapel's own edges keep their flat-cut lengths)
+            Lb0 = np.linalg.norm(W[eb[:, 0]] - W[eb[:, 1]], axis=1); okb = Lb0 > 1e-4
+            A_, B_, L0 = np.concatenate([A_, eb[okb, 0]]), np.concatenate([B_, eb[okb, 1]]), np.concatenate([L0, Lb0[okb]])
+            nbj = [np.array([e.other_vert(bm.verts[int(i)]).index for e in bm.verts[int(i)].link_edges]) for i in jj]
         if cover is not None: free[ii[under_]] = 0.0          # (the part hidden behind the upper front stays pressed there)
         P0 = W.copy(); Pr = W.copy()
         kk_ = np.clip(d / (arc + 0.35), 0, 1); kk_ = kk_ * kk_ * (3 - 2 * kk_); clear = (out_side + lie) * kk_
@@ -391,12 +412,33 @@ for s in (und, top):                                  # the under front first: t
             Pr[ii] += anch * free[ii][:, None] * (P0[ii] - Pr[ii])
             if r_ % 4 == 3:                                   # (bending: the move itself is kept smooth, so the cloth eases and does not crinkle)
                 dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbi]); Pr[ii] += rx.get('bend', 0.25) * free[ii][:, None] * (av - dl[ii])
+            if len(jj):
+                Pr[jj] += rx.get('body_anchor', 0.002) * (P0[jj] - Pr[jj])
+                Pr[jj, 1] = P0[jj, 1]                          # (the front lies on the body: it may slide, it may not buckle off it; let go in depth it crinkled beside the fold)
+                if r_ % 4 == 3:
+                    dl = Pr - P0; av = np.array([dl[j].mean(axis=0) for j in nbj]); Pr[jj] += rx.get('bend', 0.25) * (av - dl[jj])
             if r_ % 10 == 9 or r_ == it_ - 1:                 # (and it may not sink into what it lies on)
                 g2 = ground(Pr[ii][:, [0, 2]]); okg = np.isfinite(g2) & mob & (g2 < yc_t + opt.get('fell', 0.15))
                 Pr[ii[okg], 1] = np.minimum(Pr[ii[okg], 1], g2[okg] - clear[okg])
+        if pin.any():
+            dv = Pr[B_] - Pr[A_]; ln_ = np.maximum(np.linalg.norm(dv, axis=1), 1e-9); sn = (ln_ - L0) / L0
+            ua = pin[A_] & ~pin[B_]; ub = pin[B_] & ~pin[A_]
+            Fv = (sn[ua, None] * dv[ua] / ln_[ua, None]).sum(axis=0) - (sn[ub, None] * dv[ub] / ln_[ub, None]).sum(axis=0)
+            top1 = (np.abs(W[A_, 2] - zb_) < 1.5 * rb_) & (ua | ub)                   # (the edges leaving the top button's own patch)
+            body = ~(both[A_] & both[B_])
+            s['load'] = dict(z=float(zb_), pull=float(np.linalg.norm(Fv)), edge=float(np.abs(sn[top1]).mean()) if top1.any() else 0.0,
+                             edge_max=float(np.abs(sn[top1]).max()) if top1.any() else 0.0,
+                             front=float(np.abs(sn[body]).mean()), front_max=float(np.abs(sn[body]).max()),
+                             moved=float(26.2 * np.linalg.norm(Pr[jj] - P0[jj], axis=1).mean()) if len(jj) else 0.0)
+            print('foldfront: front %d, buttons pinned from z %.2f: pull on the pins %.3f; strain of the cloth leaving the top button mean |%.2f%%| worst |%.2f%%|; '
+                  'strain passed into the front round the foot mean |%.2f%%| worst |%.1f%%|; the front there moved %.2f mm on average'
+                  % (s['layer'], zb_, s['load']['pull'], 100 * s['load']['edge'], 100 * s['load']['edge_max'], 100 * s['load']['front'], 100 * s['load']['front_max'], s['load']['moved']))
         mv = np.linalg.norm(Pr[ii] - P0[ii], axis=1)
         print('foldfront: front %d relaxed over %d rounds: its points moved %.1f mm on average, %.1f mm at most' % (s['layer'], it_, 26.2 * mv.mean(), 26.2 * mv.max()))
         W[:] = Pr
+        # the front round the foot was let go to measure what the buttons carry; it moved a tenth of a millimetre, and
+        # even that showed as a crinkle beside the fold, so the front itself is put back as fitted
+        if len(jj) and rx.get('keep_front', True): W[jj] = P0[jj]
     l1 = np.linalg.norm(W[ea[:, 0]] - W[ea[:, 1]], axis=1)
     okl = l0 > 1e-4; st = l1[okl] / l0[okl] - 1
     tm = 0.5 * (s['tl'][ea[:, 0]] + s['tl'][ea[:, 1]])[okl]
@@ -435,8 +477,13 @@ if opt.get('buttons', True):
     z1 = zcross - rb - opt.get('break_over', 0.45); z0 = M['z_hem_front'] + 0.55 * w
     # John: "move down the top button and let more strain transfer": the top button sits clear below the foot of the
     # fold, so the fold runs out into the front over its whole length before anything holds the cloth
-    if opt.get('button_under_foot', None if 'bow' in opt else 0.15) is not None:
-        z1 = min(z1, foot - rb - opt.get('button_under_foot', 0.15))
+    if opt.get('button_under_foot', None if 'bow' in opt else 0.33) is not None:
+        z1 = min(z1, foot - rb - opt.get('button_under_foot', 0.33))
+    # where the top button goes was found by measure (sweep of 10 heights, the button pinned in the relaxation): the pull
+    # on it is 9.2 where the folds meet (z 44.6), 0.41 at the old place beside the fold (44.2), 0.12 just under the foot
+    # and 0.08 here, a button's top 9 mm under the foot, which is also where a tailor sets it under the break. Lower
+    # still gains little (0.05 at 43.15) and leaves more of the front's edge unheld.
+    if opt.get('button_z') is not None: z1 = opt['button_z']
     nbt = max(2, int(round((z1 - z0) / step)) + 1)
     Wb = np.array([v.co[:] for v in b.data.vertices]) @ mw[:3, :3].T + mw[:3, 3]
     fb = BVHTree.FromPolygons([Vector(p) for p in Wb], [tuple(p.vertices) for p in b.data.polygons])
@@ -473,7 +520,7 @@ if opt.get('buttons', True):
               'strain of the cloth within 2.5 radii: upper mean |%.1f%%| worst |%.1f%%| (%d edges), under mean |%.1f%%| worst |%.1f%%| (%d edges); the fronts %.2f apart there (the cloth is %.2f)'
               % (k_ + 1, z, row['turn1'], row['turn2'], row['under1'], row['under2'], 100 * row['st1'][0], 100 * row['st1'][1], row['st1'][2],
                  100 * row['st2'][0], 100 * row['st2'][1], row['st2'][2], row['gap'], th))
-    json.dump(rep, open(out + '.buttons.json', 'w'), indent=1)
+    json.dump(dict(buttons=rep, load={str(s_['layer']): s_.get('load') for s_ in sides}, strain={str(s_['layer']): [float(np.abs(s_['strain']['st']).mean()), float(np.percentile(np.abs(s_['strain']['st']), 95))] for s_ in sides}), open(out + '.buttons.json', 'w'), indent=1)
     me = bpy.data.meshes.new('Redingote bodice buttons'); me.from_pydata(P_, [], F_); me.update()
     for p in me.polygons: p.use_smooth = True
     old = bpy.data.objects.get('Redingote bodice buttons')
