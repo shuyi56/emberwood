@@ -335,3 +335,22 @@ python3 blender/base/views.py --figure bodice_cut --mannequin --turn --angles fr
 python3 blender/collar/foldfront.py CUT.blend LAPEL.blend '{"recipe":"notch_lapel"}'
 python3 blender/collar/notchcollar.py LAPEL.blend OUT.blend '{}'
 ```
+
+### The stand drafted from the neckline
+
+John circled the collar's ends beside the neck, then wrote: "think about how the shape changes as a function of the
+neckline." A notch collar's roll line is the lapel's roll line carried on round the neck. Before, the stand died away
+over a fixed length (8.4 cm) toward each lapel's roll top N. There the collar's roll met the lapel's crease at 36
+degrees, and the collar's end folded at that corner.
+
+Now the stand's rise is drafted from the neckline itself (`from_neck`, on):
+
+- At each roll top N, the stand rises off the neckline at the slope that keeps the roll straight on from the lapel's
+  crease. The slope is found from the neckline's direction at N, the stand's lean there, and the crease's direction.
+- It reaches its full height at the side neck point (90 degrees round from the front), where the neckline turns from
+  the front to the back. The rise is a smooth exponential with that slope at N that levels out by then.
+- So the shape follows the neckline. A different neckline (lower, wider, or a different roll top) gives a different
+  rise and length with no new numbers. Here the rise runs over 8.9 and 8.3 cm.
+
+As laid, the roll now turns 13 and 12 degrees off the lapels' creases (was about 36), with 0 sharp folds and the
+notch at 41.5 and 40.7 degrees.

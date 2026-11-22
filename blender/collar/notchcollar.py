@@ -119,6 +119,35 @@ E = resample(E, 0.04)
 eL = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(E, axis=0), axis=1))])
 d_end = np.minimum(eL, eL[-1] - eL)
 st = stand * ss(0.0, stand_run, d_end)
+# the stand drafted from the neckline (John: "think about how the shape changes as a function of the neckline"): the
+# collar's roll line is the lapel's roll line carried on round the neck, so at each lapel's roll top N the stand rises
+# off the neckline at the slope that keeps the roll straight on from the lapel's crease, and it reaches its full
+# height at the side neck point, where the neckline turns from the front to the back
+psE = np.mod(np.arctan2(E[:, 0], -(E[:, 1] - yc)), 2 * np.pi)
+ks = {'B': int(np.argmin(np.abs(psE - 0.5 * np.pi))), 'A': int(np.argmin(np.abs(psE - 1.5 * np.pi)))}
+upE = np.array([(Z - lean * radial(e)) / np.linalg.norm(Z - lean * radial(e)) for e in E])
+def _rise(k0, k1, crease):
+    # from E[k0] (the roll top N) toward E[k1] (the side neck point): the slope a there, and the cubic h(s)
+    sgn = 1 if k1 > k0 else -1
+    tE = E[k0 + sgn] - E[k0]; tE /= np.linalg.norm(tE)
+    c_ = crease[min(8, len(crease) - 1)] - crease[0]; c_ = -c_ / np.linalg.norm(c_)     # (the crease carried on up past N)
+    S = abs(eL[k1] - eL[k0])
+    best = (9, 0.0)
+    for a_ in np.linspace(0, 4.0, 400):
+        v = tE + a_ * upE[k0]; ang = math.degrees(math.acos(np.clip(v @ c_ / np.linalg.norm(v), -1, 1)))
+        if ang < best[0] or best[0] == 9: best = (ang, a_) if ang < best[0] or best[0] == 9 else best
+    a_ = best[1]
+    # (a rise with that slope at N that levels out smoothly to the full stand by the side neck point)
+    ss_ = np.abs(eL - eL[k0]); k_ = max(a_ / stand, 3.0 / S)
+    h = stand * (1 - np.exp(-k_ * ss_)) / (1 - np.exp(-k_ * S)); h = np.where(ss_ <= S, np.minimum(h, stand), stand)
+    ang0 = math.degrees(math.acos(np.clip(tE @ c_, -1, 1)))
+    return h, best[0], ang0, a_, S
+if opt.get('from_neck', True):
+    hB, angB, angB0, aB, SB = _rise(0, ks['B'], LP['crease2'])
+    hA, angA, angA0, aA, SA = _rise(len(E) - 1, ks['A'], LP['crease1'])
+    st = np.minimum(hA, hB)
+    print('notchcollar: the stand drafted from the neckline: it rises off each roll top at the lapel crease\'s slope (the roll turns %.0f and %.0f degrees off the crease, was %.0f and %.0f), full at the side neck points %.1f and %.1f cm round'
+          % (angA, angB, angA0, angB0, 2.62 * SA, 2.62 * SB))
 print('notchcollar: the neckline round the back %.1f cm, from z %.2f at the roll lines to %.2f at the back' % (2.62 * eL[-1], NA[2], E[:, 2].max()))
 
 # 2. the stand: from the neckline up to the roll line, leaning in, off the neck. Its top is the roll line.
@@ -152,6 +181,11 @@ for _ in range(opt.get('stand_smooth', 25)):                # (pushed point by p
     for k in range(len(E)):
         for j in range(1, nS + 1): SX[k, j] = push(SX[k, j], [(ST, neck_clear + th - 0.01)])
 Rr = SX[:, -1].copy()
+if opt.get('from_neck', True):
+    for nm, k0, sg, cr in (('A', len(Rr) - 1, -1, LP['crease1']), ('B', 0, 1, LP['crease2'])):
+        j_ = next(j for j in range(len(Rr)) if np.linalg.norm(Rr[k0 + sg * j] - Rr[k0]) > 0.3)
+        v_ = Rr[k0 + sg * j_] - Rr[k0]; c_ = cr[0] - cr[min(8, len(cr) - 1)]
+        print('notchcollar: the roll as laid turns %.0f degrees off lapel %s\'s crease at its top' % (math.degrees(math.acos(np.clip(v_ @ c_ / np.linalg.norm(v_) / np.linalg.norm(c_), -1, 1))), nm))
 print('notchcollar: the roll round the neck %.1f cm (the neckline %.1f cm), %.2f cm off the neck at most, %.2f on average'
       % (2.62 * np.linalg.norm(np.diff(Rr, axis=0), axis=1).sum(), 2.62 * np.linalg.norm(np.diff(E, axis=0), axis=1).sum(),
          2.62 * max(ST.find_nearest(Vector(p))[3] for p in Rr), 2.62 * np.mean([ST.find_nearest(Vector(p))[3] for p in Rr])))
