@@ -354,3 +354,15 @@ Now the stand's rise is drafted from the neckline itself (`from_neck`, on):
 
 As laid, the roll now turns 13 and 12 degrees off the lapels' creases (was about 36), with 0 sharp folds and the
 notch at 41.5 and 40.7 degrees.
+
+## How tailors fold a collar, and the soft roll
+
+What the tailoring sources say about folding a collar without creasing it:
+
+- The roll line is pressed into a soft roll, never creased flat. The stand turns over into the fall on a curve, and the top collar is cut larger than the under collar by the turn of the cloth (about 3 mm, up to 6 to 10 mm in thick wool) so it can roll over without pulling.
+- The under collar is cut on the bias, stretched along its outer edge and shrunk along the roll line. The fall's outer edge has to match the length of the line it lies on: too short and the collar rides up and creases at the roll, too long and it ripples.
+- The fall is a little deeper than the stand, so it covers the neckline seam. A straighter neck edge gives more stand.
+
+Sources: Fashion Incubator (the three collars), University of Kentucky extension CT-LMH.185, A Tailor Made It (top collar manipulation), Minerva (collar and lapel construction), FreeSewing (Simon collar roll), NMSU extension C-223.
+
+What the build does with it: `roll_r` (default 0.08, about 2 mm) turns the stand into the fall on a flat half round, as one cloth with one winding, instead of two layers meeting in a hard fold. The half round fades out as the square of the stand's height toward the lapels, so it doesn't leave a lump where the stand dies away. `roll_r 0` gives the old hard fold. The fall's length was already matched to where it lies (sections above), and the stand is already lower than the fall. The front views lose the double edge and the gap at the sides of the neck; sharp folds stay at 0. A small curl remains where the stand ends next to each lapel, the same as with the hard fold.

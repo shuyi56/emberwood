@@ -41,7 +41,7 @@ fall_over = opt.get('fall_over', 0.6)       # the fall reaches this far past the
 stand_run = opt.get('stand_run', 3.2)       # the stand dies away over this length toward the gorge (2.2 creased the fall)
 neck_clear = opt.get('neck_clear', 0.05)    # the stand's inside this far off the neck
 lean = opt.get('lean', 0.35)                # the stand leans in toward the neck (share of its height)
-roll_r = opt.get('roll_r', 0.0)            # the fall's turn over the roll, radius
+roll_r = opt.get('roll_r', 0.08)           # the roll line's soft turn, radius (0: a hard fold between two pieces)
 rise = opt.get('rise', 1.3)                 # the outer edge rises to each collar point over this much azimuth (radians)
 gap = opt.get('gap', 0.04)
 hm = opt.get('mesh', 0.06)
@@ -565,20 +565,33 @@ print('notchcollar: the fall at least %.3f off the bodice (the cloth is %.3f), %
 Ec = np.array([chart(p) for p in E])
 ir = np.nonzero(on_roll)[0]; ir = ir[np.argsort(ch[ir, 0])]
 sv, sf_ = [], []
-nS2 = 10; lines = []
+nS2 = 10; nA = 7; lines = []; HH = []
 for i in ir:
     ps = ch[i, 0]; e = np.array([np.interp(ps, Ec[:, 0], E[:, k]) for k in range(3)]); h_ = np.interp(ps, Ec[:, 0], st)
-    if h_ < 0.03: lines.append(None); continue
+    if h_ < opt.get('stand_min', 0.03): lines.append(None); continue
     ln_ = []; fk = np.interp(ps, Ec[:, 0], np.arange(len(E))); k0 = min(int(fk), len(E) - 2); a_ = fk - k0
     col = (1 - a_) * SX[k0] + a_ * SX[k0 + 1]                       # (the stand as laid, at this point of the roll)
     for j in range(nS2):
         ln_.append(len(P3) + len(sv)); sv.append(np.array([np.interp(j / nS2, np.linspace(0, 1, nS + 1), col[:, c_]) for c_ in range(3)]))
-    ln_.append(len(P3) + len(sv)); sv.append(np.array([np.interp(0.97, np.linspace(0, 1, nS + 1), col[:, c_]) for c_ in range(3)]))
-    lines.append(ln_)        # (the stand stops just under the fall's top edge: two pieces, not one fold, so neither's thickness is thrown at a hairpin)
+    S_ = np.array([np.interp(0.97, np.linspace(0, 1, nS + 1), col[:, c_]) for c_ in range(3)])
+    ln_.append(len(P3) + len(sv)); sv.append(S_)
+    if roll_r > 0:
+        # the roll line pressed into a soft roll, not a fold (tailors: the roll line "should be pressed into shape
+        # rather than stitched flat"; the top collar is cut larger by the turn of the cloth so it rolls over the
+        # under collar): the stand turns over into the fall on a half round of at least roll_r, one cloth, with the
+        # cloth's thickness on the outside of the turn (toward the neck on the stand, outward on the fall)
+        F_ = P3[i]; Cc = 0.5 * (S_ + F_); hh = 0.5 * (S_ - F_); HH.append(2 * np.linalg.norm(hh))
+        u_ = Z - lean * radial(S_); u_ = u_ - (u_ @ hh) / max(hh @ hh, 1e-12) * hh; u_ /= np.linalg.norm(u_)
+        bb = roll_r * min(1.0, h_ / stand) ** 2     # (a flat half round over however wide the turn is; fading out fast where the stand dies away toward the lapels, so no lump or curl at its end)
+        for t_ in np.linspace(0, 1, nA + 2)[1:-1]:
+            ln_.append(len(P3) + len(sv)); sv.append(Cc + math.cos(math.pi * t_) * hh + math.sin(math.pi * t_) * bb * u_)
+        ln_.append(int(i))
+    lines.append(ln_)        # (without roll_r the stand stops just under the fall's top edge: two pieces meeting in a hard fold)
 for l0_, l1_ in zip(lines[:-1], lines[1:]):
     if l0_ is None or l1_ is None: continue
-    for j in range(nS2):
+    for j in range(min(len(l0_), len(l1_)) - 1):
         sf_.append((l0_[j], l1_[j], l1_[j + 1], l0_[j + 1]))
+if HH: print('notchcollar: the roll turned over a soft half round of %.2f; the turn %.2f wide on average, %.2f at most' % (roll_r, np.mean(HH), np.max(HH)))
 verts = np.vstack([P3, np.array(sv).reshape(-1, 3)])
 faces = [tuple(int(i) for i in t) for t in tri] + sf_
 sq = sf_
@@ -589,8 +602,9 @@ cbm = bmesh.new(); cbm.from_mesh(me); cbm.faces.ensure_lookup_table()
 bmesh.ops.recalc_face_normals(cbm, faces=cbm.faces[:]); cbm.normal_update()
 vote = sum(np.sign(np.array(f.normal) @ dirn(*chart(np.array(f.calc_center_median())))) for f in cbm.faces[:len(tri)])
 if vote < 0: bmesh.ops.reverse_faces(cbm, faces=cbm.faces[:len(tri)])
-vote = sum(np.sign(np.array(f.normal) @ -radial(np.array(f.calc_center_median()))) for f in cbm.faces[len(tri):])
-if vote < 0: bmesh.ops.reverse_faces(cbm, faces=cbm.faces[len(tri):])      # (the stand's thickness toward the neck)
+if roll_r <= 0:       # (one cloth over the roll: the stand's side follows the fall's through the turn)
+    vote = sum(np.sign(np.array(f.normal) @ -radial(np.array(f.calc_center_median()))) for f in cbm.faces[len(tri):])
+    if vote < 0: bmesh.ops.reverse_faces(cbm, faces=cbm.faces[len(tri):])      # (the stand's thickness toward the neck)
 cbm.to_mesh(me); cbm.free()
 for p in me.polygons: p.use_smooth = True
 old = bpy.data.objects.get('Redingote collar')
