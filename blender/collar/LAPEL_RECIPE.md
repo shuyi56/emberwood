@@ -235,3 +235,21 @@ under lapel hidden behind the upper front, which is pressed flat there on purpos
 
 What to read in notchcollar's output: the notch "as cut" and "as laid" should both be near 30, the fall's depth at the
 two points should match, and the fall should be at least a few hundredths off the bodice.
+
+### The notch angle, swept
+
+John: "try angles for the collar, find one that works well that doesn't crease or blow up." The collar was built on
+the same lapel at 20, 30, 40, 45, 50, 60, 75 and 90 degrees and rendered front and three-quarter.
+
+| Angle | As laid (her right / left) | Collar point depth | Sharp folds | Looks |
+|---|---|---|---|---|
+| 20 | 22.1 / 21.0 | 7.4 / 8.0 cm | 32 | clean, but the notch is a slit that barely reads |
+| 30 | 31.4 / 30.6 | 7.1 / 7.6 cm | 34 | clean |
+| 40 | 41.0 / 40.4 | 6.9 / 7.3 cm | 34 | clean; the notch reads clearly from the front and the side |
+| 45 | 45.5 / 45.4 | 6.8 / 7.2 cm | 34 | clean; the collar's end starts to look square |
+| 50 | 50.3 / 50.3 | 6.8 / 7.1 cm | 34 | a faint crease across the collar's end on her left |
+| 60 | 59.1 / 60.2 | 2.0 / 6.9 cm | 44 | blows up: on her right the outline folds and the point is 2 cm deep |
+| 75, 90 | 73 to 87 | under 2 cm | 23 to 26 | blows up: the ends turn into boxy flaps |
+
+The default is now 40. From 60 up, the collar's end turns so far back that it runs into the outer edge on the chart,
+and the outline folds.

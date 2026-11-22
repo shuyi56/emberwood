@@ -33,7 +33,7 @@ opt = json.loads(a[-1]) if has else {}
 blend, out = a[-3:-1] if has else a[-2:]
 LP = np.load(blend + '.lapels.npz')
 
-notch_angle = opt.get('notch_angle', 30.0)  # the notch's opening, degrees
+notch_angle = opt.get('notch_angle', 40.0)  # the notch's opening, degrees (swept 20 to 90: 30 to 50 clean, 40 chosen; 60 and up the end folds over)
 notch_at = opt.get('notch_at', 0.5)         # the notch on the lapel's top edge: this share of the way from the roll line to the lapel's point
 point_len = opt.get('point_len', 0.9)       # the collar's point (G to C) this share of the lapel's (G to P)
 stand = opt.get('stand', 0.95)              # the stand at the back (2.5 cm)
