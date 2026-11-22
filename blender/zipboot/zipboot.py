@@ -69,6 +69,14 @@ SHAFT_CUT = 0.90             # the shaft is cut to this share of the leg's girth
                              # on a 22 cm leg). The model is the worn, stretched shape; entry() prints the cut girth
 CREASE = False               # the ankle's bend set into the leather as folds (boot.CREASE): off for a first look
 
+# the finish (the reference photo): a dark chocolate suede, the zip's tape and coil dyed to it, a silver slider and pull
+SUEDE = 0x3e2a21
+THREAD = 0x2c1c15            # the thread, a shade under the suede: the stitching reads as a row of dimples, not a contrast
+STITCHING = dict(pitch=0.115, thread=0.013)   # a dress boot's fine row: about 3 mm a stitch in a 0.7 mm thread (the
+                             # work boot's 4 mm in a 1.2 mm waxed linen read as rivets on suede). EXPERIMENTAL, by the photo
+ZIP_GAUGE = dict(teeth_mm=5.0, tape_mm=26.4)   # a #5 coil, the gauge boot zips are sold in (Weaver Leather Supply, YKK
+                             # closed-end boot zipper: "#5", nylon teeth on a polyester tape, with a slider and a bottom
+                             # stop; the gauge is the closed chain's width in mm). The tape scaled from the #3's: EXPERIMENTAL
 M_TEETH = female.mat_def(91, 'zip coil', female.ramp(0x2a211c, 0.08), 0.35)
 M_TAPE = female.mat_def(92, 'zip tape', female.ramp(0x31261f, 0.08), 0.1)
 M_METAL = female.mat_def(93, 'zip metal', female.ramp(0xb8b6b0, 0.2), 0.6)
@@ -357,6 +365,25 @@ def bend_at_ball(o, band, like=None, log=print):
     return X, W, names
 
 
+def metal_material():
+    """The slider, pull and stops in the 3D look: a polished nickel-plated zinc alloy (a boot zip's slider: Weaver
+    Leather Supply, YKK long tab slider, zinc alloy). Roughness EXPERIMENTAL, by eye against the photo."""
+    m = female.mat(M_METAL)
+    nt = m.node_tree
+    if nt.nodes.get('close bsdf') is None:
+        for nd in nt.nodes:
+            if nd.type == 'BSDF_PRINCIPLED':
+                nd.name = 'sprite bsdf'                         # (kept for the sprite renders: female.sprite_mode)
+        out = next(nd for nd in nt.nodes if nd.type == 'OUTPUT_MATERIAL')
+        mb = nt.nodes.new('ShaderNodeBsdfPrincipled')
+        mb.name = 'close bsdf'
+        mb.inputs['Metallic'].default_value = 1.0
+        mb.inputs['Roughness'].default_value = 0.3
+        mb.inputs['Base Color'].default_value = (0.80, 0.79, 0.76, 1)
+        nt.links.new(mb.outputs['BSDF'], out.inputs['Surface'])
+    return m
+
+
 def seat_wall(o, sole, y_br, band, out, log=print):
     """The upper stood on the sole round the heel seat. The last is drawn over the foot, and a foot's heel is a
     ball: the leather turns in under it before it meets the sole, and the sole, cut to the counter's fullest, is
@@ -483,6 +510,13 @@ def build():
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
     female.TURNOUT_AT_HIP = TURNOUT_AT_HIP
+    female.mat_def(boot.M_LEATHER, 'boot leather', female.ramp(SUEDE, 0.1), 0.24, closeup='suede')
+    female.MATS.pop(boot.M_LEATHER, None)
+    female.mat_def(boot.M_THREAD, 'boot thread', female.ramp(THREAD, 0.1), 0.0)   # (tone on tone, as the photo's)
+    female.MATS.pop(boot.M_THREAD, None)
+    sys.modules['sew'].STITCH.update(STITCHING)
+    boot.last.ZIP.update(ZIP_GAUGE)
+    zipper.PARTS.update(teeth_t_mm=2.6, slider_w_mm=8.5)        # (Rockywoods: a #5 coil is 0.103 in thick)
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
     rig = bpy.data.objects.get('Rig')
@@ -510,7 +544,7 @@ def build():
             bpy.context.view_layer.update()
         true_seam(o, boot.last.PIECES[side])       # (last: the pitch's smoothing ripples an open edge)
         zipper.build(o, boot.last.PIECES[side], rig, L,
-                     {'teeth': female.mat(M_TEETH), 'tape': female.mat(M_TAPE), 'metal': female.mat(M_METAL)})
+                     {'teeth': female.mat(M_TEETH), 'tape': female.mat(M_TAPE), 'metal': metal_material()})
     if ENTRY_CHECK:
         entry(boot.last.PIECES, boot.hose.MEASURES)
     root.location.z = up

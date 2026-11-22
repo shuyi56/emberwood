@@ -164,6 +164,10 @@ def main():
             Hh = pts(('Heel lift',))
             c = 0.5 * (Hh.min(0) + Hh.max(0)) + np.array([0, 0.0, 0.8])
             span = float(opt('--span', 6.5))
+        elif opt('--focus', 'boot') == 'zip':             # (the zip's top: the slider, the pull and the stops)
+            Zs = pts(('Zip slider',))
+            c = np.array([Zs[:, 0].mean(), Zs[:, 1].mean(), Zs[:, 2].max() - 0.9])
+            span = float(opt('--span', 3.2))
         elif opt('--focus', 'boot') == 'toe':
             c = np.array([0.5 * (B[:, 0].min() + B[:, 0].max()), B[:, 1].min() + 2.0, B[:, 2].min() + 1.3])
             span = float(opt('--span', 6.5))
@@ -176,7 +180,7 @@ def main():
         for look in looks:
             for o in bpy.data.objects:
                 if o.type == 'MESH' and o.name in saved:
-                    for s_, m_ in zip(o.material_slots, saved[o.name] if look == 'design' else [clay] * len(o.material_slots)):
+                    for s_, m_ in zip(o.material_slots, saved[o.name] if look in ('design', 'leather') else [clay] * len(o.material_slots)):
                         s_.material = m_
                     if look == 'clay':
                         for s_ in o.material_slots:

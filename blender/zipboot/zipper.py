@@ -24,10 +24,16 @@ PARTS = {
     'slider_l': 0.024,      # the slider's body, x the foot's length L (photo: slider and pull 0.060 L together)
     'slider_w_mm': 7.0,     # and its width: the teeth and a flange either side (photo, about 0.03 L). EXPERIMENTAL split
     'slider_t_mm': 3.2,     # its thickness over the teeth. EXPERIMENTAL
-    'pull_l': 0.040,        # the pull's length, x L (photo: the rest of the 0.060 L, lapping the slider)
-    'pull_w': 0.022,        # and its width, x L (photo)
+    'pull_l': 0.118,        # the pull's length, x L: a long tab (the photo's pull runs a fifth of the zip's length; Weaver:
+                            # boot zips take a 'long tab' slider). Was 0.040, which read as a stub
+    'pull_l_old': 0.040,        # the pull's length, x L (photo: the rest of the 0.060 L, lapping the slider)
+    'pull_w': 0.030,        # and its width, x L (photo: about a quarter of its length)
+    'pull_w_old': 0.022,        # and its width, x L (photo)
     'pull_t_mm': 1.0,       # its thickness. EXPERIMENTAL
     'stop_mm': 3.0,         # the bottom stop's length along the zip. EXPERIMENTAL
+    'top_stop_mm': 2.5,     # the two top stops, one clamped on each side's tape over the last element: they keep the
+                            # slider from running off the top (Sailrite, Anatomy of a Zipper). Length EXPERIMENTAL
+    'bail_mm': 1.2,         # the slider's bridge, the loop the pull hangs from: its thickness. EXPERIMENTAL
 }
 
 
@@ -142,15 +148,26 @@ def build(o, pieces, rig, L, mats, log=print):
     sv, sf = _box(c + t * 0.5 * Pr['stop_mm'] * mm - n * 0.3 * tl, t, a, n, Pr['stop_mm'] * mm, 1.15 * tw, 1.1 * th)
     # the slider, closed at the top: a body wider at its mouth (the top) than its tail, standing on the teeth
     sl, sw, st_ = Pr['slider_l'] * L, Pr['slider_w_mm'] * mm, Pr['slider_t_mm'] * mm
-    c, t, a, n = frame(arc[-1] - 0.5 * sl)
+    ts = Pr['top_stop_mm'] * mm
+    s_top = arc[-1] - 1.3 * ts                                  # (the slider's mouth, closed up against the top stops)
+    c, t, a, n = frame(s_top - 0.5 * sl)
     bv, bf = _box(c + n * (0.5 * st_ - 0.3 * tl), t, a, n, sl, 0.8 * sw, st_, taper=1.25)
+    # the top stops, one on each side's tape, and the slider's bridge over the pull's head
+    extra = []
+    c2, t2, a2, n2 = frame(arc[-1] - 0.6 * ts)
+    for sd in (-1.0, 1.0):
+        extra.append(_box(c2 + a2 * sd * 0.30 * tw - n2 * 0.3 * tl, t2, a2, n2, ts, 0.5 * tw, 1.15 * th))
+    bl = Pr['bail_mm'] * mm
+    pt_ = Pr['pull_t_mm'] * mm
+    extra.append(_box(c + t * 0.12 * sl + n * (st_ - 0.3 * tl + 0.5 * (pt_ + bl)), t, a, n, 0.42 * sl, 0.42 * sw, pt_ + bl))
     # the pull: a flat rounded tab hinged on the slider's back, lying down over the slider and past its tail
     pl, pw, pt = Pr['pull_l'] * L, Pr['pull_w'] * L, Pr['pull_t_mm'] * mm
-    hinge = arc[-1] - 0.35 * sl
+    hinge = s_top - 0.35 * sl
     hp = pl - 0.5 * pw
-    ring = [(-0.5 * pw, 0.0), (0.5 * pw, 0.0), (0.5 * pw, -hp)]
+    nk = 0.62                                                   # (its neck under the bridge, this share of its width)
+    ring = [(-0.5 * nk * pw, 0.0), (0.5 * nk * pw, 0.0), (0.5 * nk * pw, -0.5 * sl), (0.5 * pw, -1.1 * sl), (0.5 * pw, -hp)]
     ring += [(0.5 * pw * np.cos(g_), -hp - 0.5 * pw * np.sin(g_)) for g_ in np.linspace(0, np.pi, 11)[1:-1]]
-    ring += [(-0.5 * pw, -hp)]
+    ring += [(-0.5 * pw, -hp), (-0.5 * pw, -1.1 * sl), (-0.5 * nk * pw, -0.5 * sl)]
     on_slider, on_teeth = st_ + 0.5 * pt - 0.3 * tl, th + 0.5 * pt - 0.5 * tl
     PV = []
     for sgn in (1, -1):
@@ -162,6 +179,9 @@ def build(o, pieces, rig, L, mats, log=print):
     PF = [list(range(m))[::-1], list(range(m, 2 * m))] + [[i, (i + 1) % m, m + (i + 1) % m, m + i] for i in range(m)]
     V = list(sv) + list(bv) + PV
     F = sf + [[i + 8 for i in f_] for f_ in bf] + [[i + 16 for i in f_] for f_ in PF]
+    for ev, ef in extra:
+        F += [[i + len(V) for i in f_] for f_ in ef]
+        V += list(ev)
     out['metal'] = sew._on_boot(o, np.array(V), F, o.name.replace('Boot', 'Zip slider'), mats.get('metal'), rig)
     log('zipper %s: %.1f cm of #3 coil (%d elements at %.1f mm), tapes %.1f mm wide, the slider %.1f by %.1f mm, the '
         'pull %.1f mm long; the leather edges stand %.1f mm apart on average (%.1f..%.1f)'
