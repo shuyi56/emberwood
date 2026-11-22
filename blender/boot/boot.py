@@ -39,6 +39,9 @@ CREASE = True                # the ankle bent and the folds it makes set into th
 RELIEVE = ()                 # frames of the stride to let the leather out for where the hose is through it (last.relieve; off: it did not cut the through count, which may be a fault of the check's rays)
 TURNOUT_AT_HIP = True        # the stance's turn-out made in the hip (female.TURNOUT_AT_HIP): at the ankle it twisted the
                              # shaft on the foot; the gauges read the left boot's two sides bending 1.3 units apart
+TOE_SHELL = 150              # passes turning the toe as one smooth box over the toes (last.build_boots, r['toe_shell']):
+                             # the last pushed out to the gap over each toe left the toes' ridges in the leather. The
+                             # zip boot's fix (docs/clothing-solvers/zip-ankle-boot-retrospective.md); 0 for none
 SEW = True                   # the pieces sewn by the solver, and their stitches; False: the pieces as cut on the last
 
 
@@ -49,6 +52,8 @@ def build():
         os.environ.setdefault('HEAD_H', '%.2f' % (knee + 2.6))
     hose.VIEW, hose.FOOT = min(VIEW, 3), FOOT
     female.TURNOUT_AT_HIP = TURNOUT_AT_HIP
+    if TOE_SHELL and not last.RATIOS.get('toe_shell'):
+        last.RATIOS['toe_shell'] = TOE_SHELL
     res = hose.build()
     body = bpy.data.objects['Skin body']
     rig = bpy.data.objects.get('Rig')
