@@ -55,9 +55,14 @@ WELT = 0.006                 # x H: the sole trimmed close to the upper (about 1
                              # 0.022 is a welted work boot's ledge (John: join the heel and fit)
 SEAT_BAND, SEAT_OUT = 0.35, 0.02   # the heel's seat taken from the upper where it meets the sole (not the counter's
                              # fullest, 1.1 up), and trimmed this close to it: the heel runs on from the boot's back
-THROAT_LINE = 0.45           # the front line from the vamp to the top: the straight chord (Golding) bowed into the
+THROAT_LINE = 0.90           # the front line from the vamp to the top: the straight chord (Golding) bowed into the
                              # leg-and-foot corner by this share of the corner's depth (last.build_boots). EXPERIMENTAL
 THROAT_FROM = 0.30           # the vamp point, where that curve leaves the foot: this share of the length behind the toe
+SHAFT_GAP = 0.013            # x H: the shaft's least room off the skin, a sock fit's (the hose and the lining, no air);
+SHAFT_GAP_BY = 0.16          # reached this far over the ankle's joint, x H (the foot's own gap below: ROOM)
+SHAFT_CUT = 0.90             # the shaft is cut to this share of the leg's girth and stretches onto it (Red Wing's pull-on
+                             # boot, US 12108833: the narrowest girth of the shaft stretches "at least one inch", 2.5 cm
+                             # on a 22 cm leg). The model is the worn, stretched shape; entry() prints the cut girth
 CREASE = False               # the ankle's bend set into the leather as folds (boot.CREASE): off for a first look
 
 M_TEETH = female.mat_def(91, 'zip coil', female.ramp(0x2a211c, 0.08), 0.35)
@@ -169,7 +174,10 @@ def entry(pieces, M, log=print):
         'opened, the topline and the zip\'s two edges (%.1f cm each) give %.1f cm: %s'
         % (lh, girth, ankle, girth / ankle, zl, girth + 2 * zl,
            'the foot goes in' if girth + 2 * zl > 1.05 * lh else 'TOO TIGHT for the foot'), flush=True)
-    return dict(long_heel_cm=lh, top_cm=girth, ankle_cm=ankle, zip_cm=zl, open_cm=girth + 2 * zl)
+    log('zipboot entry: the shaft is cut to x%.2f of its worn girth: the topline %.1f cm as cut, stretched %.1f cm on the leg'
+        % (SHAFT_CUT, girth * SHAFT_CUT, girth * (1.0 - SHAFT_CUT)))
+    return dict(long_heel_cm=lh, top_cm=girth, top_cut_cm=girth * SHAFT_CUT, ankle_cm=ankle, zip_cm=zl,
+                open_cm=girth + 2 * zl)
 
 
 def _posed(o):
@@ -411,6 +419,7 @@ def build():
     boot.last.RATIOS.update(toe_box=TOE_BOX, toe_sq=TOE_SQ, toe_front=TOE_FRONT, toe_wall=TOE_WALL,
                             toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=4.0, sole_toe=0.7, toe_ease=TOE_EASE, toe_spare=0.08, toe_sweep=TOE_SWEEP, toe_bow=TOE_BOW, toe_side=TOE_SIDE)   # (the sole's outline kept square at the toe)
     boot.last.RATIOS['welt'] = WELT
+    boot.last.RATIOS.update(shaft_gap=SHAFT_GAP, shaft_gap_by=SHAFT_GAP_BY)
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
     female.TURNOUT_AT_HIP = TURNOUT_AT_HIP

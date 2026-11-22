@@ -599,7 +599,8 @@ SHAFTS = {'lace': dict(cut=cut_lace, ratios={}),
           # at the 0.2 slope, or the heel would not pass; the zip opens past the heel, so the shaft closes onto the
           # leg within about its own height over the heel counter)
           'zip': dict(cut=cut_zip, whole=True, ratios={'ease': 0.012, 'ankle_girth': 1.0, 'calf_swell': 0.0,
-                                                       'top_fit': 1.0, 'top_snug': 0.5, 'slope': 1.0})}
+                                                       'top_fit': 1.0, 'top_snug': 0.5, 'slope': 1.0,
+                                                       'own_by': 0.20})}
 
 
 def _hull2(q):
@@ -706,6 +707,8 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             zs, C, Rf = tables[sgn]
             _, _, Rs = shaft(P, leg, M, z_top, rs, log=lambda *a: None)
             hi = min(M['ankle_z'] + r['join'] + 9.0 * r['lap'], z_top - 0.2)   # (an ankle boot: fully its own by the top)
+            if rs.get('own_by'):                       # (a sock fit: its own this far over the ankle's joint)
+                hi = min(M['ankle_z'] + rs['own_by'], hi)
             lo_ = min(M['ankle_z'] + r['join'] + r['lap'], hi - 0.8)
             w = _ss(lo_, hi, zs)[:, None]
             shafts[sgn] = (zs, C, Rf * (1 - w) + Rs * w)
@@ -721,7 +724,10 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # room over the instep and the front of the ankle, to flex into: the last above is the leg's own, which would
     # leave the leather no more than the gap off the instep, and a stride (the foot's toe-off) presses the foot up
     # into it (the shaft's table, carried down over the foot, cuts in there)
-    X += Nr * (r['instep_room'] * _ss(1.2, 2.8, z) * (1.0 - _ss(M['ankle_z'] + r['join'], M['ankle_z'] + 3.0 * r['join'], z))
+    # (a sock-fit shaft, r['shaft_gap']: the room ends over the instep, by the ankle's joint, and is not carried up the shin)
+    ir0, ir1 = (M['ankle_z'] - 0.3 * r['join'], M['ankle_z'] + 0.7 * r['join']) if r.get('shaft_gap') \
+        else (M['ankle_z'] + r['join'], M['ankle_z'] + 3.0 * r['join'])
+    X += Nr * (r['instep_room'] * _ss(1.2, 2.8, z) * (1.0 - _ss(ir0, ir1, z))
                * np.clip(-Nr[:, 1], 0.0, 1.0))[:, None]
     # the foot's hollows bridged
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
@@ -732,6 +738,12 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         lift += out
         X += Nr * out[:, None]
     toe_w = _ss(y_ball + 0.20 * L, y_ball - 0.05 * L, X[:, 1]) * (X0[:, 2] < M['ankle_z'])
+    # the least room off the skin, by height: the foot's (r['gap']) to the ankle's joint, and a sock-fit shaft's
+    # (r['shaft_gap']: the hose and the leather's own lining, no air) from r['shaft_gap_by'] over it. The foot's gap
+    # carried up the leg stood the shaft 8 mm off it all round, a tube 5 cm wider than the leg
+    gap_ = np.full(n, r['gap'])
+    if r.get('shaft_gap'):
+        gap_ += (r['shaft_gap'] - r['gap']) * _ss(M['ankle_z'] + 0.25 * r['shaft_gap_by'], M['ankle_z'] + r['shaft_gap_by'], z)
     # a sock-fit last (RATIOS['drape'] passes, 0 for none): the whole last drawn taut over the foot and the leg, as a
     # stocking is: smoothed (a Laplacian step) and put back out to the gap from the skin, in turn, so the toes'
     # ridges and the step where the shaft's table meets the foot over the ankle are spanned by one smooth surface
@@ -749,8 +761,8 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                     if loc is None:
                         continue
                     sd_ = float(np.dot(Xs[i] - np.array(loc), np.array(nrm)))
-                    if sd_ < r['gap']:
-                        Xs[i] += np.array(nrm) * (r['gap'] - sd_)
+                    if sd_ < gap_[i]:
+                        Xs[i] += np.array(nrm) * (gap_[i] - sd_)
         log('boot: the last drawn taut over the foot and leg (%d passes): it moved %.3f on average, %.3f at most'
             % (int(r['drape']), float(np.linalg.norm(Xs - X, axis=1).mean()), float(np.linalg.norm(Xs - X, axis=1).max())))
         X = Xs
@@ -816,8 +828,8 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         if loc is None:
             continue
         side = float(np.dot(X[i] - np.array(loc), np.array(nrm)))
-        if side < r['gap']:
-            X[i] += np.array(nrm) * (r['gap'] - side)
+        if side < gap_[i]:
+            X[i] += np.array(nrm) * (gap_[i] - side)
             pushed += 1
     log('boot: the last\'s foot, %d points; %d bridged over hollows (by %.3f at most), %d put out to the gap'
         % (n, int((lift > 0.01).sum()), lift.max(), pushed))
