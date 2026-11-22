@@ -18,22 +18,22 @@ function toPage(src, scale) {
   return out;
 }
 
-// The cards' strand texture, baked once (grey, multiplied by the hair colour). v runs root (0) to tip (1). A card
-// stands for a few locks, so the texture is CLUMPS locks side by side: each a bundle of fine fibres that narrows to
-// its own tip, with a dark crease between neighbours, a root-to-tip gradient (dark roots, lightest toward the tips)
-// and each fibre a little lighter or darker than the next. The alpha fades in over the first ROOT_FADE of v (the
-// root colour of the scalp cap shows through, not a card's hard edge) and cuts each lock off at its own length.
-// (80 Level, "Tips and tricks on hair for games": clumps, root-to-tip gradient and per-strand value in the texture.)
-const ROOT_DARK = 0.7;                            // STYLE: the root's value against the mid-length
-const TIP_LIGHT = 1.25;                           // STYLE: the tip's value against the mid-length
-const CLUMPS = 6;                                 // STYLE: locks across one card: wide enough to read at LOD 0 size
-const ROOT_FADE = 0.05;                           // STYLE
-function strandTexture() {
+// How the cards look: the creator's own hair surface, so the groom reads as the same hair. The strand lines, the dark
+// partings between locks, the single light-catching strands and the rounded relief of each lock all come from the
+// creator's hair texture and bump map (hairField and paintHair in the creator; hairCapMat.map and .bumpMap here),
+// mapped onto each card where the card lies round the head, so neighbouring cards carry on the creator's locks.
+// The cut-out (each lock of the card ending at its own length, the soft root) is this file's own map, on uv1.
+const ROOT_DARK = 0.7;                            // STYLE: the root's value against the mid-length (strands and cards)
+const TIP_LIGHT = 1.25;                           // STYLE: the tip's value against the mid-length (strands)
+const CLUMPS = 6;                                 // STYLE: locks across one card in the cut-out
+const ROOT_FADE = 0.05;                           // STYLE: the cut-out fades in over this much of the card at the root
+const TEX_V_HH = 1.6;                             // the creator's hair texture runs this many head heights down the hair
+const HAIR_SHADE = 0.8;                           // the creator's own (HAIR_SHADE): its hair is drawn at 0.8 of its paint
+const CENTRE = [0, 0.56 * HH, -0.06 * HH];        // the skull's centre in the page's units (scalp_field.CENTRE)
+function cutTexture() {
   const W = 256, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H;
-  const g = c.getContext('2d'); g.clearRect(0, 0, W, H);
+  const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  // v is linear (1 = the hair colour itself); the canvas holds sRGB
-  const grey = v => { const x = Math.round(255 * Math.pow(Math.min(1, v), 1 / 2.2)); return `${x},${x},${x}`; };
   const cw = W / CLUMPS;
   for (let j = 0; j < CLUMPS; j++) {
     const cx = (j + 0.5 + (rnd() - 0.5) * 0.3) * cw, len = H * (0.72 + 0.28 * rnd()), tipX = cx + (rnd() - 0.5) * cw * 0.4;
@@ -41,43 +41,74 @@ function strandTexture() {
     for (let k = 0; k < 90; k++) {
       const off = (rnd() - 0.5) * cw * 0.95, x0 = cx + off, end = len * (0.8 + 0.2 * rnd());
       const x1 = tipX + off * 0.25 * (end / len);                 // the lock narrows to its tip
-      const centre = 1 - Math.abs(off) / (cw * 0.5);              // 1 at the lock's middle, 0 at the crease
-      const a = Math.min(1, 0.3 + 0.9 * centre) * Math.min(1, 0.35 + 1.3 * edge) * (0.6 + 0.4 * rnd());
-      const b = (0.75 + 0.2 * rnd()) * (0.75 + 0.25 * centre), f = end / H;
+      const centre = 1 - Math.abs(off) / (cw * 0.5);
+      const a = Math.min(1, 0.45 + 0.9 * centre) * Math.min(1, 0.35 + 1.3 * edge) * (0.7 + 0.3 * rnd()), f = end / H;
       const grd = g.createLinearGradient(0, 0, 0, end);
-      grd.addColorStop(0, `rgba(${grey(b * ROOT_DARK)},0)`);
-      grd.addColorStop(Math.min(0.5, ROOT_FADE / f), `rgba(${grey(b * ROOT_DARK)},${a})`);
-      grd.addColorStop(Math.min(0.9, 0.35 / f), `rgba(${grey(b)},${a})`);
-      grd.addColorStop(0.92, `rgba(${grey(b * TIP_LIGHT)},${a * 0.85})`);
-      grd.addColorStop(1, `rgba(${grey(b * TIP_LIGHT)},0)`);
+      grd.addColorStop(0, 'rgba(255,255,255,0)'); grd.addColorStop(Math.min(0.5, ROOT_FADE / f), `rgba(255,255,255,${a})`);
+      grd.addColorStop(0.92, `rgba(255,255,255,${a * 0.9})`); grd.addColorStop(1, 'rgba(255,255,255,0)');
       g.strokeStyle = grd; g.lineWidth = 1 + rnd() * 1.6; g.beginPath();
       g.moveTo(x0, 0); g.quadraticCurveTo(x0 + (rnd() - 0.5) * 4, end * 0.55, x1, end); g.stroke();
     }
   }
   const t = new THREE.CanvasTexture(c); t.flipY = false;          // canvas row y is v = y / H: the root at the top
-  t.wrapS = THREE.ClampToEdgeWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
+  t.wrapS = THREE.ClampToEdgeWrapping; t.wrapT = THREE.ClampToEdgeWrapping; t.anisotropy = 8; t.channel = 1;
   return t;
 }
 
-function buildStyle(asset, tone) {
+// Per card vertex: the creator's texture coordinates (round the head from the card's root, down the hair by length),
+// the shading normal (out from the head, as the creator's head of hair is lit: a flat card's own normal turned its
+// underside black wherever it lifted off the head) and the colour (the baked light through the hair, darker roots).
+function cardAttributes(P, UV, AO) {
+  const n = P.length / 3, uv0 = new Float32Array(n * 2), N = new Float32Array(n * 3), C = new Float32Array(n * 3);
+  let start = 0;
+  for (let i = 0; i <= n; i += 2) {
+    if (i < n && !(i > start && UV[2 * i + 1] === 0)) continue;
+    // a card is the rows from `start` to i (two vertices a row, v 0 at its root)
+    const mx = (P[3 * start] + P[3 * start + 3]) / 2, mz = (P[3 * start + 2] + P[3 * start + 5]) / 2 - CENTRE[2];
+    const u0 = Math.atan2(mx, mz) / (2 * Math.PI) + 0.5, r = Math.max(1, Math.hypot(mx, mz));
+    const w0 = Math.hypot(P[3 * start] - P[3 * start + 3], P[3 * start + 1] - P[3 * start + 4], P[3 * start + 2] - P[3 * start + 5]);
+    const du = w0 / (2 * Math.PI * r);
+    let s = 0, px = 0, py = 0, pz = 0;
+    for (let j = start; j < i; j += 2) {
+      const cx = (P[3 * j] + P[3 * j + 3]) / 2, cy = (P[3 * j + 1] + P[3 * j + 4]) / 2, cz = (P[3 * j + 2] + P[3 * j + 5]) / 2;
+      if (j > start) s += Math.hypot(cx - px, cy - py, cz - pz);
+      px = cx; py = cy; pz = cz;
+      for (const q of [j, j + 1]) {
+        uv0[2 * q] = u0 + (UV[2 * q] - 0.5) * du; uv0[2 * q + 1] = Math.min(1, s / (TEX_V_HH * HH));
+        const ox = P[3 * q] - CENTRE[0], oy = P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = P[3 * q + 2] - CENTRE[2];
+        const l = Math.hypot(ox, oy, oz) || 1; N[3 * q] = ox / l; N[3 * q + 1] = oy / l; N[3 * q + 2] = oz / l;
+        const v = UV[2 * q + 1], root = v < 0.35 ? ROOT_DARK + (1 - ROOT_DARK) * v / 0.35 : 1;
+        C[3 * q] = C[3 * q + 1] = C[3 * q + 2] = (AO ? AO[q] : 1) * root;
+      }
+    }
+    start = i;
+  }
+  return { uv0, N, C };
+}
+
+function buildStyle(asset, tone, creatorMat) {
   const group = new THREE.Group(), parts = {};
   const col = new THREE.Color(tone);
-  const cardMat = new THREE.MeshStandardMaterial({ color: col, map: strandTexture(), alphaTest: 0.3, side: THREE.DoubleSide,
-    vertexColors: true, roughness: 0.75, metalness: 0, envMapIntensity: 0.3 });
+  const cardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, map: creatorMat.map, bumpMap: creatorMat.bumpMap,
+    bumpScale: creatorMat.bumpScale, alphaMap: cutTexture(), alphaTest: 0.35, side: THREE.DoubleSide, vertexColors: true,
+    roughness: 1, metalness: 0, envMapIntensity: 0.25 });
+  // the creator's shade, and no flipping of the normal on a card's far side: both sides are the hair's outer surface
+  cardMat.onBeforeCompile = sh => {
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + HAIR_SHADE.toFixed(3) + ';')
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );');
+  };
   // the scalp under the hair in the root colour, as render.py draws it (SCALP_SHADE), so no skin shows between hairs
   const capMat = new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(SCALP_SHADE), roughness: 0.95, metalness: 0 });
   asset.lods.forEach((L, i) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(toPage(new Float32Array(bytes(L.pos)), 1), 3));
-    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(bytes(L.uv)), 2));
+    const g = new THREE.BufferGeometry(), P = toPage(new Float32Array(bytes(L.pos)), 1), UV = new Float32Array(bytes(L.uv));
+    const A = cardAttributes(P, UV, L.ao ? new Float32Array(bytes(L.ao)) : null);
+    g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(A.uv0, 2));          // the creator's hair texture and relief
+    g.setAttribute('uv1', new THREE.BufferAttribute(UV, 2));            // the card's own: the cut-out
+    g.setAttribute('normal', new THREE.BufferAttribute(A.N, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(A.C, 3));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(bytes(L.idx)), 1));
-    if (L.ao) {                                   // the light through the hair, baked per vertex (creator_asset.py)
-      const ao = new Float32Array(bytes(L.ao)), vc = new Float32Array(ao.length * 3);
-      for (let i = 0; i < ao.length; i++) vc[3 * i] = vc[3 * i + 1] = vc[3 * i + 2] = ao[i];
-      g.setAttribute('color', new THREE.BufferAttribute(vc, 3));
-    }
-    g.computeVertexNormals();
     const m = new THREE.Mesh(g, cardMat); m.castShadow = true; m.name = 'groom-cards-' + i;
     parts['lod' + i] = m; group.add(m);
   });
@@ -140,9 +171,9 @@ function start(fc) {
     Object.values(built).forEach(b => { if (!(groom && b === built[style])) show(b.group, false); });
     if (groom) {
       let b = built[style];
-      if (!b) { b = built[style] = buildStyle(JSON.parse(assets[style].textContent), fc.P.hairTone); scene.add(b.group);
+      if (!b) { b = built[style] = buildStyle(JSON.parse(assets[style].textContent), fc.P.hairTone, fc.hairCapMat); scene.add(b.group);
         note.textContent = ''; }
-      if (b.tone !== fc.P.hairTone) { const c = new THREE.Color(fc.P.hairTone); b.cardMat.color.copy(c); b.capMat.color.copy(c).multiplyScalar(SCALP_SHADE); b.tone = fc.P.hairTone; changed = true; }
+      if (b.tone !== fc.P.hairTone) { const c = new THREE.Color(fc.P.hairTone); b.capMat.color.copy(c).multiplyScalar(SCALP_SHADE); b.tone = fc.P.hairTone; changed = true; }
       show(b.group, true);
       show(b.parts.lod0, mode === 'lod0'); show(b.parts.lod1, mode === 'lod1'); show(b.parts.lod2, mode === 'lod2');
       show(b.parts.cap, true); show(b.parts.strands, mode === 'strands');
