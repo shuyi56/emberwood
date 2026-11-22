@@ -46,7 +46,7 @@ HOLD = {'sole': 0.30, 'collar': 0.25}
 # sewing bends flat sheets round the leg: a stiffer bend than the creases', walked longer, so a sheet wraps in one
 # smooth curve and does not ripple
 SEWN = dict(LEATHER, bend=2e-7, stretch=5e-4, shear=5e-4, iterations=16, steps=200)   # (the hide gives a few per cent, as leather pulled over a last does, where a flat sheet cannot follow it)
-FLAT = ('inner shaft', 'outer shaft', 'tongue')      # the pieces cut and kept as flat sheets (sew)   # how far up from the upper's lower edge, and down from its top, it is held
+FLAT = ('inner shaft', 'outer shaft', 'tongue', 'inner quarter', 'zip guard')      # the pieces cut and kept as flat sheets (sew)   # how far up from the upper's lower edge, and down from its top, it is held
 # The seams sewn: the top piece, the pieces beneath, the top piece's edge, the under pieces' edge. The foot's seams,
 # then each shaft's (last.SHAFTS); a seam whose pieces a boot does not have is passed over.
 SEAMS = (
@@ -66,6 +66,13 @@ SEAMS = (
     ('outer binding', ('outer shaft',), 'F', 'F'),
     ('inner binding', ('inner shaft',), 'top', None),
     ('outer binding', ('outer shaft',), 'top', None),
+    # the zip ankle boot (last.cut_zip): the front piece over the inner quarter down the back, the inner quarter over
+    # the front piece below the zip's stop, the two zip edges held across the closed zip (each stitched to its tape),
+    # and the zip guard under the inner quarter's zip edge
+    ('vamp and outer quarter', ('inner quarter',), 'B', 'B'),
+    ('inner quarter', ('vamp and outer quarter',), 'Y', 'Y'),
+    ('vamp and outer quarter', ('inner quarter',), 'Z', 'Z'),
+    ('inner quarter', ('zip guard',), 'Z', 'Z'),
 )
 REACH = 0.35                 # a point is sewn to the nearest point of the other piece, if that is this near (units)
 STITCH = {

@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -147,10 +147,12 @@ def shaft(P, leg, M, z_top, r, log=print):
     R = (R[None, :, :] - r['slope'] * dz[:, :, None]).max(1)
     # over the calf the lacing draws the leather in to the leg: the calf's width is not carried on up to the top
     # (which left the top a wide ring standing off the leg all round), the leg's own section is, nearly
-    w = (r['top_fit'] * _ss(M['calf_z'], z_top - 0.5, zs))[:, None]
+    # (an ankle boot's top stands under the calf: the fit is drawn in from a span under the top instead)
+    lo = min(M['calf_z'], z_top - 1.0)
+    w = (r['top_fit'] * _ss(lo, z_top - 0.5, zs))[:, None]
     R = R * (1.0 - w) + taut * w
     # (laced, the leather lies closer to the leg the higher it goes: the ease is let down over the calf to the top)
-    R = R + (r['ease'] * (1.0 - r['top_snug'] * _ss(M['calf_z'], z_top - 0.3, zs)))[:, None] \
+    R = R + (r['ease'] * (1.0 - r['top_snug'] * _ss(lo, z_top - 0.3, zs)))[:, None] \
         + r['flare'] * _ss(z_top - r['flare_span'], z_top, zs)[:, None] ** 2
     R = R + r['calf_swell'] * np.exp(-((zs - M['calf_z']) / r['calf_span']) ** 2)[:, None]
     girth = (R * (2 * np.pi / COLS)).sum(1)
@@ -478,9 +480,114 @@ def cut_lace(D, faces, f, r, weights, lift_on):
     return pieces
 
 
+# The zip ankle boot's numbers. The style is read off John's reference photo (a sock-fit suede ankle boot with an
+# inside zip; uploads 07a27853, measured with tools/refmeasure: /mnt/project-files/zip-ankle-boot/ref/
+# suede-zip-ankle.measure.json, the unit the foot's length L); the zip's sizes are a #3 nylon coil's.
+ZIP = {
+    'top_over_welt': 0.661,  # the topline at the back over the upper's foot, x L (photo: 0.825 L over the floor, less
+                             # the heel's 0.164 L at the back)
+    'top_back': 0.027,       # the topline stands this much higher at the back than at the front, x L (photo)
+    'zip_at': 0.494,         # the zip crosses the topline this share of the inner side's depth back from the front (photo)
+    'zip_stop': 0.020,       # and stops this far over the upper's foot on the inner side, x L (photo: the zip's end
+                             # stands just over the sole; the lasting allowance, 15 mm at the seat and waist (Pattern
+                             # Cutting Step-by-Step), is folded under below it)
+    'teeth_mm': 4.3,         # a #3 coil's teeth closed, across (UCAN Zippers, nylon coil: 4.3 mm)
+    'tape_mm': 22.7,         # and its tape, both sides (UCAN: 22.7 mm)
+    'clear_mm': 1.0,         # the leather's folded edge stands this far off the teeth either side. EXPERIMENTAL
+    'fold_mm': 5.0,          # the zip's edges and the topline turned under (Pattern Cutting Step-by-Step: a 5 mm
+                             # fold allowance)
+    'guard_mm': 20.0,        # the zip guard behind the zip: a strip this wide, set 0.4 of it toward the front.
+                             # EXPERIMENTAL (no source gives the gusset's width)
+}
+
+
+def cut_zip(D, faces, f, r, weights, lift_on):
+    """The zip ankle boot's upper (SHAFTS['zip'], which cuts the whole upper: the foot has no vamp or toe cap of its
+    own). As the reference is made: no seam on the outer side, one piece from the inner side's zip round the toe and
+    the front, down the outer side to a back seam; and the inner quarter from the back seam forward to the zip.
+
+      vamp and outer quarter   laps over the inner quarter down the back (B)
+      inner quarter            meets it down the inner side on a plumb line (the reference's zip is plumb):
+                               above the stop the two edges are folded (fold_mm) and sewn to the zip's tape, apart by
+                               the teeth and a little clearance (Z); below the stop the inner quarter laps over the
+                               front piece to the sole (Y)
+      zip guard                a strip behind the zip, sewn under the inner quarter's zip edge, so the foot does not
+                               ride on the teeth (Z, under)
+
+    Returns the pieces, each with 'zip' (the zip's line, its stop and top) for the zipper's build (sew.zipper)."""
+    tl, lap = r['leather'], r['lap']
+    side, front, zw, L = f['side'], f['front'], f['z_welt'], f['L']
+    mm = 1.0 / (10.0 * 165.0 / 63.0)                    # (a millimetre in units)
+    pts = D[np.unique(np.concatenate([np.asarray(fc) for fc in faces]))]
+    z_top = f['z_top']
+    topz = lambda A: z_top + ZIP['top_back'] * L * (1.0 - _ss(-0.6, 0.6, front(A)))  # noqa: E731
+    ring = pts[(np.abs(pts[:, 5] - z_top) < 0.2) & (side(pts) < 0)]
+    y_f, y_b = float(ring[:, 4].min()), float(ring[:, 4].max())
+    y_zip = y_f + ZIP['zip_at'] * (y_b - y_f)
+    z_stop = zw + ZIP['zip_stop'] * L
+    g = (0.5 * ZIP['teeth_mm'] + ZIP['clear_mm']) * mm
+    zipf = lambda A: A[:, 4] - y_zip                    # noqa: E731   (behind the zip's plane: above zero)
+    up = lambda A: _ss(z_stop - 0.05, z_stop + 0.05, A[:, 5])          # noqa: E731   (1 above the stop)
+    inner_side = lambda A: _ss(0.15, -0.15, side(A))    # noqa: E731   (1 on the inner side)
+    back = lambda A: front(A) <= 0                      # noqa: E731
+
+    def f_front(A):                                     # (the front piece: the outer side and a lap past the back's
+        f1 = side(A) + np.where(back(A), lap, 0.0)      # middle, or ahead of the zip on the inner side)
+        f2 = -zipf(A) - g * up(A)
+        return np.maximum(f1, f2)
+
+    def f_inner(A):                                     # (the inner quarter: the inner side, behind the zip)
+        return np.minimum(-side(A), zipf(A) - (g * up(A) - lap * (1.0 - up(A))))
+    pieces = []
+    cuts = (('vamp and outer quarter', f_front), ('inner quarter', f_inner))
+    for name, fld in cuts:
+        Dp, fp = _largest(*_compact(*fit.trim(*fit.trim(D, faces, fld), lambda A: topz(A) - A[:, 5])), name=name)
+        z = Dp[:, 5]
+        on = np.abs(fld(Dp)) < NEAR
+        hi = z > z_stop
+        bk = back(Dp)
+        if name == 'inner quarter':
+            e = {'B': on & bk & (np.abs(side(Dp)) < NEAR) & (zipf(Dp) > 2 * lap), 'Z': on & hi & (np.abs(zipf(Dp) - g) < NEAR),
+                 'Y': on & ~hi & (np.abs(zipf(Dp) + lap) < 2 * NEAR)}
+            d_y = np.where(z < z_stop + lap, zipf(Dp) + lap, FAR)
+            d_z = np.where(hi, np.abs(zipf(Dp) - g), FAR)
+            lift = 1.1 * tl * _ss(4.0 * lap, 0.0, d_y)
+            sd, su = np.minimum(d_y, d_z), z
+        else:
+            e = {'B': on & bk & (np.abs(side(Dp) + lap) < NEAR) & (inner_side(Dp) > 0.5),
+                 'Z': on & hi & (np.abs(zipf(Dp) + g) < NEAR), 'Y': on & ~hi & (np.abs(zipf(Dp)) < 2 * NEAR)}
+            d_b = np.where(bk, side(Dp) + lap, FAR)
+            d_z = np.where(hi & (side(Dp) < 0), np.abs(zipf(Dp) + g), FAR)
+            lift = 1.1 * tl * _ss(4.0 * lap, 0.0, d_b)
+            sd, su = np.minimum(d_b, d_z), z
+        e['E'] = z < zw + NEAR
+        e['top'] = z > topz(Dp) - NEAR
+        pieces.append(dict(name=name, V=lift_on(Dp, lift), F=fp, up=(0, 0, 1), lift=lift, edges=e, sd=sd, su=su,
+                           W=Dp[:, 9:], lasted=(name != 'inner quarter')))
+    # the zip guard: behind the zip from the stop to just under the topline, sewn under the inner quarter's zip edge
+    gw = ZIP['guard_mm'] * mm
+    f_g = lambda A: np.minimum(np.minimum(0.5 * gw - np.abs(zipf(A) - 0.1 * gw), -side(A)),  # noqa: E731
+                               np.minimum(A[:, 5] - z_stop, topz(A) - ZIP['fold_mm'] * mm - A[:, 5]))
+    Dg, fg = _largest(*_compact(*fit.trim(D, faces, f_g)), name='zip guard')
+    lg = np.full(len(Dg), -1.1 * tl)
+    pieces.append(dict(name='zip guard', V=lift_on(Dg, lg), F=fg, up=(0, 0, 1), lift=lg,
+                       edges={'Z': np.abs(zipf(Dg) - g) < 0.6 * GRAIN}, sd=np.full(len(Dg), FAR), su=Dg[:, 5],
+                       W=Dg[:, 9:]))
+    for p in pieces:
+        p['zip'] = dict(y=y_zip, stop=z_stop, top=z_top, gap=g, mm=mm)
+    print('boot: the zip on the inner side at y %.2f (%.2f of the topline\'s depth), from the stop at z %.2f (%.2f over '
+          'the welt) to the top at %.2f: %.1f cm long; the edges %.1f mm apart'
+          % (y_zip, ZIP['zip_at'], z_stop, z_stop - zw, z_top, (z_top - z_stop) * 165 / 63, 2 * g / mm))
+    return pieces
+
+
 # The shafts, by name: each cuts everything of the upper behind the vamp's seam (the foot, which every shaft shares,
 # is the toe cap, the vamp and the sole), with the numbers its last is drafted with over the foot's.
-SHAFTS = {'lace': dict(cut=cut_lace, ratios={})}
+SHAFTS = {'lace': dict(cut=cut_lace, ratios={}),
+          # (the zip ankle boot: sock-fit, its own last over the leg: little ease and no laced ankle girth to pass the
+          # heel, since the zip opens; the ease is heelboot's 0.015 H, 'ankle_girth' checked by zipboot.entry)
+          'zip': dict(cut=cut_zip, whole=True, ratios={'ease': 0.012, 'ankle_girth': 1.0, 'calf_swell': 0.0,
+                                                       'top_fit': 1.0, 'top_snug': 0.5})}
 
 
 def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot', ratios=RATIOS, shaft_name='lace',
@@ -497,9 +604,12 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     tl = r['leather']
     col = {n: i for i, n in enumerate(names)}
     arm = sum(W[:, col[n]] for n in names if n.split('.')[0] in draft.ARM_GROUPS)
-    z_top = M['knee_z'] - r['top_below_knee']
-    M['boot_top'] = z_top
     L = M['heel_y'] - M['toe_y']
+    z_top = M['knee_z'] - r['top_below_knee']
+    if r.get('top_over_welt'):                         # (an ankle boot: its top this share of the foot's length over the welt)
+        z_foot0 = float(P[(arm < 0.02), 2].min())
+        z_top = z_foot0 - 0.35 * r['under'] + r['top_over_welt'] * L
+    M['boot_top'] = z_top
     y_ball = M['toe_y'] + 0.30 * L                     # the ball of the foot: 70 percent of the way from the heel
 
     z_cut = z_top + r['tongue_rise']                   # (the last carries on above the top, for the tongue)
@@ -629,21 +739,24 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         def toe_seam(A):                                                    # (ahead of the seam: above zero)
             return y_cap + k_cap * (A[:, 3] - fx) ** 2 - A[:, 4]
         tongue_w = 0.5 * r['lace_gap'] + r['tongue']
-        # the vamp: ahead of its seam and behind the toe cap's, under everything
-        Dv, fv = _compact(*fit.trim(*fit.trim(D0, mine, vamp_f), lambda A: -toe_seam(A)))
-        add(Dv[:, 3:6], fv, np.full(len(Dv), FAR), np.zeros(len(Dv)), Dv[:, 9:9 + nw])
-        on = np.abs(vamp_f(Dv)) < NEAR
-        throat = np.abs(side_f(Dv)) < tongue_w
-        pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), lift=np.zeros(len(Dv)), lasted=True, edges={
-            'A inner': on & ~throat & (side_f(Dv) < 0), 'A outer': on & ~throat & (side_f(Dv) > 0), 'C': _main_run(on & throat, fv),
-            'E': np.abs(Dv[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dv)) < NEAR}))
-        # the toe cap: ahead of its seam, its back edge lapped over the vamp
-        Dc, fc = _largest(*_compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap'])), name='toe cap')
-        add(lift_on(Dc, 1.1 * tl), fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
-        pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), lift=np.full(len(Dc), 1.1 * tl), lasted=True,
-                           edges={'E': np.abs(Dc[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dc) + r['lap']) < NEAR}))
+        whole = SHAFTS[shaft_name].get('whole', False)
+        if not whole:                                                       # (else the shaft cuts the whole upper)
+            # the vamp: ahead of its seam and behind the toe cap's, under everything
+            Dv, fv = _compact(*fit.trim(*fit.trim(D0, mine, vamp_f), lambda A: -toe_seam(A)))
+            add(Dv[:, 3:6], fv, np.full(len(Dv), FAR), np.zeros(len(Dv)), Dv[:, 9:9 + nw])
+            on = np.abs(vamp_f(Dv)) < NEAR
+            throat = np.abs(side_f(Dv)) < tongue_w
+            pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), lift=np.zeros(len(Dv)), lasted=True, edges={
+                'A inner': on & ~throat & (side_f(Dv) < 0), 'A outer': on & ~throat & (side_f(Dv) > 0), 'C': _main_run(on & throat, fv),
+                'E': np.abs(Dv[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dv)) < NEAR}))
+            # the toe cap: ahead of its seam, its back edge lapped over the vamp
+            Dc, fc = _largest(*_compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap'])), name='toe cap')
+            add(lift_on(Dc, 1.1 * tl), fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
+            pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), lift=np.full(len(Dc), 1.1 * tl), lasted=True,
+                               edges={'E': np.abs(Dc[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dc) + r['lap']) < NEAR}))
         # the shaft: everything behind the vamp's seam
-        f = dict(side=side_f, front=front_f, vamp=vamp_f, kc=kc, z_welt=z_welt, z_top=z_top)
+        f = dict(side=side_f, front=front_f, vamp=vamp_f, kc=kc, z_welt=z_welt, z_top=z_top, L=L, T=T, M=M,
+                 toe_y=M['toe_y'], heel_y=M['heel_y'])
         for p in SHAFTS[shaft_name]['cut'](D0, mine, f, r, lambda G: _weights(Pl, Wl, G), lift_on):
             add(p.pop('V'), p['F'], p.pop('sd'), p.pop('su'), p.pop('W')[:, :nw])
             p['V'] = V[-1]
