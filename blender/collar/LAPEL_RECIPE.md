@@ -77,9 +77,44 @@ under 0.05, no fold left at any button.
 - Three layers of thick cloth meet where the lapels cross. Decide which lies on what; do not let a ray decide.
 - Fixes that free the fitted front must put it back: a tenth of a millimetre of movement there shows as a crinkle.
 
+## Measuring a reference photo (do this before cutting)
+
+John: "get better at ground truth measuring ratios from photos like lapel to shoulder or lapel to neck."
+An outline guessed by eye came out half the size of the habit's. Measure instead:
+
+1. Crop the photo round the lapel, brighten it until the dark cloth shows its edges, enlarge it 2 to 4 times and
+   draw a labelled pixel grid over it. Read points off the grid, in the photo's own pixels.
+2. Use the side of the garment that faces the camera. The far side of a turned figure is foreshortened.
+3. Read these points: the break B (bottom of the V), the fold's top T (where the roll line meets the neck or the
+   collar), the lapel's point P, the shoulder point S (top of the sleeve seam), the waist W, the top button.
+4. Take two yardsticks from the same photo: the half shoulder (B to S, across) for widths, and break to waist for
+   heights. Never mix a photo's pixels with the model's units; only ratios carry over.
+5. Turn the points into ratios, then into the recipe's numbers:
+
+| Ratio | Read as | Sets |
+|---|---|---|
+| `top_x` | T across from the middle / half shoulder | `neck_x` = ratio x `x_sh` |
+| `roll_rise` | T above B / neck pit to waist | `foot` = T's height - ratio x (neck pit to waist) |
+| `top_edge` | T to P / T to B | the outline's width, as a share of the fold |
+| `point_t` | how far down the fold P sits | where the outline's corner goes |
+| `reach` | P across from B / half shoulder | check only: it should come out right |
+| button step | spacing / neck pit to waist | `button_step` |
+
+Every build prints the same ratios for the model (`foldfront: front N ratios: ...`). Compare, adjust, rebuild.
+
 ## Test: the classical lapel
 
-`classical_lapel` is the same recipe with two numbers changed: the break 3.45 over the bust line and the outline
-`[[0.04, 0], [0.35, 0.45], [1.0, 0]]`. Result: small pointed lapels 4.2 cm wide, 12 buttons from 1.4 cm under the
-break to the hem, strain mean 4.5% and 6.8%, pull on the top button 0.02, no fold left at any button. The same high
-break shrivelled the lapel before this recipe existed. The habit's separate collar is not part of this recipe.
+`classical_lapel` is the same recipe cut to the habit's measured ratios:
+
+| Ratio | Habit photo | Model |
+|---|---|---|
+| Fold's top, out from the middle / half shoulder | 0.47 | 0.42 |
+| Fold's rise / neck pit to waist | 0.21 | 0.21 |
+| Fold's length / neck pit to waist | 0.43 | 0.39 |
+| Lapel's top edge / fold's length | 0.48 | 0.48 |
+| Lapel point's reach / half shoulder | 0.62 | 0.63 |
+
+Both lapels are pressed alike. 12 buttons run from under the break to the hem, strain is mean 6.6% on both fronts,
+and no fold is left at any button. Two things do not carry over: the habit's break sits at the neck pit because its
+lapel joins a separate standing collar (the model's is 0.12 lower, on a collarless neckline), and the collar itself
+is not part of this recipe.

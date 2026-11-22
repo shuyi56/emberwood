@@ -44,9 +44,13 @@ RECIPES = {
                          relax=dict(iters=1500, anchor=0.0005, comp=0.7, bend=0.25, button_pin=True, keep_front=True),
                          ease_chest=True, ease_rounds=150, sheet=6, fair=40, lie=0.02, thick_out=1.0),
 }
-# the same recipe on the classical lapel of the 1890s riding habit: the break high on the chest (3.45 over the bust
-# line), a small pointed lapel, the button row running from just under it to the hem
-RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], foot_over_bust=3.45, outline=[[0.04, 0.0], [0.35, 0.45], [1.0, 0.0]])
+# the same recipe on the classical lapel of the 1890s riding habit, cut to ratios measured off the photo on a pixel grid
+# (her left side, which faces the camera; widths against the half shoulder, heights against neck pit to waist):
+#   the fold's top 0.47 of the half shoulder out from the middle (here 0.42), the fold's rise 0.21 (0.21), its length
+#   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
+#   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
+RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
+                                  press={'left': 0.85, 'right': 0.85})
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
@@ -185,7 +189,7 @@ if outline:
     for si, s in enumerate(sides):
         cv, ct, cy = rec[si]; Lc = s['ln']
         Dfun = lambda t_, Lc=Lc: np.interp(t_, OT[:, 0], OT[:, 1] * Lc, left=0.0, right=0.0)
-        pts = [(OT[1, 0], OT[1, 1] * Lc)]
+        pts = [(OT[k_, 0], OT[k_, 1] * Lc) for k_ in range(1, len(OT) - 1)]      # (every corner of the outline is a point of the mesh)
         for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
             D = float(Dfun(t_)); n_ = int(np.ceil(D / hm))
             pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
@@ -478,6 +482,16 @@ for s in (und, top):                                  # the under front first: t
           % (s['layer'], len(st), 100 * np.abs(st).mean(), 100 * np.percentile(np.abs(st), 95), 100 * st.min(), 100 * st.max(),
              100 * np.abs(st[cusp]).mean(), 100 * st[cusp].min(), 100 * st[cusp].max()))
     s['lapel_pts'] = W[ii].copy(); s['lapel_t'] = t.copy()
+    # the lapel against the body, as ratios (John: "get better at ground truth measuring ratios from photos like lapel
+    # to shoulder or lapel to neck"): the same numbers are read off a reference photo on a pixel grid and compared.
+    # Widths are taken against the half shoulder (middle to shoulder point), heights against neck pit to waist.
+    if 'C' in s:
+        Hs, NW = M['x_sh'], M['z_neck_front'] - M['z_waist']; kP = int(np.argmax(d)); Pp = W[ii[kP]]; Nn, Bb = s['Cd'][0], s['Cd'][-1]
+        s['ratios'] = dict(roll_run=abs(Nn[0] - Bb[0]) / Hs, roll_rise=(Nn[1] - Bb[1]) / NW, roll_len=float(s['ln']) / NW,
+                           top_edge=float(d.max() / s['ln']), point_t=float(t[kP]), reach=abs(Pp[0] - Bb[0]) / Hs,
+                           point_drop=(Nn[1] - Pp[2]) / NW, break_under_pit=(M['z_neck_front'] - Bb[1]) / NW,
+                           top_x=abs(Nn[0]) / Hs)
+        print('foldfront: front %d ratios: ' % s['layer'] + ', '.join('%s %.2f' % kv for kv in s['ratios'].items()))
     print('foldfront: front %d: %d of its own points turned back on the roll line (%d on the line); the lapel %.1f cm wide, the roll %.1f cm high'
           % (s['layer'], len(ii), len(ci), 2.62 * d.max(), 2.62 * 2 * rr.max()))
 for v in bm.verts: v.co = tuple(W[v.index] @ inv[:3, :3].T + inv[:3, 3])
