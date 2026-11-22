@@ -30,6 +30,10 @@ const ROOT_FADE = 0.05;                           // STYLE: the cut-out fades in
 const TEX_V_HH = 1.6;                             // the creator's hair texture runs this many head heights down the hair
 const HAIR_SHADE = 0.8;                           // the creator's own (HAIR_SHADE): its hair is drawn at 0.8 of its paint
 const CENTRE = [0, 0.56 * HH, -0.06 * HH];        // the skull's centre in the page's units (scalp_field.CENTRE)
+const HAIR_MM = 0.07;                             // SOURCED: a scalp hair is 50-100 um across (Robbins, Chemical and Physical
+                                                  // Behavior of Human Hair, ch. 9); the middle of that range
+const HEAD_MM = 219;                              // one head height in mm (scalp_field.HH_MM)
+const PX_WORLD = { value: 0.002 };                // one pixel's width at unit depth: set each frame from the camera
 function cutTexture() {
   const W = 256, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
@@ -116,29 +120,60 @@ function buildStyle(asset, tone, creatorMat) {
   cg.setAttribute('position', new THREE.BufferAttribute(toPage(new Float32Array(bytes(asset.cap.pos)), 1), 3));
   cg.setIndex(new THREE.BufferAttribute(new Uint32Array(bytes(asset.cap.idx)), 1)); cg.computeVertexNormals();
   parts.cap = new THREE.Mesh(cg, capMat); group.add(parts.cap);
-  // the strands: line segments, each strand a little lighter or darker than the next and lighter toward its tip
+  // The strands: each drawn child stands for `hairs_per_strand` real hairs (about 9.6), so it is a ribbon that wide:
+  // that many hairs of HAIR_MM side by side, turned to face the camera, and never under a pixel. (As one-pixel lines
+  // they covered a ninth of what the hair covers, and seen close the skin and the ear showed through.) Lit like the
+  // cards, with normals out from the head; a little lighter or darker strand to strand, dark at the root.
   const S = asset.strands, cnt = new Uint16Array(bytes(S.counts)), raw = new Int16Array(bytes(S.pos));
   const pts = new Float32Array(raw.length); for (let i = 0; i < raw.length; i++) pts[i] = raw[i] * S.q;
-  const P = toPage(pts, 1);
-  let nseg = 0; for (const c of cnt) nseg += c - 1;
-  const pos = new Float32Array(nseg * 6), vc = new Float32Array(nseg * 6);
-  let o = 0, k = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const P = toPage(pts, 1), np = P.length / 3;
+  const wHair = (S.hairs_per_strand || 1) * HAIR_MM * HH / HEAD_MM;
+  const pos = new Float32Array(np * 6), tan = new Float32Array(np * 6), nrm = new Float32Array(np * 6);
+  const side = new Float32Array(np * 2), wid = new Float32Array(np * 2), vc = new Float32Array(np * 6), idx = [];
+  let k = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (const c of cnt) {
-    const b = 0.75 + 0.5 * rnd();
-    for (let j = 0; j < c - 1; j++) {
-      for (const jj of [j, j + 1]) {
-        const t = jj / (c - 1), s = b * (t < 0.35 ? ROOT_DARK + (1 - ROOT_DARK) * t / 0.35 : 1 + (TIP_LIGHT - 1) * (t - 0.35) / 0.65);
-        pos.set(P.subarray((k + jj) * 3, (k + jj) * 3 + 3), o);
-        vc[o] = col.r * s; vc[o + 1] = col.g * s; vc[o + 2] = col.b * s; o += 3;
+    const b = 0.8 + 0.4 * rnd();
+    for (let j = 0; j < c; j++) {
+      const q = k + j, a0 = k + Math.max(0, j - 1), a1 = k + Math.min(c - 1, j + 1), t = j / (c - 1);
+      let tx = P[3 * a1] - P[3 * a0], ty = P[3 * a1 + 1] - P[3 * a0 + 1], tz = P[3 * a1 + 2] - P[3 * a0 + 2];
+      const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      const ox = P[3 * q] - CENTRE[0], oy = P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = P[3 * q + 2] - CENTRE[2];
+      const ol = Math.hypot(ox, oy, oz) || 1;
+      const shade = b * (t < 0.35 ? ROOT_DARK + (1 - ROOT_DARK) * t / 0.35 : 1 + (TIP_LIGHT - 1) * (t - 0.35) / 0.65);
+      for (let e = 0; e < 2; e++) {
+        const v = 2 * q + e;
+        pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
+        nrm[3 * v] = ox / ol; nrm[3 * v + 1] = oy / ol; nrm[3 * v + 2] = oz / ol;
+        side[v] = e ? 1 : -1; wid[v] = wHair * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
+        vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade;
       }
+      if (j < c - 1) idx.push(2 * q, 2 * q + 1, 2 * q + 3, 2 * q, 2 * q + 3, 2 * q + 2);
     }
     k += c;
   }
   const sg = new THREE.BufferGeometry();
-  sg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); sg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
-  parts.strands = new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75 }));
+  sg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); sg.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  sg.setAttribute('strandT', new THREE.BufferAttribute(tan, 3)); sg.setAttribute('strandSide', new THREE.BufferAttribute(side, 1));
+  sg.setAttribute('strandW', new THREE.BufferAttribute(wid, 1)); sg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
+  sg.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
+  sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
+  const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: 0.8,
+    metalness: 0, envMapIntensity: 0.25 });
+  strandMat.onBeforeCompile = sh => {
+    sh.uniforms.pxWorld = PX_WORLD;
+    sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\n' +
+      sh.vertexShader.replace('#include <project_vertex>', [
+        'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
+        'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
+        'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
+        'mvPosition.xyz += sd * ( 0.5 * max( strandW, -mvPosition.z * pxWorld ) * strandSide );',
+        'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );');
+  };
+  parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
   group.add(parts.strands);
-  return { group, parts, cardMat, capMat, tone };
+  const segs = idx.length / 6;
+  return { group, parts, cardMat, capMat, strandMat, segs, tone };
 }
 
 function start(fc) {
@@ -158,8 +193,11 @@ function start(fc) {
   const isVeil = mat => mat && mat.isMeshBasicMaterial && mat.vertexColors && mat.blending === THREE.CustomBlending;
   const isCreatorHair = m => m.isMesh && (m === fc.hairMesh || m.material === fc.hairCapMat || isVeil(m.material) ||
     (m.material && fc.hairCapMat.map && m.material.map === fc.hairCapMat.map));
+  const asset_n = el => (el._n = el._n || JSON.parse(el.textContent).strands.n).toLocaleString();
   function frame() {
     place();
+    const el = fc.renderer.domElement;
+    PX_WORLD.value = 2 * Math.tan(fc.camera.fov * Math.PI / 360) / Math.max(1, el.clientHeight);
     const style = fc.P.hairStyle, have = !!assets[style];
     [...sel.options].forEach(o => { o.disabled = o.value !== 'creator' && !have; });
     if (!have && mode !== 'creator') { mode = 'creator'; sel.value = 'creator'; }
@@ -173,12 +211,12 @@ function start(fc) {
       let b = built[style];
       if (!b) { b = built[style] = buildStyle(JSON.parse(assets[style].textContent), fc.P.hairTone, fc.hairCapMat); scene.add(b.group);
         note.textContent = ''; }
-      if (b.tone !== fc.P.hairTone) { const c = new THREE.Color(fc.P.hairTone); b.capMat.color.copy(c).multiplyScalar(SCALP_SHADE); b.tone = fc.P.hairTone; changed = true; }
+      if (b.tone !== fc.P.hairTone) { const c = new THREE.Color(fc.P.hairTone); b.capMat.color.copy(c).multiplyScalar(SCALP_SHADE); b.strandMat.color.copy(c); b.tone = fc.P.hairTone; changed = true; }
       show(b.group, true);
       show(b.parts.lod0, mode === 'lod0'); show(b.parts.lod1, mode === 'lod1'); show(b.parts.lod2, mode === 'lod2');
       show(b.parts.cap, true); show(b.parts.strands, mode === 'strands');
       if (mode in LOD_INDEX) { const a = JSON.parse(assets[style].dataset.summary || '{}'); note.textContent = a[mode] || ''; }
-      else note.textContent = (b.parts.strands.geometry.attributes.position.count / 2 | 0).toLocaleString() + ' segments';
+      else note.textContent = b.segs.toLocaleString() + ' segments, ' + asset_n(assets[style]) + ' strands';
     }
     if (changed) fc.controls.dispatchEvent({ type: 'change' });      // (the page draws on demand: ask for a frame)
     requestAnimationFrame(frame);
