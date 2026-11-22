@@ -25,8 +25,8 @@ import boot  # noqa: E402
 import female  # noqa: E402
 import zipper  # noqa: E402
 
-STYLE = 'block'              # the heel's style (heelboot.STYLES)
-HEEL_H = None                # cm, the heel's height at the seat point (None: the optimizer's)
+STYLE = 'waisted'            # the heel's style (heelboot.STYLES): John's pick
+HEEL_H = 3.0                 # cm, the heel's height at the seat point (John's pick; None: the optimizer's)
 DESIGN = False               # the colour-coded draft
 ENTRY_CHECK = True
 DRAPE = 64                   # passes drawing the last taut over the foot and leg (last.build_boots: a sock fit)

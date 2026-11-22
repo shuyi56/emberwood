@@ -586,8 +586,11 @@ def cut_zip(D, faces, f, r, weights, lift_on):
 SHAFTS = {'lace': dict(cut=cut_lace, ratios={}),
           # (the zip ankle boot: sock-fit, its own last over the leg: little ease and no laced ankle girth to pass the
           # heel, since the zip opens; the ease is heelboot's 0.015 H, 'ankle_girth' checked by zipboot.entry)
+          # (and 'slope' 1.0: a pull-on or laced shaft must stand off the leg as far up as the heel's bulge, closing in
+          # at the 0.2 slope, or the heel would not pass; the zip opens past the heel, so the shaft closes onto the
+          # leg within about its own height over the heel counter)
           'zip': dict(cut=cut_zip, whole=True, ratios={'ease': 0.012, 'ankle_girth': 1.0, 'calf_swell': 0.0,
-                                                       'top_fit': 1.0, 'top_snug': 0.5})}
+                                                       'top_fit': 1.0, 'top_snug': 0.5, 'slope': 1.0})}
 
 
 def _hull2(q):
@@ -693,8 +696,14 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             rs = dict(r, **{k: v * H if k not in PLAIN else v for k, v in more.items()})
             zs, C, Rf = tables[sgn]
             _, _, Rs = shaft(P, leg, M, z_top, rs, log=lambda *a: None)
-            w = _ss(M['ankle_z'] + r['join'] + r['lap'], M['ankle_z'] + r['join'] + 9.0 * r['lap'], zs)[:, None]
+            hi = min(M['ankle_z'] + r['join'] + 9.0 * r['lap'], z_top - 0.2)   # (an ankle boot: fully its own by the top)
+            lo_ = min(M['ankle_z'] + r['join'] + r['lap'], hi - 0.8)
+            w = _ss(lo_, hi, zs)[:, None]
             shafts[sgn] = (zs, C, Rf * (1 - w) + Rs * w)
+            if sgn < 0:
+                g_ = (shafts[sgn][2] * (2 * np.pi / COLS)).sum(1) * 165.0 / 63.0
+                log('boot: the shaft as cut (its own last from z %.2f, wholly by %.2f): %s' % (lo_, hi, ', '.join(
+                    '%.0f cm at z %.2f' % (g_[i], zs[i]) for i in range(0, len(zs), max(1, len(zs) // 6)))))
         else:
             shafts[sgn] = tables[sgn]
         mine = X0[:, 0] * sgn > 0
