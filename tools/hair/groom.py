@@ -1277,6 +1277,83 @@ def comb_pass(X, group, col, cap=None, passes=COMB_PASSES, pull=COMB_PULL):
     return X
 
 
+FRONT_X = 0.22         # HH: the side hair (outside the face's width); the bangs in front of the face are left alone
+FRONT_TOP = 0.55       # HH: below the temple the side hair's front edge is held to the creator's
+FRONT_BIN = 0.05       # HH: the heights the front edges are compared in
+FRONT_PCT = 5          # the front edge: this percentile of the hair's depth (y) at that height
+FRONT_WIN = 2          # nodes: the push back is smoothed along the strand over this window
+FRONT_SLOPE = 1.0      # HH back per HH down: the steepest the held edge turns back below the creator's front ends
+
+
+def creator_front(X, style_path, col=None, keep=None):
+    """The side hair's front edge held to the creator's: below the temple no side hair lies further forward (less y)
+    than the creator's side hair at that height, left and right. The hair is swung back round the body's axis at its
+    own distance from it (round the jaw and over the shoulder, not into them: moved straight back it went into the
+    body, and the body pushed it forward again), by the angle it reaches past the edge, smoothed along the strand (a
+    max then a mean over FRONT_WIN nodes) and eased in from FRONT_TOP. Below the creator's front ends the edge turns
+    back no faster than FRONT_SLOPE."""
+    import gzip
+    import torch
+    d = json.load(gzip.open(style_path))
+    C = np.concatenate([np.array(st['p'], float).reshape(-1, 3) for st in d['strands']])
+    zb = np.arange(FRONT_TOP + FRONT_BIN, -1.6, -FRONT_BIN)
+    X = X.copy()
+    G, S1, _ = X.shape
+    ax, ay = SF.AXIS
+    th = np.arctan2(X[..., 0] - ax, -(X[..., 1] - ay))
+    r = np.hypot(X[..., 0] - ax, X[..., 1] - ay)
+    turn = np.zeros((G, S1))
+    for sd in (-1.0, 1.0):
+        edge = np.full(len(zb), np.nan)
+        side = C[np.sign(C[:, 0]) == sd]
+        for i, z in enumerate(zb):
+            m = (np.abs(side[:, 0]) > FRONT_X) & (np.abs(side[:, 2] - z) < FRONT_BIN)
+            if m.sum() > 10:
+                edge[i] = np.percentile(side[m, 1], FRONT_PCT)
+        ok = ~np.isnan(edge)
+        if not ok.any():
+            continue
+        last = np.where(ok)[0].max()
+        edge[last:] = edge[last]
+        edge = np.interp(np.arange(len(zb)), np.where(~np.isnan(edge))[0], edge[~np.isnan(edge)])
+        edge = np.convolve(np.pad(edge, 2, mode='edge'), np.ones(5) / 5, mode='valid')
+        # (going down, the edge moves back no faster than FRONT_SLOPE: the creator's front locks end at the chin and its
+        # edge then jumps behind the shoulder, and a strand held to that jump was swung back off the jaw)
+        for i in range(1, len(edge)):
+            edge[i] = min(edge[i], edge[i - 1] + FRONT_SLOPE * FRONT_BIN)
+        e = np.interp(-np.nan_to_num(X[..., 2]), -zb, edge)
+        on = (np.sign(X[..., 0]) == sd) & (np.abs(X[..., 0]) > FRONT_X) & ~np.isnan(X[..., 0])
+        ease = np.clip((FRONT_TOP - X[..., 2]) / 0.05, 0, 1)
+        want = np.arccos(np.clip((ay - e) / np.maximum(r, 1e-9), -1, 1))         # |th| at which y reaches the edge
+        need = np.nan_to_num(np.maximum(want - np.abs(th), 0.0) * ease)
+        turn = np.where(on, np.maximum(turn, need), turn)
+    W = FRONT_WIN
+    pad = np.pad(turn, ((0, 0), (W, W)), mode='edge')
+    mx = np.max(np.stack([pad[:, i:i + S1] for i in range(2 * W + 1)]), 0)
+    pad = np.pad(mx, ((0, 0), (W, W)), mode='edge')
+    turn = np.mean(np.stack([pad[:, i:i + S1] for i in range(2 * W + 1)]), 0)
+    turn[:, 0] = 0.0
+    if keep is not None:
+        turn[keep] = 0.0
+    th2 = th + np.sign(th) * turn
+    X[..., 0] = np.where(np.isnan(X[..., 0]), np.nan, ax + r * np.sin(th2))
+    X[..., 1] = np.where(np.isnan(X[..., 1]), np.nan, ay - r * np.cos(th2))
+    if col is not None:
+        g, k = np.where(~np.isnan(X[..., 0]) & (turn > 0))
+        if len(g):
+            P = torch.tensor(X[g, k], dtype=torch.float64)
+            for fn in (col.head_depth, col.body_depth):
+                for _ in range(4):
+                    P.requires_grad_(True)
+                    dep = fn(P)
+                    gr_, = torch.autograd.grad(dep.clamp(min=0).sum(), P)
+                    with torch.no_grad():
+                        n = gr_ / gr_.norm(dim=1, keepdim=True).clamp(min=1e-12)
+                        P = P - n * (dep + 1.0 / SF.HH_MM).clamp(min=0)[:, None]
+            X[g, k] = P.detach().numpy()
+    return X
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -1510,6 +1587,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # the comb: strays back into their lock, crossing neighbours laid parallel, roots along the scalp
         lk = np.where(bang, np.where(roots[:, 0] < SF.AXIS[0], 3, 4), lock)      # (the bangs combed among themselves)
         X2 = comb_pass(X2, lk * 1000 + clump, col, cap)
+        # the front of the side hair held back to the creator's (combed forward over the shoulders, it hid the jaw)
+        X2 = creator_front(X2, trace, col, keep=bang)
+        X2 = comb_pass(X2, lk * 1000 + clump, col, cap, passes=2)        # (a light comb over the swung strands)
         X2 = relax_kinks(X2, col, cap, keep=bang)
     if trace and not wavy:
         # the back cut on the creator's own length line where it is shorter: the creator's back ends at z -1.2, the
