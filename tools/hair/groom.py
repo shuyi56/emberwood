@@ -660,6 +660,45 @@ def layer_over(X, top, seg_hh, under=None):
     return X
 
 
+FALL_Z = 0.3                       # HH: below the jaw the face-framing hair only falls
+FALL_WIN = 9                       # nodes (9 cm): the depth (y) of the fall is smoothed over this window
+
+
+def smooth_fall(X, sel, body=None, margin_hh=3.0 / SF.HH_MM):
+    """The face-framing hair below the jaw falls; it does not swing back in. Combed down the cheek to the jaw and let
+    fall from there, the Ranger's framing guides bowed in toward the neck below the chin and out again (a third of
+    them 20-37 degrees off the fall over their last 5 cm), which from below read as rows of hooks inside the hair.
+    Below FALL_Z each selected guide keeps the widest |x| it has reached (it never comes back in toward the neck)
+    and its depth is smoothed over FALL_WIN nodes; nodes then in the body are set back out from the axis."""
+    X = X.copy()
+    for g in np.where(sel)[0]:
+        n = int((~np.isnan(X[g, :, 0])).sum())
+        P = X[g, :n]
+        low = np.where(P[:, 2] < FALL_Z)[0]
+        if len(low) < 3:
+            continue
+        a = low[0]
+        sx = np.sign(P[a, 0] - SF.AXIS[0]) or 1.0
+        ax = sx * (P[a:, 0] - SF.AXIS[0])
+        P[a:, 0] = SF.AXIS[0] + sx * np.maximum.accumulate(ax)
+        h = FALL_WIN // 2
+        y = np.pad(P[max(0, a - h):, 1], (0, h), mode='edge')
+        ys = np.convolve(np.pad(y, (h, 0), mode='edge'), np.ones(FALL_WIN) / FALL_WIN, mode='valid')
+        P[a:, 1] = ys[-(n - a) - h:len(ys) - h] if h else ys[-(n - a):]
+        if body is not None:
+            for _ in range(4):
+                dep = body_depth_np(body, P[a:]) + margin_hh
+                bad = dep > 0
+                if not bad.any():
+                    break
+                q = P[a:][bad, :2] - np.asarray(SF.AXIS)
+                r = np.linalg.norm(q, axis=1)
+                Q = P[a:]
+                Q[bad, :2] = np.asarray(SF.AXIS) + q * ((r + dep[bad]) / np.maximum(r, 1e-9))[:, None]
+                P[a:] = Q
+    return X
+
+
 FLARE_TOP = 0.7                    # HH: below here the sides are fitted to the creator's outline
 FLARE_IN = 0.25                    # HH: the hair's inner side at the jaw and neck (the neck's half-width is about
                                    # 0.2): the fit widens or narrows the hair beyond this, so the hair next to the
@@ -1174,6 +1213,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # layered as cut: the face-framing hair over the hair at the sides, the bangs over both
         X2 = layer_over(X2, frame, seg_hh, under=~bang & ~frame)
         X2 = layer_over(X2, bang, seg_hh)
+    if frame.any() and not wavy:
+        # below the jaw the face-framing hair falls, without swinging back in toward the neck
+        X2 = smooth_fall(X2, frame, body)
     if trace and not wavy:
         # the Ranger's sides flow outward below the cheek, as the creator's do
         X2 = creator_flare(X2, trace, surf)
