@@ -277,3 +277,16 @@ off the neck (`hug`, now on by default). Two changes made the drawn-in ring lie 
 
 The roll round the neck is 36.5 cm (was 38.3) and sits 1.1 cm off the neck on average (was 1.5). There are 41 sharp
 folds, against 34 without the draw-in and 75 before the two changes. None of them shows in the renders.
+
+### The lower collar, smoothed
+
+John: "smooth the creases from the lower collar only." The drawn-in ring is off again (`hug` unset). Up close, the
+lower collar had three creases, each with its own cause:
+
+| Crease | Cause | Fix |
+|---|---|---|
+| a step where the collar's top meets the seam to the lapel, and a nick in the fall's top edge there | the roll edge was fixed over the stand, and the seam at the lapel's edge; the two did not meet | the roll edge is evened out along itself, fully at its ends (`roll_free` 0.45) and lightly round the back (`roll_even` 0.15) |
+| a crease across the fall at each side of the neck | the bodice's own neckline edge, seen edge-on from F, propped the fall up from the side where no ray finds it (the fall was 0.13 off it, inside its 0.21 clearance) | a last polish (`polish` 40 rounds) evens the fall and keeps it off everything by its nearest point too, so it rounds over the edge |
+| the same crease, sharpened where the stand dies away | the stand fell off over 5.8 cm | `stand_run` 3.2: it dies away over 8.4 cm |
+
+Sharp folds (neighbouring faces more than 60 degrees apart) went from 34 to 0.

@@ -38,7 +38,7 @@ notch_at = opt.get('notch_at', 0.5)         # the notch on the lapel's top edge:
 point_len = opt.get('point_len', 0.7)       # the collar's point (G to C) this share of the lapel's (G to P)
 stand = opt.get('stand', 0.6)               # the stand at the back (1.6 cm; it was 2.5, John: "the collar is too long")
 fall_over = opt.get('fall_over', 0.45)      # the fall reaches this far past the stand at the back (it covers the seam)
-stand_run = opt.get('stand_run', 2.2)       # the stand dies away over this length toward the gorge
+stand_run = opt.get('stand_run', 3.2)       # the stand dies away over this length toward the gorge (2.2 creased the fall)
 neck_clear = opt.get('neck_clear', 0.10)    # the stand's inside this far off the neck
 lean = opt.get('lean', 0.12)                # the stand leans in toward the neck (share of its height)
 roll_r = opt.get('roll_r', 0.0)            # the fall's turn over the roll, radius
@@ -127,7 +127,7 @@ up = np.array([(Z - lean * radial(e)) / np.linalg.norm(Z - lean * radial(e)) for
 Rr = E + st[:, None] * up
 # the ring (John: "the ring of the collar, reduce that length"): the roll is drawn in toward the neck until it lies
 # hug off it, as much as the stand stands there (where the stand dies away at the fronts it keeps to the neckline)
-hug = opt.get('hug', 0.25)
+hug = opt.get('hug')            # (drawn-in ring, off: John kept the lower collar alone)
 E0 = E.copy()
 wh = ss(0.0, opt.get('hug_run', 2.0) * stand_run, d_end)      # (drawn in gently, over twice the stand's own run, so the fall finds no step)
 if hug and opt.get('hug_base', True):     # (the collar's neck edge too: the collar is cut shorter round the neck and sewn
@@ -453,9 +453,15 @@ dgz = cKDTree(gall).query(UV[zone])[0]
 zone_p = zone[dgz > opt.get('seam_free', 0.3)]
 gz_i = np.nonzero(on_gorge)[0] if opt.get('seam_slide', True) else np.zeros(0, int)
 g3s = [(g_, cKDTree(g_)) for g_ in (resample(Nt['gorge'], 0.005) for Nt in (NtA, NtB))]
+# the roll edge is evened out too, along itself, most toward its ends: there it meets the seam to the lapel, which
+# sits at the lapel's edge, not over the stand, and a fixed roll made a step (and a nick in the fall's top) at the join
+ri = np.nonzero(on_roll)[0]
+dre = np.minimum(ch[ri, 0] - Rc[0, 0], Rc[-1, 0] - ch[ri, 0])
+wr = (opt.get('roll_even', 0.15) + (1 - opt.get('roll_even', 0.15)) * ss(opt.get('roll_free', 0.45), 0.0, dre))[:, None]
 for it in range(opt.get('front_smooth', 250)):
     A_ = (Wm @ P3) / deg[:, None]
     P3[zone] += 0.6 * wz * (A_[zone] - P3[zone])
+    P3[ri] += 0.6 * wr * (A_[ri] - P3[ri])
     if len(gz_i):     # (the seam to the lapel slides along the lapel's edge, evening its points out, and stays on it)
         P3[gz_i] += 0.6 * (A_[gz_i] - P3[gz_i])
         for g3d_, g3t_ in g3s:      # (in order along the seam, evenly spaced: two points on one spot make a spike)
@@ -465,6 +471,15 @@ for it in range(opt.get('front_smooth', 250)):
             P3[mine[o_]] = g3d_[np.round(np.linspace(si.min(), si.max(), len(mine))).astype(int)]
     if it % 3 == 2 or it == opt.get('front_smooth', 250) - 1:
         for i in zone_p: P3[i] = push_g(P3[i])
+        for i in ri: P3[i] = push_n(P3[i])
+# a last polish: what the line from F cannot see (the bodice's own neckline edge at the sides of the neck, seen edge on,
+# under the fall) still props the cloth up from the side and creases it; the fall is evened once more and kept off
+# everything by its nearest point too, so it rounds over that edge instead of folding on it
+for it in range(opt.get('polish', 40)):
+    A_ = (Wm @ P3) / deg[:, None]
+    P3[zone] += 0.5 * (A_[zone] - P3[zone])
+    if it % 2 == 1 or it == opt.get('polish', 40) - 1:
+        for i in zone_p: P3[i] = push_n(push_g(P3[i]))
 print('notchcollar: the fall hung as a membrane over %d points toward the fronts' % len(zone))
 
 # 8. what was built, measured
