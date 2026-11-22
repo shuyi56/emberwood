@@ -21,6 +21,8 @@ The API (kept stable: the boot, and the skirt, sleeves and petticoat scripts use
     f.mesh(faces)                          a mesh's threads, quad diagonals and bend ties; returns their counts
     f.step(h, body, neutral=False)         one step; body(points) -> (points pushed out, touched mask)
     f.settle(body, h, most, tol, damping)  run to rest; returns the steps taken
+    f.chain(runs, lead=0.9)                hold runs of points (root first) at their segment lengths exactly, as the
+                                           creator's and the game's `hold` does for hair strands
     f.pos                                  the points as they are now
     bvh_body(tree, gap)                    a body from a mathutils BVHTree (normals outward)
 
@@ -47,6 +49,7 @@ class Fabric:
         self.prev = self.pos.copy()
         self.w = np.ones(self.n)                     # inverse mass: 0 pins a point
         self.s = dict(FABRIC_DEFAULTS, **(settings or {}))
+        self.chains = None                           # (held chains: see chain())
         self.ci, self.cj, self.rest, self.comp = (np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64),
                                                   np.zeros(0), np.zeros(0))
 
@@ -112,9 +115,9 @@ class Fabric:
             dl = np.where(ok, (-C - alpha * lam) / np.maximum(wi + wj + alpha, 1e-12), 0.0)
             lam += dl
             q = (dl / np.maximum(L, 1e-9))[:, None] * d
-            acc = np.zeros_like(x)
-            np.add.at(acc, ci, -wi[:, None] * q)
-            np.add.at(acc, cj, wj[:, None] * q)
+            # (each point's moves summed: bincount per axis, the same sums as np.add.at and several times faster)
+            acc = np.stack([np.bincount(ci, -wi * q[:, k], self.n) + np.bincount(cj, wj * q[:, k], self.n)
+                            for k in range(3)], -1)
             x += s['relax'] * acc / count[:, None]
         if body is not None:
             p, touch = body(x)
@@ -131,6 +134,45 @@ class Fabric:
             if neutral:
                 pv[touch] += (p - x)[touch]
             x[free] = p[free]
+        if self.chains is not None:
+            self.hold(body, neutral)
+
+    def chain(self, runs, lead=0.9):
+        """Hold runs of points (each an index array, its root first) at their present segment lengths exactly: after
+        every step each run is walked from the root down and every point put back at its length from the one above
+        (follow the leader), the move fed back to the point above as speed the other way (lead: its share), as the
+        creator's and the game's `hold` (Mueller, Kim and Chentanez 2012, "Fast simulation of inextensible hair and
+        fur"). The runs are walked side by side, one point down all of them at a time."""
+        runs = [np.asarray(r, dtype=np.int64) for r in runs if len(r) > 1]
+        m = max(len(r) for r in runs)
+        C = np.full((len(runs), m), -1, dtype=np.int64)
+        for k, r in enumerate(runs):
+            C[k, :len(r)] = r
+        L = np.zeros((len(runs), m - 1))
+        ok = C[:, 1:] >= 0
+        L[ok] = np.linalg.norm(self.pos[C[:, 1:][ok]] - self.pos[C[:, :-1][ok]], axis=1)
+        self.chains = (C, L, float(lead))
+
+    def hold(self, body=None, neutral=False):
+        """Put every held chain back at its segment lengths (see chain()), then out of the body again."""
+        C, L, lead = self.chains
+        x, pv, w = self.pos, self.prev, self.w
+        for k in range(1, C.shape[1]):
+            m = C[:, k] >= 0
+            i, j, r = C[m, k], C[m, k - 1], L[m, k - 1]
+            d = x[i] - x[j]
+            ln = np.maximum(np.linalg.norm(d, axis=1), 1e-12)
+            p = x[j] + d * (r / ln)[:, None]
+            f = w[i] > 0
+            up = f & (w[j] > 0)
+            pv[j[up]] += lead * (p[up] - x[i[up]])
+            x[i[f]] = p[f]
+        if body is not None:
+            p, touch = body(x)
+            f = (w > 0) & touch
+            if neutral:
+                pv[f] += (p - x)[f]
+            x[f] = p[f]
 
     def settle(self, body=None, h=1.0 / 120.0, most=600, tol=1e-4, damping=0.35):
         """Run to rest: steps until the fastest point moves less than tol a step (or most steps), its speed damped

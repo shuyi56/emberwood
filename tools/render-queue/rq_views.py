@@ -19,6 +19,13 @@ build:
                looking level ahead in the body poses (female.carry_head), as a real neck holds it.
 --pose-crop REGIONS  with --poses: also a crop of each region (as --crop names them) in every pose, from the same
                camera as the strip: DIR/pose-crop-REGION.png, one tile per pose (default height 300, --pose-size)
+--flow         the flow check (rq_flow.py: each garment's strain, bending, seams and jaggedness, with a heatmap)
+               right after the build, before any render: DIR/flow.json and DIR/flow-heat.png. On by itself for
+               outfit jobs (--figure outfit) and pose strips (--poses), where it also runs in every pose:
+               DIR/flow-poses.json, and flow-heat-pose-NAME.png for each pose it flags. Report-only: it never stops
+               a render. RQ_FLOW=0 turns it off.
+--flow-only    the build and the flow check (and with --poses, the flow in every pose), no renders: the cheap
+               way to measure a garment, or to calibrate the approved band (rq_flow.py --calibrate)
 
 Regions (centred on the figure's axis, so one crop serves every angle; both sides show):
   neck, shoulder, armhole, bust, elbow, waist, wrist (the cuff), hips (the seat), hand, knee, hem (floor length),
@@ -34,6 +41,9 @@ import time
 T0 = time.time()
 HERE = os.path.dirname(os.path.abspath(__file__))
 VIEWS_PY = os.path.join(HERE, 'views.py')
+if not os.path.exists(VIEWS_PY):       # (run from tools/render-queue in a branch, not put beside views.py)
+    VIEWS_PY = os.path.normpath(os.path.join(HERE, '..', '..', 'blender', 'base', 'views.py'))
+sys.path.insert(0, HERE)
 src = open(VIEWS_PY).read()
 cut = src.rstrip().rfind('\nmain()')
 if cut < 0:                 # (a views.py that does not end in main(): run it as it is, with no extras)
@@ -46,6 +56,17 @@ exec(compile(src[:cut], VIEWS_PY, 'exec'), V)
 T_LOADED = time.time()
 bpy, female, opt, argv = V['bpy'], V['female'], V['opt'], V['argv']
 
+FLOW_ONLY = '--flow-only' in argv
+FLOW = os.environ.get('RQ_FLOW', '1') != '0' and (FLOW_ONLY or '--flow' in argv or '--poses' in argv
+                                                  or opt('--figure') == 'outfit')
+if FLOW_ONLY:         # (views.py renders nothing it is not asked for: drop what would render)
+    for k in ('--turn', '--head', '--clay', '--clay-only'):
+        while k in argv:
+            argv.remove(k)
+    for k in ('--cells', '--walk', '--run', '--crop', '--pieces'):
+        while k in argv:
+            i = argv.index(k)
+            del argv[i:i + 2]
 POSES = ('rest', 'arms-up', 'arms-fwd', 'elbows', 'step', 'crouch', 'twist') + tuple(getattr(female, 'HEAD_POSES', {}))
 ALL_VIEWS = [('front', 0), ('3/4', 45), ('profile', 90), ('back 3/4', 135), ('back', 180)]
 
@@ -169,6 +190,38 @@ def crops(out):
     V['VIEWS'] = keep
 
 
+def flow(out, **kw):
+    """The flow check on the garments as they stand now (rq_flow.py); never fails the job."""
+    try:
+        import rq_flow
+        return rq_flow.run(garments(), out, female, **kw)
+    except Exception as e:
+        print(f'rq flow: skipped ({type(e).__name__}: {e})', flush=True)
+        return None
+
+
+def flow_poses(out, names):
+    """The flow check in every pose of the strip: DIR/flow-poses.json, and a heatmap for each flagged pose."""
+    t = time.time()
+    reps = {}
+    for name in names:
+        apply(name)
+        r = flow(out, stem=f'flow-pose-{name}', heat='flagged', pose=name,
+                 write=False, title=f'flow in the pose {name}')
+        if r is not None:
+            if r.get('heatmap'):
+                os.replace(os.path.join(out, r['heatmap']), os.path.join(out, f'flow-heat-pose-{name}.png'))
+                r['heatmap'] = f'flow-heat-pose-{name}.png'
+            reps[name] = r
+    female.pose(0)
+    bpy.context.view_layer.update()
+    order = {'ok': 0, 'watch': 1, 'likely rejection': 2}
+    worst = max([r['verdict'] for r in reps.values()] or ['ok'], key=order.get)
+    with open(os.path.join(out, 'flow-poses.json'), 'w') as f:
+        json.dump({'verdict': worst, 'seconds': round(time.time() - t, 1), 'poses': reps}, f, indent=1)
+    print(f'rq flow poses: {worst} over {len(reps)} poses in {time.time() - t:.0f} s', flush=True)
+
+
 def poses(out):
     from PIL import Image, ImageDraw
     sc = bpy.context.scene
@@ -176,6 +229,10 @@ def poses(out):
         if o.animation_data:
             o.animation_data_clear()
     names = list(POSES) if opt('--poses') in (None, 'all') else [p for p in opt('--poses').split(',') if p]
+    if FLOW:
+        flow_poses(out, names)
+    if FLOW_ONLY:
+        return
     size = int(opt('--pose-size', 300))
     cam = V['look_3d'](int(opt('--samples', 32)))
     keep = V['VIEWS']
@@ -390,6 +447,8 @@ def main():
                 raise
             except Exception as e:      # (a check must never fail the render)
                 print(f'rq geometry: skipped ({type(e).__name__}: {e})', flush=True)
+            if FLOW:
+                flow(out)
             checked['s'] = round(time.time() - t, 1)
         if os.environ.get('RQ_LAYER_GAPS', '1') != '0' and '--list' not in argv and not opt('--save'):
             t = time.time()

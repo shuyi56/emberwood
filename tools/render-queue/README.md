@@ -17,6 +17,8 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_flow.py` | the flow check: each garment's strain field, seams and jaggedness, with a heatmap, before the render |
+| `rq_hair.py`, `rq_hair_export.cjs` | the hair stress test: flow, drape and motion on our own solver, with heatmap and contour sheet, before the render |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -232,6 +234,81 @@ checked yet.
 - garments past the geometry bands (over 2% inside, stretched past 1.3x, squashed below 0.7x)
 - body-ratio drift past 1% from the median
 - rejections by tag, garment and who, and the rounds of requests per piece
+
+## The flow check: strain before the render
+
+John's request (2026-11-19): after a build or solve and before the render, read the stress and strain across each
+garment. A smooth field means the cut and the body agree; jagged peaks mark the faults that come back as
+rejections: dart tips and seam corners where curvature concentrates, paired seam edges of unequal length, grain or
+bias errors, too little ease at the armholes, shoulders or seat. `rq_flow.py` does it, and `rq_views.py` runs it
+right after the build, beside the geometry checks:
+
+- **On by itself for outfit jobs** (`--figure outfit`) **and pose strips** (`--poses`), where it also runs in every
+  pose (the rig poses the garment and it is read back, so the poses cost no render). Any other views job asks for
+  it with `--flow`. `RQ_FLOW=0` turns it off.
+- **Report-only.** It never stops a render. It flags `watch` (past the approved band) or `likely rejection` (well
+  past it, or a sharp peak at a seam end), and the log, the manifest's `flow` and the nightly report say so.
+- **Files in the result:** `flow.json` (per garment: the numbers, the flags and the worst spots with where they are
+  on the body, such as "left armhole, back", and what they most likely are), `flow-heat.png` (strain, jaggedness
+  and bending in four views and on the flat pattern, the worst spots ringed and numbered as in `flow.json`), and
+  with poses `flow-poses.json` and `flow-heat-pose-NAME.png` for each flagged pose. Attach the heatmap beside the
+  render it came with.
+- **What it measures:** against the flat pattern when the mesh carries one (a UV layer `pattern`, `flat` or `cut`
+  that really is the cut: laid on the garment as built it must give a smooth, moderate strain), otherwise against
+  the garment as built, in the rig's rest position (then what the pose does to it shows): principal stretch and
+  squash, shear, Green strain, bending energy density (as a fold radius), how far each triangle's strain stands
+  above its neighbours (jaggedness, roughness, gradient, isolated peaks counted one per place, the sharpest
+  peak), and each seam's paired edge lengths. A garment script can declare its seams exactly with a `seam_mate`
+  point attribute (each point's partner, -1 for none); otherwise they are found from the UV seams and from
+  separate pieces' edges that lie on each other. Slivers from trims and hardware (eyelets, studs, stitches,
+  plates) are left out. None of main's garments carries its flat pattern yet: the hose's and the chemise's UVs
+  are texture maps (banded in steps of 0.5 down the leg, folded at the shoulders), so they and the rest are
+  measured against their built shape. A garment built from flat pieces, as John's construction rule asks,
+  should keep its pieces' flat coordinates as a UV named `cut`; then the check reads the cut against the body.
+- **The band comes from John's approved garments, per pose.** `flow_baseline.json` holds the limits for the rest
+  pose and for every pose of the strip, calibrated by
+  `python3 rq_flow.py --calibrate flow_baseline.json RESULT/flow-poses.json ...` on main's hose, boots, chemise
+  and vest (no-render jobs `views-0a8c28aac239`, `views-05159b056b65`, `views-0e767d28ffaa`): each limit is the
+  worst approved value with a 25% margin, so a garment is flagged only when it does worse than what John already
+  passed, in that pose (the rig strains even approved cloth in arms-up). An approved garment more than 3x worse
+  than every other on a metric is left out of that metric's band and listed under `outliers`: so far that is the
+  vest, whose side panels under the arm stretch 2.7x in the rest pose (hidden by the arm in its renders) and tear
+  in arms-up and arms-fwd. The band is loose where the approved garments are rough (the chemise has one sharp
+  peak on the right forearm, the left boot shears at the ankle crease); fixing them and re-running the
+  calibration tightens it. Re-run it when John approves more garments.
+- **Cached.** Each garment's result is stored under a key made of its posed points, its reference, its triangles,
+  the check's version and the band (`RQ_FLOW_CACHE`, else `RQ_HOME/flow-cache`). The fold cache gives a
+  texture-only or material-only re-run the same settled points, so it gets the same key and costs nothing.
+- **Measure without rendering:** `tools/render-queue/rq_views.py --figure F --mannequin --poses all --flow-only`
+  builds, checks in every pose and renders nothing. `python3 rq_flow.py --selftest DIR` checks the metrics on
+  three test sleeves (smooth, a stretched patch, a seam drawn 10% short) outside Blender.
+
+## The hair stress test: flow, drape and motion before the render
+
+John's request (2026-11-20): run a hairstyle through our own solver and check that the flow makes sense, before
+anything renders. `rq_hair.py` is the flow check for hair, built on the same pieces as `rq_flow.py`: report-only,
+a band calibrated on approved hair, the worst spots ringed and numbered, results cached.
+
+- **Input:** `node rq_hair_export.cjs face-creator.html DIR [styles]` writes every style's strands (every ring) and
+  the head's skin; `python3 rq_hair.py DIR [--styles a,b] [--out OUT]` runs the test.
+- **The head first:** the creator's skin is measured (chin, crown, width, depth, centre) and every distance is a
+  share of the measured height (HH). Nothing is a hand-placed offset.
+- **Checks:** as drawn (kinks, spikes, roots, flow against neighbours, crossings, depth into the skin, body and
+  the hair's own cap); settled at rest by `blender/shared/fabric.py` with hair's stiffness (`SHAPE`, tuned by
+  `--tune` from a hair's own stiffness against its weight); and in five motions (walk from the game's cycle, run,
+  turn, start-stop, spin): jitter, depth into the body, stretch, bends, crossings.
+- **One solve for the drape, the check and the animation:** the settle and every motion frame are cached once in
+  `hair-cache/` (shared folder, keyed on the hair, the solver settings and the motion). The check only reads it.
+  `--drape STYLE --into EXPORT --out DRAPED` writes the hair export with the settled strands for the renders, and
+  `--motion STYLE:POSE --into EXPORT --out FILE.npz` the per-frame strands for playback. No second solve.
+- **Contours after every solve (John's rule):** inspect the contour sheet before any render. `hair-contours.png`
+  shows the outline of the hair mass (front and side) and sections at six heights for the hair as drawn, settled
+  and in each motion. A perfectly regular ring or a stepped outline is fixed first; real hair is ragged. Include
+  the sheet whenever you show a hair solve.
+- **Files:** `hair.json` (numbers, flags, worst spots with places), `hair-heat.png`, `hair-contours.png`.
+  `rq_hair.py --selftest DIR` checks that a clean head of hair passes and broken ones are flagged. The limits are
+  loose defaults until `hair_baseline.json` is written by `--calibrate` on approved hair (Warden, Ranger, the
+  rogue's ponytail).
 
 ## Layer gaps and garment ease
 
