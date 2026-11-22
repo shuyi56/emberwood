@@ -284,7 +284,9 @@ def restyle(style):
     global STYLE
     STYLE = style
     for o in [o for o in bpy.data.objects if o.name.startswith('Heel lift ')]:
+        me = o.data
         bpy.data.objects.remove(o, do_unlink=True)
+        bpy.data.meshes.remove(me)                     # (so the new lifts take the same names)
     return {side: stack(side) for side in GEO}
 
 

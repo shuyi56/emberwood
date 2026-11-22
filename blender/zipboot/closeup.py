@@ -61,32 +61,38 @@ def pts(prefixes, side='R'):
 
 
 def landmarks():
-    """The boot's landmarks as the reference sheet names them, seen from the outer side (image x = -y: the toe to
-    the left, as in the photo; image y = -z)."""
-    B = pts(('Boot.', 'Boot sole.'))
+    """The boot's landmarks as the reference sheet names them, seen from the outer side (image x = y: the toe to
+    the left, as in the photo; image y = -z), in hundredths of a unit. The topline is the pieces' top edges, the
+    ankle the boot's front and back at the photo's ankle height (0.489 of the length over the floor)."""
+    import last
+    dg = bpy.context.evaluated_depsgraph_get()
+    o = bpy.data.objects['Boot.R'].evaluated_get(dg)
+    X = np.array([(o.matrix_world @ v.co)[:] for v in o.data.vertices])
+    B = np.concatenate([X, pts(('Boot sole.',))])
     Hh = pts(('Heel lift',))
     Zt = pts(('Zip teeth',))
-    up = B[B[:, 2] > B[:, 2].max() - 0.15]
+    top = np.concatenate([X[p['start']:p['start'] + len(p['V'])][p['edges']['top']] for p in last.PIECES['R']
+                          if 'top' in p.get('edges', {})])
     toe = B[np.argmin(B[:, 1])]
     floor = min(B[:, 2].min(), Hh[:, 2].min() if len(Hh) else 9.0)
-    hb = Hh[np.argmax(Hh[:, 1])] if len(Hh) else B[np.argmax(B[:, 1])]
     lo_h = Hh[Hh[:, 2] < floor + 0.08] if len(Hh) else B
-    seat = B[(B[:, 1] > hb[1] - 0.3) & (B[:, 2] < floor + 1.6)]
-    sole_top_back = Hh[:, 2].max() if len(Hh) else floor
-    z_ank = female.ANKLE_Z if hasattr(female, 'ANKLE_Z') else floor + 3.0
-    ank = B[np.abs(B[:, 2] - (floor + 0.43 * (B[:, 2].max() - floor))) < 0.1]
+    L = lo_h[:, 1].max() - toe[1]
+    hb = Hh[np.argmax(Hh[:, 1])] if len(Hh) else B[np.argmax(B[:, 1])]
+    ank = X[np.abs(X[:, 2] - (floor + 0.489 * L)) < 0.1]
     P = {
         'toe_tip': (toe[1], toe[2]), 'heel_back_tread': (lo_h[:, 1].max(), floor), 'floor_back': (lo_h[:, 1].max(), floor),
-        'heel_back_seat': (hb[1], sole_top_back), 'breast_tread': (lo_h[:, 1].min(), floor),
+        'heel_back_seat': (hb[1], Hh[:, 2].max() if len(Hh) else floor), 'breast_tread': (lo_h[:, 1].min(), floor),
         'breast_top': (lo_h[:, 1].min(), Hh[Hh[:, 1] < lo_h[:, 1].min() + 0.1][:, 2].max() if len(Hh) else floor),
-        'top_front': (up[:, 1].min(), up[np.argmin(up[:, 1]), 2]), 'top_back': (up[:, 1].max(), up[np.argmax(up[:, 1]), 2]),
-        'ankle_front': (ank[:, 1].min(), ank[:, 2].mean()), 'ankle_back': (ank[:, 1].max(), ank[:, 2].mean()),
+        'top_front': (top[np.argmin(top[:, 1]), 1], top[np.argmin(top[:, 1]), 2]),
+        'top_back': (top[np.argmax(top[:, 1]), 1], top[np.argmax(top[:, 1]), 2]),
+        'ankle_front': (ank[:, 1].min(), floor + 0.489 * L), 'ankle_back': (ank[:, 1].max(), floor + 0.489 * L),
     }
     if len(Zt):
         P['zip_top'] = (Zt[np.argmax(Zt[:, 2]), 1], Zt[:, 2].max())
         P['zip_bottom'] = (Zt[np.argmin(Zt[:, 2]), 1], Zt[:, 2].min())
-    del seat, z_ank
-    return {k: [float(-y) * 100.0, float(-z) * 100.0] for k, (y, z) in P.items()}
+        P['far_floor'] = (lo_h[:, 1].max(), floor)                 # (the zip's own boot: this one)
+        P['far_top_back'] = P['top_back']
+    return {k: [float(y) * 100.0, float(-z) * 100.0] for k, (y, z) in P.items()}
 
 
 def main():
@@ -143,12 +149,16 @@ def main():
         for o in bpy.data.objects:
             if o.type == 'MESH':
                 o.hide_render = not mine(o)
+                if '--rest' in argv:                  # (the boot as cut and sewn, before the rig bends it)
+                    for m_ in o.modifiers:
+                        if m_.type == 'ARMATURE':
+                            m_.show_render = m_.show_viewport = False
         bpy.context.view_layer.update()
         B = pts(('Boot.', 'Boot sole.', 'Heel lift'))
         if opt('--focus', 'boot') == 'heel':
             Hh = pts(('Heel lift',))
-            c = 0.5 * (Hh.min(0) + Hh.max(0)) + np.array([0, -0.6, 0.9])
-            span = float(opt('--span', 4.0))
+            c = 0.5 * (Hh.min(0) + Hh.max(0)) + np.array([0, -0.4, 0.5])
+            span = float(opt('--span', 3.2))
         else:
             c = 0.5 * (B.min(0) + B.max(0))
             span = float(opt('--span', 1.1 * max(np.ptp(B[:, 1]), np.ptp(B[:, 2]))))

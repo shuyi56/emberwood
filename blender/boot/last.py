@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -590,6 +590,48 @@ SHAFTS = {'lace': dict(cut=cut_lace, ratios={}),
                                                        'top_fit': 1.0, 'top_snug': 0.5})}
 
 
+def _hull2(q):
+    """The convex hull of 2D points, counter-clockwise (Andrew's monotone chain)."""
+    pts = sorted(map(tuple, np.round(q, 6)))
+    if len(pts) < 3:
+        return np.array(pts)
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, hi = [], []
+    for p_ in pts:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p_) <= 0:
+            lo.pop()
+        lo.append(p_)
+    for p_ in reversed(pts):
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], p_) <= 0:
+            hi.pop()
+        hi.append(p_)
+    return np.array(lo[:-1] + hi[:-1])
+
+
+def _to_hull(q, h, c):
+    """Each 2D point q moved out from c along its own direction to the hull h's boundary (never inward)."""
+    out = q.copy()
+    a, b = h, np.roll(h, -1, axis=0)
+    e = b - a
+    for i, p_ in enumerate(q):
+        d = p_ - c
+        nd = np.linalg.norm(d)
+        if nd < 1e-9:
+            continue
+        # c + t d = a + s e: solve for t, s on each edge
+        den = d[0] * e[:, 1] - d[1] * e[:, 0]
+        ok = np.abs(den) > 1e-12
+        ac = a - c
+        t = np.where(ok, (ac[:, 0] * e[:, 1] - ac[:, 1] * e[:, 0]) / np.where(ok, den, 1.0), -1.0)
+        s_ = np.where(ok, (ac[:, 0] * d[1] - ac[:, 1] * d[0]) / np.where(ok, den, 1.0), -1.0)
+        good = ok & (t > 0) & (s_ >= -1e-6) & (s_ <= 1 + 1e-6)
+        if good.any():
+            out[i] = c + d * max(1.0, float(t[good].max()))
+    return out
+
+
 def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot', ratios=RATIOS, shaft_name='lace',
                 log=print):
     """Make one boot for each leg from the measures M (draft.measure_legs) and hand them to the body's bones: the
@@ -671,6 +713,29 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, r['bridge'] - lift)
         lift += out
         X += Nr * out[:, None]
+    toe_w = _ss(y_ball + 0.20 * L, y_ball - 0.05 * L, X[:, 1]) * (X0[:, 2] < M['ankle_z'])
+    # a sock-fit last (RATIOS['drape'] passes, 0 for none): the whole last drawn taut over the foot and the leg, as a
+    # stocking is: smoothed (a Laplacian step) and put back out to the gap from the skin, in turn, so the toes'
+    # ridges and the step where the shaft's table meets the foot over the ankle are spanned by one smooth surface
+    # that never comes nearer the skin than the gap (the last's toe is turned smooth, not cast from the toes)
+    if r.get('drape'):
+        tree0 = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
+        wt = _ss(z_welt, z_welt + 0.6, z) * (1.0 - toe_w)       # (held where it meets the sole, and over the toe box)
+        Xs = X.copy()
+        for k_ in range(int(r['drape'])):
+            lap = _nbr_sum(Xs, E) / np.maximum(deg, 1)[:, None] - Xs
+            Xs += lap * (0.5 * wt)[:, None]
+            if k_ % 8 == 7 or k_ == int(r['drape']) - 1:
+                for i in range(n):
+                    loc, nrm, _, d = tree0.find_nearest(Xs[i])
+                    if loc is None:
+                        continue
+                    sd_ = float(np.dot(Xs[i] - np.array(loc), np.array(nrm)))
+                    if sd_ < r['gap']:
+                        Xs[i] += np.array(nrm) * (r['gap'] - sd_)
+        log('boot: the last drawn taut over the foot and leg (%d passes): it moved %.3f on average, %.3f at most'
+            % (int(r['drape']), float(np.linalg.norm(Xs - X, axis=1).mean()), float(np.linalg.norm(Xs - X, axis=1).max())))
+        X = Xs
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
     pushed = 0
@@ -685,6 +750,38 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     log('boot: the last\'s foot, %d points; %d bridged over hollows (by %.3f at most), %d put out to the gap'
         % (n, int((lift > 0.01).sum()), lift.max(), pushed))
 
+    # the toe turned as a last's is (r['toe_shell'] passes): a last is carved as one smooth box over the toes, never
+    # cast from them (Golding, The Manufacture of Boots and Shoes), and the gap pushed out over each toe above leaves
+    # the toes' own ridges in it. Ahead of the ball the last is smoothed (a Laplacian step each pass), then let out
+    # again by a push that is itself smooth: the most each point lies under the gap off the skin, spread over its
+    # neighbours (never less than any point's own need), so the toe box clears the toes everywhere by the gap
+    # without taking their shape. (Tried first and dropped: slab-by-slab convex hulls, which left the surface torn
+    # between slabs, and letting the surface out only where it was hollow, which found no hollows at the mesh's
+    # scale: the toes' ridges are the gap's push, not hollows.)
+    if r.get('toe_shell'):
+        tw = toe_w * _ss(z_welt, z_welt + 0.15, X[:, 2])
+        X1 = X.copy()
+        for _ in range(int(r['toe_shell'])):
+            X += (0.5 * tw)[:, None] * (_nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X)
+        need = np.zeros(n)
+        for i in np.nonzero(tw > 0)[0]:
+            loc, nrm, _, d = tree.find_nearest(X[i])
+            if loc is not None:
+                need[i] = max(r['gap'] - float(np.dot(X[i] - np.array(loc), np.array(nrm))), 0.0)
+
+        def avg1(v):
+            return (np.bincount(E[:, 0], weights=v[E[:, 1]], minlength=n)
+                    + np.bincount(E[:, 1], weights=v[E[:, 0]], minlength=n)) / np.maximum(deg, 1)
+        push = need.copy()
+        for _ in range(int(r['toe_shell'])):
+            push = np.maximum(need, avg1(push))
+        for _ in range(int(r['toe_shell']) // 2):
+            push = np.maximum(need, avg1(push) * tw + push * (1 - tw))
+        X += Nr * (push * tw)[:, None]
+        mv = np.linalg.norm(X - X1, axis=1)
+        log('boot: the toe turned as one smooth box over the toes (%d passes): %d points moved, %.3f on average, %.3f '
+            'at most' % (int(r['toe_shell']), int((mv > 0.01).sum()), float(mv[mv > 0.01].mean()) if (mv > 0.01).any()
+                         else 0.0, float(mv.max())))
     # ---- the foot's pieces, cut from the last: columns 0:3 the skin, 3:6 the last, 6:9 the normal, then the weights
     nw = len(names)
     D0 = np.concatenate([X0, X, Nr, Wr], 1)

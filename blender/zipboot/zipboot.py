@@ -29,6 +29,9 @@ STYLE = 'block'              # the heel's style (heelboot.STYLES)
 HEEL_H = None                # cm, the heel's height at the seat point (None: the optimizer's)
 DESIGN = False               # the colour-coded draft
 ENTRY_CHECK = True
+DRAPE = 64                   # passes drawing the last taut over the foot and leg (last.build_boots: a sock fit)
+TOE_SHELL = 150              # passes turning the toe as one smooth box over the toes (last.build_boots)
+CREASE = False               # the ankle's bend set into the leather as folds (boot.CREASE): off for a first look
 
 M_TEETH = female.mat_def(91, 'zip coil', female.ramp(0x2a211c, 0.08), 0.35)
 M_TAPE = female.mat_def(92, 'zip tape', female.ramp(0x31261f, 0.08), 0.1)
@@ -146,6 +149,9 @@ def build():
     heelboot.STYLE, heelboot.HEEL_H = STYLE, HEEL_H
     boot.SHAFT = 'zip'
     boot.last.RATIOS['top_over_welt'] = boot.last.ZIP['top_over_welt']
+    boot.last.RATIOS['drape'] = DRAPE
+    boot.last.RATIOS['toe_shell'] = TOE_SHELL
+    boot.CREASE = CREASE
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
     rig = bpy.data.objects.get('Rig')
