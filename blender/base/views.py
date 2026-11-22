@@ -12,6 +12,7 @@
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
            show (DIR/turn-clay.png, DIR/head-clay.png)
+--clay-only  the clay views alone, without the full look (a first look at new forms: no materials rendered)
 --angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
            comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
@@ -379,7 +380,8 @@ def main():
             return
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
-            for look in ('', '-clay') if '--clay' in argv else ('',):
+            looks = ('-clay',) if '--clay-only' in argv else ('', '-clay') if '--clay' in argv else ('',)
+            for look in looks:
                 clay(look == '-clay', saved)
                 if '--turn' in argv:
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)
