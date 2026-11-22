@@ -146,3 +146,18 @@ it. The knot at the break opens into a free point. Strain at the cusp falls from
 and from 6.0% to 4.6% on her right; the pull on her right front's top button rises from 0.021 to 0.027, which is the
 load arriving there.
 
+### Rounded points and curved edges
+
+John: "the collar on the reference was far smoother the tips and has gentle curves all around." On the habit photo the
+lapel's point is a rounded corner about 4 px in radius on a fold 145 px long, and its long edge swells slightly. A
+three-point outline gives a spike and a ruled line. `outline_round` [0.05, 0.025] in `classical_lapel`:
+
+- the corner is cut back 5% of the fold's length along each edge and turned as a curve;
+- the long edge swells out by 2.5% of the fold's length at its middle;
+- the outline is widened from 0.48 to 0.50 so the reach stays at 0.60 to 0.61 of the half shoulder (0.62 on the photo);
+- the edge's points are set evenly along the curve and the rows of the mesh stop short of it. Row ends beside a
+  curved edge leave thin triangles, and thick cloth turns each into a spike standing off the front.
+
+Strain did not rise: mean 6.8% and 7.1%, worst edge +48% and +69% (it was +97% with the sharp point). Still rough,
+seen from the side: the top corner of each lapel crumples where it meets the neck edge.
+

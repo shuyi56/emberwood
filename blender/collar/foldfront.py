@@ -49,8 +49,8 @@ RECIPES = {
 #   the fold's top 0.47 of the half shoulder out from the middle (here 0.42), the fold's rise 0.21 (0.21), its length
 #   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
-RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
-                                  press={'left': 0.85, 'right': 0.85}, top_out=[0.5, 0.8], metric3d=True, flap=[0.7, 1.4])
+RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.50], [1.0, 0.0]],
+                                  press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], top_out=[0.5, 0.8], metric3d=True, flap=[0.7, 1.4])
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
@@ -178,6 +178,23 @@ for s in sides:
 if outline:
     from scipy.spatial import Delaunay
     OT = np.array(outline, float)
+    if opt.get('outline_round') and len(OT) == 3:
+        # John, 2026-11-22: "the collar on the reference was far smoother the tips and has gentle curves all around".
+        # The habit's lapel point is a rounded corner and its long edge swells a little; a three-point outline gives a
+        # spike and a ruled line. [fillet, swell], both as shares of the fold's length: the corner is cut back `fillet`
+        # along each edge and turned as a curve, the long edge swells out by `swell` at its middle, and the whole is
+        # scaled so the lapel reaches as far out as the sharp one did (the measured reach is kept).
+        rf, sw = opt['outline_round']; A_, P_, B_ = OT
+        def bez(p0, p1, p2, n): u = np.linspace(0, 1, n + 1)[:, None]; return (1 - u) ** 2 * p0 + 2 * u * (1 - u) * p1 + u ** 2 * p2
+        e1 = (A_ - P_) / np.linalg.norm(A_ - P_); e2 = (B_ - P_) / np.linalg.norm(B_ - P_)
+        mid = 0.5 * (P_ + B_); nrm = np.array([-e2[1], e2[0]]); nrm = nrm * np.sign(nrm[1] + 1e-12)
+        ctl = mid + 2 * sw * nrm                                   # (control point of the swelling long edge)
+        q1 = P_ + rf * e1; t2 = (ctl - P_) / np.linalg.norm(ctl - P_); q2 = P_ + rf * t2
+        long_ = bez(P_, ctl, B_, 24); long_ = long_[np.linalg.norm(long_ - P_, axis=1) > rf * 1.05]
+        OT = np.vstack([A_[None], bez(q1, P_ + 0.15 * rf * (e1 + t2), q2, 10), long_])
+        OT = OT[np.concatenate([[True], np.diff(OT[:, 0]) > 1e-5])]  # (one width for each place along the fold)
+        OT[:, 1] *= P_[1] / OT[:, 1].max(); OT[-1] = B_
+    kpt = int(np.argmax(OT[:, 1]))
     rec = []
     for s in sides:
         ci = np.nonzero(s['crease'])[0]; ci = ci[np.argsort(s['tl'][ci])]
@@ -189,11 +206,23 @@ if outline:
     for si, s in enumerate(sides):
         cv, ct, cy = rec[si]; Lc = s['ln']
         Dfun = lambda t_, Lc=Lc: np.interp(t_, OT[:, 0], OT[:, 1] * Lc, left=0.0, right=0.0)
-        pts = [(OT[k_, 0], OT[k_, 1] * Lc) for k_ in range(1, len(OT) - 1)]      # (every corner of the outline is a point of the mesh)
-        for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
-            D = float(Dfun(t_)); n_ = int(np.ceil(D / hm))
-            pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
-        pts = np.array(pts)
+        if opt.get('outline_round'):
+            # a curved edge: its points are set evenly along the edge itself and the rows stop short of it, so no thin
+            # triangle is left between a row's end and the edge (thick cloth turns each into a spike)
+            xy = OT * np.array([Lc, Lc]); sl = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))])
+            sq = np.linspace(0, sl[-1], int(np.ceil(sl[-1] / hm)) + 1)[1:-1]
+            pts = [(float(np.interp(q_, sl, OT[:, 0])), float(np.interp(q_, sl, xy[:, 1]))) for q_ in sq]
+            for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
+                D = float(Dfun(t_)) - 0.6 * hm
+                if D > 0.3 * hm:
+                    n_ = int(np.ceil(D / hm)); pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
+            pts = np.array(pts)
+        else:
+            pts = [(OT[k_, 0], OT[k_, 1] * Lc) for k_ in range(1, len(OT) - 1)]      # (every corner of the outline is a point of the mesh)
+            for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
+                D = float(Dfun(t_)); n_ = int(np.ceil(D / hm))
+                pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
+            pts = np.array(pts)
         keep = np.nonzero((ct >= OT[0, 0] - 1e-6) & (ct <= 1 + 1e-6))[0]; nc = len(keep)
         allp = np.vstack([np.column_stack([ct[keep] * Lc, np.zeros(nc)]), np.column_stack([pts[:, 0] * Lc, pts[:, 1]])])
         tri = Delaunay(allp).simplices
@@ -210,12 +239,13 @@ if outline:
             if max(a_, b_, c_) < nc: continue
             e1, e2 = flat[b_] - flat[a_], flat[c_] - flat[a_]; ny = e1[1] * e2[0] - e1[0] * e2[1]
             if abs(ny) < 1e-9: continue
+            if opt.get('outline_round') and abs(ny) < 0.02 * hm * hm: continue
             order = (a_, b_, c_) if ny * ref_ny > 0 else (a_, c_, b_)
             try: bm.faces.new([vs[int(i)] for i in order]); nf += 1
             except ValueError: pass
         s['Dfun'] = Dfun
         print('foldfront: front %d: cut to the traced lapel: point %.2f of the way down the fold, %.1f cm out; %d points, %d faces of its own cloth'
-              % (s['layer'], OT[1, 0], 2.62 * OT[1, 1] * Lc, len(tt) - nc, nf))
+              % (s['layer'], OT[kpt, 0], 2.62 * OT[kpt, 1] * Lc, len(tt) - nc, nf))
     # the seam between the lapel and the rest of its front must be whole. Where a point of the front's cut edge was not
     # counted as on the line (it sat a hair off it), the lapel was joined to its neighbours past it and a slit was left
     # open in the cloth: the dark ticks beside the top button. Every small hole along the line is closed.
