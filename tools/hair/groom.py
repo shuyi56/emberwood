@@ -620,6 +620,46 @@ def push_out(col, X, layer=None, margin_hh=1.0 / SF.HH_MM, steps=8):
     return X
 
 
+LAYER_GAP_MM = 2.0                 # STYLE: the top layer's middle lies this far over the outer surface of the hair under it
+LAYER_EASE_M = 0.02                # m: from the root, the top layer rises onto the hair under it over this length
+LAYER_BIN = (0.08, 0.03)           # (rad round the axis, HH up): the cells the under layer's outer surface is read in
+
+
+def layer_over(X, top, seg_hh, under=None):
+    """Lay the `top` guides (the bangs and the face-framing hair) over the rest. A haircut's shorter, front layers lie
+    on top of the longer hair under them: "the hair on top ... blends with layers beneath" (Wikipedia, Layered hair),
+    as the Face Creator draws the Ranger's side bangs over the hair at her sides. Combed or traced on their own, they
+    lay 20-30 mm inside the side hair (layerchk: the Ranger's bangs 100% under it, the framing hair 94%). Each point of a
+    top guide is moved out from the head's axis to the under layer's outer surface (the furthest under-layer node in
+    its cell of angle and height) plus LAYER_GAP_MM, eased in from the root over LAYER_EASE_M; a guide that clears the
+    hair under it is left where it is."""
+    X = X.copy()
+    under = X[~top if under is None else under].reshape(-1, 3)
+    under = under[~np.isnan(under[:, 0])]
+    d = under[:, :2] - np.asarray(SF.AXIS)
+    th, r = np.arctan2(d[:, 0], -d[:, 1]), np.hypot(d[:, 0], d[:, 1])
+    key = lambda t, z: np.round(t / LAYER_BIN[0]).astype(int) * 100000 + np.round(z / LAYER_BIN[1]).astype(int)
+    env = {}
+    for k, rr in zip(key(th, under[:, 2]), r):
+        if rr > env.get(k, 0.0):
+            env[k] = rr
+    gap = LAYER_GAP_MM / SF.HH_MM
+    ease_n = max(1, int(round(LAYER_EASE_M / HH_M / seg_hh)))
+    w = np.clip(np.arange(X.shape[1]) / ease_n, 0, 1)
+    w = w * w * (3 - 2 * w)
+    for g in np.where(top)[0]:
+        n = int((~np.isnan(X[g, :, 0])).sum())          # (a guide is its first n nodes; the cut rest is NaN)
+        P = X[g, :n]
+        dd = P[:, :2] - np.asarray(SF.AXIS)
+        tg, rg = np.arctan2(dd[:, 0], -dd[:, 1]), np.hypot(dd[:, 0], dd[:, 1])
+        need = np.array([env.get(k, 0.0) for k in key(tg, P[:, 2])]) + gap
+        lift = np.maximum(need - rg, 0)
+        # (spread along the strand, so a cell edge does not kink it, and eased in from the root)
+        lift = np.convolve(np.pad(lift, 3, mode='edge'), np.ones(7) / 7, mode='valid') * w[:n]
+        P[:, :2] += dd / np.maximum(rg, 1e-9)[:, None] * lift[:, None]
+    return X
+
+
 def creator_cut(style_path, nb=48):
     """The end height by angle round the head from the creator's own hair: in each bin of angle (where the hair
     hangs), how low its strands and its cap's hem reach (CUT_PCT percentile of their lowest points), smoothed round
@@ -1080,6 +1120,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     X2, D = settle_some(D, mask, its=WAVE_ITERS if wavy else None)
     t2 = time.time()
     X2[:, 1:][mask == 0] = np.nan
+    if bangs or frame.any():
+        # layered as cut: the face-framing hair over the hair at the sides, the bangs over both
+        X2 = layer_over(X2, frame, seg_hh, under=~bang & ~frame)
+        X2 = layer_over(X2, bang, seg_hh)
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
