@@ -866,6 +866,28 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
             X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
             X[:, 2] += 0.5 * tw * dl[:, 2]
+        # (and the toes kept clear after it, by 0.6 of the gap: the smoothing took the box back onto the hose at the
+        # toes' tips, low by the welt, where the first push is held for the sole. A second, smaller push of the
+        # same smooth kind, sideways at the welt (z held there) and along the normal above it)
+        need = np.zeros(n)
+        for i in np.nonzero(toe_w > 0)[0]:
+            loc, nrm, _, d = tree.find_nearest(X[i])
+            if loc is not None:
+                need[i] = max(0.6 * r['gap'] - float(np.dot(X[i] - np.array(loc), np.array(nrm))), 0.0)
+        push = need.copy()
+        for _ in range(int(r['toe_shell']) // 3):
+            push = np.maximum(need, avg1(push))
+        for _ in range(int(r['toe_shell']) // 6):
+            push = np.maximum(need, avg1(push) * toe_w + push * (1 - toe_w))
+        Nh = Nr[:, :2] / np.maximum(np.linalg.norm(Nr[:, :2], axis=1, keepdims=True), 0.3)
+        X[:, :2] += Nh * (toe_w * push)[:, None]
+        X[:, 2] += Nr[:, 2] * tw * push
+        for _ in range(12):                               # (and eased, so the second push leaves no band of its own)
+            dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+            X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
+            X[:, 2] += 0.5 * tw * dl[:, 2]
+        log('boot: the toe box kept clear of the toes after its smoothing: %d points let out again, %.3f at most'
+            % (int((need > 1e-3).sum()), float(need.max())))
         mv = np.linalg.norm(X - X1, axis=1)
         log('boot: the toe turned as one smooth box over the toes (%d passes): %d points moved, %.3f on average, %.3f '
             'at most' % (int(r['toe_shell']), int((mv > 0.01).sum()), float(mv[mv > 0.01].mean()) if (mv > 0.01).any()

@@ -72,6 +72,8 @@ def taper(u, flare, waist):
 
 WELD = 0.03                  # the stack's seat stands this far up into the sole, so the two are one solid
 SEAT_OUT = 0.06              # how far the sole stands out past the counter round the heel seat (about 1.5 mm)
+SEAT_BAND = 1.1              # the upper's outline the seat is let out to is taken over this height above the sole (the
+                             # counter's fullest; less, and the seat follows the upper where it meets the sole)
 
 
 def stack_material():
@@ -166,7 +168,7 @@ def join_heel(side, lift):
     c2 = Sv[-2:, :2].mean(0)
     if up_ is not None:
         Uv = np.array([(up_.matrix_world @ v.co)[:] for v in up_.data.vertices])
-        Uv = Uv[(Uv[:, 2] > Sv[:, 2].max() - 0.05) & (Uv[:, 2] < Sv[:, 2].max() + 1.1)]
+        Uv = Uv[(Uv[:, 2] > Sv[:, 2].max() - 0.05) & (Uv[:, 2] < Sv[:, 2].max() + SEAT_BAND)]
         ang = np.arctan2(Uv[:, 0] - c2[0], -(Uv[:, 1] - c2[1]))
         rr = np.linalg.norm(Uv[:, :2] - c2, axis=1)
         bins = np.floor((ang + np.pi) / (2 * np.pi) * na).astype(int) % na

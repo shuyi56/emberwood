@@ -37,6 +37,10 @@ TOE_NARROW = 0.30            # and narrowed toward its point by this share at th
 ROOM = {'room': 0.034, 'gap': 0.034}   # x H: the foot's room and the least room off the skin (the boot's own 0.022
                              # and 0.024 drew the suede onto the foot until the toes and the instep showed: John, too tight)
 PITCH_SET = 40               # passes setting the leather at the heel's pitch (set_at_pitch; 0 for none)
+WELT = 0.006                 # x H: the sole trimmed close to the upper (about 1.5 mm), as a dress boot's is; the boot's
+                             # 0.022 is a welted work boot's ledge (John: join the heel and fit)
+SEAT_BAND, SEAT_OUT = 0.35, 0.02   # the heel's seat taken from the upper where it meets the sole (not the counter's
+                             # fullest, 1.1 up), and trimmed this close to it: the heel runs on from the boot's back
 THROAT_LINE = 0.45           # the front line from the vamp to the top: the straight chord (Golding) bowed into the
                              # leg-and-foot corner by this share of the corner's depth (last.build_boots). EXPERIMENTAL
 THROAT_FROM = 0.30           # the vamp point, where that curve leaves the foot: this share of the length behind the toe
@@ -288,6 +292,8 @@ def build():
     boot.last.RATIOS['toe_ext'], boot.last.RATIOS['toe_narrow'] = TOE_EXT, TOE_NARROW
     boot.CREASE = CREASE
     boot.last.RATIOS.update(ROOM)
+    boot.last.RATIOS['welt'] = WELT
+    heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
