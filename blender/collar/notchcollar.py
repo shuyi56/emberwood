@@ -42,6 +42,7 @@ stand_run = opt.get('stand_run', 3.2)       # the stand dies away over this leng
 neck_clear = opt.get('neck_clear', 0.05)    # the stand's inside this far off the neck
 lean = opt.get('lean', 0.35)                # the stand leans in toward the neck (share of its height)
 roll_r = opt.get('roll_r', 0.08)           # the roll line's soft turn, radius (0: a hard fold between two pieces)
+end_taper = opt.get('end_taper', 0.25)     # below this stand height the turn tapers onto the fall's roll point: the collar's ends closed (0: left open)
 rise = opt.get('rise', 1.3)                 # the outer edge rises to each collar point over this much azimuth (radians)
 gap = opt.get('gap', 0.04)
 hm = opt.get('mesh', 0.06)
@@ -560,15 +561,38 @@ for L, Nt in ((1, NtA), (2, NtB)):
 dmin = min(BT.find_nearest(Vector(p))[3] for p in P3[~on_gorge]); smin = min(ST.find_nearest(Vector(p))[3] for p in P3)
 print('notchcollar: the fall at least %.3f off the bodice (the cloth is %.3f), %.3f off the skin' % (dmin, th, smin))
 
+# the fall's corners on the roll tops evened (the lapels cross, one over the other, so the two corners lie on different
+# ground: the over lapel's side kept a small fold there that the under side did not): the fall's inner points within
+# end_even of each roll top relaxed toward their neighbours, the edges left where they are
+end_even = opt.get('end_even', 0.6)
+if end_even > 0:
+    from collections import defaultdict
+    ec_ = defaultdict(int); nb_ = defaultdict(set)
+    for t in tri:
+        for a_, b_ in ((0, 1), (1, 2), (2, 0)):
+            ec_[tuple(sorted((int(t[a_]), int(t[b_]))))] += 1; nb_[int(t[a_])].add(int(t[b_])); nb_[int(t[b_])].add(int(t[a_]))
+    onb_ = np.zeros(len(P3), bool)
+    for (a_, b_), c_ in ec_.items():
+        if c_ == 1: onb_[a_] = onb_[b_] = True
+    ir_ = np.nonzero(on_roll)[0]; ir_ = ir_[np.argsort(ch[ir_, 0])]
+    for F_ in (P3[ir_[0]].copy(), P3[ir_[-1]].copy()):
+        dd_ = np.linalg.norm(P3 - F_, axis=1); idx_ = np.nonzero((dd_ < end_even) & ~onb_)[0]
+        w_ = 0.5 * (1 - ss(0.5 * end_even, end_even, dd_[idx_]))
+        for _ in range(opt.get('end_even_rounds', 30)):
+            avg_ = np.array([P3[list(nb_[int(q)])].mean(axis=0) for q in idx_])
+            P3[idx_] += w_[:, None] * (avg_ - P3[idx_])
+        print('notchcollar: the fall\'s corner at (%.2f, %.2f, %.2f) evened over %d points' % (F_[0], F_[1], F_[2], len(idx_)))
+
 # 9. the collar: the stand and the fall as one piece, in the bodice's wool, the same thickness. The stand is hung from
 # the fall's own points on the roll line (so the two are one cloth there, no seam and no ragged edge) down to the neckline
 Ec = np.array([chart(p) for p in E])
 ir = np.nonzero(on_roll)[0]; ir = ir[np.argsort(ch[ir, 0])]
 sv, sf_ = [], []
-nS2 = 10; nA = 7; lines = []; HH = []
+nS2 = 10; nA = 7; lines = []; HH = []; thin = {}
 for i in ir:
     ps = ch[i, 0]; e = np.array([np.interp(ps, Ec[:, 0], E[:, k]) for k in range(3)]); h_ = np.interp(ps, Ec[:, 0], st)
-    if h_ < opt.get('stand_min', 0.03): lines.append(None); continue
+    if h_ < opt.get('stand_min', -1.0 if end_taper > 0 else 0.03): lines.append(None); continue
+    n0_ = len(sv)
     ln_ = []; fk = np.interp(ps, Ec[:, 0], np.arange(len(E))); k0 = min(int(fk), len(E) - 2); a_ = fk - k0
     col = (1 - a_) * SX[k0] + a_ * SX[k0 + 1]                       # (the stand as laid, at this point of the roll)
     for j in range(nS2):
@@ -586,6 +610,12 @@ for i in ir:
         for t_ in np.linspace(0, 1, nA + 2)[1:-1]:
             ln_.append(len(P3) + len(sv)); sv.append(Cc + math.cos(math.pi * t_) * hh + math.sin(math.pi * t_) * bb * u_)
         ln_.append(int(i))
+    if end_taper > 0 and roll_r > 0 and h_ < end_taper:
+        # the collar's ends closed: where the stand dies away beside each lapel the turn is drawn in onto the fall's
+        # own roll point, so the roll tapers to nothing at the fall's corner on the gorge and no open end shows
+        t_ = 0.12 + 0.88 * ss(0.0, end_taper, h_)       # (not quite to a point: a point pinches the cloth's thickness)
+        for q_ in range(n0_, len(sv)): sv[q_] = P3[i] + t_ * (sv[q_] - P3[i])
+        for q_ in range(n0_, len(sv)): thin[len(P3) + q_] = t_      # (and the cloth thinned with it: a turn tighter than the cloth is thick would cut through itself)
     lines.append(ln_)        # (without roll_r the stand stops just under the fall's top edge: two pieces meeting in a hard fold)
 for l0_, l1_ in zip(lines[:-1], lines[1:]):
     if l0_ is None or l1_ is None: continue
@@ -611,7 +641,9 @@ old = bpy.data.objects.get('Redingote collar')
 if old: bpy.data.objects.remove(old, do_unlink=True)
 o = bpy.data.objects.new('Redingote collar', me); bpy.context.scene.collection.objects.link(o)
 for m in b.data.materials: me.materials.append(m)
-s2 = o.modifiers.new('Solidify', 'SOLIDIFY'); s2.thickness = th; s2.offset = sol.offset; s2.use_rim = True; s2.use_even_offset = False
+vg_ = o.vertex_groups.new(name='thick'); vg_.add(list(range(len(verts))), 1.0, 'REPLACE')
+for q_, t_ in thin.items(): vg_.add([int(q_)], float(t_), 'REPLACE')
+s2 = o.modifiers.new('Solidify', 'SOLIDIFY'); s2.thickness = th; s2.offset = sol.offset; s2.use_rim = True; s2.use_even_offset = False; s2.vertex_group = 'thick'; s2.thickness_vertex_group = 0.1
 if b.parent: o.parent = b.parent; o.matrix_parent_inverse = b.parent.matrix_world.inverted()
 np.savez(out + '.collar.npz', uv=UV, pts=P3, tri=tri)
 bpy.ops.wm.save_as_mainfile(filepath=out)

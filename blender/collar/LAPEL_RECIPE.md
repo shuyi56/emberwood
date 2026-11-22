@@ -366,3 +366,12 @@ What the tailoring sources say about folding a collar without creasing it:
 Sources: Fashion Incubator (the three collars), University of Kentucky extension CT-LMH.185, A Tailor Made It (top collar manipulation), Minerva (collar and lapel construction), FreeSewing (Simon collar roll), NMSU extension C-223.
 
 What the build does with it: `roll_r` (default 0.08, about 2 mm) turns the stand into the fall on a flat half round, as one cloth with one winding, instead of two layers meeting in a hard fold. The half round fades out as the square of the stand's height toward the lapels, so it doesn't leave a lump where the stand dies away. `roll_r 0` gives the old hard fold. The fall's length was already matched to where it lies (sections above), and the stand is already lower than the fall. The front views lose the double edge and the gap at the sides of the neck; sharp folds stay at 0. A small curl remains where the stand ends next to each lapel, the same as with the hard fold.
+
+## The collar's ends closed
+
+The two lapels cross, so the collar's two ends lie on different ground: the over lapel's roll top sits 0.2 (5 mm) further forward than the under lapel's. The stand's rise is the same on both sides, so that offset is not a cut difference. What showed was that the roll ended in an open mouth beside each lapel, because the fall's corner sits about 0.22 to 0.24 (6 mm) off the neckline's end, on top of the lapel, and the mouth looked worse on the over side.
+
+- `end_taper` (default 0.25): where the stand is lower than this, the turn is drawn in onto the fall's own roll point, so the roll tapers to a closed tip at the fall's corner on the gorge. The cloth's thickness thins with it (the `thick` vertex group on the Solidify), because a turn tighter than the cloth is thick cuts through itself.
+- `end_even` (default 0.6): the fall's inner points within this distance of each roll top are relaxed toward their neighbours, edges left alone, which evens the small fold the over side kept.
+
+Both ends are now closed and smaller. A small pinch is still visible at each tip in the close front view, a little larger on the over side.
