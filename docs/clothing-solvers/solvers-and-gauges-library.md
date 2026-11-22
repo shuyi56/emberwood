@@ -39,8 +39,9 @@ with `tools/INDEX.md` as the catalogue and decision guide, and CLAUDE.md tells e
   same before and after (`af61cac112f91c4473461d8c`), the bake the same (90.0 of 90.0 degrees in 80 steps), and the
   contour sheet's PNG and JSON identical. One edited line in that file would have re-solved every approved fold.
 - The three solver tests print byte-identical output on main and on the branch, through the old paths and the new.
-- The heel optimizer, stylizer and sheet, the colour check, and the leather gauge were run on main and on the branch
-  on the same build and compared (see the PR for the results).
+- On the same build (bpy 5.3), main against the branch: the heel dump, the optimizer's, stylizer's and sheet's JSON
+  and output, the sheet's PNG, the colour check's table and colour map, and the leather gauge's `gauge.json` were
+  all identical.
 
 ## Lessons
 
