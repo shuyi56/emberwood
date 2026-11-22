@@ -1,5 +1,5 @@
 import os, sys
-R = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'blender')
+R = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'blender')
 for d in ('boot', 'hose', 'vest', 'chemise', 'sorceress_pendant', 'shared', 'gown', 'base'): sys.path.insert(0, os.path.join(R, d))
 import bpy, female, numpy as np
 female.MANNEQUIN = True

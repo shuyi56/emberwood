@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'blender', 'shared'))  # fabric.py (folds via its shim)
 import fabric as xf   # noqa: E402
 import folds as fo    # noqa: E402
 

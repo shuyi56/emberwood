@@ -106,7 +106,7 @@ def main():
     f = S.measure(D['P'], D['N'], D['maskR'], D['ankleR'])
     Pl, step = S.plantar(D['P'], D['N'], D['maskR'])
     k, e, bare = S.calibrate(Pl, step, f)
-    sys.path.insert(0, os.path.join(HERE, '..', '..', 'blender', 'heelboot'))
+    sys.path.insert(0, os.path.join(HERE, '..', '..', '..', '..', 'blender', 'heelboot'))
     base = json.load(open(arg('--base'))) if arg('--base') else None
     x0 = [1.7675569, 1.0, 0.8102475, 0.0, 0.3905357, 1.0] if base is None else [base['optimum']['x'][n] for n in O.NAMES]
     out = {}

@@ -7,7 +7,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'blender', 'shared'))  # fabric.py (folds via its shim)
 import fabric as xf   # noqa: E402
 
 RT, RA, SINK, GAP = 4.0, 1.6, 0.2, 0.06          # torso and arm radii (figure units), the arm sunk into the side

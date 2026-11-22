@@ -27,7 +27,7 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'blender', 'heel'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'gauges', 'footwear', 'heel'))   # study.py, the support gauge
 import study as S  # noqa: E402
 
 NAMES = ('h', 'width', 'length', 'rake', 'arch', 'cup')

@@ -19,7 +19,7 @@ The limits (CIE Lab, D65):
     darkens what is around it.
 """
 import os, sys, math, argparse
-R = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'blender')
+R = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'blender')
 for d in ('base', 'boot', 'hose', 'shared', 'redingote_bodice'):
     sys.path.insert(0, os.path.join(R, d))
 import numpy as np

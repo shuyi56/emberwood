@@ -29,6 +29,8 @@ import numpy as np
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
+import sys as _sys
+_sys.path.append(os.path.dirname(os.path.abspath(__file__)))   # ease.py beside this file (appended: blender/shared still wins)
 import ease
 
 # a negative gap smaller than this (in mm) is the meshes' own faceting, not show-through

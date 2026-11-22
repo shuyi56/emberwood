@@ -34,7 +34,7 @@ import os
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SPEC = os.path.join(HERE, 'riding_habit.json')
+SPEC = os.path.join(HERE, '..', '..', '..', 'blender', 'shared', 'riding_habit.json')   # (the spec stays beside the outfit's code)
 
 REGIONS_TRUNK = {'neck_base': True, 'bust': True, 'under_bust': True, 'waist': True, 'high_hip': True, 'hip': True,
                  'across_back': True}

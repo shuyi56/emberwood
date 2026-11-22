@@ -20,7 +20,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'blender', 'heel'))
+sys.path.insert(0, HERE)   # study.py, the support gauge, beside this file
 import study as S  # noqa: E402
 
 COL = {'insole': '#33a0a0', 'shank': '#d92626', 'sole': '#f28c1a', 'lift_a': '#8c6bbf', 'lift_b': '#598cd9',

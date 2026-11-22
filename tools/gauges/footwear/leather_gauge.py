@@ -262,7 +262,7 @@ def main():
     import sys
     argv = sys.argv[1:]
     opt = lambda k, d=None: argv[argv.index(k) + 1] if k in argv else d  # noqa: E731
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'blender', 'zipboot')  # (was beside zipboot.py)
     fig = opt('--figure', 'zipboot')
     for d in (fig, 'heelboot', 'base', 'boot'):
         sys.path.insert(0, os.path.join(here, '..', d))

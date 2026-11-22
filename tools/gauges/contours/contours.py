@@ -295,5 +295,7 @@ def contour_sheet(F, path, target=None, x=None, stations=5, heights=5):
 
 
 def _dih(X, H):
+    import os, sys
+    sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'solvers', 'folds'))  # (appended)
     from folds import dihedral
     return dihedral(X, H)
