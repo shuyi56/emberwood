@@ -660,6 +660,56 @@ def layer_over(X, top, seg_hh, under=None):
     return X
 
 
+FLARE_TOP = 0.7                    # HH: below here the sides are fitted to the creator's outline
+FLARE_IN = 0.25                    # HH: the hair's inner side at the jaw and neck (the neck's half-width is about
+                                   # 0.2): the fit widens or narrows the hair beyond this, so the hair next to the
+                                   # head and neck stays where it is
+FLARE_BIN = 0.05                   # HH: the heights the outlines are compared in
+FLARE_PCT = 98                     # the outline: this percentile of the hair's distance out to the side
+
+
+def creator_flare(X, style_path, surf=None):
+    """The Ranger's sides flow outward as the creator draws them: from the cheek down her outline widens from 95 to
+    121 mm (half-width, at -0.25 HH) while the groom's fell as a straight column at 109 mm (14 mm too wide at the jaw,
+    8 mm too narrow at the shoulders). Each side is fitted height by height: the hair beyond FLARE_IN from the axis is
+    scaled so its outline (FLARE_PCT) lands on the creator's, eased in below FLARE_TOP. A fit to the creator, not
+    physics: it stretches or packs the outer hair by up to about a quarter."""
+    import creator_truth as CT
+    P, A, strands = CT.load(style_path)
+    Q = CT.creator_points(P, A, strands)
+    X = X.copy()
+    pts = X.reshape(-1, 3)
+    ok = ~np.isnan(pts[:, 0])
+    zs = np.arange(FLARE_TOP + FLARE_BIN, pts[ok, 2].min() - FLARE_BIN, -FLARE_BIN)
+    for sgn in (1.0, -1.0):
+        rat = []
+        for z in zs:
+            c = Q[(np.abs(Q[:, 2] - z) < FLARE_BIN) & (sgn * Q[:, 0] > 0)]
+            g = pts[ok & (np.abs(pts[:, 2] - z) < FLARE_BIN) & (sgn * pts[:, 0] > 0)]
+            rat.append((np.percentile(sgn * c[:, 0], FLARE_PCT) - FLARE_IN) / (np.percentile(sgn * g[:, 0], FLARE_PCT) - FLARE_IN)
+                       if len(c) > 20 and len(g) > 20 else np.nan)
+        rat = np.array(rat)
+        rat = np.where(np.isnan(rat), np.interp(np.arange(len(rat)), np.where(~np.isnan(rat))[0], rat[~np.isnan(rat)]), rat)
+        rat = np.convolve(np.pad(rat, 1, mode='edge'), np.ones(3) / 3, mode='valid')
+        rat = np.clip(rat, 0.6, 1.6)
+        side = ok & (sgn * (pts[:, 0] - SF.AXIS[0]) > FLARE_IN)
+        z = pts[side, 2]
+        k = np.interp(-z, -zs, rat)                                    # (zs falls)
+        e = np.clip((FLARE_TOP - z) / (2 * FLARE_BIN), 0, 1)
+        k = 1 + (k - 1) * e * e * (3 - 2 * e)
+        pts[side, 0] = SF.AXIS[0] + sgn * (FLARE_IN + (sgn * (pts[side, 0] - SF.AXIS[0]) - FLARE_IN) * k)
+    if surf is not None:
+        # (packing the hair at the ear drew some of its inner nodes into the skull: set them back out over the skin)
+        up = ok & (pts[:, 2] > 0.2)
+        q = pts[up] - SF.CENTRE
+        r = np.linalg.norm(q, axis=1)
+        need = surf.radius(q / r[:, None]) + 0.5 / SF.HH_MM
+        inside = r < need
+        q[inside] *= (need[inside] / r[inside])[:, None]
+        pts[up] = SF.CENTRE + q
+    return pts.reshape(X.shape)
+
+
 def creator_cut(style_path, nb=48):
     """The end height by angle round the head from the creator's own hair: in each bin of angle (where the hair
     hangs), how low its strands and its cap's hem reach (CUT_PCT percentile of their lowest points), smoothed round
@@ -1124,6 +1174,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # layered as cut: the face-framing hair over the hair at the sides, the bangs over both
         X2 = layer_over(X2, frame, seg_hh, under=~bang & ~frame)
         X2 = layer_over(X2, bang, seg_hh)
+    if trace and not wavy:
+        # the Ranger's sides flow outward below the cheek, as the creator's do
+        X2 = creator_flare(X2, trace, surf)
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
