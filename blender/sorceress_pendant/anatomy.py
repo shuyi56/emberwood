@@ -219,8 +219,16 @@ def patch():
     elif MEASURED_FOOT:
         # (the ankle joint at its measured height: the shin longer by what the ankle comes down, the slack kept)
         female.ANKLE_Z = FLOOR_Z + ANKLE_H
+        female.SOLE_UNDER_ANKLE = ANKLE_H      # (the walk views draw their floor this far under the ankle)
         female.SHIN = 13.8 + (3.4 - ANKLE_H)
         female.FOOT_BALL = FOOT_BALL_M
+        # (a toe bone at the metatarsal heads, under the skin of the knuckles: the walk rolls the foot over it with the toes flat)
+        female.TOE_JOINT = (FOOT_BALL_M, 0.8)
+        # (the heel strike held longer: initial contact at 0-2 % of the cycle with the ankle at neutral, foot flat only at
+        # the end of the loading response, 2-12 % (AAPMR, Biomechanics of Normal Gait). The table's 16 degrees flat in
+        # 7 % was over in one frame of an 8-frame walk, so she read as landing flat; the toes-up angle is the EXPERIMENTAL
+        # part: 20 degrees, the shank's lean at contact with the ankle neutral)
+        female.L_GAIT_FOOT = [(0.0, 20), (0.05, 10), (0.11, 0)] + [k for k in female.L_GAIT_FOOT if k[0] >= 0.30]
 
 
 # ---------------------------------------------------------------- pelvis

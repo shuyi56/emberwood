@@ -296,7 +296,7 @@ def walk(n, out, stem='walk', seconds=0.69, wide=1.0):
         if o.animation_data:
             o.animation_data_clear()
     floor = bpy.data.meshes.new('Walk floor')
-    fz = female.ANKLE_Z - 3.4      # (the sole is 3.4 under the ankle: the floor, wherever the figure's legs put it)
+    fz = female.ANKLE_Z - getattr(female, 'SOLE_UNDER_ANKLE', 3.4)   # (the sole is 3.4 under the ankle, or the measured foot's ankle height: the floor, wherever the figure's legs put it)
     floor.from_pydata([(-60, -60, fz), (60, -60, fz), (60, 60, fz), (-60, 60, fz)], [], [(0, 1, 2, 3)])
     fo = bpy.data.objects.new('Walk floor', floor)
     sc.collection.objects.link(fo)
