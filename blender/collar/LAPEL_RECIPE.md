@@ -310,3 +310,28 @@ John circled the collar's back seen past the neck from the front: it floated, wi
 (`neck_clear` 0.05, was 0.10). The ring is drawn in again (`hug` 0.15), now all the way to near the fronts (`hug_run`
 1.0). With the roll edge evened out and the last polish, this no longer creases: there are 0 sharp folds. The roll is
 35.5 cm round the neck (was 37.9) and 0.8 cm off it on average, which includes the stand's own thickness.
+
+### The neckline redrafted to the collar
+
+John: "you have to redraft with this new neckline so the collar fits better." The collar used to be drawn in to the
+neck on its own, over a bodice neckline that stood off the neck. Now the bodice is cut to the collar's neck edge, and
+the collar is sewn straight onto it (`hug` off).
+
+`bodice_cut.neck_fit`, in the cut step, before anything is folded, works like this:
+
+- Round the sides and back, each point near the neckline moves level toward the neck until it lies `BODICE_NECK_HUG`
+  (0.05) off it.
+- The move is full at the neck edge and fades out `BODICE_NECK_DROP` (2.0) below it. It is evened out over the mesh,
+  so the shoulders take it up as one swell.
+- It starts only past 0.9 rad round from the front and is full past 1.4 (`BODICE_NECK_FROM`). Starting at 0.6, it
+  reached the lapels' top corners and roughened the collar's right end.
+- The lapels come out of the fold exactly as before: the same strain to the tenth of a percent.
+
+The neckline round the back is 36.3 cm (was 37.7). The collar's roll is 36.0 cm and 0.95 cm off the neck on average,
+which includes the stand's own thickness, with 0 sharp folds and the notch at 41.5 and 40.7 degrees.
+
+```
+python3 blender/base/views.py --figure bodice_cut --mannequin --turn --angles front --size 300 --samples 8 --save CUT.blend --out DIR
+python3 blender/collar/foldfront.py CUT.blend LAPEL.blend '{"recipe":"notch_lapel"}'
+python3 blender/collar/notchcollar.py LAPEL.blend OUT.blend '{}'
+```

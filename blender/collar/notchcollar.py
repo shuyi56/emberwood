@@ -127,7 +127,7 @@ up = np.array([(Z - lean * radial(e)) / np.linalg.norm(Z - lean * radial(e)) for
 Rr = E + st[:, None] * up
 # the ring (John: "the ring of the collar, reduce that length"): the roll is drawn in toward the neck until it lies
 # hug off it, as much as the stand stands there (where the stand dies away at the fronts it keeps to the neckline)
-hug = opt.get('hug', 0.15)      # (John: "fix the floating back of the collar": the roll drawn in to this far off the neck)
+hug = opt.get('hug')            # (off: the bodice's neckline is now drafted to the collar, bodice_cut.neck_fit; was 0.15)
 E0 = E.copy()
 wh = ss(0.0, opt.get('hug_run', 1.0) * stand_run, d_end)      # (drawn in gently, over twice the stand's own run, so the fall finds no step)
 if hug and opt.get('hug_base', True):     # (the collar's neck edge too: the collar is cut shorter round the neck and sewn
