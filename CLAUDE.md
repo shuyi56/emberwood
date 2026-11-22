@@ -55,3 +55,20 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
   into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
   clashed, and forest green read badly (and vanished on the grass), so her robe and cape are a deep plum. Check the cape against the hair in the side and back views.
+
+## Measuring references: use `tools/refmeasure/`
+
+Whenever you build from a photo or reference image (lapels, collars, hair, boots, a face), measure it
+before you cut or model, and measure the model the same way after. Use the shared tool, not one-off
+scripts: `tools/refmeasure/refmeasure.py` (headless) or `tools/refmeasure/measure.html` (click to place
+points). Full workflow and sources are in `tools/refmeasure/README.md`.
+
+- Place named landmarks (`refmeasure.py names` lists the shared names), pick one unit (a vertical span such
+  as head height or neck-to-waist survives a 3/4 view; a width does not), and hang a plumb line from one
+  landmark. `report` gives every size, ratio, position and alignment in that unit.
+- `probe SHEET a b [c d]` gives a quick span or ratio between landmarks.
+- Save the sheet (`<image>.measure.json`) next to the image and commit or keep it with the build, so the
+  numbers are repeatable.
+- Measure the model from a camera that matches the photo (`blender_landmarks.py` projects exact 3D points),
+  `template` the reference sheet onto it, and run `compare REF MODEL --png gaps.png`. List every flagged gap
+  in the thread before changing the model.
