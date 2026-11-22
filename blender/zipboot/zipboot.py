@@ -36,12 +36,13 @@ TOE_EXT = 0.12               # an almond toe: drawn this far past the toes, x th
 TOE_NARROW = 0.30            # and narrowed toward its point by this share at the tip (read off the photo's plan. EXPERIMENTAL)
 ROOM = {'room': 0.034, 'gap': 0.034}   # x H: the foot's room and the least room off the skin (the boot's own 0.022
                              # and 0.024 drew the suede onto the foot until the toes and the instep showed: John, too tight)
-TOE_BOX = 0.07               # a square toe box (last.build_boots): cut this far ahead of the toes, x the foot's length
-TOE_SQ, TOE_FRONT, TOE_WALL = 3.0, 0.72, 0.45   # its sections' squareness (a superellipse's power: a nearly flat top pinched
+TOE_BOX = 0.085              # a square toe box (last.build_boots): cut this far ahead of the toes, x the foot's length
+TOE_SQ, TOE_FRONT, TOE_WALL = 3.0, 0.72, 0.40   # its sections' squareness (a superellipse's power: a nearly flat top pinched
                              # into the sides), its width at the cut as a share of the ball's, and the front wall's least
                              # height (John: sharp, not round; nearly flat top, pinched)
 TOE_EASE = 5                 # passes easing the box after it is drawn (John: smooth, by the photo's lines)
-TOE_CUT_R, TOE_RAKE = 0.15, 0.15   # the front edge's softness, and the front wall's lean back with height
+TOE_SWEEP = 1.3              # the profile's hollow: low over the toes, then up to the instep (1: a straight ramp)
+TOE_CUT_R, TOE_RAKE = 0.20, 0.25   # the front edge's softness, and the front wall's lean back with height
 BEND_FAN = 0.8               # and its band's half-width grown by this per unit of height over the sole
 BEND = (2.7, 4.1)            # the boot's bend moved back to the ball: this far behind the tip, units (bend_at_ball)
 PITCH_SET = 40               # passes setting the leather at the heel's pitch (set_at_pitch; 0 for none)
@@ -370,7 +371,7 @@ def build():
     boot.CREASE = CREASE
     boot.last.RATIOS.update(ROOM)
     boot.last.RATIOS.update(toe_box=TOE_BOX, toe_sq=TOE_SQ, toe_front=TOE_FRONT, toe_wall=TOE_WALL,
-                            toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=2.0, toe_ease=TOE_EASE, toe_spare=0.08)   # (the sole's outline kept square at the toe)
+                            toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=2.0, toe_ease=TOE_EASE, toe_spare=0.08, toe_sweep=TOE_SWEEP)   # (the sole's outline kept square at the toe)
     boot.last.RATIOS['welt'] = WELT
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM

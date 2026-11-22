@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('toe_sweep', 'toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -924,7 +924,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                 Ltop = binned(z_, y_, np.max) - z_welt
                 gs_ = g_ + r.get('toe_spare', 0.0)               # (and a little over: the easing below draws the box in)
                 Slo, Shi = binned(X0[idx, 0], X0[idx, 1], np.min) - gs_, binned(X0[idx, 0], X0[idx, 1], np.max) + gs_
-                Stop = binned(X0[idx, 2], X0[idx, 1], np.max) + gs_ - z_welt
+                Stop = binned(X0[idx, 2], X0[idx, 1], np.max) + g_ - z_welt
                 at = lambda A, yv: float(np.interp(yv, ys[~np.isnan(A)], A[~np.isnan(A)]))  # noqa: E731
                 lo_b, hi_b, h_b = at(Llo, y_ball), at(Lhi, y_ball), at(Ltop, y_ball)
                 c_b, a_b = 0.5 * (lo_b + hi_b), 0.5 * (hi_b - lo_b)
@@ -938,9 +938,21 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                     hi = np.fmax(hi, Shi)
                     lo[1:-1] = np.minimum(lo[1:-1], 0.25 * lo[:-2] + 0.5 * lo[1:-1] + 0.25 * lo[2:])
                     hi[1:-1] = np.maximum(hi[1:-1], 0.25 * hi[:-2] + 0.5 * hi[1:-1] + 0.25 * hi[2:])
-                ok = (t > 0.15) & ~np.isnan(Stop)
-                hf = max(r.get('toe_wall', 0.5), float(np.max((Stop[ok] - h_b * (1.0 - t[ok])) / t[ok])) if ok.any() else 0.0)
-                h_ = h_b + (hf - h_b) * t
+                # (the profile, as a toe is capped: the box keeps the toes' own thickness over them, about 2 cm (a last's
+                # toe thickness: the toes' plus the sock's and the lining's), and only then sweeps up to the instep, a
+                # hollow curve of power toe_sweep; a straight ramp from the edge to the ball reads as a wedge. Let out
+                # wherever the skin needs more, and that eased along the box so it leaves no bump)
+                tips = ~np.isnan(Stop) & (ys < sk_tip + 0.03 * L)
+                hf = max(r.get('toe_wall', 0.5), float(np.nanmax(Stop[tips])) if tips.any() else 0.0)
+                h_ = hf + (h_b - hf) * (1.0 - t) ** r.get('toe_sweep', 2.2)
+                for _ in range(40):
+                    h_ = np.fmax(h_, Stop)
+                    h_[1:-1] = np.maximum(h_[1:-1], 0.25 * h_[:-2] + 0.5 * h_[1:-1] + 0.25 * h_[2:])
+                # (and the toe's recede: ahead of the toes' tips the top turns down to the front wall, toe_wall high, as
+                # a quarter of an ellipse over the toe allowance; the cap's curve, not a box's corner)
+                hw_ = r.get('toe_wall', 0.4)
+                u_r = np.clip((sk_tip + 0.1 - ys) / max(sk_tip + 0.1 - y_cut, 1e-6), 0.0, 1.0)
+                h_ = np.where(u_r > 0, np.minimum(h_, hw_ + (max(hf, hw_) - hw_) * np.sqrt(1.0 - u_r ** 2)), h_)
                 fill = lambda A: np.interp(ys, ys[~np.isnan(A)], A[~np.isnan(A)])  # noqa: E731
                 Llo, Lhi, Ltop = fill(Llo), fill(Lhi), np.maximum(fill(Ltop), 1e-3)
                 # (ahead of the cut the nose is read in the cut section's own frame, and its distance from that
@@ -965,7 +977,7 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                 X[idx, 1] += (yn - y_) * wv
                 X[idx, 2] += (zn - z_) * wv * (z_ > z_welt)
                 log('boot: the toe box drawn square: cut %.2f ahead of the toes, %.2f wide there of %.2f at the ball, '
-                    'the front wall %.2f high, the top %.2f at the ball' % (sk_tip - y_cut, 2 * av[np.argmin(np.abs(y_ - y_cut))], 2 * a_b, hf, h_b))
+                    'the front wall %.2f high, %.2f over the toes\' tips, the top %.2f at the ball' % (sk_tip - y_cut, 2 * av[np.argmin(np.abs(y_ - y_cut))], 2 * a_b, hw_, hf, h_b))
         if r.get('toe_box') and r.get('toe_ease'):        # (the box eased: its folds and the wall's edge left soft)
             for _ in range(int(r['toe_ease'])):
                 dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
