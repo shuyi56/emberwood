@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -922,8 +922,9 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                     return o_
                 Llo, Lhi = binned(x_, y_, np.min), binned(x_, y_, np.max)
                 Ltop = binned(z_, y_, np.max) - z_welt
-                Slo, Shi = binned(X0[idx, 0], X0[idx, 1], np.min) - g_, binned(X0[idx, 0], X0[idx, 1], np.max) + g_
-                Stop = binned(X0[idx, 2], X0[idx, 1], np.max) + g_ - z_welt
+                gs_ = g_ + r.get('toe_spare', 0.0)               # (and a little over: the easing below draws the box in)
+                Slo, Shi = binned(X0[idx, 0], X0[idx, 1], np.min) - gs_, binned(X0[idx, 0], X0[idx, 1], np.max) + gs_
+                Stop = binned(X0[idx, 2], X0[idx, 1], np.max) + gs_ - z_welt
                 at = lambda A, yv: float(np.interp(yv, ys[~np.isnan(A)], A[~np.isnan(A)]))  # noqa: E731
                 lo_b, hi_b, h_b = at(Llo, y_ball), at(Lhi, y_ball), at(Ltop, y_ball)
                 c_b, a_b = 0.5 * (lo_b + hi_b), 0.5 * (hi_b - lo_b)
@@ -949,19 +950,27 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                 u_, v_ = (x_ - cl) / np.maximum(al, 1e-3), np.maximum(z_ - z_welt, 0.0) / np.interp(yc, ys, Ltop)
                 th = np.arctan2(v_, u_)
                 s_ = np.where(y_ < y_cut, np.clip(np.hypot(u_, v_), 0.0, 1.0), 1.0)
-                rho = (np.abs(np.cos(th)) ** n_ + np.abs(np.sin(th)) ** n_) ** (-1.0 / n_)
+                # (the squareness grown along the box: a round section at the ball, toe_sq at the cut, so the top flows
+                # out of the instep as one surface and only folds toward the front)
+                nv = 2.0 + (n_ - 2.0) * np.clip((y_ball - yc) / (y_ball - y_cut), 0.0, 1.0) ** 2.5
+                rho = (np.abs(np.cos(th)) ** nv + np.abs(np.sin(th)) ** nv) ** (-1.0 / nv)
                 cv, av, hv = 0.5 * (np.interp(yc, ys, lo) + np.interp(yc, ys, hi)), 0.5 * (np.interp(yc, ys, hi) - np.interp(yc, ys, lo)), np.interp(yc, ys, h_)
                 xn = cv + av * s_ * rho * np.cos(th)
                 zn = z_welt + hv * s_ * rho * np.sin(th)
                 d_ = y_ - (y_cut + r.get('toe_rake', 0.0) * (zn - z_welt))
                 kr = r.get('toe_cut_r', 0.08)
                 yn = y_ - d_ + 0.5 * (d_ + np.sqrt(d_ ** 2 + kr ** 2))
-                wv = _ss(y_ball + 0.04 * L, y_ball - 0.20 * L, y_) * toe_w[idx]
+                wv = _ss(y_ball + 0.10 * L, y_ball - 0.08 * L, y_) * toe_w[idx]   # (short: the foot's own ridges end at the ball)
                 X[idx, 0] += (xn - x_) * wv
                 X[idx, 1] += (yn - y_) * wv
                 X[idx, 2] += (zn - z_) * wv * (z_ > z_welt)
                 log('boot: the toe box drawn square: cut %.2f ahead of the toes, %.2f wide there of %.2f at the ball, '
                     'the front wall %.2f high, the top %.2f at the ball' % (sk_tip - y_cut, 2 * av[np.argmin(np.abs(y_ - y_cut))], 2 * a_b, hf, h_b))
+        if r.get('toe_box') and r.get('toe_ease'):        # (the box eased: its folds and the wall's edge left soft)
+            for _ in range(int(r['toe_ease'])):
+                dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+                X[:, :2] += (0.5 * toe_w * (X[:, 2] > z_welt + 0.05))[:, None] * dl[:, :2]
+                X[:, 2] += 0.5 * tw * dl[:, 2]
         mv = np.linalg.norm(X - X1, axis=1)
         log('boot: the toe turned as one smooth box over the toes (%d passes): %d points moved, %.3f on average, %.3f '
             'at most' % (int(r['toe_shell']), int((mv > 0.01).sum()), float(mv[mv > 0.01].mean()) if (mv > 0.01).any()

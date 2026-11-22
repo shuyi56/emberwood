@@ -36,11 +36,14 @@ TOE_EXT = 0.12               # an almond toe: drawn this far past the toes, x th
 TOE_NARROW = 0.30            # and narrowed toward its point by this share at the tip (read off the photo's plan. EXPERIMENTAL)
 ROOM = {'room': 0.034, 'gap': 0.034}   # x H: the foot's room and the least room off the skin (the boot's own 0.022
                              # and 0.024 drew the suede onto the foot until the toes and the instep showed: John, too tight)
-TOE_BOX = 0.05               # a square toe box (last.build_boots): cut this far ahead of the toes, x the foot's length
-TOE_SQ, TOE_FRONT, TOE_WALL = 5.0, 0.72, 0.5   # its sections' squareness (a superellipse's power: a nearly flat top pinched
+TOE_BOX = 0.07               # a square toe box (last.build_boots): cut this far ahead of the toes, x the foot's length
+TOE_SQ, TOE_FRONT, TOE_WALL = 3.0, 0.72, 0.45   # its sections' squareness (a superellipse's power: a nearly flat top pinched
                              # into the sides), its width at the cut as a share of the ball's, and the front wall's least
                              # height (John: sharp, not round; nearly flat top, pinched)
-TOE_CUT_R, TOE_RAKE = 0.08, 0.2   # the front edge's softness, and the front wall's lean back with height
+TOE_EASE = 5                 # passes easing the box after it is drawn (John: smooth, by the photo's lines)
+TOE_CUT_R, TOE_RAKE = 0.15, 0.15   # the front edge's softness, and the front wall's lean back with height
+BEND_FAN = 0.8               # and its band's half-width grown by this per unit of height over the sole
+BEND = (2.7, 4.1)            # the boot's bend moved back to the ball: this far behind the tip, units (bend_at_ball)
 PITCH_SET = 40               # passes setting the leather at the heel's pitch (set_at_pitch; 0 for none)
 WELT = 0.006                 # x H: the sole trimmed close to the upper (about 1.5 mm), as a dress boot's is; the boot's
                              # 0.022 is a welted work boot's ledge (John: join the heel and fit)
@@ -234,6 +237,75 @@ def true_seam(o, pieces, reach=0.45, passes=40, log=print):
         flush=True)
 
 
+def bend_at_ball(o, band, like=None, log=print):
+    """The boot's bend moved back to the ball: the leather takes the hose's weights, so it bends where the toes do,
+    across the middle of the toe box, and on the heel that shows as a line across the box's top. A shoe's forepart is
+    stiff and flat to the tread line and bends there, under the vamp's rise. The toes' bone is given the box whole to
+    band[0] behind the tip and none of it past band[1] (units), each point's other bones keeping their own
+    proportions (a point that had none takes the foot's). The sole (like: the upper's points, weights and names)
+    takes its weights from the upper's nearest point by the welt, so the two bend as one."""
+    me = o.data
+    side = o.name.rsplit('.', 1)[-1]
+    if like is not None:
+        for nm in like[2]:
+            if o.vertex_groups.get(nm) is None:
+                o.vertex_groups.new(name=nm)
+    names = [g.name for g in o.vertex_groups]
+    rig = next((m_.object for m_ in o.modifiers if m_.type == 'ARMATURE'), None)
+    bones = np.array([nm in rig.data.bones for nm in names])
+    n = len(me.vertices)
+    W = np.zeros((n, len(names)))
+    for v in me.vertices:
+        for g in v.groups:
+            W[v.index, g.group] = g.weight
+    W0 = W.copy()
+    X = np.array([v.co[:] for v in me.vertices])
+    if like is not None:
+        Xu, Wu, nu = like
+        low = np.nonzero(Xu[:, 2] < Xu[:, 2].min() + 0.6)[0]
+        from mathutils.kdtree import KDTree
+        kd = KDTree(len(low))
+        for j, i in enumerate(low):
+            kd.insert((Xu[i, 0], Xu[i, 1], 0.0), j)
+        kd.balance()
+        near = np.array([low[kd.find((x[0], x[1], 0.0))[1]] for x in X])
+        fwd = X[:, 1] < Xu[:, 1].min() + band[1] + 1.5
+        for j, nm in enumerate(names):
+            if bones[j] and nm in nu:
+                W[fwd, j] = Wu[near[fwd], nu.index(nm)]
+    else:
+        it, i_f = names.index('Toe.' + side), names.index('Foot.' + side)
+        y = X[:, 1] - X[:, 1].min()
+        # (the band widens with height: the vamp's top stands well over the joint and a narrow bend there shortens
+        # it by a third, which folds it; low by the sole the bend stays short, as a sole's is)
+        c0, hw = 0.5 * (band[0] + band[1]), 0.5 * (band[1] - band[0]) + BEND_FAN * np.clip(X[:, 2] - X[:, 2].min() - 0.3, 0.0, 2.0)
+        t = np.clip((y - (c0 - hw)) / (2.0 * hw), 0.0, 1.0)
+        s_new = 1.0 - t * t * (3.0 - 2.0 * t)
+        Ot = W * bones[None, :]
+        Ot[:, it] = 0.0
+        none = Ot.sum(1) < 1e-3
+        Ot[none] = 0.0
+        Ot[none, i_f] = 1.0
+        Ot /= Ot.sum(1, keepdims=True)
+        Wn = Ot * (1.0 - s_new)[:, None]
+        Wn[:, it] = s_new
+        fwd = y < band[1] + 2.5                             # (behind that the toes' bone has no share either way)
+        W[np.ix_(fwd, bones)] = Wn[np.ix_(fwd, bones)]
+    ch = np.nonzero(np.abs(W - W0).max(1) > 1e-4)[0]
+    for g in o.vertex_groups:
+        if not bones[g.index]:
+            continue
+        col = W[:, g.index]
+        for i in ch:
+            if col[i] > 1e-4:
+                g.add([int(i)], float(col[i]), 'REPLACE')
+            elif W0[i, g.index] > 0:
+                g.remove([int(i)])
+    log('zipboot %s: the bend moved back to the ball (%.1f to %.1f behind the tip): %d points re-weighted, by %.2f at most'
+        % (o.name, band[0], band[1], len(ch), float(np.abs(W - W0).max())), flush=True)
+    return X, W, names
+
+
 def set_at_pitch(o, M, passes, log=print):
     """Set the boot's leather at the heel's pitch, as a boot is lasted: on a last that already stands at the heel's
     height (Golding, The Manufacture of Boots and Shoes: the last carries the pitch, and the upper is drawn smooth
@@ -298,7 +370,7 @@ def build():
     boot.CREASE = CREASE
     boot.last.RATIOS.update(ROOM)
     boot.last.RATIOS.update(toe_box=TOE_BOX, toe_sq=TOE_SQ, toe_front=TOE_FRONT, toe_wall=TOE_WALL,
-                            toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=1.5)   # (the sole's outline kept square at the toe)
+                            toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=2.0, toe_ease=TOE_EASE, toe_spare=0.08)   # (the sole's outline kept square at the toe)
     boot.last.RATIOS['welt'] = WELT
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
@@ -313,6 +385,10 @@ def build():
     bpy.context.view_layer.update()
     for side in 'RL':
         o = bpy.data.objects['Boot.' + side]
+        if BEND:
+            up_ = bend_at_ball(o, BEND)
+            if bpy.data.objects.get('Boot sole.' + side) is not None:
+                bend_at_ball(bpy.data.objects['Boot sole.' + side], BEND, like=up_)
         if PITCH_SET:
             root.location.z = up               # (as it stands on the heel)
             bpy.context.view_layer.update()

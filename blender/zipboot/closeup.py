@@ -76,7 +76,7 @@ def landmarks():
                           if 'top' in p.get('edges', {})])
     toe = B[np.argmin(B[:, 1])]
     floor = min(B[:, 2].min(), Hh[:, 2].min() if len(Hh) else 9.0)
-    lo_h = Hh[Hh[:, 2] < floor + 0.08] if len(Hh) else B
+    lo_h = Hh[Hh[:, 2] < Hh[:, 2].min() + 0.08] if len(Hh) else B
     L = lo_h[:, 1].max() - toe[1]
     hb = Hh[np.argmax(Hh[:, 1])] if len(Hh) else B[np.argmax(B[:, 1])]
     ank = X[np.abs(X[:, 2] - (floor + 0.489 * L)) < 0.1]
