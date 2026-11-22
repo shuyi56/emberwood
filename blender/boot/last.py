@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('sole_toe', 'toe_bow', 'toe_sweep', 'toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('toe_side', 'sole_toe', 'toe_bow', 'toe_sweep', 'toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -972,8 +972,18 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                 # (the squareness grown along the box: a round section at the ball, toe_sq at the cut, so the top flows
                 # out of the instep as one surface and only folds toward the front)
                 nv = 2.0 + (n_ - 2.0) * np.clip((y_ball - yc) / (y_ball - y_cut), 0.0, 1.0) ** 2.5
-                rho = (np.abs(np.cos(th)) ** nv + np.abs(np.sin(th)) ** nv) ** (-1.0 / nv)
                 cv, av, hv = 0.5 * (np.interp(yc, ys, lo) + np.interp(yc, ys, hi)), 0.5 * (np.interp(yc, ys, hi) - np.interp(yc, ys, lo)), np.interp(yc, ys, h_)
+                # (the section: upright sides toe_side high, as a last's stand over its feather line, and over them
+                # a dome, a superellipse's upper half, meeting them upright so no shoulder shows. Its radius along
+                # each point's ray found by halving)
+                ev = np.minimum(r.get('toe_side', 0.0), 0.35 * hv) / np.maximum(hv, 1e-6)
+                ct, st_ = np.abs(np.cos(th)), np.maximum(np.sin(th), 0.0)
+                r_lo, r_hi = np.zeros(len(th)), np.minimum(1.0 / np.maximum(ct, 1e-6), 1.0 / np.maximum(st_, 1e-6))
+                for _ in range(40):
+                    rm = 0.5 * (r_lo + r_hi)
+                    f_ = (rm * ct) ** nv + (np.maximum(rm * st_ - ev, 0.0) / (1.0 - ev)) ** nv - 1.0
+                    r_lo, r_hi = np.where(f_ < 0, rm, r_lo), np.where(f_ < 0, r_hi, rm)
+                rho = 0.5 * (r_lo + r_hi)
                 xn = cv + av * s_ * rho * np.cos(th)
                 zn = z_welt + hv * s_ * rho * np.sin(th)
                 # (the cut bowed back toward the corners, r['toe_bow'] of the half width at the corner and as its cube:
