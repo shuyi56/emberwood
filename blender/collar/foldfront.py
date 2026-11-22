@@ -50,7 +50,7 @@ RECIPES = {
 #   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
 RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.50], [1.0, 0.0]],
-                                  press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], top_out=[0.5, 0.8], metric3d=True, flap=[0.7, 1.4])
+                                  press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], metric3d=True)   # (top_out [0.5, 0.8] and flap [0.7, 1.4] are off: John wanted the first draft's tight fold)
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape

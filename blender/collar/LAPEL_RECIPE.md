@@ -161,3 +161,11 @@ three-point outline gives a spike and a ruled line. `outline_round` [0.05, 0.025
 Strain did not rise: mean 6.8% and 7.1%, worst edge +48% and +69% (it was +97% with the sharp point). Still rough,
 seen from the side: the top corner of each lapel crumples where it meets the neck edge.
 
+### The tight fold, kept
+
+John: "use the tighter fold of the first draft with the new geometry." `classical_lapel` no longer sets `top_out` or
+`flap`: the roll narrows toward the neck and the lapel is pressed flat to the break, as in the first draft, on the
+rounded outline. `metric3d` stays, because it is what lets the top lie easy. This is also the lowest strain of any
+classical build: mean 5.2% and 6.1%, 95% of edges under 15% and 17%, worst stretched edge +39% and +64%, pull on the
+top button 0.034 and 0.018. Both options still work when passed by hand; the two sections above describe them.
+
