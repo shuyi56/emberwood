@@ -859,6 +859,13 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         for _ in range(int(r['toe_shell']) // 2):
             push = np.maximum(need, avg1(push) * tw + push * (1 - tw))
         X += Nr * (push * tw)[:, None]
+        # (the push goes out along the skin's own normals, which fan apart round a toe's tip and left a lump there at
+        # the big toe; smoothed once more after it, a third as long, the lump is spread into the box. The gap is
+        # no longer exact at the tip: it is 8 mm here, and the smoothing takes back well under that)
+        for _ in range(int(r['toe_shell']) // 3):
+            dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+            X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
+            X[:, 2] += 0.5 * tw * dl[:, 2]
         mv = np.linalg.norm(X - X1, axis=1)
         log('boot: the toe turned as one smooth box over the toes (%d passes): %d points moved, %.3f on average, %.3f '
             'at most' % (int(r['toe_shell']), int((mv > 0.01).sum()), float(mv[mv > 0.01].mean()) if (mv > 0.01).any()

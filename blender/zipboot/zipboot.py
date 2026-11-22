@@ -165,6 +165,66 @@ def _posed(o):
     return P
 
 
+def _carry(o, R, dR):
+    """Whatever rides on the boot o (its stitches) moved as the boot's nearest point (at R, before) was (dR)."""
+    from mathutils.kdtree import KDTree
+    side = o.name.rsplit('.', 1)[-1]
+    kd = KDTree(len(R))
+    for i, p_ in enumerate(R):
+        kd.insert(p_, i)
+    kd.balance()
+    for r_ in bpy.data.objects:
+        if r_ is o or r_.type != 'MESH' or not r_.name.endswith('.' + side) or not r_.name.startswith('Boot stitches'):
+            continue
+        for v in r_.data.vertices:
+            v.co = v.co + type(v.co)(dR[kd.find(v.co)[1]])
+        r_.data.update()
+
+
+def true_seam(o, pieces, reach=0.45, passes=40, log=print):
+    """The back seam's lapped edge trued to a fair line. The edge is cut straight on the last, but sewn (each of its
+    points tied to the nearest point of the quarter under it, which are not spaced alike) it comes out wavy, with a
+    notch over the counter where the back turns from the heel's bulge into the hollow above it. A clicker's edge is
+    a clean knife line, so the edge's points are drawn to their own smoothed run up the seam, and the leather
+    within `reach` of the edge goes with it, less the further off."""
+    by = {p['name']: p for p in pieces}
+    fr = by['vamp and outer quarter']
+    me = o.data
+    R = np.array([v.co[:] for v in me.vertices])
+    # the edge itself: the piece's open edges (each on one face only) that lie along the seam
+    from collections import Counter
+    cnt = Counter()
+    lo, hi = fr['start'], fr['start'] + len(fr['V'])
+    for f in me.polygons:
+        vs = list(f.vertices)
+        if lo <= vs[0] < hi:
+            for k in range(len(vs)):
+                a_, b_ = vs[k], vs[(k + 1) % len(vs)]
+                cnt[(min(a_, b_), max(a_, b_))] += 1
+    rim = np.unique(np.array([e for e, c in cnt.items() if c == 1]).ravel())
+    seam = np.nonzero(fr['edges']['B'])[0] + fr['start']
+    near = np.sqrt(((R[rim][:, None, :] - R[seam][None, :, :]) ** 2).sum(-1)).min(1) < 0.2
+    idx = rim[near]
+    idx = idx[np.argsort(R[idx, 2])]
+    Q = R[idx].copy()
+    for _ in range(passes):
+        Q[1:-1, :2] = 0.25 * Q[:-2, :2] + 0.5 * Q[1:-1, :2] + 0.25 * Q[2:, :2]
+    dE = Q - R[idx]
+    dR = np.zeros_like(R)
+    sl = np.arange(fr['start'], fr['start'] + len(fr['V']))
+    d2 = ((R[sl][:, None, :] - R[idx][None, :, :]) ** 2).sum(-1)
+    j = d2.argmin(1)
+    dist = np.sqrt(d2[np.arange(len(sl)), j])
+    t = np.clip(1.0 - dist / reach, 0.0, 1.0)
+    dR[sl] = dE[j] * (t * t * (3 - 2 * t))[:, None]
+    me.vertices.foreach_set('co', (R + dR).ravel())
+    me.update()
+    _carry(o, R, dR)
+    log('zipboot %s: the back seam\'s edge trued: %d points on it moved %.3f on average, %.3f at most'
+        % (o.name, len(idx), float(np.linalg.norm(dE, axis=1).mean()), float(np.linalg.norm(dE, axis=1).max())),
+        flush=True)
+
+
 def set_at_pitch(o, M, passes, log=print):
     """Set the boot's leather at the heel's pitch, as a boot is lasted: on a last that already stands at the heel's
     height (Golding, The Manufacture of Boots and Shoes: the last carries the pitch, and the upper is drawn smooth
@@ -212,18 +272,7 @@ def set_at_pitch(o, M, passes, log=print):
     put(R + dR)
     for m in solid:
         m.show_viewport = True
-    side = o.name.rsplit('.', 1)[-1]
-    from mathutils.kdtree import KDTree
-    kd = KDTree(n)
-    for i, p_ in enumerate(R):
-        kd.insert(p_, i)
-    kd.balance()
-    for r_ in bpy.data.objects:
-        if r_ is o or r_.type != 'MESH' or not r_.name.endswith('.' + side) or not r_.name.startswith('Boot stitches'):
-            continue
-        for v in r_.data.vertices:
-            v.co = v.co + type(v.co)(dR[kd.find(v.co)[1]])
-        r_.data.update()
+    _carry(o, R, dR)
     mv = np.linalg.norm(Q - P, axis=1)
     log('zipboot %s: set at the heel\'s pitch (%d passes): %d points moved, %.3f on average, %.3f at most'
         % (o.name, int(passes), int((mv > 0.005).sum()), float(mv[mv > 0.005].mean()) if (mv > 0.005).any() else 0.0,
@@ -257,6 +306,7 @@ def build():
             set_at_pitch(o, boot.hose.MEASURES, PITCH_SET)
             root.location.z = 0.0
             bpy.context.view_layer.update()
+        true_seam(o, boot.last.PIECES[side])       # (last: the pitch's smoothing ripples an open edge)
         zipper.build(o, boot.last.PIECES[side], rig, L,
                      {'teeth': female.mat(M_TEETH), 'tape': female.mat(M_TAPE), 'metal': female.mat(M_METAL)})
     if ENTRY_CHECK:
