@@ -206,7 +206,17 @@ def compute(hours=None, names=None):
         "batching": batching(lo, events, json.load(open(STATE)) if os.path.exists(STATE) else {}),
         "telemetry": telemetry(lo, jl, json.load(open(STATE)) if os.path.exists(STATE) else {}),
         "hogging": hogging(lo, now, events),
+        "interventions": _interventions(hours, names),
     }
+
+
+def _interventions(hours, names):
+    """John's interventions and the iterations between them (rq_interventions.py, from stats/thread-activity.jsonl)."""
+    try:
+        import rq_interventions
+        return rq_interventions.compute(hours, names)
+    except Exception as e:                      # a missing or broken activity log never stops the nightly numbers
+        return {"error": repr(e)}
 
 
 def hogging(lo, now, events):
@@ -508,6 +518,10 @@ def report(st):
             or ["  no thread passed a warning"]
         out.append(f"  warnings told to threads at request time: {h['told'] or 'none'}; rules {h['rules']}")
         out.append(f"  pings by thread: {h['pings'] or 'none'}; requests sent without a recent ping: {h['unpinged'] or 'none'}")
+    iv = st.get("interventions")
+    if iv:
+        import rq_interventions
+        out += [""] + (rq_interventions.report_lines(iv) if "error" not in iv else [f"John's interventions: {iv['error']}"])
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]
     return "\n".join(out)

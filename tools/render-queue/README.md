@@ -17,6 +17,7 @@ it to the shared folder. To run this copy against the shared state, set `RQ_HOME
 | `rq_run.py` | the one way a Blender script is run: `python3 rq_run.py [--quality check] [--memo DIR] [--keep-scene] -- SCRIPT ARGS` |
 | `rq_frames.py` | renders the sprite cells a `frames` request names |
 | `rq_stats.py` | nightly throughput, wait and idle figures |
+| `rq_interventions.py` | how often John steps into a thread, and the iterations between his interventions |
 | `rq_jit.py`, `rq_hot.py` | region rendering and build reuse: kept as options, not used by the queue's jobs |
 
 A view job is any script in the requesting branch, run through `rq_run.py` with the request's arguments plus
@@ -341,6 +342,33 @@ crease, spike, stretch, seam, silhouette, proportion, pose, shading, colour, noi
 --help` says what each means). `--artifacts` takes the post-render flag ids when an image check could have caught it.
 The nightly job reads the new rejections, proposes PITFALLS.md rules and flag thresholds for the tags that repeat, and
 opens a pull request for John.
+
+## John's interventions
+
+John's request (2026-11-20): the nightly stats say how often he steps into a thread and how much progress a thread
+makes before he does. `rq_interventions.py` works it out and `rq_stats.py` prints it as the section "John's
+interventions", for the day and for all history.
+
+- **Intervention:** a message John writes in a thread after its opening ask, or a rejection logged `--by John`.
+  Messages and rejections less than 15 minutes apart in one thread count as one (a burst of quick follow-ups is one
+  stepping-in). The raw message and rejection counts are printed beside it.
+- **Iteration:** one step of the thread's own progress: a request to this queue (render or solver run), a rejection
+  the thread or the reviewer logged, a progress report it posted (a reply of 280 characters or more) or a stop-rule
+  report. Steps less than 10 minutes apart are one iteration, so a request, its result post and its rejection are one
+  round.
+- **Run:** the iterations between two interventions, or between the opening ask and the first one. The report gives
+  the count, the average gap between interventions, the median and longest run, how often John stepped in again
+  before any new iteration, and each thread's open run (iterations since his last intervention).
+
+The thread messages come from `stats/thread-activity.jsonl`: one line per message with its id, thread, time, who
+(`john` or `agent`) and kind (`root`, `msg`, `result`, `stop`), never its text. The nightly job adds the day's lines:
+it reads each thread active since its last run with `read_thread` (newest first, paging back until it reaches
+messages it already has), runs `python3 rq_interventions.py extract <saved result files> > /tmp/activity.jsonl` on
+the results the tool saved to files, writes the lines for small results that came back inline in the same shape, and
+merges them with `python3 rq_interventions.py add-activity /tmp/activity.jsonl`. A thread line
+`{"thread": ..., "title": ..., "read_from": ...}` names a thread and marks where reading started, so a run that began
+before it is left out. Automated threads (the merge notifier) are skipped. The log was seeded on 2026-11-20 with 14
+threads back to 2026-11-18.
 
 ## Speed-ups every job gets
 
