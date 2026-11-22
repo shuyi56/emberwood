@@ -1189,6 +1189,94 @@ CLIMB_HH = 0.05        # HH: a guide that climbs this far back up after it has f
 CLIMB_FROM = 6         # nodes: a bang's root lift (it leaves the forehead upward) is not a climb
 
 
+COMB_K = 8             # the guides a guide is combed with (its nearest in its own group, by root and path)
+COMB_PULL = 0.5        # STYLE: per pass, how far each segment turns toward its neighbours' mean direction
+COMB_PASSES = 4
+ROOT_LIE_DEG = 25.0    # STYLE: the steepest a root's first segments leave the scalp (the creator's p99 is 29)
+ROOT_LIE_N = 3         # segments from the root held to that
+COMB_ROOT_M = 0.0      # m: the comb takes hold from the root (a follicle grows along the flow round it: a root left
+                       # standing across the hair over it was most of the crossings the stress test found)
+
+
+def comb_pass(X, group, col, cap=None, passes=COMB_PASSES, pull=COMB_PULL):
+    """A comb run through the settled hair: each guide's segments turned toward the mean direction of its COMB_K
+    nearest guides of the same group (the same lock: the back, each side's face-framing hair, each side's bangs, or
+    for wavy hair each wave lock, so a comb never drags one lock into the next), node by node down the strand, then
+    the strand rebuilt from its root at its own segment length and kept out of the head, the body and the cap. Strays
+    come back into their lock, crossing neighbours lie parallel, and the silhouette stays: the mean of a lock's
+    directions is the lock's own direction. (The usual groom tool's comb: Houdini's guide groom, XGen's comb brush.)"""
+    from scipy.spatial import cKDTree
+    import torch
+    X = X.copy()
+    G, S1, _ = X.shape
+    seg = SEG_M / HH_M
+    ok = ~np.isnan(X[..., 0])
+    s = np.arange(S1 - 1) * SEG_M
+    hold = (np.clip(s / COMB_ROOT_M, 0, 1) if COMB_ROOT_M > 0 else np.ones_like(s))[None, :, None]
+    for _ in range(passes):
+        D = np.diff(X, axis=1)
+        D /= np.maximum(np.linalg.norm(D, axis=-1, keepdims=True), 1e-12)
+        valid = ~np.isnan(D[..., 0])
+        Dn = D.copy()
+        for gr in np.unique(group):
+            ids = np.where(group == gr)[0]
+            if len(ids) < 3:
+                continue
+            feat = []
+            for k in (0, 5, 10, 20):
+                Y = X[ids, min(k, S1 - 1)]
+                last = X[ids, np.maximum(ok[ids].sum(1) - 1, 0)]
+                feat.append(np.where(np.isnan(Y), last, Y))
+            F = np.concatenate(feat, 1)
+            kk = min(COMB_K + 1, len(ids))
+            dist, nb = cKDTree(F).query(F, k=kk)
+            nb = ids[nb[:, 1:]]
+            w = np.exp(-(dist[:, 1:] / max(np.median(dist[:, 1:]), 1e-9)) ** 2)        # (nearer guides comb harder)
+            Dm = np.zeros((len(ids), S1 - 1, 3))
+            W = np.zeros((len(ids), S1 - 1))
+            for j in range(nb.shape[1]):
+                v = valid[nb[:, j]]
+                Dm += np.where(v[..., None], np.nan_to_num(D[nb[:, j]]), 0.0) * w[:, j, None, None]
+                W += v * w[:, j, None]
+            has = (W > 1e-6) & valid[ids]
+            Dm = Dm / np.maximum(W, 1e-9)[..., None]
+            a = pull * hold[0, :, 0][None] * has
+            mix = (1 - a)[..., None] * D[ids] + a[..., None] * Dm
+            mix /= np.maximum(np.linalg.norm(mix, axis=-1, keepdims=True), 1e-12)
+            Dn[ids] = np.where(has[..., None], mix, D[ids])
+        # the first segments laid down along the scalp: no steeper than ROOT_LIE_DEG off it (a root that stands up
+        # crosses the hair lying over it; the creator's roots leave at 29 degrees, p99)
+        nr = X[:, :ROOT_LIE_N] - SF.CENTRE
+        nr /= np.maximum(np.linalg.norm(nr, axis=-1, keepdims=True), 1e-12)
+        d = Dn[:, :ROOT_LIE_N]
+        up = np.einsum('gsk,gsk->gs', d, nr)
+        tan = d - up[..., None] * nr
+        tl = np.maximum(np.linalg.norm(tan, axis=-1, keepdims=True), 1e-12)
+        lim = math.sin(math.radians(ROOT_LIE_DEG))
+        upc = np.clip(up, -lim, lim)
+        dl = tan / tl * np.sqrt(1 - upc ** 2)[..., None] + upc[..., None] * nr
+        Dn[:, :ROOT_LIE_N] = np.where(np.isnan(d), d, dl)
+        Y = X.copy()
+        for k in range(S1 - 1):
+            Y[:, k + 1] = np.where(valid[:, k, None], Y[:, k] + Dn[:, k] * seg, np.nan)
+        # kept out of the head and the body, as relax_kinks keeps them
+        g, k = np.where(ok)
+        P = torch.tensor(Y[g, k], dtype=torch.float64)
+        for fn in (col.head_depth, col.body_depth):
+            for _ in range(4):
+                P.requires_grad_(True)
+                dep = fn(P)
+                gr_, = torch.autograd.grad(dep.clamp(min=0).sum(), P)
+                with torch.no_grad():
+                    n = gr_ / gr_.norm(dim=1, keepdim=True).clamp(min=1e-12)
+                    P = P - n * (dep + 1.0 / SF.HH_MM).clamp(min=0)[:, None]
+        Y[g, k] = P.detach().numpy()
+        X = Y
+    if cap is not None:
+        X = onto_cap(X, cap)
+    return X
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -1418,6 +1506,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # the stress test's faults: off the creator's cap, then no sharp bends (the combed bangs keep their shape)
         cap = CreatorCap(trace)
         X2 = onto_cap(X2, cap)
+        X2 = relax_kinks(X2, col, cap, keep=bang)
+        # the comb: strays back into their lock, crossing neighbours laid parallel, roots along the scalp
+        lk = np.where(bang, np.where(roots[:, 0] < SF.AXIS[0], 3, 4), lock)      # (the bangs combed among themselves)
+        X2 = comb_pass(X2, lk * 1000 + clump, col, cap)
         X2 = relax_kinks(X2, col, cap, keep=bang)
     if trace and not wavy:
         # the back cut on the creator's own length line where it is shorter: the creator's back ends at z -1.2, the
