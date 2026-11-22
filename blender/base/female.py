@@ -4623,6 +4623,7 @@ def pose(col):
 # The idle's feet, each (forward of the hip, out from it, turned out in radians): the weight on the right leg under the
 # body, the left foot eased forward, out, and turned out. A figure may set its own (the heeled boots stand square).
 IDLE_STANCE = {'R': (-1.0, 0.0, 0.0), 'L': (4.6, 0.6, 0.35)}
+TURNOUT_AT_HIP = False  # a stance's turn-out made in the hip, not the ankle (a figure in boots sets it: see pose)
 
 
 def pose_sheet(col, walking):
@@ -4671,11 +4672,14 @@ def pose_sheet(col, walking):
             th, shn = leg_ik(hip_z, fwd, heel_ankle_z(pitch) if HEEL_CONTACT is not None else ANKLE_Z)
             kb = th - shn
         hip.location = (-s * (LEG_X + out), 0, 0)
-        hip.rotation_euler = (-th, roll, 0)
+        # (TURNOUT_AT_HIP: the foot's turn-out made where a leg makes it, the whole leg turned in the hip, so the shin
+        # turns with the foot. Turned at the ankle it twists whatever is worn over the ankle: a boot's shaft)
+        hip_turn = -s * toe if TURNOUT_AT_HIP else 0.0
+        hip.rotation_euler = (-th, roll, hip_turn)
         kn.rotation_euler = (kb, 0, 0)
         # (the foot is held at its pitch from level: the ankle takes out the shin's lean, and the foot is turned
         # back against the pelvis's turn, so it points down the line of the walk)
-        an.rotation_euler = (th - kb - pitch, 0, -s * toe - turn)
+        an.rotation_euler = (th - kb - pitch, 0, (0.0 if TURNOUT_AT_HIP else -s * toe) - turn)
         set_toe(side, pitch)
 
         # arms: hang just off the body with a soft bend; in the walk they swing against the legs

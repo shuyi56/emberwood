@@ -45,6 +45,9 @@ TOE_SIDE = 0.42              # the toe's sides stand upright this high over the 
 TOE_BOW = 0.38               # the front edge bowed back at its corners by this share of the half width (John: round the tips' edges)
 TOE_SWEEP = 1.3              # the profile's hollow: low over the toes, then up to the instep (1: a straight ramp)
 TOE_CUT_R, TOE_RAKE = 0.20, 0.25   # the front edge's softness, and the front wall's lean back with height
+TURNOUT_AT_HIP = True        # the stance's 7 degrees of turn-out made in the hip: at the ankle it twists the shaft on the foot
+                             # (gauge.py: the two sides of the instep bent apart by up to 1.8 cm, the fold across the front view)
+SHELL = 0.5                  # the ankle's bend averaged across the boot, inner side with outer (bend_at_ball; 0 for the hose's own)
 BEND_FAN = 0.8               # and its band's half-width grown by this per unit of height over the sole
 BEND = (2.7, 4.1)            # the boot's bend moved back to the ball: this far behind the tip, units (bend_at_ball)
 PITCH_SET = 40               # passes setting the leather at the heel's pitch (set_at_pitch; 0 for none)
@@ -294,6 +297,39 @@ def bend_at_ball(o, band, like=None, log=print):
         Wn[:, it] = s_new
         fwd = y < band[1] + 2.5                             # (behind that the toes' bone has no share either way)
         W[np.ix_(fwd, bones)] = Wn[np.ix_(fwd, bones)]
+        # ---- and the ankle's bend made a shell's (SHELL). The hose's weights are a leg's: the shin's share differs
+        # between the inner and the outer ankle and changes over a few millimetres, so a boot that is the same on
+        # both sides at rest stands on its heel bent more on one side than the other, with a fold across the instep
+        # (gauge.py: pose asymmetry). Leather is one stiff shell: its bend depends on where a point lies along the
+        # foot and how high, not on which side. The shin's share is averaged across the boot on a grid of (along,
+        # up), eased, and read back, the foot's bone taking what is left.
+        if SHELL and 'Shin.' + side in names:
+            i_s = names.index('Shin.' + side)
+            zz = X[:, 2] - X[:, 2].min()
+            ny, nz = 48, 48
+            gy, gz = np.clip((y / (y.max() + 1e-6) * ny).astype(int), 0, ny - 1), np.clip((zz / (zz.max() + 1e-6) * nz).astype(int), 0, nz - 1)
+            num, den = np.zeros((ny, nz)), np.zeros((ny, nz))
+            np.add.at(num, (gy, gz), W[:, i_s])
+            np.add.at(den, (gy, gz), 1.0)
+            for _ in range(60):                             # (empty cells filled from their neighbours, all eased)
+                pn, pd = np.pad(num, 1, mode='edge'), np.pad(den, 1, mode='edge')
+                an = 0.25 * (pn[:-2, 1:-1] + pn[2:, 1:-1] + pn[1:-1, :-2] + pn[1:-1, 2:])
+                ad = 0.25 * (pd[:-2, 1:-1] + pd[2:, 1:-1] + pd[1:-1, :-2] + pd[1:-1, 2:])
+                k_ = SHELL if _ < 12 else 0.0
+                num = np.where(den > 0, (1 - k_) * num + k_ * an, an)
+                den = np.where(den > 0, (1 - k_) * den + k_ * ad, ad)
+            grid = num / np.maximum(den, 1e-9)
+            fy, fz = y / (y.max() + 1e-6) * ny - 0.5, zz / (zz.max() + 1e-6) * nz - 0.5
+            y0_, z0_ = np.clip(np.floor(fy).astype(int), 0, ny - 2), np.clip(np.floor(fz).astype(int), 0, nz - 2)
+            ty, tz = np.clip(fy - y0_, 0, 1), np.clip(fz - z0_, 0, 1)
+            sh_ = ((1 - ty) * (1 - tz) * grid[y0_, z0_] + ty * (1 - tz) * grid[y0_ + 1, z0_]
+                   + (1 - ty) * tz * grid[y0_, z0_ + 1] + ty * tz * grid[y0_ + 1, z0_ + 1])
+            oth = W[:, bones].sum(1) - W[:, i_s] - W[:, i_f]
+            sh_ = np.clip(sh_, 0.0, np.maximum(1.0 - oth, 0.0))
+            log('zipboot %s: the ankle\'s bend made a shell\'s: the shin\'s share changed by %.2f at most, %.3f on average'
+                % (o.name, float(np.abs(sh_ - W[:, i_s]).max()), float(np.abs(sh_ - W[:, i_s]).mean())), flush=True)
+            W[:, i_s] = sh_
+            W[:, i_f] = np.maximum(1.0 - oth - sh_, 0.0)
     ch = np.nonzero(np.abs(W - W0).max(1) > 1e-4)[0]
     for g in o.vertex_groups:
         if not bones[g.index]:
@@ -377,6 +413,7 @@ def build():
     boot.last.RATIOS['welt'] = WELT
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM
+    female.TURNOUT_AT_HIP = TURNOUT_AT_HIP
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
     rig = bpy.data.objects.get('Rig')
