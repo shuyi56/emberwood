@@ -49,6 +49,9 @@ RECIPES = {
 #   the fold's top 0.47 of the half shoulder out from the middle (here 0.42), the fold's rise 0.21 (0.21), its length
 #   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
+# John, 2026-11-22: "go back to the other lapel and add collar so it's 30 degrees notch with new lapels": the wide
+# traced lapel with the rounded point; the collar is added on it by notchcollar.py (see LAPEL_RECIPE.md)
+RECIPES['notch_lapel'] = dict(RECIPES['traced_lapel'], outline_round=[0.05, 0.025])
 RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
                                   press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], metric3d=True,
                                   button_under_foot=0.69, button_step=0.67)   # (both measured off the habit photo; see LAPEL_RECIPE.md)   # (top_out [0.5, 0.8] and flap [0.7, 1.4] are off: John wanted the first draft's tight fold)
@@ -562,6 +565,8 @@ for s in (und, top):                                  # the under front first: t
           % (s['layer'], len(st), 100 * np.abs(st).mean(), 100 * np.percentile(np.abs(st), 95), 100 * st.min(), 100 * st.max(),
              100 * np.abs(st[cusp]).mean(), 100 * st[cusp].min(), 100 * st[cusp].max()))
     s['lapel_pts'] = W[ii].copy(); s['lapel_t'] = t.copy()
+    s['lapel_d'] = d.copy(); ck_ = np.nonzero(s['crease'])[0]; ck_ = ck_[np.argsort(s['tl'][ck_])]; s['crease_pts'] = W[ck_].copy(); s['crease_t'] = s['tl'][ck_].copy()
+    if outline: s['lapel_edge'] = d >= s['Dfun'](t) - 0.02     # (the points on the lapel's cut edge)
     # the lapel against the body, as ratios (John: "get better at ground truth measuring ratios from photos like lapel
     # to shoulder or lapel to neck"): the same numbers are read off a reference photo on a pixel grid and compared.
     # Widths are taken against the half shoulder (middle to shoulder point), heights against neck pit to waist.
@@ -665,5 +670,11 @@ if opt.get('truth'):
         dd_, jj_ = cKDTree(T_['pts%d' % s_['layer']]).query(s_['lapel_pts']); body_ = s_['lapel_t'] < opt.get('cusp_from', 0.8)
         print('foldfront: front %d against the ground truth: above the cusp mean %.3f, worst %.3f (%.1f mm); at the cusp mean %.3f, worst %.3f (%.1f mm)'
               % (s_['layer'], dd_[body_].mean(), dd_[body_].max(), 26.2 * dd_[body_].max(), dd_[~body_].mean(), dd_[~body_].max(), 26.2 * dd_[~body_].max()))
+# the turned lapels as built, for the collar (blender/collar/notchcollar.py): each lapel's points, where each sat in the
+# flat cut (t down the fold, d out from it), which of them are on its cut edge, and the roll line itself
+if outline:
+    np.savez(out + '.lapels.npz', **{'%s%d' % (k_, s_['layer']): s_[v_] for s_ in sides for k_, v_ in
+                                     (('pts', 'lapel_pts'), ('t', 'lapel_t'), ('d', 'lapel_d'), ('edge', 'lapel_edge'), ('crease', 'crease_pts'), ('ct', 'crease_t'))},
+             ln1=top['ln'], ln2=und['ln'], OT=OT)
 np.savez(out + '.strain.npz', **{'st%d' % s_['layer']: s_['strain']['st'] for s_ in sides}, **{'mid%d' % s_['layer']: s_['strain']['mid'] for s_ in sides})
 bpy.ops.wm.save_as_mainfile(filepath=out)
