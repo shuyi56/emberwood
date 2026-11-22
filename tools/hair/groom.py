@@ -322,6 +322,7 @@ def creator_field(style_path, front=True):
     length of strand left from each point to its tip. front: only the strands rooted at the front of the head (the
     curtain bangs, their cover locks and the face-framing locks)."""
     import gzip
+    import gzip
     d = json.load(gzip.open(style_path))
     P, T, R = [], [], []
     for st in d['strands']:
@@ -352,6 +353,7 @@ TRACE_JOIN_M = 0.03                # m: a traced bang leaves its own root and jo
 def creator_bangs(style_path):
     """The creator's curtain bangs: its strands rooted on the part at the front of the head (all from the part's
     front, z > 0.95), each side ordered across the fan by how far out it lies at the brow (z 0.85)."""
+    import gzip
     import gzip
     d = json.load(gzip.open(style_path))
     out = {-1.0: [], 1.0: []}
@@ -753,6 +755,7 @@ def creator_cut(style_path, nb=48):
     """The end height by angle round the head from the creator's own hair: in each bin of angle (where the hair
     hangs), how low its strands and its cap's hem reach (CUT_PCT percentile of their lowest points), smoothed round
     the head. Returns a function of the angle."""
+    import gzip
     import gzip
     d = json.load(gzip.open(style_path))
     pts = []
@@ -1294,6 +1297,7 @@ def creator_front(X, style_path, col=None, keep=None):
     back no faster than FRONT_SLOPE."""
     import gzip
     import torch
+    import gzip
     d = json.load(gzip.open(style_path))
     C = np.concatenate([np.array(st['p'], float).reshape(-1, 3) for st in d['strands']])
     zb = np.arange(FRONT_TOP + FRONT_BIN, -1.6, -FRONT_BIN)
@@ -1369,12 +1373,20 @@ def creator_front(X, style_path, col=None, keep=None):
 STYLES = {
     #            frame_z: the face frame's shortest piece (HH); frame_th: |theta| over which it steps to the perimeter;
     #            layer_k: end rise per HH of root height above layer_z0; roll_deg: the ends' roll (0: none)
-    'ranger': dict(frame_z=0.25, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=15.0),   # CALIBRATED:
+    'ranger': dict(frame_z=0.25, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=15.0, tuck=(1.0,)),   # CALIBRATED:
               # creator Ranger front ends 0.26 (roots |th| .6-1), crown vs mid roots 1.2 HH per HH (sector 1.5-2.2)
-    'warden': dict(frame_z=-0.2, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=0.0),   # CALIBRATED:
+    'warden': dict(frame_z=-0.2, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=0.0, tuck=(1.0, -1.0)),   # CALIBRATED:
               # creator Warden front ends -0.2 to -0.3; layer_k kept at the Ranger's (its crown's 2.4 is a top
               # layer of short strands over its shell); the waves are their own finish (no roll)
 }
+# tuck: the sides (+1 her left, -1 her right) tucked behind the ear, STYLE (John's pick from the side-style sheet,
+# 2026-11-22: the Ranger's left side, both of the Warden's). Every side is also laid in to the creator's width.
+TUCK_TH = (0.85, 1.6)   # |theta| of the roots tucked: in front of the ear, back to just behind it (not the bangs)
+TUCK_PAST = 0.32        # rad: tucked hair lies this far behind the ear's |theta| (about 1.5 cm at the ear), STYLE
+TUCK_FROM_Z = 0.72      # HH: the tuck takes hold from the temple, over 0.12 HH, STYLE
+SIDE_TH = (0.9, 2.2)    # |theta| of the side hair laid in to the creator's width
+SIDE_CLEAR_MM = 2.0     # mm: the side hair's width over the creator's (its 95th percentile per 0.05 HH of height), CALIBRATED
+SIDE_ROLL_DEG = 20.0    # the side ends rolled under after the tuck, STYLE (the stylists' smooth finish [RZ])
 CUT_FALL = 1.5          # the plumb's weight against the line above, for a cut end
 CUT_TAIL = 5            # nodes (5 cm): a cut end straightened onto the line above it
 POINT_CUT_HH = 0.1      # HH: the stagger of the point-cut ends (about 2 cm), STYLE
@@ -1514,6 +1526,78 @@ def push_valid(col, X, mask=None, margin_hh=1.0 / SF.HH_MM, steps=4):
                 n = gr_ / gr_.norm(dim=1, keepdim=True).clamp(min=1e-12)
                 P = P - n * (dep + margin_hh).clamp(min=0)[:, None]
     X[g, k] = P.detach().numpy()
+    return X
+
+
+def _polar(X):
+    ax, ay = SF.AXIS
+    return np.arctan2(X[..., 0] - ax, -(X[..., 1] - ay)), np.hypot(X[..., 0] - ax, X[..., 1] - ay)
+
+
+def _from_polar(X, th, r):
+    ax, ay = SF.AXIS
+    X = X.copy()
+    X[..., 0] = ax + r * np.sin(th)
+    X[..., 1] = ay - r * np.cos(th)
+    return X
+
+
+def _smooth_along(a, W=2):
+    """a running max then a running mean along each strand (a push that rises and settles without a kink)."""
+    S1 = a.shape[1]
+    pad = np.pad(a, ((0, 0), (W, W)), mode='edge')
+    mx = np.max(np.stack([pad[:, i:i + S1] for i in range(2 * W + 1)]), 0)
+    pad = np.pad(mx, ((0, 0), (W, W)), mode='edge')
+    return np.mean(np.stack([pad[:, i:i + S1] for i in range(2 * W + 1)]), 0)
+
+
+def side_tuck(X, roots, keep, sides):
+    """The hair rooted in front of the ear (|theta| in TUCK_TH, not the bangs) taken over the top of the ear and
+    tucked behind it: from the temple down, swung back round the body axis (at constant r) until it lies TUCK_PAST
+    behind the ear, and held there below it (the swing is carried down the strand)."""
+    ok = ~np.isnan(X[..., 0])
+    th, r = _polar(X)
+    thr = SF.theta(roots)
+    ear_th = math.atan2(EAR_X, -(SF.EAR_CANAL[1] - SF.AXIS[1])) + TUCK_PAST
+    w = np.clip((TUCK_FROM_Z - X[..., 2]) / 0.12, 0, 1)
+    for sd in sides:
+        g = (np.sign(thr) == sd) & (np.abs(thr) > TUCK_TH[0]) & (np.abs(thr) < TUCK_TH[1]) & ~keep
+        m = g[:, None] & ok
+        need = np.where(m, np.maximum(ear_th - np.abs(th), 0) * w, 0.0)
+        need = np.maximum.accumulate(np.nan_to_num(need), axis=1)
+        need[:, 0] = 0
+        Y = _from_polar(X, th + sd * need, r)
+        X = np.where(m[..., None], Y, X)
+        th, r = _polar(X)
+    return X
+
+
+def side_debulk(X, keep, style_path):
+    """The side hair from the ear down laid in to the creator's side width (+SIDE_CLEAR_MM), the push smoothed along
+    each strand: our sides stood 6 to 11 mm wider than the creator's at the jaw (hair-rebuild/sides/README.md)."""
+    ok = ~np.isnan(X[..., 0])
+    th, _ = _polar(X)
+    side = (np.abs(th) > SIDE_TH[0]) & (np.abs(th) < SIDE_TH[1]) & ok & ~keep[:, None]
+    import gzip
+    d = json.load(gzip.open(style_path))
+    C = np.concatenate([np.array(s['p']).reshape(-1, 3) for s in d['strands']])
+    tc, _ = _polar(C)
+    zb = np.arange(0.7, -1.6, -0.05)
+    W = np.full(len(zb), np.nan)
+    for i, z in enumerate(zb):
+        m = (np.abs(tc) > SIDE_TH[0]) & (np.abs(tc) < SIDE_TH[1]) & (np.abs(C[:, 2] - z) < 0.05)
+        if m.sum() > 10:
+            W[i] = np.percentile(np.abs(C[m, 0]), 95)
+    k = np.where(~np.isnan(W))[0]
+    W[k[-1]:] = W[k[-1]]
+    W = np.interp(np.arange(len(zb)), k, W[k]) + SIDE_CLEAR_MM / SF.HH_MM
+    lim = np.interp(-np.nan_to_num(X[..., 2]), -zb, W)
+    ease = np.clip((0.6 - X[..., 2]) / 0.1, 0, 1)
+    over = np.where(side, np.maximum(np.abs(X[..., 0]) - lim, 0) * ease, 0.0)
+    over = _smooth_along(np.nan_to_num(over))
+    over[:, 0] = 0
+    X = X.copy()
+    X[..., 0] -= np.sign(X[..., 0]) * over
     return X
 
 
@@ -1760,6 +1844,12 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X2 = push_valid(col, X2)
         X2 = relax_kinks(X2, col, cap, keep=bang)
         X2 = end_roll(X2, roots, bang, st['roll_deg'], col)
+        # the sides: tucked behind the ear (STYLES tuck), laid in to the creator's width, the ends rolled under
+        X2 = side_tuck(X2, roots, bang, st['tuck'])
+        X2 = side_debulk(X2, bang, trace)
+        X2 = push_valid(col, X2)
+        X2 = relax_kinks(X2, col, cap, keep=bang)
+        X2 = end_roll(X2, roots, bang, SIDE_ROLL_DEG, col)
     if trace and not wavy:
         # the back cut on the creator's own length line where it is shorter: the creator's back ends at z -1.2, the
         # approved line's at -1.52 (CLAUDE.md: the creator overrides the measurement); the sides keep the approved line
