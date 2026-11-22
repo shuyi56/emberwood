@@ -21,10 +21,13 @@ ap.add_argument('--hz', type=float, default=0.6)
 ap.add_argument('--full', action='store_true')
 ap.add_argument('--game', action='store_true', help='also the world\'s close follow camera: perspective, 38 degree field, 27 degrees down')
 ap.add_argument('--on', default='eye', choices=('eye', 'mouth'), help='what the turned close-ups centre on: the nearer eye, or the mouth')
+ap.add_argument('--lips', default='layered', choices=('layered', 'flat'), help='flat: the lips as they were before the two layers (one Principled at roughness 0.55), for a before/after')
 ap.add_argument('--hide', default='', help='comma-separated object name prefixes to leave out, e.g. Eyeshadow,Lashes')
 args = ap.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:])
 os.makedirs(args.out, exist_ok=True)
 
+if args.lips == 'flat':
+    os.environ['LIP_LAYERS'] = '0'
 ranger.build()
 sc = bpy.context.scene
 sc.frame_set(1)
