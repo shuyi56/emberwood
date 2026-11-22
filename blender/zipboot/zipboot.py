@@ -36,6 +36,11 @@ TOE_EXT = 0.12               # an almond toe: drawn this far past the toes, x th
 TOE_NARROW = 0.30            # and narrowed toward its point by this share at the tip (read off the photo's plan. EXPERIMENTAL)
 ROOM = {'room': 0.034, 'gap': 0.034}   # x H: the foot's room and the least room off the skin (the boot's own 0.022
                              # and 0.024 drew the suede onto the foot until the toes and the instep showed: John, too tight)
+TOE_BOX = 0.05               # a square toe box (last.build_boots): cut this far ahead of the toes, x the foot's length
+TOE_SQ, TOE_FRONT, TOE_WALL = 5.0, 0.72, 0.5   # its sections' squareness (a superellipse's power: a nearly flat top pinched
+                             # into the sides), its width at the cut as a share of the ball's, and the front wall's least
+                             # height (John: sharp, not round; nearly flat top, pinched)
+TOE_CUT_R, TOE_RAKE = 0.08, 0.2   # the front edge's softness, and the front wall's lean back with height
 PITCH_SET = 40               # passes setting the leather at the heel's pitch (set_at_pitch; 0 for none)
 WELT = 0.006                 # x H: the sole trimmed close to the upper (about 1.5 mm), as a dress boot's is; the boot's
                              # 0.022 is a welted work boot's ledge (John: join the heel and fit)
@@ -292,6 +297,8 @@ def build():
     boot.last.RATIOS['toe_ext'], boot.last.RATIOS['toe_narrow'] = TOE_EXT, TOE_NARROW
     boot.CREASE = CREASE
     boot.last.RATIOS.update(ROOM)
+    boot.last.RATIOS.update(toe_box=TOE_BOX, toe_sq=TOE_SQ, toe_front=TOE_FRONT, toe_wall=TOE_WALL,
+                            toe_cut_r=TOE_CUT_R, toe_rake=TOE_RAKE, sole_blur=1.5)   # (the sole's outline kept square at the toe)
     boot.last.RATIOS['welt'] = WELT
     heelboot.SEAT_BAND, heelboot.SEAT_OUT = SEAT_BAND, SEAT_OUT
     boot.last.RATIOS['throat_line'], boot.last.RATIOS['throat_from'] = THROAT_LINE, THROAT_FROM

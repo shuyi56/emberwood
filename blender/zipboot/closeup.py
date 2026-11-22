@@ -32,6 +32,7 @@ VIEWS = {   # name: (camera offset direction, rotation): orthographic, looking a
     'inner': (Vector((1, 0, 0)), (math.pi / 2, 0, math.pi / 2)),
     'back': (Vector((0, 1, 0)), (math.pi / 2, 0, math.pi)),
     'front': (Vector((0, -1, 0)), (math.pi / 2, 0, 0)),
+    'top': (Vector((0, -0.25, 1)).normalized(), (0.245, 0, 0)),
     'inner3q': (Vector((0.7, 0.7, 0)), (math.pi / 2, 0, math.radians(135))),
 }
 
@@ -162,6 +163,9 @@ def main():
         if opt('--focus', 'boot') == 'heel':
             Hh = pts(('Heel lift',))
             c = 0.5 * (Hh.min(0) + Hh.max(0)) + np.array([0, 0.0, 0.8])
+            span = float(opt('--span', 6.5))
+        elif opt('--focus', 'boot') == 'toe':
+            c = np.array([0.5 * (B[:, 0].min() + B[:, 0].max()), B[:, 1].min() + 2.0, B[:, 2].min() + 1.3])
             span = float(opt('--span', 6.5))
         else:
             c = 0.5 * (B.min(0) + B.max(0))

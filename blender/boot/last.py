@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -351,7 +351,7 @@ def _sole(edge, z_welt, r):
     have = np.unique(bins)
     rad = np.array([rr[bins == b].max() for b in have])
     rad = np.interp(np.arange(na), np.concatenate([have - na, have, have + na]), np.tile(rad, 3))
-    rad = fit._blur(rad, 4.0, 0, True) + r['leather']                        # (the upper's outer face)
+    rad = fit._blur(rad, r.get('sole_blur', 4.0), 0, True) + r['leather']                        # (the upper's outer face)
     aa = (np.arange(na) + 0.5) / na * 2 * np.pi - np.pi
     bev = 0.18 * r['sole']
     out, zb = rad + r['welt'], z_welt - r['sole']
@@ -888,6 +888,80 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             X[:, 2] += 0.5 * tw * dl[:, 2]
         log('boot: the toe box kept clear of the toes after its smoothing: %d points let out again, %.3f at most'
             % (int((need > 1e-3).sum()), float(need.max())))
+        # the toe box drawn as a last's is (r['toe_box'] and the rest): a square toe is "a leading edge that is rather
+        # straight across the front" (Gentleman's Gazette), low in front, its top running down nearly flat to a
+        # sharp edge (Shoegazing, Guide: toe shapes: chiselled in profile). Ahead of the ball each cross-section is
+        # redrawn as a superellipse of power toe_sq (a flat top folded sharply into short side walls) standing on the
+        # welt: its width eased from the ball's to toe_front of it at the cut, its height a straight line from the
+        # ball's down to the front wall's, both let out wherever the foot's own skin plus 0.6 of the gap needs more.
+        # The cut stands toe_box x L ahead of the toes (the toe allowance); the last ahead of it is folded onto the
+        # cut as the front wall (leaning back by toe_rake, its edge as soft as toe_cut_r). After the smoothing above.
+        if r.get('toe_box'):
+            g_, n_ = 0.6 * r['gap'], r.get('toe_sq', 4.0)
+            for sgn in (-1, 1):
+                idx = np.nonzero((X0[:, 0] * sgn > 0) & (toe_w > 0))[0]
+                if not len(idx):
+                    continue
+                # (the last drawn out ahead of the ball first, so toe_nose of it lies ahead of the cut to make the wall)
+                sk_tip = X0[idx, 1].min()
+                y_cut = sk_tip - r['toe_box'] * L
+                fw = X[idx, 1] < y_ball
+                k_ = (y_ball - (y_cut - r.get('toe_nose', 0.5))) / max(y_ball - X[idx, 1].min(), 1e-6)
+                X[idx[fw], 1] = y_ball - (y_ball - X[idx[fw], 1]) * max(k_, 1.0)
+                x_, y_, z_ = X[idx, 0].copy(), X[idx, 1].copy(), X[idx, 2].copy()
+                y_tip = y_.min()
+                ys = np.linspace(y_tip, y_ball + 0.2 * L, 60)
+                hw = ys[1] - ys[0]
+
+                def binned(v, yy, fn):
+                    o_ = np.full(len(ys), np.nan)
+                    for j, yv in enumerate(ys):
+                        m_ = np.abs(yy - yv) < hw
+                        if m_.any():
+                            o_[j] = fn(v[m_])
+                    return o_
+                Llo, Lhi = binned(x_, y_, np.min), binned(x_, y_, np.max)
+                Ltop = binned(z_, y_, np.max) - z_welt
+                Slo, Shi = binned(X0[idx, 0], X0[idx, 1], np.min) - g_, binned(X0[idx, 0], X0[idx, 1], np.max) + g_
+                Stop = binned(X0[idx, 2], X0[idx, 1], np.max) + g_ - z_welt
+                at = lambda A, yv: float(np.interp(yv, ys[~np.isnan(A)], A[~np.isnan(A)]))  # noqa: E731
+                lo_b, hi_b, h_b = at(Llo, y_ball), at(Lhi, y_ball), at(Ltop, y_ball)
+                c_b, a_b = 0.5 * (lo_b + hi_b), 0.5 * (hi_b - lo_b)
+                c_t = 0.5 * (at(Slo, sk_tip + 0.08 * L) + at(Shi, sk_tip + 0.08 * L))
+                t = np.clip((y_ball - ys) / (y_ball - y_cut), 0.0, 1.0)
+                a_ = a_b * (1.0 - (1.0 - r.get('toe_front', 0.68)) * t ** 1.6)
+                c_ = c_b + (c_t - c_b) * t
+                lo, hi = c_ - a_, c_ + a_
+                for _ in range(60):          # (let out for the toes, and the letting out eased along the box: no step)
+                    lo = np.fmin(lo, Slo)
+                    hi = np.fmax(hi, Shi)
+                    lo[1:-1] = np.minimum(lo[1:-1], 0.25 * lo[:-2] + 0.5 * lo[1:-1] + 0.25 * lo[2:])
+                    hi[1:-1] = np.maximum(hi[1:-1], 0.25 * hi[:-2] + 0.5 * hi[1:-1] + 0.25 * hi[2:])
+                ok = (t > 0.15) & ~np.isnan(Stop)
+                hf = max(r.get('toe_wall', 0.5), float(np.max((Stop[ok] - h_b * (1.0 - t[ok])) / t[ok])) if ok.any() else 0.0)
+                h_ = h_b + (hf - h_b) * t
+                fill = lambda A: np.interp(ys, ys[~np.isnan(A)], A[~np.isnan(A)])  # noqa: E731
+                Llo, Lhi, Ltop = fill(Llo), fill(Lhi), np.maximum(fill(Ltop), 1e-3)
+                # (ahead of the cut the nose is read in the cut section's own frame, and its distance from that
+                # section's foot fills the wall: a polar reading alone is singular where the nose closes)
+                yc = np.maximum(y_, y_cut)
+                cl, al = 0.5 * (np.interp(yc, ys, Llo) + np.interp(yc, ys, Lhi)), 0.5 * (np.interp(yc, ys, Lhi) - np.interp(yc, ys, Llo))
+                u_, v_ = (x_ - cl) / np.maximum(al, 1e-3), np.maximum(z_ - z_welt, 0.0) / np.interp(yc, ys, Ltop)
+                th = np.arctan2(v_, u_)
+                s_ = np.where(y_ < y_cut, np.clip(np.hypot(u_, v_), 0.0, 1.0), 1.0)
+                rho = (np.abs(np.cos(th)) ** n_ + np.abs(np.sin(th)) ** n_) ** (-1.0 / n_)
+                cv, av, hv = 0.5 * (np.interp(yc, ys, lo) + np.interp(yc, ys, hi)), 0.5 * (np.interp(yc, ys, hi) - np.interp(yc, ys, lo)), np.interp(yc, ys, h_)
+                xn = cv + av * s_ * rho * np.cos(th)
+                zn = z_welt + hv * s_ * rho * np.sin(th)
+                d_ = y_ - (y_cut + r.get('toe_rake', 0.0) * (zn - z_welt))
+                kr = r.get('toe_cut_r', 0.08)
+                yn = y_ - d_ + 0.5 * (d_ + np.sqrt(d_ ** 2 + kr ** 2))
+                wv = _ss(y_ball + 0.04 * L, y_ball - 0.20 * L, y_) * toe_w[idx]
+                X[idx, 0] += (xn - x_) * wv
+                X[idx, 1] += (yn - y_) * wv
+                X[idx, 2] += (zn - z_) * wv * (z_ > z_welt)
+                log('boot: the toe box drawn square: cut %.2f ahead of the toes, %.2f wide there of %.2f at the ball, '
+                    'the front wall %.2f high, the top %.2f at the ball' % (sk_tip - y_cut, 2 * av[np.argmin(np.abs(y_ - y_cut))], 2 * a_b, hf, h_b))
         mv = np.linalg.norm(X - X1, axis=1)
         log('boot: the toe turned as one smooth box over the toes (%d passes): %d points moved, %.3f on average, %.3f '
             'at most' % (int(r['toe_shell']), int((mv > 0.01).sum()), float(mv[mv > 0.01].mean()) if (mv > 0.01).any()
