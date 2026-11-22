@@ -35,7 +35,18 @@ blend, out = a[-3:-1] if has else a[-2:]
 RECIPES = {
     'stand_collar': dict(foot_over_bust=0.15, bow=-0.5, roll_radius=0.24, break_over=0.03, neck_x=2.2, sheet=6, fair=40,
                          ease_chest=True, ease_rounds=150, tail=0, bow_band=1.0, bow_over=1.5, lie=0.02, thick_out=1.0, t0=0.03),
+    # the lapel folded from the front's own cloth (John, 2026-11-21: "this is good, summarize entire process as a recipe"):
+    # cut to a traced outline, turned on a gently curved roll line that breaks below the bust, softened at the cusp,
+    # relaxed as cloth, eased where the two lapels cross, the top button set by measured load. See LAPEL_RECIPE.md.
+    'traced_lapel': dict(foot_over_bust=-1.35, belly=0.25, outline=[[0.04, 0.0], [0.27, 0.40], [1.0, 0.0]], neck_x=2.2,
+                         roll_radius=0.24, press={'left': 0.85}, cusp=[0.55, 0.7], tail_out=1.3, cross_ease=True, cross_run=0.4,
+                         close_slits=True, clean_foot=True, foot_reach=1.7, button_under_foot=0.33,
+                         relax=dict(iters=1500, anchor=0.0005, comp=0.7, bend=0.25, button_pin=True, keep_front=True),
+                         ease_chest=True, ease_rounds=150, sheet=6, fair=40, lie=0.02, thick_out=1.0),
 }
+# the same recipe on the classical lapel of the 1890s riding habit: the break high on the chest (3.45 over the bust
+# line), a small pointed lapel, the button row running from just under it to the hem
+RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], foot_over_bust=3.45, outline=[[0.04, 0.0], [0.35, 0.45], [1.0, 0.0]])
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
