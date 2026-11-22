@@ -454,7 +454,7 @@ for Nt in (NtA, NtB):
     m = onb & (de < 0.4 * hm) & (ie <= int(0.8 * (len(evs) - 1))) & ~on_gorge & ~on_roll
     for i in np.nonzero(m)[0]:
         t_ = ie[i] / (len(evs) - 1.0); P3[i] = push_g(Nt['G3'] + t_ * (Nt['C3'] - Nt['G3']))
-    on_end |= m
+    on_end |= m; Nt['end_idx'] = np.nonzero(m)[0]; Nt['end_t'] = ie[m] / (len(evs) - 1.0)
 fixed = on_roll | on_gorge | on_end
 def push_n(p):
     loc, nor, fi, dist = GT.find_nearest(Vector(p))
@@ -542,6 +542,66 @@ if press:
                 for i in zone_p: P3[i] = push_n(push_g(P3[i]))
     gz1 = np.array([g_ for g_ in (gap_of(P3[i]) for i in zone_p) if g_ is not None])
     print('notchcollar: pressed, the fall floats %.2f cm on average, %.2f at most (95%%)' % (2.62 * gz1.mean(), 2.62 * np.percentile(gz1, 95)))
+# settled onto the lapels (John: "the left collar needs more adjustment to its position to compensate for the folding of
+# the lapel, it is too far up"): the fall is laid on a ground with its crevices closed and hung as a membrane between
+# its edges, so over the folded lapels its middle and its points hovered up to 6 mm above the cloth they should lie on.
+# Each point over the bodice is drawn down toward its own nearest point of it by an evened share of how far it hovers
+# past the clearance, then evened and kept off everything by the nearest point (not by the closed ground).
+settle = opt.get('settle', 0.9)
+if settle:
+    nBP = len(BP); zs = np.union1d(zone_p, np.nonzero(on_end)[0])      # (the collar's ends too: laid straight from the notch to the point, they hovered most)
+    wst = ss(0.0, opt.get('settle_from', 0.5), ch[:, 1])       # (not at the roll: the fall turns over the stand there)
+    h0 = []
+    for it in range(opt.get('settle_rounds', 4)):
+        g = np.zeros(len(UV)); N_ = np.zeros((len(UV), 3))
+        for i in zs:
+            loc, nor, fi, dist = GT.find_nearest(Vector(P3[i]))
+            if loc is None or fi >= nBP or dist > 0.8 or dist < 1e-6: continue
+            g[i] = max(dist - clr[fi], 0.0); N_[i] = (P3[i] - np.array(loc)) / dist
+        if it == 0: h0 = g[zs][g[zs] > 0]
+        D_ = (settle * wst * g)[:, None] * N_           # (the move itself evened, not only its size: neighbours go the same way, so the edges stay fair)
+        for _ in range(opt.get('settle_even', 40)):
+            D_ = 0.5 * D_ + 0.5 * (Wm @ D_) / deg[:, None]
+        mv = np.zeros(len(UV), bool); mv[zs] = True; mv &= ~(on_roll | on_gorge)
+        P3[mv] -= D_[mv]
+        for Nt in (NtA, NtB):                          # (each end laid straight again, from the notch to its lowered point)
+            ix, tt = Nt['end_idx'], Nt['end_t']
+            if len(ix) > 2:
+                o_ = np.argsort(tt); a0, a1 = P3[ix[o_[0]]].copy(), P3[ix[o_[-1]]].copy(); u_ = (tt[o_] - tt[o_[0]]) / max(tt[o_[-1]] - tt[o_[0]], 1e-9)
+                for q_, uu in zip(ix[o_], u_): P3[q_] = push_n(a0 + uu * (a1 - a0))
+        for k_ in range(8):
+            A_ = (Wm @ P3) / deg[:, None]
+            P3[zone] += 0.5 * (A_[zone] - P3[zone])
+            for i in zone_p: P3[i] = push_n(P3[i])
+    h1 = []
+    for i in zs:
+        loc, nor, fi, dist = GT.find_nearest(Vector(P3[i]))
+        if loc is not None and fi < nBP and dist < 0.8: h1.append(max(dist - clr[fi], 0.0))
+    print('notchcollar: settled onto the lapels: the fall hovered %.1f mm over them on average, %.1f at most; now %.1f, %.1f at most'
+          % (26.2 * np.mean(h0), 26.2 * np.max(h0), 26.2 * np.mean(h1), 26.2 * np.max(h1)))
+# a last smoothing round over the pressed fall (John: "add a smoothing round to the collar"), kept off everything
+for it in range(opt.get('final_smooth', 30) if (press or settle) else 0):
+    A_ = (Wm @ P3) / deg[:, None]
+    P3[zone] += 0.5 * (A_[zone] - P3[zone])
+    if it % 2 == 1 or it == opt.get('final_smooth', 30) - 1:
+        for i in zone_p: P3[i] = push_n(P3[i]) if settle else push_n(push_g(P3[i]))
+if settle:
+    # the fall's free edge faired along itself: where the collar's point crosses the lapel's edge the ground under it
+    # steps down a cloth's thickness, and the edge, kept off it point by point, took the step as small bumps
+    from collections import defaultdict as _dd
+    ec_ = _dd(int)
+    for t in tri:
+        for a_, b_ in ((0, 1), (1, 2), (2, 0)): ec_[tuple(sorted((int(t[a_]), int(t[b_]))))] += 1
+    bn_ = _dd(list)
+    for (a_, b_), c_ in ec_.items():
+        if c_ == 1: bn_[a_].append(b_); bn_[b_].append(a_)
+    fb_ = np.array([i for i in bn_ if len(bn_[i]) == 2 and not fixed[i]])
+    for _ in range(opt.get('edge_fair', 12)):
+        A_ = np.array([0.5 * (P3[bn_[i][0]] + P3[bn_[i][1]]) for i in fb_])
+        P3[fb_] += 0.5 * (A_ - P3[fb_])
+    for _ in range(opt.get('edge_in', 20)):           # (and the cloth just inside it brought along)
+        A_ = (Wm @ P3) / deg[:, None]; keep_ = P3[fb_].copy()
+        P3[zone] += 0.5 * (A_[zone] - P3[zone]); P3[fb_] = keep_
 print('notchcollar: the fall hung as a membrane over %d points toward the fronts' % len(zone))
 
 # 8. what was built, measured

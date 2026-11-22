@@ -398,3 +398,13 @@ What the sources say about finishing it:
 Sources: UKY CT-LMH.176 (collar and lapel construction), Every Woman's Encyclopaedia, Practical Lessons in Tailoring (the sixth lesson on cutting out and making a coat), Permanent Style (how to correct a flattened lapel), Seamwork (expert coat tailoring techniques), Gentleman's Gazette (jacket ironing).
 
 Applied: the closed ends (`end_taper` 0.25, `end_even` 0.6) are back on by default, now that the two sides sit on the same ground. They are the clipped and mitered end: the turn tapers onto the fall's corner, the cloth thins with it, and the corner is evened, so no open tube shows. Measured, sharp folds stay 0, and the notch pinch beside each lapel is smaller and the same on both sides. The break is left alone, as the sources say.
+
+## The collar settled onto the folded lapels
+
+John (2026-11-22): "the left collar needs more adjustment to its position to compensate for the folding of the lapel, it is too far up; add a smoothing round". Measured, both ends hovered: the fall is laid on a ground with its crevices closed and hung as a membrane between its edges, so over the folded lapels it stood 0.9 mm above the cloth on average and up to 5.9 mm at the points and along the end edge. It showed on the left of the picture because the key light throws the shadow under that side.
+
+- `settle` (default 0.9, `settle_rounds` 4): each point over the bodice is drawn toward its own nearest point of it by an evened share of how far it hovers past the clearance. The move itself is evened over the mesh (`settle_even` 40), and each end is laid straight again from the notch to its lowered point.
+- `final_smooth` (30): a last smoothing round over the fall, kept off everything by the nearest point.
+- `edge_fair` (12), `edge_in` (20): the free edge faired along itself and the cloth just inside brought along, because where the collar's point crosses the lapel's edge the ground steps down a cloth's thickness.
+
+After: the fall hovers 0.2 mm on average, the end edges lie on the cloth (gap 0.207 against a clearance of 0.207 over most of their length), the notch is 40.9 and 41.0 degrees as laid, sharp folds 0, and the two sides still mirror. The bottom edge at each point is slightly uneven in the close textured view where it crosses the lapel's edge.
