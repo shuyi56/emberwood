@@ -58,6 +58,12 @@ RECIPES['notch_lapel'] = dict(RECIPES['traced_lapel'], outline_round=[0.05, 0.02
 RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
                                   press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], metric3d=True,
                                   button_under_foot=0.69, button_step=0.67)   # (both measured off the habit photo; see LAPEL_RECIPE.md)   # (top_out [0.5, 0.8] and flap [0.7, 1.4] are off: John wanted the first draft's tight fold)
+# the notch lapel with the roll line straightened by the tension solver (John, 2026-11-22: "using the tension as a
+# guideline develop the ideal shape of lapels and collars to reduce tension"): blender/tension/ reads the bare cut and
+# scores each roll line by the strain the turned lapel must take; the 0.25 swing bowed into the ring of tension round
+# the bust. Built: strain mean 4.3/4.7% to 3.1/3.6%, 95% 14.3/15.0% to 9.7/10.9%. Outline 0.42 wide keeps the reach
+# 0.64 of the half shoulder. See docs/clothing-solvers/lapel-tension-solver.md.
+RECIPES['derived_lapel'] = dict(RECIPES['notch_lapel'], belly=0.001, outline=[[0.04, 0.0], [0.27, 0.42], [1.0, 0.0]])
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape

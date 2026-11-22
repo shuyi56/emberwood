@@ -408,3 +408,19 @@ John (2026-11-22): "the left collar needs more adjustment to its position to com
 - `edge_fair` (12), `edge_in` (20): the free edge faired along itself and the cloth just inside brought along, because where the collar's point crosses the lapel's edge the ground steps down a cloth's thickness.
 
 After: the fall hovers 0.2 mm on average, the end edges lie on the cloth (gap 0.207 against a clearance of 0.207 over most of their length), the notch is 40.9 and 41.0 degrees as laid, sharp folds 0, and the two sides still mirror. The bottom edge at each point is slightly uneven in the close textured view where it crosses the lapel's edge.
+
+## The roll line straightened by the tension solver (2026-11-22)
+
+John: "Create a compression solver that reads our bodice without any lapels or collars then using the tension as a
+guideline develop the ideal shape of lapels and collars to reduce tension." `blender/tension/` reads the bare cut's
+field and scores every roll line by the strain the turned lapel must take. The current line's swing (`belly` 0.25)
+bows into the ring of tension and gathering round the bust; a straight line stays out of it. Built:
+
+```
+python3 blender/collar/foldfront.py CUT.blend LAPEL.blend '{"recipe":"derived_lapel"}'
+```
+
+Strain mean 4.3/4.7% to 3.1/3.6%, 95% of edges 14.3/15.0% to 9.7/10.9%, worst visible edge +39% to +27%, the pull on
+the button pins about halved, the notch laid 40.4 on both sides. The outline is 0.42 wide (was 0.40) so the lapel's
+reach stays 0.64 of the half shoulder. The roll top, break, point and collar are unchanged: the field either did not
+care or its preferences did nothing built. See `docs/clothing-solvers/lapel-tension-solver.md`.
