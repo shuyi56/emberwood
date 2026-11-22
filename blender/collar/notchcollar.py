@@ -39,8 +39,8 @@ point_len = opt.get('point_len', 0.7)       # the collar's point (G to C) this s
 stand = opt.get('stand', 0.4)               # the stand at the back (1.0 cm: John, "press down the collar"; was 2.5, then 1.6)
 fall_over = opt.get('fall_over', 0.6)       # the fall reaches this far past the stand at the back (it covers the seam)
 stand_run = opt.get('stand_run', 3.2)       # the stand dies away over this length toward the gorge (2.2 creased the fall)
-neck_clear = opt.get('neck_clear', 0.10)    # the stand's inside this far off the neck
-lean = opt.get('lean', 0.12)                # the stand leans in toward the neck (share of its height)
+neck_clear = opt.get('neck_clear', 0.05)    # the stand's inside this far off the neck
+lean = opt.get('lean', 0.35)                # the stand leans in toward the neck (share of its height)
 roll_r = opt.get('roll_r', 0.0)            # the fall's turn over the roll, radius
 rise = opt.get('rise', 1.3)                 # the outer edge rises to each collar point over this much azimuth (radians)
 gap = opt.get('gap', 0.04)
@@ -127,9 +127,9 @@ up = np.array([(Z - lean * radial(e)) / np.linalg.norm(Z - lean * radial(e)) for
 Rr = E + st[:, None] * up
 # the ring (John: "the ring of the collar, reduce that length"): the roll is drawn in toward the neck until it lies
 # hug off it, as much as the stand stands there (where the stand dies away at the fronts it keeps to the neckline)
-hug = opt.get('hug')            # (drawn-in ring, off: John kept the lower collar alone)
+hug = opt.get('hug', 0.15)      # (John: "fix the floating back of the collar": the roll drawn in to this far off the neck)
 E0 = E.copy()
-wh = ss(0.0, opt.get('hug_run', 2.0) * stand_run, d_end)      # (drawn in gently, over twice the stand's own run, so the fall finds no step)
+wh = ss(0.0, opt.get('hug_run', 1.0) * stand_run, d_end)      # (drawn in gently, over twice the stand's own run, so the fall finds no step)
 if hug and opt.get('hug_base', True):     # (the collar's neck edge too: the collar is cut shorter round the neck and sewn
     for k in range(len(E)):               #  on inside the bodice's neckline, which its fall covers)
         q = np.array(ST.find_nearest(Vector(E[k]))[0]); dv = E[k] - q; dv[2] = 0.0; dh = np.linalg.norm(dv)

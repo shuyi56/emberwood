@@ -302,3 +302,11 @@ it were tried:
 - **A lower stand** (kept). The stand is 1.0 cm at the back (was 1.6), and the fall reaches 0.6 past it, so the fall is
   2.6 cm deep at the back (was 2.8) and the points are unchanged (6.1 and 6.5 cm). The collar turns over lower and
   lies flatter round the neck, with 0 sharp folds.
+
+### The back of the collar against the neck
+
+John circled the collar's back seen past the neck from the front: it floated, with a dark gap between it and the neck
+(1.4 cm on average, 2.2 cm at most). The stand now leans in more (`lean` 0.35, was 0.12) and sits closer to the neck
+(`neck_clear` 0.05, was 0.10). The ring is drawn in again (`hug` 0.15), now all the way to near the fronts (`hug_run`
+1.0). With the roll edge evened out and the last polish, this no longer creases: there are 0 sharp folds. The roll is
+35.5 cm round the neck (was 37.9) and 0.8 cm off it on average, which includes the stand's own thickness.
