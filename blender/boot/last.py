@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('toe_sweep', 'toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('sole_toe', 'toe_bow', 'toe_sweep', 'toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -351,8 +351,15 @@ def _sole(edge, z_welt, r):
     have = np.unique(bins)
     rad = np.array([rr[bins == b].max() for b in have])
     rad = np.interp(np.arange(na), np.concatenate([have - na, have, have + na]), np.tile(rad, 3))
-    rad = fit._blur(rad, r.get('sole_blur', 4.0), 0, True) + r['leather']                        # (the upper's outer face)
     aa = (np.arange(na) + 0.5) / na * 2 * np.pi - np.pi
+    # (r['sole_toe']: round the toe the outline is eased far less, so the sole turns the toe's corners with the upper;
+    # the same easing as the waist's rounds them off and leaves the sole standing out at each corner)
+    if r.get('sole_toe'):
+        wt_ = np.exp(-(aa / 0.75) ** 2)
+        rad = wt_ * fit._blur(rad, r['sole_toe'], 0, True) + (1.0 - wt_) * fit._blur(rad, r.get('sole_blur', 4.0), 0, True)
+    else:
+        rad = fit._blur(rad, r.get('sole_blur', 4.0), 0, True)
+    rad = rad + r['leather']                                                 # (the upper's outer face)
     bev = 0.18 * r['sole']
     out, zb = rad + r['welt'], z_welt - r['sole']
     rings = [(rad - 2.0 * r['welt'], z_welt), (out - bev, z_welt), (out, z_welt - bev), (out, zb + bev), (out - bev, zb)]
@@ -969,7 +976,10 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
                 cv, av, hv = 0.5 * (np.interp(yc, ys, lo) + np.interp(yc, ys, hi)), 0.5 * (np.interp(yc, ys, hi) - np.interp(yc, ys, lo)), np.interp(yc, ys, h_)
                 xn = cv + av * s_ * rho * np.cos(th)
                 zn = z_welt + hv * s_ * rho * np.sin(th)
-                d_ = y_ - (y_cut + r.get('toe_rake', 0.0) * (zn - z_welt))
+                # (the cut bowed back toward the corners, r['toe_bow'] of the half width at the corner and as its cube:
+                # seen from above the front is a shallow curve turning into the sides, not a line meeting them)
+                bow = r.get('toe_bow', 0.0) * av * np.clip(np.abs(xn - cv) / np.maximum(av, 1e-3), 0.0, 1.2) ** 3
+                d_ = y_ - (y_cut + r.get('toe_rake', 0.0) * (zn - z_welt) + bow)
                 kr = r.get('toe_cut_r', 0.08)
                 yn = y_ - d_ + 0.5 * (d_ + np.sqrt(d_ ** 2 + kr ** 2))
                 wv = _ss(y_ball + 0.10 * L, y_ball - 0.08 * L, y_) * toe_w[idx]   # (short: the foot's own ridges end at the ball)
