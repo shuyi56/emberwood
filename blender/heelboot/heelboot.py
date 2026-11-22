@@ -3,6 +3,7 @@ onto the heel in the walk (female.HEEL_PITCH, as in blender/heelwalk); the boot'
 the foot at rest, and the heel's stacked lifts (blender/heel) ride the foot's bones under the sole.
 
     python3 blender/base/views.py --figure heelboot --mannequin --clay-only --walk 16 --angles profile --out DIR"""
+import math
 import os
 import sys
 
@@ -237,6 +238,29 @@ def join_heel(side, lift):
     return out
 
 
+def stand_check(cols):
+    """Print, for each sheet column, where each boot's under side is: the lowest point of its sole and of its heel
+    over the floor (0: standing on it; below 0: through it), and the sole's height under the toe and at its back."""
+    for col in cols:
+        female.pose(col)                       # (the build's frame handler is not on yet)
+        bpy.context.view_layer.update()
+        dg = bpy.context.evaluated_depsgraph_get()
+        for side in 'RL':
+            row = []
+            for nm in ('Boot sole.' + side, 'Heel lift 0.' + side):
+                o = bpy.data.objects.get(nm)
+                if o is None:
+                    continue
+                e = o.evaluated_get(dg)
+                X = np.array([(e.matrix_world @ v.co)[:] for v in e.data.vertices])
+                fw = X @ np.array([0.0, -1.0, 0.0])
+                row.append('%s lowest %.2f (toe end %.2f, back end %.2f; x %.2f..%.2f)'
+                           % (nm, X[:, 2].min(), X[np.argmax(fw), 2], X[np.argmin(fw), 2], X[:, 0].min(), X[:, 0].max()))
+            print('heelboot stand col %d: %s' % (col, '; '.join(row)), flush=True)
+        print('heelboot stand col %d: ankles R %s L %s' % (col, *[tuple(round(v, 2) for v in bpy.data.objects['Ankle.' + sd].matrix_world.translation) for sd in 'RL']), flush=True)
+    female.pose(0)
+
+
 def build():
     # (set on every build: a render worker that keeps its scene loaded resets the environment between jobs)
     os.environ['HEEL_PARTS'] = '1'
@@ -284,4 +308,21 @@ def build():
     root.location.z = up
     bpy.context.view_layer.update()
     print('heelboot: %d contact points, raised %.2f' % (len(tread), up), flush=True)
+    # she stands square in boots: both feet under the hips, each turned out a little (the base idle's left foot eased
+    # forward and turned well out put the far boot higher in every side view and read as a foot off the floor. John,
+    # 2026-11-21: fix the stand pose). EXPERIMENTAL: 7 degrees a foot, the usual figure for quiet standing, unsourced here.
+    female.IDLE_STANCE = {'R': (0.0, 0.0, math.radians(7.0)), 'L': (0.0, 0.0, math.radians(7.0))}
+    # and on the floor: the contact points are a sample of the tread, which leaves the sole a hair over the floor;
+    # the ankle is let down by what is left under the standing foot
+    female.pose(0)
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    gap = min(float(min((o.evaluated_get(dg).matrix_world @ v.co).z for v in o.evaluated_get(dg).data.vertices))
+              for o in [bpy.data.objects['Boot sole.R']] + stacks['R'])
+    female.HEEL_UP += gap
+    female.pose(0)
+    bpy.context.view_layer.update()
+    print('heelboot: the standing foot was %.2f over the floor, let down onto it' % gap, flush=True)
+    if os.environ.get('HEELBOOT_CHECK'):       # (how each foot stands at the sheet's columns named: the idle is 0)
+        stand_check([int(v) for v in os.environ['HEELBOOT_CHECK'].split(',')])
     return res

@@ -4620,6 +4620,11 @@ def pose(col):
     carry_head(GAZE[0])
 
 
+# The idle's feet, each (forward of the hip, out from it, turned out in radians): the weight on the right leg under the
+# body, the left foot eased forward, out, and turned out. A figure may set its own (the heeled boots stand square).
+IDLE_STANCE = {'R': (-1.0, 0.0, 0.0), 'L': (4.6, 0.6, 0.35)}
+
+
 def pose_sheet(col, walking):
     ob = bpy.data.objects
     # the walk is sampled half a step off the passing pose (as in the painted sheets), so no frame has the feet together
@@ -4658,9 +4663,7 @@ def pose_sheet(col, walking):
             roll = math.asin(max(-0.5, min(0.5, (hip_x + s * LEG_X * FOOT_X) / down))) - lst
         else:
             # hip-width stance: weight on the right leg, under the body; the left foot eased forward, out, and turned out
-            fwd = -1.0 if s > 0 else 4.6
-            out = 0.0 if s > 0 else 0.6
-            toe = 0.0 if s > 0 else 0.35
+            fwd, out, toe = IDLE_STANCE['R' if s > 0 else 'L']
             # (on a heel, HEEL_CONTACT: the foot stands pitched onto it, the ankle as high as the tread sets it)
             pitch = -HEEL_PITCH if HEEL_CONTACT is not None else 0.0
             th, shn = leg_ik(hip_z, fwd, heel_ankle_z(pitch) if HEEL_CONTACT is not None else ANKLE_Z)
@@ -4842,15 +4845,16 @@ def run_foot(t):
     t %= 1.0
     S = run_stride()
     a = RUN_AHEAD * RUN_STANCE * S
-    pitch = math.radians(cyclic(R_GAIT_FOOT, t))
+    # (on a heel the foot is held pitched onto it, and stands as high as the tread sets it: see heel_ankle_z)
+    pitch = math.radians(cyclic(R_GAIT_FOOT, t)) - HEEL_PITCH
     if t < RUN_STANCE:
-        return a - S * t + toe_roll(pitch), ANKLE_Z + foot_lift(pitch), pitch, True
+        return a - S * t + toe_roll(pitch), heel_ankle_z(pitch), pitch, True
     u = (t - RUN_STANCE) / (1 - RUN_STANCE)
     L = THIGH + SHIN
-    off = math.radians(cyclic(R_GAIT_FOOT, RUN_STANCE))
-    keys = ([(0.0, a - RUN_STANCE * S + toe_roll(off), ANKLE_Z + foot_lift(off))]
+    off = math.radians(cyclic(R_GAIT_FOOT, RUN_STANCE)) - HEEL_PITCH
+    keys = ([(0.0, a - RUN_STANCE * S + toe_roll(off), heel_ankle_z(off))]
             + [(k, f * L, ANKLE_Z + z * L) for k, f, z in R_SWING]
-            + [(1.0, a, ANKLE_Z + foot_lift(math.radians(cyclic(R_GAIT_FOOT, 0.0))))])
+            + [(1.0, a, heel_ankle_z(math.radians(cyclic(R_GAIT_FOOT, 0.0)) - HEEL_PITCH))])
     # (a smooth curve through the keys that leaves the ground and meets it again at the ground's own pace)
     span = S * (1 - RUN_STANCE)
     tan = [(-0.3 * span, 0.8 * L)] + [((keys[i + 1][1] - keys[i - 1][1]) / (keys[i + 1][0] - keys[i - 1][0]),
@@ -4863,7 +4867,7 @@ def run_foot(t):
     v = (u - keys[i][0]) / d
     fwd = _hermite(keys[i][1], keys[i + 1][1], tan[i][0] * d, tan[i + 1][0] * d, v)
     z = _hermite(keys[i][2], keys[i + 1][2], tan[i][1] * d, tan[i + 1][1] * d, v)
-    return fwd, max(z, ANKLE_Z + foot_lift(pitch)), pitch, False
+    return fwd, max(z, heel_ankle_z(pitch)), pitch, False
 
 
 _RUN_HIPS = {}
@@ -4875,11 +4879,12 @@ def run_hips(tr):
     soft minimum with that reach, as in locked_hips), so a planted foot stays planted on a figure whose legs or feet
     are too short for the full rise at push-off."""
     key = (RUN_STRIDE, RUN_STANCE, RUN_AHEAD, RUN_SINK, RUN_RISE, R_PELVIS_TURN, R_PELVIS_LIST, FOOT_BALL, THIGH, SHIN,
-           ANKLE_Z, BOB_JOIN, tuple(R_HIPS), tuple(R_GAIT_FOOT))
+           ANKLE_Z, BOB_JOIN, tuple(R_HIPS), tuple(R_GAIT_FOOT), HEEL_PITCH, HEEL_UP, tuple(HEEL_CONTACT or ()),
+           tuple(HEEL_AXIS or ()))
     if key not in _RUN_HIPS:
         n = 192
         L = THIGH + SHIN
-        low = ANKLE_Z + math.sqrt(THIGH ** 2 + SHIN ** 2 + 2 * THIGH * SHIN * math.cos(math.radians(RUN_SINK)))
+        low = heel_ankle_z(-HEEL_PITCH) + math.sqrt(THIGH ** 2 + SHIN ** 2 + 2 * THIGH * SHIN * math.cos(math.radians(RUN_SINK)))
         want, reach = np.zeros(n), np.full(n, 1e3)
         for i in range(n):
             t = i / n
