@@ -127,18 +127,19 @@ up = np.array([(Z - lean * radial(e)) / np.linalg.norm(Z - lean * radial(e)) for
 Rr = E + st[:, None] * up
 # the ring (John: "the ring of the collar, reduce that length"): the roll is drawn in toward the neck until it lies
 # hug off it, as much as the stand stands there (where the stand dies away at the fronts it keeps to the neckline)
-hug = opt.get('hug')
+hug = opt.get('hug', 0.25)
 E0 = E.copy()
+wh = ss(0.0, opt.get('hug_run', 2.0) * stand_run, d_end)      # (drawn in gently, over twice the stand's own run, so the fall finds no step)
 if hug and opt.get('hug_base', True):     # (the collar's neck edge too: the collar is cut shorter round the neck and sewn
     for k in range(len(E)):               #  on inside the bodice's neckline, which its fall covers)
         q = np.array(ST.find_nearest(Vector(E[k]))[0]); dv = E[k] - q; dv[2] = 0.0; dh = np.linalg.norm(dv)
-        if dh > hug: E[k] = E[k] - (st[k] / stand) * (1 - hug / dh) * dv
-    E = smooth_curve(E, 10); E[0], E[-1] = E0[0], E0[-1]
+        if dh > hug: E[k] = E[k] - wh[k] * (1 - hug / dh) * dv
+    E = smooth_curve(E, 30); E[0], E[-1] = E0[0], E0[-1]
     Rr = E + st[:, None] * up
 if hug:
     for k in range(len(Rr)):
         q = np.array(ST.find_nearest(Vector(Rr[k]))[0]); dv = Rr[k] - q; dv[2] = 0.0; dh = np.linalg.norm(dv)
-        if dh > hug: Rr[k] = Rr[k] - (st[k] / stand) * (1 - hug / dh) * dv
+        if dh > hug: Rr[k] = Rr[k] - wh[k] * (1 - hug / dh) * dv
 Rr = smooth_curve(Rr, 20); Rr[0], Rr[-1] = E[0], E[-1]
 SX = np.zeros((len(E), nS + 1, 3))
 for k in range(len(E)):
@@ -163,7 +164,7 @@ for k in range(len(E) - 1):
         sq.append((ids[k, j], ids[k + 1, j], ids[k + 1, j + 1], ids[k, j + 1]))
 SXf = SX.reshape(-1, 3)
 # (for what the fall lies on, the stand runs on a little below the neckline, so no ray slips between the two)
-SK = np.array([[push(E[k] - (j / 3.0) * 0.35 * up[k], [(ST, 0.06)]) for j in range(4)] for k in range(len(E))])   # (under the bodice's own edge, so it makes no ledge)
+SK = np.array([[push(E[k] + (j / 3.0) * ((E0[k] - 0.35 * up[k]) - E[k]), [(ST, 0.06)]) for j in range(4)] for k in range(len(E))])   # (under the bodice's own edge, so it makes no ledge; with the ring drawn in it bridges back out to the bodice's neckline)
 skq = [(len(SXf) + k * 4 + j, len(SXf) + (k + 1) * 4 + j, len(SXf) + (k + 1) * 4 + j + 1, len(SXf) + k * 4 + j + 1)
        for k in range(len(E) - 1) if keep_s[k] and keep_s[k + 1] for j in range(3)]
 print('notchcollar: the stand %.1f cm at the back, dying away over %.1f cm toward each gorge; %d faces' % (2.62 * stand, 2.62 * stand_run, len(sq)))

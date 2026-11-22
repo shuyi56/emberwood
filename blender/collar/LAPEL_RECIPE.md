@@ -265,3 +265,15 @@ Two ways to shorten it were tried:
 - **A lower, shallower band** (kept). The stand is 1.6 cm at the back (was 2.5) and the fall 2.8 cm (was 4.2). The
   collar's points are 0.7 of the lapel's (3.4 cm, was 0.9 and 4.4 cm), so the fall is 6.1 and 6.5 cm deep at the
   points (was 6.9 and 7.3). The notch lays at 41.5 and 40.7 degrees. There are 34 sharp folds, the same as before.
+
+### Lower and drawn in, together
+
+John: "do a combined run: lower diameter and lower collar line." The low band above, with the ring drawn in to 0.25
+off the neck (`hug`, now on by default). Two changes made the drawn-in ring lie clean:
+
+- It is drawn in gently, over twice the stand's own run (`hug_run`), and the neck edge is smoothed harder.
+- The ground-only skirt under the stand bridges from the drawn-in neck edge back out to the bodice's neckline. Before
+  this, the fall sank into the gap between the two and creased at the sides of the neck.
+
+The roll round the neck is 36.5 cm (was 38.3) and sits 1.1 cm off the neck on average (was 1.5). There are 41 sharp
+folds, against 34 without the draw-in and 75 before the two changes. None of them shows in the renders.
