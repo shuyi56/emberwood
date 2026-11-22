@@ -169,3 +169,21 @@ rounded outline. `metric3d` stays, because it is what lets the top lie easy. Thi
 classical build: mean 5.2% and 6.1%, 95% of edges under 15% and 17%, worst stretched edge +39% and +64%, pull on the
 top button 0.034 and 0.018. Both options still work when passed by hand; the two sections above describe them.
 
+### Tuned by measurement: button height, button spacing, lapel width
+
+John: "tune more params like button height and lapel width." Each was swept on the tight-fold build and scored by
+strain, button load and the habit photo's ratios.
+
+| Setting | Swept | Strain | Photo says | Chosen |
+|---|---|---|---|---|
+| `button_under_foot` | 0.15 to 0.8 | lapel unchanged; pull on the top button 0.073, 0.052, 0.034, 0.022, 0.011, 0.005 (her right front) | top button 28 px under the break = 0.083 of neck pit to waist = 0.69 | 0.69: pull 0.007 on both fronts |
+| outline width | 0.46 to 0.60 | flat, mean 5.2 to 5.5% / 5.5 to 6.4% | `top_edge` 0.48, `reach` 0.62 | 0.48: reach 0.62 and 0.63 |
+| `button_step` | | | spacing 40.5 px = 0.12 of neck pit to waist | 0.67 (3.5 cm): 9 buttons from 48.08 to the hem |
+
+The button height and the photo agree: lower carries less load, and the habit's top button sits exactly where the
+load has dropped to almost nothing. The lapel's width does not change its strain over this range, so the photo decides
+it. Spacing is taken against the height yardstick, as the method says; against the half shoulder it would come out
+2.8 cm, because the model's torso is longer for her shoulders than the habit's.
+
+The button pins in the relaxation now use the same `button_step` as the buttons.
+

@@ -49,8 +49,9 @@ RECIPES = {
 #   the fold's top 0.47 of the half shoulder out from the middle (here 0.42), the fold's rise 0.21 (0.21), its length
 #   0.43 (0.39), the lapel's top edge 0.48 of the fold's length (0.48) with its point right at the top (0.06 down),
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
-RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.50], [1.0, 0.0]],
-                                  press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], metric3d=True)   # (top_out [0.5, 0.8] and flap [0.7, 1.4] are off: John wanted the first draft's tight fold)
+RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
+                                  press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], metric3d=True,
+                                  button_under_foot=0.69, button_step=0.67)   # (both measured off the habit photo; see LAPEL_RECIPE.md)   # (top_out [0.5, 0.8] and flap [0.7, 1.4] are off: John wanted the first draft's tight fold)
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
@@ -479,7 +480,7 @@ for s in (und, top):                                  # the under front first: t
             rB = np.hypot(W[:, 0] - Bf[0], W[:, 2] - Bf[1])
             reg = (L_ == s['layer']) & (W[:, 1] < yc) & (rB < Rf) & ~s['fold']
             for kb in range(4):
-                pin |= reg & (np.hypot(W[:, 0], W[:, 2] - (zb_ - kb * M['button_step'] * w)) < rb_)
+                pin |= reg & (np.hypot(W[:, 0], W[:, 2] - (zb_ - kb * opt.get('button_step', M['button_step']) * w)) < rb_)
             pinl = s['fold'] & (np.hypot(W[:, 0], W[:, 2] - zb_) < rb_); pin |= pinl; free[pinl] = 0.0     # (turned cloth caught under the top button is held with it)
             jj = np.nonzero(reg & (rB < Rf - 0.3) & ~pin)[0]; free[jj] = 1.0
             inreg = reg | s['fold']
