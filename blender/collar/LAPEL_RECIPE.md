@@ -386,3 +386,15 @@ John (2026-11-22): "the new collar is worse, figure out the root cause of the as
 Measured, the collar mirrored left to right: mean gap 0.058 before, 0.004 after (1.5 mm to 0.1 mm; 1 unit is 2.62 cm); the front-most point of each side -3.99 and -3.34 before, -3.35 and -3.34 after; the fall depth at the two points 6.1 and 6.5 cm before, 6.5 and 6.5 after; the lapels' mirror gap in the top 4 cm of the fold 0.34 before, 0.01 to 0.02 after. Sharp folds stay at 0.
 
 The lapels still differ lower down, where the right one lies over the left at the crossing, as they should.
+
+## Finishing the rolled collar (John, 2026-11-22: "read how to finish the rolled collar now")
+
+What the sources say about finishing it:
+
+- **Ends and corners.** Clip at the end of the roll line and miter the corners at the points; cut surplus cloth from the corners so they lie flat; trim seam allowances (3/8 in) so nothing bulks up at the end. The upper collar's seam turns under so it lies 1/16 to 1/8 in over the under collar (the build already cuts the fall larger by the turn of the cloth).
+- **Pressing.** Steam-shape the under collar along the roll line over the small end of a ham, let it dry, and keep the fall outside the circle. Press the gorge, but never press the break itself or it sets as a hard fold. The roll can only be moved a little: collar tension and the chest canvas set it.
+- **Roll-line tape.** Preshrunk twill tape 1/4 to 3/8 in wide, cut 1/2 to 3/4 in shorter than the roll line (shorter for heavy cloth), so the roll line is drawn in and the collar stands against the neck. The build does this with the redrafted neckline and the stand drawn from it.
+
+Sources: UKY CT-LMH.176 (collar and lapel construction), Every Woman's Encyclopaedia, Practical Lessons in Tailoring (the sixth lesson on cutting out and making a coat), Permanent Style (how to correct a flattened lapel), Seamwork (expert coat tailoring techniques), Gentleman's Gazette (jacket ironing).
+
+Applied: the closed ends (`end_taper` 0.25, `end_even` 0.6) are back on by default, now that the two sides sit on the same ground. They are the clipped and mitered end: the turn tapers onto the fall's corner, the cloth thins with it, and the corner is evened, so no open tube shows. Measured, sharp folds stay 0, and the notch pinch beside each lapel is smaller and the same on both sides. The break is left alone, as the sources say.
