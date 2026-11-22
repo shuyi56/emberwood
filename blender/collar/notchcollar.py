@@ -36,8 +36,8 @@ LP = np.load(blend + '.lapels.npz')
 notch_angle = opt.get('notch_angle', 40.0)  # the notch's opening, degrees (swept 20 to 90: 30 to 50 clean, 40 chosen; 60 and up the end folds over)
 notch_at = opt.get('notch_at', 0.5)         # the notch on the lapel's top edge: this share of the way from the roll line to the lapel's point
 point_len = opt.get('point_len', 0.7)       # the collar's point (G to C) this share of the lapel's (G to P)
-stand = opt.get('stand', 0.6)               # the stand at the back (1.6 cm; it was 2.5, John: "the collar is too long")
-fall_over = opt.get('fall_over', 0.45)      # the fall reaches this far past the stand at the back (it covers the seam)
+stand = opt.get('stand', 0.4)               # the stand at the back (1.0 cm: John, "press down the collar"; was 2.5, then 1.6)
+fall_over = opt.get('fall_over', 0.6)       # the fall reaches this far past the stand at the back (it covers the seam)
 stand_run = opt.get('stand_run', 3.2)       # the stand dies away over this length toward the gorge (2.2 creased the fall)
 neck_clear = opt.get('neck_clear', 0.10)    # the stand's inside this far off the neck
 lean = opt.get('lean', 0.12)                # the stand leans in toward the neck (share of its height)
@@ -480,6 +480,33 @@ for it in range(opt.get('polish', 40)):
     P3[zone] += 0.5 * (A_[zone] - P3[zone])
     if it % 2 == 1 or it == opt.get('polish', 40) - 1:
         for i in zone_p: P3[i] = push_n(push_g(P3[i]))
+# pressed (John: "press down the collar"): the fall is drawn in onto what it lies on, its ends onto the lapels, its
+# back onto the stand and shoulders, then evened again and kept off everything
+def gap_of(p):
+    c = chart(p); q = ground(c[0], c[1])
+    return None if q is None else np.linalg.norm(p - F0) - np.linalg.norm(q - F0)
+gz0 = np.array([g_ for g_ in (gap_of(P3[i]) for i in zone_p) if g_ is not None])
+print('notchcollar: before pressing, the fall floats %.2f cm over what it lies on on average, %.2f at most (95%%)' % (2.62 * gz0.mean(), 2.62 * np.percentile(gz0, 95)))
+press = opt.get('press', 0.0)
+if press:
+    # (drawn in by an evened-out share of the gap, not onto the ground point by point: that copies every step under it)
+    wpr = ss(0.0, opt.get('press_from', 0.8), ch[:, 1])     # (not at the roll: the fall turns over the stand there)
+    for it in range(opt.get('press_rounds', 4)):
+        g = np.zeros(len(UV)); ok = np.zeros(len(UV), bool)
+        for i in zone_p:
+            v_ = gap_of(P3[i])
+            if v_ is not None: g[i] = max(v_, 0.0); ok[i] = True
+        for _ in range(60):
+            gs = (Wm @ g) / deg; g = np.where(ok, 0.5 * g + 0.5 * gs, gs)
+        for i in zone_p:
+            d = P3[i] - F0; r = np.linalg.norm(d); P3[i] = F0 + (r - press * wpr[i] * g[i]) * d / r
+        for k_ in range(10):
+            A_ = (Wm @ P3) / deg[:, None]
+            P3[zone] += 0.5 * (A_[zone] - P3[zone])
+            if k_ % 2 == 1:
+                for i in zone_p: P3[i] = push_n(push_g(P3[i]))
+    gz1 = np.array([g_ for g_ in (gap_of(P3[i]) for i in zone_p) if g_ is not None])
+    print('notchcollar: pressed, the fall floats %.2f cm on average, %.2f at most (95%%)' % (2.62 * gz1.mean(), 2.62 * np.percentile(gz1, 95)))
 print('notchcollar: the fall hung as a membrane over %d points toward the fronts' % len(zone))
 
 # 8. what was built, measured

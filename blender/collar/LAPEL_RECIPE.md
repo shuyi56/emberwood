@@ -290,3 +290,15 @@ lower collar had three creases, each with its own cause:
 | the same crease, sharpened where the stand dies away | the stand fell off over 5.8 cm | `stand_run` 3.2: it dies away over 8.4 cm |
 
 Sharp folds (neighbouring faces more than 60 degrees apart) went from 34 to 0.
+
+### Pressed down
+
+John: "press down the collar." The fall already lay close: 0.39 cm over what it lies on, on average. Two ways to press
+it were tried:
+
+- **Drawing the fall in onto what lies under it** (`press`, off by default). Drawn in point by point, it copied every
+  step under it, with 714 sharp folds. Drawn in by an evened-out share of the gap and kept clear of the roll, it gained
+  only 0.15 cm and still creased at the sides of the neck (71 folds).
+- **A lower stand** (kept). The stand is 1.0 cm at the back (was 1.6), and the fall reaches 0.6 past it, so the fall is
+  2.6 cm deep at the back (was 2.8) and the points are unchanged (6.1 and 6.5 cm). The collar turns over lower and
+  lies flatter round the neck, with 0 sharp folds.
