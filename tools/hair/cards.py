@@ -11,7 +11,7 @@ How (the usual game hair pipeline: 80 Level, "Tips and tricks on hair for games"
      card follows hair that really falls together.
   2. The card's centre line is the members' mean path, to the cluster's median length.
   3. Its width at each point is the members' spread across the hair (2.5 standard deviations, at least two guides'
-     spacing), so the card covers the strands it replaces; it is turned to face out from the body's axis.
+     spacing), so the card covers the strands it replaces; it is turned to face out from the head's centre.
   4. The strand texture (u across, v along) and the alpha cut-out of the tips belong to the material (as in the
      creator); this tool writes the geometry and the UVs.
 """
@@ -38,7 +38,11 @@ def kmeans(F, k, iters=30, seed=2):
     return a
 
 
-def bake(X, k, spacing, step=3):
+ROOT_ROWS = 6                      # DRAFT: guide segments over which the root's width eases into the lock's
+CARD_LIFT_MM = 2.0                 # DRAFT: cards lie at least this far over the skin (the cap lies at 1 mm)
+
+
+def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0])):
     G, S1 = X.shape[:2]
     last = np.array([np.max(np.where(~np.isnan(X[g, :, 0]))[0]) for g in range(G)])
     Xf = X.copy()
@@ -55,24 +59,44 @@ def bake(X, k, spacing, step=3):
         if L < 2:
             continue
         C = Xf[m, :L + 1].mean(0)
+        # the mean of hairs lying over a curved scalp lies inside the curve (a lock 4 cm wide over the crown dips
+        # about 1.5 mm into the skull): set each point back out to the members' mean distance from the head's centre
+        rc = np.linalg.norm(C - centre, axis=1)
+        rm = np.linalg.norm(Xf[m, :L + 1] - centre, axis=2).mean(0)
+        C = centre + (C - centre) * (np.maximum(rc, rm) / np.maximum(rc, 1e-9))[:, None]
         T = np.gradient(C, axis=0)
         T /= np.linalg.norm(T, axis=1, keepdims=True)
-        out = np.c_[C[:, 0], C[:, 1] - 0.04, np.zeros(len(C))]
+        # the card faces out from the head's centre: over the crown it lies flat on the hair, down the sides it faces
+        # out horizontally. (Facing out from the body's vertical axis stood the crown's cards on edge, like fins.)
+        out = C - np.asarray(centre)
+        if centre[2] == 0.0:
+            out[:, 2] = 0
         out = out - T * (out * T).sum(1, keepdims=True)
         out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
         B = np.cross(T, out)
         B /= np.linalg.norm(B, axis=1, keepdims=True)
         spread = np.array([np.std(((Xf[m, i] - C[i]) * B[i]).sum(1)) if len(m) > 1 else 0 for i in range(L + 1)])
         w = np.maximum(2.5 * spread, 2 * spacing)
+        # at the root the card covers the members' roots across the hair, with a guide's spacing to spare on each
+        # side, so neighbouring cards meet over the scalp (the part and the crown otherwise showed the cap)
+        rspan = np.ptp(((Xf[m, 0] - C[0]) * B[0]).sum(1)) + 2 * spacing
+        w = np.maximum(w, rspan * np.clip(1 - np.arange(len(w)) / ROOT_ROWS, 0, 1))
         # taper the last 15% to a point, so the card ends in the hair's soft tip shape
         t = np.linspace(0, 1, L + 1)
         w = w * (1 - 0.85 * np.clip((t - 0.85) / 0.15, 0, 1))
         keep = np.unique(np.r_[np.arange(0, L + 1, step), L])      # rows every `step` guide segments: straight hair
-        cards.append(dict(C=C[keep], B=B[keep], N=out[keep], w=w[keep], members=m))  # needs few
+        C, B, N, w = C[keep], B[keep], out[keep], w[keep]
+        # the members' roots are spread along the hair too, not only across it: start the card a guide's spacing
+        # behind the rearmost member's root, or the scalp behind the card's mean root is bare under it
+        back = -np.min(((Xf[m, 0] - C[0]) * T[0]).sum(1)) + spacing
+        if back > spacing:
+            C = np.r_[[C[0] - T[0] * back], C]
+            B, N, w = np.r_[B[:1], B], np.r_[N[:1], N], np.r_[w[:1], w]
+        cards.append(dict(C=C, B=B, N=N, w=w, members=m))  # straight hair needs few rows
     return cards
 
 
-def write_obj(cards, path):
+def write_obj(cards, path, surf=None):
     V, VT, VN, Fc = [], [], [], []
     for c in cards:
         n = len(c['C'])
@@ -85,6 +109,16 @@ def write_obj(cards, path):
         for i in range(n - 1):
             a, b, cc, d = base + 2 * i, base + 2 * i + 1, base + 2 * i + 2, base + 2 * i + 3
             Fc += [(a, b, d), (a, d, cc)]
+    if surf is not None:
+        # nothing under the scalp cap: a ribbon is flat across, so over the curved scalp its edges (and the roots of
+        # the centre line) sit in the skull, under the cap, and the cap shows through where the hair should be
+        import scalp_field as SF
+        V = np.array(V)
+        q = V - SF.CENTRE
+        r = np.linalg.norm(q, axis=1)
+        need = surf.radius(q / r[:, None]) + CARD_LIFT_MM / SF.HH_MM
+        lift = (r < need) & (V[:, 2] > 0.2)
+        V[lift] = SF.CENTRE + q[lift] * (need[lift] / r[lift])[:, None]
     with open(path, 'w') as f:
         f.write('# hair cards baked from the settled groom (tools/hair/cards.py); units: head heights, z up\n')
         for v in V:
@@ -207,9 +241,12 @@ def main():
     spacing = float(np.median(cKDTree(R).query(R, k=2)[0][:, 1]))
     S = X.reshape(-1, 3); S = S[~np.isnan(S[:, 0])]
     rep = {'guides': int(len(X)), 'lods': []}
+    import scalp_field as SF
+    centre = SF.CENTRE
+    surf = SF.Surface(SF.load_head(a[a.index('--head') + 1])) if '--head' in a else None
     for k in lods:
-        cards = bake(X, k, spacing, steps.get(k, 3))
-        nv, nf = write_obj(cards, os.path.join(out, 'cards-lod%d.obj' % k))
+        cards = bake(X, k, spacing, steps.get(k, 3), centre)
+        nv, nf = write_obj(cards, os.path.join(out, 'cards-lod%d.obj' % k), surf)
         P = card_points(cards)
         d, _ = cKDTree(P).query(S)            # how far each strand point is from the nearest card
         rep['lods'].append(dict(cards=len(cards), vertices=nv, triangles=nf,

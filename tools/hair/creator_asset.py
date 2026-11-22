@@ -8,6 +8,11 @@ and the strands (children grown as render.py grows them, with their share of the
 heights in the hair's frame (x across, y back, z up from the chin); the page turns them into its own units
 (x 8.6, z up -> its y, y back -> its -z), the inverse of rq_hair_export.cjs. Arrays are base64 little-endian:
 float32 for card positions and UVs, uint32 for triangles, int16 for strand points (scaled by `q`).
+
+The bake: each card vertex carries `ao`, the light that reaches it through the hair, baked from the strands. A vertex
+deep in the hair (strand points crowd the space just outside it) is dark, one on the outer surface is lit. This is the
+usual card bake's occlusion pass (80 Level, "Tips and tricks on hair for games": AO and root-to-tip gradient baked into
+the cards), done per vertex because the page has one shared strand texture.
 """
 import base64
 import json
@@ -17,6 +22,12 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+AO_R = 0.03                        # DRAFT: the probe's radius, head heights (about 7 mm)
+AO_STEPS = (0.03, 0.07, 0.12)      # DRAFT: probes outward from the vertex, head heights
+AO_MID = 0.75                      # STYLE: the light through the hair at the median card vertex
+AO_MIN = 0.35                      # STYLE: the deepest hair keeps a third of the light, so it never goes black
 
 
 def b64(a, dt):
@@ -44,12 +55,6 @@ def main():
     names = ['LOD 0', 'LOD 1', 'LOD 2']
     lod_files = sorted([f for f in os.listdir(cdir) if f.startswith('cards-lod') and f.endswith('.obj')],
                        key=lambda f: -int(f[9:-4]))
-    for name, f in zip(names, lod_files):
-        V, VT, F = read_obj(os.path.join(cdir, f))
-        rep['lods'].append(dict(name=name, cards=int(f[9:-4]), triangles=int(len(F)),
-                                pos=b64(V, '<f4'), uv=b64(VT, '<f4'), idx=b64(F, '<u4')))
-    V, _, F = read_obj(os.path.join(cdir, 'scalp-cap.obj'))
-    rep['cap'] = dict(pos=b64(V, '<f4'), idx=b64(F, '<u4'))
     # the strands: children as render.py grows them (blended within their lock, clumped to their guide, cut)
     import scalp_field as SF
     import render as RD
@@ -68,6 +73,24 @@ def main():
     rep['strands'] = dict(n=int(len(keep)), counts=b64(counts, '<u2'), pos=b64(np.round(P / q), '<i2'), q=q,
                           hairs_per_strand=round(float(share.mean() * Gm['n_hairs'].sum()), 2))
     rep['guides'] = int(len(Gm['roots']))
+    from scipy.spatial import cKDTree
+    tree = cKDTree(P[::2])
+    V, _, Fc = read_obj(os.path.join(cdir, 'scalp-cap.obj'))
+    centre = V.mean(0) - np.array([0, 0, 0.15])        # inside the skull, below the cap's middle
+    rep['cap'] = dict(pos=b64(V, '<f4'), idx=b64(Fc, '<u4'))
+
+    def crowd(V):
+        out = V - centre
+        out /= np.linalg.norm(out, axis=1, keepdims=True)
+        return sum(np.array([len(x) for x in tree.query_ball_point(V + out * d, AO_R)]) for d in AO_STEPS)
+    # the scale: the hair over the median LOD 0 vertex lets through AO_MID of the light
+    k = np.median(crowd(read_obj(os.path.join(cdir, lod_files[0]))[0])) / -np.log(AO_MID)
+    for name, f in zip(names, lod_files):
+        V, VT, Fc = read_obj(os.path.join(cdir, f))
+        ao = np.clip(np.exp(-crowd(V) / k), AO_MIN, 1.0)
+        rep['lods'].append(dict(name=name, cards=int(f[9:-4]), triangles=int(len(Fc)), pos=b64(V, '<f4'),
+                                uv=b64(VT, '<f4'), idx=b64(Fc, '<u4'), ao=b64(ao, '<f4')))
+        print(name, 'ao mean %.2f, 10th pct %.2f' % (ao.mean(), np.percentile(ao, 10)))
     rep['source'] = dict(groom=os.path.abspath(gdir), cards=os.path.abspath(cdir), card_report=cj['lods'])
     json.dump(rep, open(out, 'w'))
     print(out, os.path.getsize(out) // 1024, 'KB', len(keep), 'strands')
