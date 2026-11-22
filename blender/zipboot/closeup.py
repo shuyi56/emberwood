@@ -157,8 +157,8 @@ def main():
         B = pts(('Boot.', 'Boot sole.', 'Heel lift'))
         if opt('--focus', 'boot') == 'heel':
             Hh = pts(('Heel lift',))
-            c = 0.5 * (Hh.min(0) + Hh.max(0)) + np.array([0, -0.4, 0.5])
-            span = float(opt('--span', 3.2))
+            c = 0.5 * (Hh.min(0) + Hh.max(0)) + np.array([0, 0.0, 0.8])
+            span = float(opt('--span', 6.5))
         else:
             c = 0.5 * (B.min(0) + B.max(0))
             span = float(opt('--span', 1.1 * max(np.ptp(B[:, 1]), np.ptp(B[:, 2]))))
