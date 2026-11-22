@@ -279,7 +279,11 @@ for s in (und, top):                                  # the under front first: t
     # strip narrower than the half turn then only turns part of the way (its width over the radius), so the fold opens
     # out of the flat front like a cone instead of pinching shut.
     if opt.get('cusp'):
-        c0, fl = opt['cusp']; rr = rr + ss01(c0, min(c0 + 0.12, 1.0), t) * (np.maximum(rr, r0 * fl * (1 - 0.7 * pr)) - rr)
+        c0, fl = opt['cusp']
+        # John: "you need to bend out a bit more the left lapel" (the one on the left of the picture, the upper front's,
+        # along its tail under the crossing): its roll is fuller there, so it stands out over what passes beneath it
+        if s is top: fl = opt.get('tail_out', 1.3)
+        rr = rr + ss01(c0, min(c0 + 0.12, 1.0), t) * (np.maximum(rr, r0 * fl * (1 - 0.7 * pr)) - rr)
         # and over the very last of it the radius opens right out, so the needle-thin end of the lapel is hardly turned
         # at all: folded hard over, cloth that thin and this thick made a spike and a dark notch at the foot
         if opt.get('cusp_end'): e0, Re = opt['cusp_end']; rr = rr + ss01(e0, 1.0, t) ** 2 * np.maximum(Re - rr, 0)      # (tried: it tore the front beside the button; off)
@@ -473,7 +477,7 @@ if opt.get('clean_foot', 'bow' not in opt):
     for s_ in sides:
         Bf = np.array([s_['Cd'][-1, 0], s_['Cd'][-1, 1]]) if 'Cd' in s_ else None
         if Bf is None: continue
-        near = [e for e in bm.edges if all(np.hypot(W[v.index, 0] - Bf[0], W[v.index, 2] - Bf[1]) < opt.get('foot_reach', 0.35) and W[v.index, 1] < yc for v in e.verts)]
+        near = [e for e in bm.edges if all(np.hypot(W[v.index, 0] - Bf[0], W[v.index, 2] - Bf[1]) < opt.get('foot_reach', 1.7) and W[v.index, 1] < yc for v in e.verts)]
         bmesh.ops.dissolve_degenerate(bm, dist=opt.get('foot_dist', 0.012), edges=near)
     bm.verts.index_update(); bm.normal_update()
     print('foldfront: the feet of the folds cleaned: %d faces with no area taken out' % (ne0 - len(bm.faces)))
