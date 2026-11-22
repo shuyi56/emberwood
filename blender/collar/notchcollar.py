@@ -42,7 +42,7 @@ stand_run = opt.get('stand_run', 3.2)       # the stand dies away over this leng
 neck_clear = opt.get('neck_clear', 0.05)    # the stand's inside this far off the neck
 lean = opt.get('lean', 0.35)                # the stand leans in toward the neck (share of its height)
 roll_r = opt.get('roll_r', 0.08)           # the roll line's soft turn, radius (0: a hard fold between two pieces)
-end_taper = opt.get('end_taper', 0.25)     # below this stand height the turn tapers onto the fall's roll point: the collar's ends closed (0: left open)
+end_taper = opt.get('end_taper', 0.0)     # below this stand height the turn tapers onto the fall's roll point: the collar's ends closed (0: left open)
 rise = opt.get('rise', 1.3)                 # the outer edge rises to each collar point over this much azimuth (radians)
 gap = opt.get('gap', 0.04)
 hm = opt.get('mesh', 0.06)
@@ -564,7 +564,7 @@ print('notchcollar: the fall at least %.3f off the bodice (the cloth is %.3f), %
 # the fall's corners on the roll tops evened (the lapels cross, one over the other, so the two corners lie on different
 # ground: the over lapel's side kept a small fold there that the under side did not): the fall's inner points within
 # end_even of each roll top relaxed toward their neighbours, the edges left where they are
-end_even = opt.get('end_even', 0.6)
+end_even = opt.get('end_even', 0.0)
 if end_even > 0:
     from collections import defaultdict
     ec_ = defaultdict(int); nb_ = defaultdict(set)

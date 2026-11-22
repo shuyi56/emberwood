@@ -51,7 +51,10 @@ RECIPES = {
 #   the point's reach 0.62 of the half shoulder (0.63). Both lapels pressed alike. See LAPEL_RECIPE.md.
 # John, 2026-11-22: "go back to the other lapel and add collar so it's 30 degrees notch with new lapels": the wide
 # traced lapel with the rounded point; the collar is added on it by notchcollar.py (see LAPEL_RECIPE.md)
-RECIPES['notch_lapel'] = dict(RECIPES['traced_lapel'], outline_round=[0.05, 0.025], metric3d=True)   # (metric3d: the left lapel's strain 5.6% to 4.7%)
+# both lapels pressed alike (John, 2026-11-22: "figure out the root cause of the asymmetry"): the traced lapel presses only
+# the left, so the right lapel's roll stood 1.6 cm high against the left's 0.5 cm all the way up to the neck, and the
+# collar's two ends lay on different ground
+RECIPES['notch_lapel'] = dict(RECIPES['traced_lapel'], outline_round=[0.05, 0.025], metric3d=True, press={'left': 0.85, 'right': 0.85})   # (metric3d: the left lapel's strain 5.6% to 4.7%)
 RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0, outline=[[0.02, 0.0], [0.06, 0.48], [1.0, 0.0]],
                                   press={'left': 0.85, 'right': 0.85}, outline_round=[0.05, 0.025], metric3d=True,
                                   button_under_foot=0.69, button_step=0.67)   # (both measured off the habit photo; see LAPEL_RECIPE.md)   # (top_out [0.5, 0.8] and flap [0.7, 1.4] are off: John wanted the first draft's tight fold)

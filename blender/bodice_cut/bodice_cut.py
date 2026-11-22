@@ -29,6 +29,33 @@ NECK_HUG = float(os.environ.get('BODICE_NECK_HUG', 0.05))
 NECK_DROP = float(os.environ.get('BODICE_NECK_DROP', 2.0))     # fading out over this far down from the neck edge
 NECK_FROM = [float(x) for x in os.environ.get('BODICE_NECK_FROM', '0.9,1.4').split(',')]   # (angle round from the front: none before the first, all past the second; the lapels' top corners lie before)
 
+# the right front raised only where it lies over the left (John, 2026-11-22: "one lapel is over the other ... figure out
+# the root cause of the asymmetry"): the bodice's draft raised the whole right front a cloth's thickness, out to the
+# side and up to the neck, so its neck edge, its lapel's roll top and the collar's end on it all stood 5 mm further
+# forward than the left's. The fronts cross only between the two lap lines; past the underlap's edge the right front
+# comes down onto the body again over OVER_RUN (in w). 0 keeps it raised everywhere.
+OVER_RUN = float(os.environ.get('BODICE_OVER_RUN', 0.6))
+
+
+def over_only_on_the_lap(run=OVER_RUN):
+    import numpy as np
+    orig = bodice.surface_lift
+    if run <= 0 or getattr(orig, '_lap_only', False):
+        return
+    def surface_lift(M, ap, ratios=bodice.RATIOS, under=False):
+        f = orig(M, ap, ratios, under)
+        if under:
+            return f
+        w, yc = M['w'], M['yc']; th = ratios['thickness'] * w; lap = ratios['lap'] * w
+        def lift(p):
+            t = np.clip((yc - 0.5 * w - p[:, 1]) / w, 0, 1); front = t * t * (3 - 2 * t)
+            over = th * (p[:, 0] < lap + 0.5 * bodice.LAP_GAP) * front
+            u = np.clip((p[:, 0] + lap + run * w) / (run * w), 0, 1); keep = u * u * (3 - 2 * u)
+            return f(p) - over * (1 - keep)
+        return lift
+    surface_lift._lap_only = True
+    bodice.surface_lift = surface_lift
+
 
 def neck_fit(b, M, hug=NECK_HUG, drop=NECK_DROP, log=print):
     """The neck edge drawn in toward the neck round the sides and back. Each point near the neckline moves level
@@ -85,6 +112,7 @@ def build():
     bodice.FRONT = None                               # the fronts whole to the neck: nothing cut open
     bodice.RATIOS['thickness'] = THICK
     bodice.buttons = lambda *a, **k: []               # buttoned last, after the fold
+    over_only_on_the_lap()
     res = RB.build()
     b = bpy.data.objects['Redingote bodice']
     M = RB.MEASURES

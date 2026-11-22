@@ -375,3 +375,14 @@ The two lapels cross, so the collar's two ends lie on different ground: the over
 - `end_even` (default 0.6): the fall's inner points within this distance of each roll top are relaxed toward their neighbours, edges left alone, which evens the small fold the over side kept.
 
 Both ends are now closed and smaller. A small pinch is still visible at each tip in the close front view, a little larger on the over side.
+
+## The asymmetry: two causes in the cut and the lapels, not in the collar
+
+John (2026-11-22): "the new collar is worse, figure out the root cause of the asymmetry and get the fix". The closed ends (`end_taper`, `end_even`) treated a symptom, so both are off by default now. The two sides differed because the two lapels they sit on differed.
+
+1. **The cut raised the whole right front.** The bodice draft lifts the right front a cloth's thickness off the shell so that it lies over the left front. It did so everywhere on that side, out to the shoulder and up to the neck, so the right neck edge, the right lapel's roll top and the right collar end stood 5 mm further forward than the left's (roll tops at y -2.81 against -2.61). Fix: `bodice_cut.over_only_on_the_lap` (`BODICE_OVER_RUN`, default 0.6 w) keeps the lift where the fronts cross, and the front comes down onto the body past the underlap's edge. The two roll tops now sit at -2.608 and -2.606.
+2. **Only the left lapel was pressed.** The traced lapel presses `{'left': 0.85}`. The right lapel's roll stood 1.6 cm high against 0.5 cm, all the way up to the neck, so the collar's two ends lay on different ground. Fix: the `notch_lapel` recipe presses both (`{'left': 0.85, 'right': 0.85}`); the right roll is now 0.7 cm.
+
+Measured, the collar mirrored left to right: mean gap 0.058 before, 0.004 after (1.5 mm to 0.1 mm; 1 unit is 2.62 cm); the front-most point of each side -3.99 and -3.34 before, -3.35 and -3.34 after; the fall depth at the two points 6.1 and 6.5 cm before, 6.5 and 6.5 after; the lapels' mirror gap in the top 4 cm of the fold 0.34 before, 0.01 to 0.02 after. Sharp folds stay at 0.
+
+The lapels still differ lower down, where the right one lies over the left at the crossing, as they should.
