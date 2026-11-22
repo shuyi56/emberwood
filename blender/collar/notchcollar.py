@@ -35,10 +35,11 @@ LP = np.load(blend + '.lapels.npz')
 
 notch_angle = opt.get('notch_angle', 40.0)  # the notch's opening, degrees (swept 20 to 90: 30 to 50 clean, 40 chosen; 60 and up the end folds over)
 notch_at = opt.get('notch_at', 0.5)         # the notch on the lapel's top edge: this share of the way from the roll line to the lapel's point
-point_len = opt.get('point_len', 0.9)       # the collar's point (G to C) this share of the lapel's (G to P)
-stand = opt.get('stand', 0.95)              # the stand at the back (2.5 cm)
-fall_over = opt.get('fall_over', 0.65)      # the fall reaches this far past the stand at the back (it covers the seam)
+point_len = opt.get('point_len', 0.7)       # the collar's point (G to C) this share of the lapel's (G to P)
+stand = opt.get('stand', 0.6)               # the stand at the back (1.6 cm; it was 2.5, John: "the collar is too long")
+fall_over = opt.get('fall_over', 0.45)      # the fall reaches this far past the stand at the back (it covers the seam)
 stand_run = opt.get('stand_run', 2.2)       # the stand dies away over this length toward the gorge
+neck_clear = opt.get('neck_clear', 0.10)    # the stand's inside this far off the neck
 lean = opt.get('lean', 0.12)                # the stand leans in toward the neck (share of its height)
 roll_r = opt.get('roll_r', 0.0)            # the fall's turn over the roll, radius
 rise = opt.get('rise', 1.3)                 # the outer edge rises to each collar point over this much azimuth (radians)
@@ -124,18 +125,35 @@ print('notchcollar: the neckline round the back %.1f cm, from z %.2f at the roll
 nS = 12
 up = np.array([(Z - lean * radial(e)) / np.linalg.norm(Z - lean * radial(e)) for e in E])
 Rr = E + st[:, None] * up
+# the ring (John: "the ring of the collar, reduce that length"): the roll is drawn in toward the neck until it lies
+# hug off it, as much as the stand stands there (where the stand dies away at the fronts it keeps to the neckline)
+hug = opt.get('hug')
+E0 = E.copy()
+if hug and opt.get('hug_base', True):     # (the collar's neck edge too: the collar is cut shorter round the neck and sewn
+    for k in range(len(E)):               #  on inside the bodice's neckline, which its fall covers)
+        q = np.array(ST.find_nearest(Vector(E[k]))[0]); dv = E[k] - q; dv[2] = 0.0; dh = np.linalg.norm(dv)
+        if dh > hug: E[k] = E[k] - (st[k] / stand) * (1 - hug / dh) * dv
+    E = smooth_curve(E, 10); E[0], E[-1] = E0[0], E0[-1]
+    Rr = E + st[:, None] * up
+if hug:
+    for k in range(len(Rr)):
+        q = np.array(ST.find_nearest(Vector(Rr[k]))[0]); dv = Rr[k] - q; dv[2] = 0.0; dh = np.linalg.norm(dv)
+        if dh > hug: Rr[k] = Rr[k] - (st[k] / stand) * (1 - hug / dh) * dv
 Rr = smooth_curve(Rr, 20); Rr[0], Rr[-1] = E[0], E[-1]
 SX = np.zeros((len(E), nS + 1, 3))
 for k in range(len(E)):
     for j in range(nS + 1):
-        SX[k, j] = push(E[k] + (j / nS) * (Rr[k] - E[k]), [(ST, 0.10 + th)])     # (the stand's thickness lies toward the neck)
+        SX[k, j] = push(E[k] + (j / nS) * (Rr[k] - E[k]), [(ST, neck_clear + th)])     # (the stand's thickness lies toward the neck)
 for _ in range(opt.get('stand_smooth', 25)):                # (pushed point by point off the neck: evened out round the neck)
     SX[1:-1] = 0.25 * SX[:-2] + 0.5 * SX[1:-1] + 0.25 * SX[2:]
     SX[:, 1:-1] = 0.75 * SX[:, 1:-1] + 0.125 * (SX[:, :-2] + SX[:, 2:])
     SX[:, 0] = E
     for k in range(len(E)):
-        for j in range(1, nS + 1): SX[k, j] = push(SX[k, j], [(ST, 0.10 + th - 0.01)])
+        for j in range(1, nS + 1): SX[k, j] = push(SX[k, j], [(ST, neck_clear + th - 0.01)])
 Rr = SX[:, -1].copy()
+print('notchcollar: the roll round the neck %.1f cm (the neckline %.1f cm), %.2f cm off the neck at most, %.2f on average'
+      % (2.62 * np.linalg.norm(np.diff(Rr, axis=0), axis=1).sum(), 2.62 * np.linalg.norm(np.diff(E, axis=0), axis=1).sum(),
+         2.62 * max(ST.find_nearest(Vector(p))[3] for p in Rr), 2.62 * np.mean([ST.find_nearest(Vector(p))[3] for p in Rr])))
 keep_s = st > 0.03
 sq = []
 ids = np.arange(len(E) * (nS + 1)).reshape(len(E), nS + 1)

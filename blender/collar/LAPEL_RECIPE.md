@@ -253,3 +253,15 @@ the same lapel at 20, 30, 40, 45, 50, 60, 75 and 90 degrees and rendered front a
 
 The default is now 40. From 60 up, the collar's end turns so far back that it runs into the outer edge on the chart,
 and the outline folds.
+
+### A shorter collar
+
+John: "fix the cut, it's creasing, the collar is too long", then "the ring of the collar, reduce that length."
+Two ways to shorten it were tried:
+
+- **Drawing the ring in round the neck** (`hug`, off by default). The collar's neck edge is set by the bodice's
+  neckline, which already sits close to the neck: the most it gained was 1 cm (37.7 to 36.5 cm). It pinched the stand
+  at the front of the neck and doubled the sharp folds (34 to 78).
+- **A lower, shallower band** (kept). The stand is 1.6 cm at the back (was 2.5) and the fall 2.8 cm (was 4.2). The
+  collar's points are 0.7 of the lapel's (3.4 cm, was 0.9 and 4.4 cm), so the fall is 6.1 and 6.5 cm deep at the
+  points (was 6.9 and 7.3). The notch lays at 41.5 and 40.7 degrees. There are 34 sharp folds, the same as before.
