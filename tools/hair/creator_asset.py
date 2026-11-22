@@ -1,7 +1,7 @@
 """The groom as the Face Creator loads it: the hair fidelity mode (tools/face-creator/apply-hair-fidelity.py) shows a
 hairstyle either as the creator sculpts it or as this groom, as game cards at three levels of detail or as strands.
 
-    python3 tools/hair/creator_asset.py HEAD.json.gz GROOM_DIR CARDS_DIR OUT.json [--strands 8000]
+    python3 tools/hair/creator_asset.py HEAD.json.gz GROOM_DIR CARDS_DIR OUT.json [--strands 8000] [--body ranger|warden]
 
 Writes one JSON: the cards of each LOD (cards-lod<k>.obj from cards.py: positions, UVs, triangles), the scalp cap,
 and the strands (children grown as render.py grows them, with their share of the hair). Positions stay in head
@@ -50,6 +50,9 @@ def main():
     a = sys.argv[1:]
     head, gdir, cdir, out = a[:4]
     nstr = int(a[a.index('--strands') + 1]) if '--strands' in a else 8000
+    # the body the groom was draped on (the character's sections from the head export: her collar, cape and back), so
+    # the page can show the hair lying on her shoulders; --body none leaves it out
+    body = a[a.index('--body') + 1] if '--body' in a else None
     rep = {'lods': []}
     cj = json.load(open(os.path.join(cdir, 'cards.json')))
     names = ['LOD 0', 'LOD 1', 'LOD 2']
@@ -91,6 +94,9 @@ def main():
         rep['lods'].append(dict(name=name, cards=int(f[9:-4]), triangles=int(len(Fc)), pos=b64(V, '<f4'),
                                 uv=b64(VT, '<f4'), idx=b64(Fc, '<u4'), ao=b64(ao, '<f4')))
         print(name, 'ao mean %.2f, 10th pct %.2f' % (ao.mean(), np.percentile(ao, 10)))
+    if body and body != 'none':
+        import gzip
+        rep['body'] = dict(name=body, sections=json.load(gzip.open(head))['bodies'][body], cy=0.04, p=3)
     rep['source'] = dict(groom=os.path.abspath(gdir), cards=os.path.abspath(cdir), card_report=cj['lods'])
     json.dump(rep, open(out, 'w'))
     print(out, os.path.getsize(out) // 1024, 'KB', len(keep), 'strands')

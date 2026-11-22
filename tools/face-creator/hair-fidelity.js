@@ -205,6 +205,50 @@ function buildStyle(asset, tone, creatorMat) {
   return { group, parts, cardMat, capMat, strandMat, segs, tone };
 }
 
+// The body the groom was draped on (creator_asset.py --body: the character's sections, as the groom's colliders read
+// them, groom.py character_body): each section a superellipse (|x/w|^p + |y/d|^p = 1, its front and back depths apart)
+// round x 0, y CY, the sections joined by the same smoothstep the colliders use. Shown so the hair that lies on her
+// shoulders and cape reads as lying on them, not as splaying into the air.
+const BODY_ROWS = 8, BODY_SEG = 64;
+const DRAPE_VIEW = { az: 35, el: 10, dist: 62, ty: -0.25 };   // STYLE: 3/4 from a little above, shoulders to mid-back
+const BODY_COLOUR = 0x4d4a47;                     // STYLE: a neutral cloth grey, clear of every hair tone in hue and value
+function buildBody(body) {
+  const S = body.sections, CY = body.cy, e = 2 / body.p;
+  const ring = smooth => {
+    const rows = [];
+    for (let k = 0; k < S.length - 1; k++) for (let j = 0; j < BODY_ROWS; j++) {
+      let t = j / BODY_ROWS; const z = S[k][0] + (S[k + 1][0] - S[k][0]) * t; if (smooth) t = t * t * (3 - 2 * t);
+      rows.push([z, ...[1, 2, 3].map(i => S[k][i] + (S[k + 1][i] - S[k][i]) * t)]);
+    }
+    rows.push(S[S.length - 1]);
+    const P = new Float32Array(rows.length * BODY_SEG * 3);
+    const sp = v => Math.sign(v) * Math.pow(Math.abs(v), e);
+    rows.forEach(([z, w, df, db], r) => {
+      for (let i = 0; i < BODY_SEG; i++) {
+        const a = i / BODY_SEG * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a), o = (r * BODY_SEG + i) * 3;
+        P[o] = w * sp(s); P[o + 1] = CY + (c < 0 ? df : db) * sp(c); P[o + 2] = z;       // (c < 0: the front, -y)
+      }
+    });
+    return [rows.length, P];
+  };
+  const [nr, P] = ring(true), idx = [];
+  for (let r = 0; r < nr - 1; r++) for (let i = 0; i < BODY_SEG; i++) {
+    const a = r * BODY_SEG + i, b = r * BODY_SEG + (i + 1) % BODY_SEG;
+    idx.push(a, a + BODY_SEG, b, b, a + BODY_SEG, b + BODY_SEG);
+  }
+  // the shape is the colliders' (smoothstep between sections), the shading a straight blend's: the smoothstep's flat
+  // spot at every section lit as a row of terraces
+  const lin = new THREE.BufferGeometry();
+  lin.setAttribute('position', new THREE.BufferAttribute(toPage(ring(false)[1], 1), 3));
+  lin.setIndex(idx); lin.computeVertexNormals();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(toPage(P, 1), 3));
+  g.setIndex(idx); g.setAttribute('normal', lin.getAttribute('normal')); lin.dispose();
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: BODY_COLOUR, roughness: 0.95, metalness: 0, side: THREE.DoubleSide }));
+  m.name = 'groom-body-' + body.name; m.receiveShadow = true;
+  return m;
+}
+
 function start(fc) {
   const assets = {};
   document.querySelectorAll('script[id^="groom-asset-"]').forEach(s => { assets[s.id.slice(12)] = s; });
@@ -215,8 +259,12 @@ function start(fc) {
   MODES.forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
   sel.addEventListener('change', () => { mode = sel.value; });
   ui.appendChild(sel);
+  // the shoulders: the body the groom was draped on, on by default with a groom
+  const bodyUi = document.createElement('label'); bodyUi.className = 'check';
+  const bodyBox = document.createElement('input'); bodyBox.type = 'checkbox'; bodyBox.checked = true; bodyBox.id = 'chk-hair-body';
+  bodyUi.appendChild(bodyBox); bodyUi.appendChild(document.createTextNode(' Shoulders (the drape body)'));
   const note = document.createElement('div'); note.style.cssText = 'font-size:11px;opacity:.7;margin:2px 0 6px';
-  const place = () => { const h = document.getElementById('sel-hair'); if (h && !ui.isConnected) { h.parentElement.after(ui); ui.after(note); } };
+  const place = () => { const h = document.getElementById('sel-hair'); if (h && !ui.isConnected) { h.parentElement.after(ui); ui.after(bodyUi); bodyUi.after(note); } };
   // the creator's hair: the head of hair, its locks, and the sheer brown veils it lays over the scalp between strands
   // (hairVeil: vertex-coloured, custom-blended); a veil left showing under the groom read as a flat red-brown patch
   const isVeil = mat => mat && mat.isMeshBasicMaterial && mat.vertexColors && mat.blending === THREE.CustomBlending;
@@ -238,19 +286,29 @@ function start(fc) {
     Object.values(built).forEach(b => { if (!(groom && b === built[style])) show(b.group, false); });
     if (groom) {
       let b = built[style];
-      if (!b) { b = built[style] = buildStyle(JSON.parse(assets[style].textContent), fc.P.hairTone, fc.hairCapMat); scene.add(b.group);
+      if (!b) { const A = JSON.parse(assets[style].textContent);
+        b = built[style] = buildStyle(A, fc.P.hairTone, fc.hairCapMat); scene.add(b.group);
+        if (A.body) { b.parts.body = buildBody(A.body); b.group.add(b.parts.body); }
         note.textContent = ''; }
       if (b.tone !== fc.P.hairTone) { const c = new THREE.Color(fc.P.hairTone); b.capMat.color.copy(c).multiplyScalar(SCALP_SHADE); b.strandMat.color.copy(c); b.tone = fc.P.hairTone; changed = true; }
       show(b.group, true);
       show(b.parts.lod0, mode === 'lod0'); show(b.parts.lod1, mode === 'lod1'); show(b.parts.lod2, mode === 'lod2');
       show(b.parts.cap, true); show(b.parts.strands, mode === 'strands');
+      if (b.parts.body) show(b.parts.body, bodyBox.checked);
       if (mode in LOD_INDEX) { const a = JSON.parse(assets[style].dataset.summary || '{}'); note.textContent = a[mode] || ''; }
       else note.textContent = b.segs.toLocaleString() + ' segments, ' + asset_n(assets[style]) + ' strands';
     }
     if (changed) fc.controls.dispatchEvent({ type: 'change' });      // (the page draws on demand: ask for a frame)
     requestAnimationFrame(frame);
   }
-  window.__hairFidelity = { set: v => { mode = v; sel.value = v; }, get: () => mode, built };
+  // a "Drape" camera: back far enough, and low enough, to see the hair on her shoulders and down her back
+  fc.VIEWS.drape = DRAPE_VIEW;
+  const seg = document.querySelector('.seg[aria-label="Camera"]');
+  if (seg && !seg.querySelector('[data-view="drape"]')) {
+    const d = document.createElement('button'); d.type = 'button'; d.dataset.view = 'drape'; d.textContent = 'Drape';
+    d.addEventListener('click', () => fc.setView('drape')); seg.appendChild(d);
+  }
+  window.__hairFidelity = { set: v => { mode = v; sel.value = v; }, get: () => mode, built, body: v => { bodyBox.checked = v; } };
   frame();
 }
 
