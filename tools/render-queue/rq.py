@@ -70,7 +70,7 @@ PRIORITY = {"frames": 0, "views": 0, "glb": 1, "sheet": 9}
 PEN = {"quiet_s": 2700, "max": 3, "age_s": 600}
 MAX_BATCH = int(os.environ.get("RQ_MAX_BATCH", "4"))      # branches merged into one commit
 MAX_MERGE = int(os.environ.get("RQ_MAX_MERGE", "6"))      # requests in one combined views.py job
-WINDOW_S = int(os.environ.get("RQ_WINDOW", "22"))         # a job waits this long after its newest request
+WINDOW_S = int(os.environ.get("RQ_WINDOW", "15"))         # a job waits this long after its newest request
 READY_CUTOFF_S = int(os.environ.get("RQ_READY_CUTOFF", "300"))   # John: a 5-minute collation window from the first piece ready
 INTENT_TTL_S = 1800                                       # an intent nobody followed lapses after its ETA + this
 VIEWS_PY = "blender/base/views.py"
@@ -1822,10 +1822,16 @@ PING_FRESH_S = 900    # a request sent without a ping from its thread in the las
 
 
 def _est_seconds(r, done):
-    """About how long a request will render: the median of the last finished requests like it (same quality and
-    the same kind of render), else of the same quality, else 3 minutes."""
+    """About how long a request will render: the median of the last finished requests like it (same quality, kind
+    of render and figure), else the same figure, else the same kind, else the same quality, else 3 minutes."""
     kind = tuple(_view_kinds(r.get("views"), r.get("outputs") or []))
-    for pick in (lambda o: o.get("quality") == r.get("quality") and tuple(_view_kinds(o.get("views"), o.get("outputs") or [])) == kind,
+    figs = tuple(sorted(_figures(r.get("views"))))
+    kind_of = lambda o: tuple(_view_kinds(o.get("views"), o.get("outputs") or []))     # noqa: E731
+    fig_of = lambda o: tuple(sorted(_figures(o.get("views"))))                           # noqa: E731
+    # 2026-11-22: the same figure first (a heeled boot builds in 6 to 13 min, a bare mannequin in 3), then the same kind
+    for pick in (lambda o: o.get("quality") == r.get("quality") and kind_of(o) == kind and fig_of(o) == figs,
+                 lambda o: bool(figs) and o.get("quality") == r.get("quality") and fig_of(o) == figs,
+                 lambda o: o.get("quality") == r.get("quality") and kind_of(o) == kind,
                  lambda o: o.get("quality") == r.get("quality")):
         xs = [x for x in (request_seconds(o) for o in done[-60:] if pick(o)) if x > 0]
         if len(xs) >= 3:
