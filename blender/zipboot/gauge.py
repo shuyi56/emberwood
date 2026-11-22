@@ -280,7 +280,7 @@ def main():
     bpy.context.view_layer.update()
     res = {}
     sc = bpy.context.scene
-    side = 'R'
+    side = opt('--side', 'R')
     o = bpy.data.objects['Boot.' + side]
     for m in o.modifiers:
         if m.type == 'SOLIDIFY':
@@ -294,7 +294,7 @@ def main():
     gi = o.vertex_groups.get('Foot.' + side)
     wf = np.array([next((g.weight for g in v.groups if gi is not None and g.group == gi.index), 0.0) for v in o.data.vertices])
     maps, res['pieces'] = read(R, P, faces, pieces, fit=wf > 0.98 if (wf > 0.98).sum() > 50 else None)
-    M = F.boot.hose.MEASURES
+    M = sys.modules['boot'].hose.MEASURES
     sgn = -1.0 if side == 'R' else 1.0
     res['symmetry_rest'] = symmetry(R, sgn * M['leg_x'], R[:, 1].min(), R[:, 1].min() + 6.0, M['boot_welt'] + 0.1)
     for k, v in maps.items():

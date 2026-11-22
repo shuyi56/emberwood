@@ -61,6 +61,11 @@ STYLES = {
 }
 STYLE = 'block'
 HEEL_H = None                # cm: the heel's height at the seat point, None for SHAPE's (the optimizer's)
+BEND_AT_BALL = True          # the leather's bend moved back to the ball (zipboot.bend_at_ball): on the heel the toes are
+                             # pitched 14 degrees and the hose's weights bent the toe cap mid-box (the gauges: 26% of
+                             # it squeezed over 5%). The zip boot sets it off and does its own
+SEAT_WALL = 0.6              # the upper's lowest band stood out to the sole's rim round the seat (zipboot.seat_wall), so
+                             # the sole is no ledge under a heel that turns in under the foot. The zip boot does its own
 RINGS_PER_LIFT = 4           # (the stack's side is one sanded curve: each lift drawn with this many rings)
 
 
@@ -343,6 +348,20 @@ def build():
         if so is not None:
             so.data.materials.clear()
             so.data.materials.append(female.mat(M_SOLE))
+    if BEND_AT_BALL or SEAT_WALL:
+        sys.path.insert(0, os.path.join(HERE, '..', 'zipboot'))
+        import zipboot
+    for side in 'RL' if SEAT_WALL else ():          # (the upper stood on the sole round the seat: zipboot.seat_wall)
+        lifts = stacks.get(side) or []
+        if lifts and bpy.data.objects.get('Boot sole.' + side) is not None:
+            y_br = min(float((l_.matrix_world @ v.co)[1]) for l_ in lifts for v in l_.data.vertices)
+            zipboot.seat_wall(bpy.data.objects['Boot.' + side], bpy.data.objects['Boot sole.' + side], y_br,
+                              SEAT_WALL, 0.07)
+    if BEND_AT_BALL:
+        for side in 'RL':
+            up_ = zipboot.bend_at_ball(bpy.data.objects['Boot.' + side], zipboot.BEND)
+            if bpy.data.objects.get('Boot sole.' + side) is not None:
+                zipboot.bend_at_ball(bpy.data.objects['Boot sole.' + side], zipboot.BEND, like=up_)
     # (the lace and the eyelets in the leather's own tone, a shade down: near black, they drew a dark line down the
     # boot's front edge in every side view)
     for o in bpy.data.objects:

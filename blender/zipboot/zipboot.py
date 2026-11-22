@@ -517,6 +517,7 @@ def build():
     sys.modules['sew'].STITCH.update(STITCHING)
     boot.last.ZIP.update(ZIP_GAUGE)
     zipper.PARTS.update(teeth_t_mm=2.6, slider_w_mm=8.5)        # (Rockywoods: a #5 coil is 0.103 in thick)
+    heelboot.BEND_AT_BALL = heelboot.SEAT_WALL = False   # (done below, with the zip's own steps)
     heelboot.CUT = {}                          # (the tall boot's cut of the shaft does not apply)
     res = heelboot.build()
     rig = bpy.data.objects.get('Rig')

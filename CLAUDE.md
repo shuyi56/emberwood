@@ -55,3 +55,15 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   in hue, not only in value. Dark brown cloth next to dark brown hair made the Warden's hair disappear
   into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
   clashed, and forest green read badly (and vanished on the grass), so her robe and cape are a deep plum. Check the cape against the hair in the side and back views.
+
+## Boots: lessons from the zip ankle boot
+
+See `docs/clothing-solvers/zip-ankle-boot-retrospective.md` for the numbers.
+
+- Measure with `blender/zipboot/gauge.py` before and after every change to a boot's shape, weights or pose. Pose
+  asymmetry over 0.02 units, or stretch outside 0.9 to 1.15, means the rig is distorting the leather.
+- Make a stance's turn-out in the hip (`female.TURNOUT_AT_HIP`), never at the ankle: at the ankle it twists any shaft.
+- On a heel the toes pitch: move the leather's bend back to the ball (`zipboot.bend_at_ball`).
+- Render with `--rest` before blaming the shape: a line that is only there posed is the rig.
+- Fit clearance by region (toes, heel, shaft), and when one region tightens, check the next one.
+

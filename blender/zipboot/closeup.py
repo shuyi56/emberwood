@@ -106,6 +106,10 @@ def main():
     if opt('--h'):
         F.HEEL_H = float(opt('--h')) if hasattr(F, 'HEEL_H') else None
         HB.HEEL_H = float(opt('--h'))
+    for kv in [a_ for a_ in argv if a_.startswith('--set=')]:   # (--set=module.NAME=value: a setting changed for this run)
+        k_, v_ = kv[len('--set='):].split('=', 1)
+        mod_, nm_ = k_.rsplit('.', 1)
+        setattr(sys.modules[mod_] if mod_ in sys.modules else importlib.import_module(mod_), nm_, eval(v_))
     if 'design' in looks and hasattr(F, 'DESIGN'):
         F.DESIGN = True
     female.MANNEQUIN = True
@@ -176,7 +180,10 @@ def main():
             span = float(opt('--span', 1.1 * max(np.ptp(B[:, 1]), np.ptp(B[:, 2]))))
         cam.data.ortho_scale = span
         if marks is None:
-            marks = landmarks()
+            try:
+                marks = landmarks()
+            except ValueError:                        # (a boot without the zip boot's parts: no landmarks)
+                marks = {}
         for look in looks:
             for o in bpy.data.objects:
                 if o.type == 'MESH' and o.name in saved:
