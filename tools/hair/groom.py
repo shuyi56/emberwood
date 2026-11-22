@@ -2,7 +2,7 @@
 a rod model, with a mass and volume budget, and a style written as operations on the natural fall.
 
     python3 tools/hair/groom.py HEAD.json.gz OUT_DIR [--guides 2400] [--style ranger|warden] [--reuse OLD/groom.npz]
-        [--trace CREATOR_STYLE.json.gz]      (warden: the natural wave, cut on the creator's length line; needs --trace)
+        [--trace CREATOR_STYLE.json.gz] [--body ranger|warden|mannequin]   (default: the style's own character)      (warden: the natural wave, cut on the creator's length line; needs --trace)
     python3 tools/hair/groom.py --selftest OUT_DIR         the cantilever check of the rod model
 
 Units: head heights (HH) for geometry, as scalp_field.py; SI inside the energy (1 HH = 0.219 m).
@@ -1026,6 +1026,201 @@ class Layers:
         return float(self.cum.max()) * SF.HH_MM
 
 
+# ---------------------------------------------------------------------------------------------------- the stress test
+# The hair stress test (tools/render-queue/rq_hair.py, the game's fabric solver) found four faults in the first
+# grooms (rejection 113): the hair hung through the character's own body (it was solved against the bare
+# mannequin), the parting and the jaw had sharp bends, and the roots stood off the scalp under the creator's cap.
+# The fixes below take the stress test's own colliders and limits as the measure.
+
+def character_body(sections, mannequin, na=96):
+    """A character's body (the creator's sections: z, half-width, front depth, back depth, as makeDrape reads them;
+    her collar, cape and back) as a mannequin-style table, so the solver's colliders take it unchanged: the radius
+    from SF.AXIS where each ray first leaves the section's superellipse (the stress test's body_field, exactly)."""
+    S = np.array(sections, float)
+    CY = 0.04
+    z0, dz = mannequin['z0'], mannequin['dz']
+    nz = int(math.ceil((z0 - S[-1, 0]) / dz)) + 1
+    zz = z0 - dz * np.arange(nz)
+    th = np.arange(na) / na * 2 * np.pi - np.pi
+    Z, TH = np.meshgrid(zz, th, indexing='ij')
+
+    def F(r):
+        x = SF.AXIS[0] + r * np.sin(TH)
+        y = SF.AXIS[1] - r * np.cos(TH) - CY
+        z = Z
+        k = np.clip(np.searchsorted(-S[:, 0], -z) - 1, 0, len(S) - 2)
+        t = np.clip((S[k, 0] - z) / (S[k, 0] - S[k + 1, 0]), 0, 1)
+        t = t * t * (3 - 2 * t)
+        D = S[k, 1:] + (S[k + 1, 1:] - S[k, 1:]) * t[..., None]
+        ry = np.where(y < 0, D[..., 1], D[..., 2])
+        return (np.abs(x / D[..., 0]) ** 3 + np.abs(y / ry) ** 3) ** (1 / 3) - 1
+    lo, hi = np.zeros(Z.shape), np.full(Z.shape, 2.0)
+    for _ in range(40):                    # (bisection: inside at lo, outside at hi)
+        mid = 0.5 * (lo + hi)
+        ins = F(mid) < 0
+        lo, hi = np.where(ins, mid, lo), np.where(ins, hi, mid)
+    R = np.where(Z <= S[0, 0], lo, 0.0)    # (above the top section: no body)
+    return dict(z0=z0, dz=dz, na=na, r=np.round(R * 1000).astype(int).ravel().tolist())
+
+
+class CreatorCap:
+    """The creator's hair cap (the export's cap grid, where its alpha shows) as a radius by direction from the skull's
+    centre: the creator roots its strands on this shell, and the stress test counts points under it as buried."""
+    def __init__(self, style_path):
+        import gzip
+        from scipy.spatial import cKDTree
+        cap = json.load(gzip.open(style_path))['cap']
+        P = np.array(cap['p'], float).reshape(-1, 3)
+        a = np.array(cap['a'], float)
+        P = P[a > 0.2]
+        q = P - SF.CENTRE
+        self.r = np.linalg.norm(q, axis=1)
+        self.tree = cKDTree(q / self.r[:, None])
+
+    def radius(self, U):
+        d, i = self.tree.query(U, k=6)
+        w = 1.0 / np.maximum(d, 1e-4) ** 2
+        R = (self.r[i] * w).sum(1) / w.sum(1)
+        return np.where(d[:, 0] < 0.08, R, 0.0)          # (no cap in that direction: nothing to clear)
+
+
+CAP_CLEAR_MM = 1.0     # STYLE: the hair lies this far over the creator's cap (the stress test's thickness margin is 2 mm)
+CAP_WIN = 3            # nodes (3 cm): the window the push off the cap is smoothed over
+CAP_ROOT_M = 0.03      # m: below the root the hair rises onto the cap over this length (a lock's root fans out of it)
+
+
+def onto_cap(X, cap, keep=None):
+    """Each guide moved out of the creator's cap: its root to the cap's surface (where the creator roots its strands),
+    the rest pushed out along the radius to CAP_CLEAR_MM over it, eased in over CAP_ROOT_M so the root leaves the cap
+    along it instead of standing up off the skin. keep: guides left as they are."""
+    X = X.copy()
+    G, S1, _ = X.shape
+    q = X - SF.CENTRE
+    r = np.linalg.norm(q, axis=-1)
+    U = q / np.maximum(r, 1e-9)[..., None]
+    ok = ~np.isnan(X[..., 0])
+    R = np.zeros((G, S1))
+    R[ok] = cap.radius(U[ok])
+    s = np.arange(S1) * SEG_M
+    clear = np.minimum(1.0, s / CAP_ROOT_M) * CAP_CLEAR_MM / SF.HH_MM
+    need = np.where((R > 0) & ok, R + clear[None] - r, 0.0)
+    need = np.maximum(need, 0.0)
+    # (smoothed along the strand, a max over CAP_WIN nodes then a mean: pushed node by node, the hair steps wherever
+    # the cap's edge or its radius changes under it)
+    W = CAP_WIN
+    pad = np.pad(need, ((0, 0), (W, W)), mode='edge')
+    mx = np.max(np.stack([pad[:, i:i + S1] for i in range(2 * W + 1)]), 0)
+    pad = np.pad(mx, ((0, 0), (W, W)), mode='edge')
+    need = np.mean(np.stack([pad[:, i:i + S1] for i in range(2 * W + 1)]), 0)
+    need[:, 0] = np.maximum(R[:, 0] - r[:, 0], 0.0)
+    if keep is not None:
+        need[keep, KEEP_ROOT_NODES:] = 0.0
+    X[ok] = (SF.CENTRE + U * (r + need)[..., None])[ok]
+    return X
+
+
+KINK_MAX_DEG = 20.0    # STYLE: no single 1 cm segment turns further than this (the stress test flags 35 at 9 mm)
+RELAX_ITERS = 200
+KEEP_ROOT_NODES = 99  # nodes: a kept (combed) guide is relaxed this far from its root (all of it: only its sharp points move)
+
+
+def relax_kinks(X, col, cap=None, keep=None, iters=RELAX_ITERS):
+    """Sharp bends taken out: where a node turns more than KINK_MAX_DEG, it and its neighbours are moved toward the
+    mean of theirs (a local Laplacian step), then the chain is set back to its segment length from the root and
+    pushed out of the head, the body and the cap again. The root and its first node stay."""
+    import torch
+    X = X.copy()
+    seg = SEG_M / HH_M
+    for _ in range(iters):
+        d = np.diff(X, axis=1)
+        u = d / np.maximum(np.linalg.norm(d, axis=-1, keepdims=True), 1e-12)
+        c = np.einsum('gsk,gsk->gs', u[:, :-1], u[:, 1:])
+        ang = np.degrees(np.arccos(np.clip(np.nan_to_num(c, nan=1.0), -1, 1)))     # at nodes 1 .. S-1
+        nb = np.fmax(np.pad(ang, ((0, 0), (1, 0)))[:, :-1], np.pad(ang, ((0, 0), (0, 1)))[:, 1:])
+        bad = np.zeros(X.shape[:2], bool)
+        # (a sharp point, sharper than the line either side of it, or any very sharp turn; a wave keeps its curves)
+        bad[:, 1:-1] = ((ang > KINK_MAX_DEG) & (ang > 1.5 * nb)) | (ang > 2 * KINK_MAX_DEG)
+        if keep is not None:              # (combed guides kept: only their roots, where they leave the scalp)
+            bad[keep, KEEP_ROOT_NODES:] = False
+        if not bad.any():
+            break
+        sm = bad.copy()
+        sm[:, 1:] |= bad[:, :-1]
+        sm[:, :-1] |= bad[:, 1:]
+        sm[:, :1] = False
+        L = X.copy()
+        L[:, 1:-1] = 0.5 * (X[:, :-2] + X[:, 2:])
+        last = (~np.isnan(X[..., 0])).sum(1) - 1                # (a guide's last node: its own mean is itself)
+        L[np.arange(len(X)), last] = X[np.arange(len(X)), last]
+        X = np.where(sm[..., None] & ~np.isnan(L), 0.5 * X + 0.5 * L, X)
+        # back to the segment length, from the root out
+        for k in range(2, X.shape[1]):
+            v = X[:, k] - X[:, k - 1]
+            n = np.linalg.norm(v, axis=-1, keepdims=True)
+            X[:, k] = X[:, k - 1] + v / np.maximum(n, 1e-12) * seg
+        g, k = np.where(sm & ~np.isnan(X[..., 0]))
+        if len(g):
+            P = torch.tensor(X[g, k], dtype=torch.float64)
+            for fn in (col.head_depth, col.body_depth):
+                for _ in range(4):
+                    P.requires_grad_(True)
+                    dep = fn(P)
+                    gr, = torch.autograd.grad(dep.clamp(min=0).sum(), P)
+                    with torch.no_grad():
+                        n = gr / gr.norm(dim=1, keepdim=True).clamp(min=1e-12)
+                        P = P - n * (dep + 1.0 / SF.HH_MM).clamp(min=0)[:, None]
+            X[g, k] = P.detach().numpy()
+    if cap is not None:
+        X = onto_cap(X, cap, keep)
+    # (a guide the smoothing folded back on itself, a few in a thousand, ends where it folds)
+    d = np.diff(X, axis=1)
+    u = d / np.maximum(np.linalg.norm(d, axis=-1, keepdims=True), 1e-12)
+    c = np.nan_to_num(np.einsum('gsk,gsk->gs', u[:, :-1], u[:, 1:]), nan=1.0)
+    for g in np.where((c < -0.5).any(1))[0]:
+        k = int(np.argmax(c[g] < -0.5))
+        X[g, max(3, k + 1):] = np.nan
+    return X
+
+
+BACK_CUT_TH = (2.0, 2.4)   # rad round the head: the creator's back length takes over between these
+CLIMB_HH = 0.05        # HH: a guide that climbs this far back up after it has fallen is cut where it turns (hair
+                       # under gravity does not climb: a few framing guides combed onto the cape's steep shoulder looped
+                       # back up over the head)
+CLIMB_FROM = 6         # nodes: a bang's root lift (it leaves the forehead upward) is not a climb
+
+
+def recut(X, lengths, cut_z=None, keep=None):
+    """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
+    out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
+    up is cut where it turns."""
+    X = X.copy()
+    lengths = lengths.copy()
+    for g in range(len(X)):
+        z = X[g, :, 2]
+        ok = ~np.isnan(z)
+        if ok.sum() <= CLIMB_FROM:
+            continue
+        lo = np.minimum.accumulate(np.where(ok, z, np.inf))
+        up = np.where(ok & (z - lo > CLIMB_HH) & (np.arange(len(z)) >= CLIMB_FROM))[0]
+        if len(up):
+            k = int(np.argmin(z[:up[0]]))                 # (the turn: the lowest point before the climb)
+            n = max(3, k)
+            X[g, n + 1:] = np.nan
+            lengths[g] = min(lengths[g], n)
+    if cut_z is None:
+        return X, lengths
+    endz = cut_z(SF.theta(np.nan_to_num(X[:, 0])))
+    for g in range(len(X)):
+        if keep is not None and keep[g]:
+            continue
+        below = np.where(X[g, 1:, 2] < endz[g])[0]
+        if len(below) and below[0] + 1 < lengths[g] + 1:
+            n = max(3, below[0])
+            X[g, n + 1:] = np.nan
+            lengths[g] = min(lengths[g], n)
+    return X, lengths
+
+
 def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=None, bangs=True, reuse=None, trace=None):
     """style: "ranger" (straight, curtain bangs, the approved length line) or "warden" (the natural wave, no bangs,
     cut on the creator's own length line, which needs trace). reuse: a previous groom.npz. The guides do not act on each other (no hair-hair contact; the layer is a fixed
@@ -1219,6 +1414,22 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     if trace and not wavy:
         # the Ranger's sides flow outward below the cheek, as the creator's do
         X2 = creator_flare(X2, trace, surf)
+    if trace:
+        # the stress test's faults: off the creator's cap, then no sharp bends (the combed bangs keep their shape)
+        cap = CreatorCap(trace)
+        X2 = onto_cap(X2, cap)
+        X2 = relax_kinks(X2, col, cap, keep=bang)
+    if trace and not wavy:
+        # the back cut on the creator's own length line where it is shorter: the creator's back ends at z -1.2, the
+        # approved line's at -1.52 (CLAUDE.md: the creator overrides the measurement); the sides keep the approved line
+        cz = creator_cut(trace)
+
+        def back_cut(th):
+            w = SF.sm(BACK_CUT_TH[0], BACK_CUT_TH[1], np.abs(th))
+            return ranger_cut_z(th) + w * np.maximum(cz(th) - ranger_cut_z(th), 0.0)
+        X2, lengths = recut(X2, lengths, back_cut, keep=bang)
+    elif trace:
+        X2, lengths = recut(X2, lengths)
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
@@ -1237,7 +1448,12 @@ def main():
     os.makedirs(out, exist_ok=True)
     surf = SF.Surface(SF.load_head(head))
     F = SF.build(surf)
-    body = json.load(gzip.open(head))['bodies']['mannequin']
+    bodies = json.load(gzip.open(head))['bodies']
+    style0 = a[a.index('--style') + 1] if '--style' in a else 'ranger'
+    who = a[a.index('--body') + 1] if '--body' in a else style0
+    # the character's own body (her collar, cape and back), as the game and the stress test drape her hair on;
+    # --body mannequin for the bare mannequin
+    body = bodies['mannequin'] if who == 'mannequin' else character_body(bodies[who], bodies['mannequin'])
     log = []
     reuse = a[a.index('--reuse') + 1] if '--reuse' in a else None
     trace = a[a.index('--trace') + 1] if '--trace' in a else None
