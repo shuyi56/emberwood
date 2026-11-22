@@ -310,9 +310,25 @@ def lay(ps, v):
 def chv(p):
     c = chart(p); return np.array([c[0], to_v(c[0], c[1])])
 for Nt in (NtA, NtB):
-    Nt['Gv'], Nt['Cv'] = chv(Nt['G3']), chv(Nt['C3'])
-    Nt['gv'] = np.array([chv(p) for p in Nt['gorge']])
-    Nt['ev'] = np.array([chv(p) for p in Nt['G3'] + np.linspace(0, 1, 30)[:, None] * (Nt['C3'] - Nt['G3'])])
+    # the gorge on the chart: its azimuth as seen from F, its length down measured along the seam itself (what of each
+    # step along it is not across the meridians is down them). Looked up through the walked meridians instead, the seam
+    # (which runs nearly along a meridian, on the lapel's steep edge) jumps up and down the chart and the cloth folds
+    g3 = Nt['gorge']; gps = np.unwrap(np.array([chart(p)[0] for p in g3]))
+    gps = smooth_curve(np.column_stack([gps, np.zeros_like(gps)]), 4)[:, 0]
+    Rh = np.linalg.norm((g3 - F0)[:, :2], axis=1)
+    ds = np.linalg.norm(np.diff(g3, axis=0), axis=1); dps = np.diff(gps) * 0.5 * (Rh[1:] + Rh[:-1])
+    gvv = np.concatenate([[0.0], np.cumsum(np.sqrt(np.maximum(ds ** 2 - dps ** 2, (0.2 * ds) ** 2)))])
+    Nt['gv'] = np.column_stack([np.mod(gps, 2 * np.pi), gvv]); Nt['Gv'] = Nt['gv'][-1].copy()
+    # the collar's end: the lapel's edge carried on past G (the seam's own direction there) turned by the notch's angle
+    # toward the back, measured on the chart scaled to lengths at G, so the notch opens the same on the cloth both sides
+    RG = Rh[-1]; k0 = max(0, len(g3) - 4)
+    # the collar's end as cut (G to C, turned off the lapel's edge by the notch's angle on the cloth, step 4), put on the
+    # chart the same way as the seam: across the meridians and down them
+    gc_ = Nt['C3'] - g3[-1]; lgc = np.linalg.norm(gc_)
+    dpC = (np.mod(chart(Nt['C3'])[0] - gps[-1] + np.pi, 2 * np.pi) - np.pi) * RG
+    dzC = math.sqrt(max(lgc ** 2 - dpC ** 2, (0.2 * lgc) ** 2)) * (1.0 if gc_[2] <= 0 else -1.0)
+    Nt['Cv'] = Nt['Gv'] + np.array([dpC / RG, dzC])
+    Nt['ev'] = Nt['Gv'] + np.linspace(0, 1, 30)[:, None] * (Nt['Cv'] - Nt['Gv'])
 FcA, FcB = NtA['Cv'][1], NtB['Cv'][1]
 def Flen(ps):
     return Fb + (FcA - Fb) * ss(NtA['Cv'][0] - rise, NtA['Cv'][0], ps) + (FcB - Fb) * ss(NtB['Cv'][0] + rise, NtB['Cv'][0], ps)
@@ -376,7 +392,16 @@ nb = [set() for _ in range(len(UV))]
 for a_, b_, c_ in tri:
     nb[a_] |= {b_, c_}; nb[b_] |= {a_, c_}; nb[c_] |= {a_, b_}
 bnb = [[j for j in n_ if onb[j]] if onb[i] else list(n_) for i, n_ in enumerate(nb)]
-fixed = on_roll | on_gorge
+# the collar's end, from the notch to where its point begins to round, is laid straight on the cloth as cut, so the notch
+# opens on the cloth the angle it was cut to
+on_end = np.zeros(len(UV), bool)
+for Nt in (NtA, NtB):
+    evs = Nt['ev'] * SC; de, ie = cKDTree(evs).query(UV)
+    m = onb & (de < 0.4 * hm) & (ie <= int(0.8 * (len(evs) - 1))) & ~on_gorge & ~on_roll
+    for i in np.nonzero(m)[0]:
+        t_ = ie[i] / (len(evs) - 1.0); P3[i] = push_g(Nt['G3'] + t_ * (Nt['C3'] - Nt['G3']))
+    on_end |= m
+fixed = on_roll | on_gorge | on_end
 def push_n(p):
     loc, nor, fi, dist = GT.find_nearest(Vector(p))
     if loc is None or dist >= clr[fi]: return p
@@ -397,7 +422,8 @@ for _ in range(opt.get('smooth', 6)):
 # toward the fronts, where the collar's ends cross the lapels' rolls, what the fall lies on is steep and stepped, seen
 # from F: there the fall is let hang as a membrane, smoothed hard and only ever pushed out, so it bridges the steps
 sfv = np.interp(ch[:, 0], psis, sfp)
-zone = np.nonzero(~fixed & (sfv < opt.get('front_where', 0.6)))[0]
+zone = np.nonzero(~fixed)[0]
+wz = (opt.get('back_hang', 0.6) + (1 - opt.get('back_hang', 0.6)) * ss(0.95, 0.4, sfv[zone]))[:, None]   # (all over, hardest at the fronts)
 from scipy.sparse import coo_matrix
 rr = np.concatenate([[i] * len(n_) for i, n_ in enumerate(bnb)]).astype(int); cc = np.concatenate([list(n_) for n_ in bnb]).astype(int)
 Wm = coo_matrix((np.ones(len(rr)), (rr, cc)), shape=(len(UV), len(UV))).tocsr()
@@ -408,9 +434,9 @@ dgz = cKDTree(gall).query(UV[zone])[0]
 zone_p = zone[dgz > opt.get('seam_free', 0.3)]
 gz_i = np.nonzero(on_gorge)[0] if opt.get('seam_slide', True) else np.zeros(0, int)
 g3s = [(g_, cKDTree(g_)) for g_ in (resample(Nt['gorge'], 0.005) for Nt in (NtA, NtB))]
-for it in range(opt.get('front_smooth', 120)):
+for it in range(opt.get('front_smooth', 250)):
     A_ = (Wm @ P3) / deg[:, None]
-    P3[zone] += 0.6 * (A_[zone] - P3[zone])
+    P3[zone] += 0.6 * wz * (A_[zone] - P3[zone])
     if len(gz_i):     # (the seam to the lapel slides along the lapel's edge, evening its points out, and stays on it)
         P3[gz_i] += 0.6 * (A_[gz_i] - P3[gz_i])
         for g3d_, g3t_ in g3s:      # (in order along the seam, evenly spaced: two points on one spot make a spike)
@@ -418,7 +444,7 @@ for it in range(opt.get('front_smooth', 120)):
             if len(mine) < 2: continue
             si = g3t_.query(P3[mine])[1]; o_ = np.argsort(si, kind='stable')
             P3[mine[o_]] = g3d_[np.round(np.linspace(si.min(), si.max(), len(mine))).astype(int)]
-    if it % 3 == 2 or it == opt.get('front_smooth', 120) - 1:
+    if it % 3 == 2 or it == opt.get('front_smooth', 250) - 1:
         for i in zone_p: P3[i] = push_g(P3[i])
 print('notchcollar: the fall hung as a membrane over %d points toward the fronts' % len(zone))
 
@@ -429,7 +455,11 @@ print('notchcollar: %d points, %d faces; edges %.3f mean, %.3f at most on the cl
       % (len(UV), len(tri), le.mean(), le.max(), lc.mean(), 100 * np.abs(le / lc - 1).mean(), 100 * np.percentile(np.abs(le / lc - 1), 95)))
 for L, Nt in ((1, NtA), (2, NtB)):
     u1, u2 = Nt['C3'] - Nt['G3'], Nt['P3'] - Nt['G3']
-    q_ = chv(Nt['G3'] + 0.5 * (Nt['C3'] - Nt['G3'])); u1b = lay(*q_) - Nt['G3']   # (half way along the end: the point itself is rounded)
+    # (as laid: the cloth's own points on the end, from G a third of the way to C, the point itself being rounded)
+    evs = Nt['ev'] * SC; de, ie = cKDTree(evs).query(UV); me = onb & (de < 0.5 * hm) & (ie > 3) & (ie < 12)
+    gi = np.argmin(np.linalg.norm(UV - Nt['Gv'] * SC, axis=1))
+    u1b = P3[me].mean(0) - P3[gi] if me.any() else u1
+    u2 = Nt['P3'] - P3[gi]
     ang = lambda x, y: math.degrees(math.acos(np.clip(x @ y / np.linalg.norm(x) / np.linalg.norm(y), -1, 1)))
     print('notchcollar: front %d: the notch opens %.1f degrees as cut, %.1f as laid (asked %.0f)' % (L, ang(u1, u2), ang(u1b, u2), notch_angle))
 dmin = min(BT.find_nearest(Vector(p))[3] for p in P3[~on_gorge]); smin = min(ST.find_nearest(Vector(p))[3] for p in P3)

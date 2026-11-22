@@ -187,3 +187,51 @@ it. Spacing is taken against the height yardstick, as the method says; against t
 
 The button pins in the relaxation now use the same `button_step` as the buttons.
 
+
+## The notch collar on the wide lapel
+
+John: "go back to the other lapel and add collar so it's 30 degrees notch with new lapels." The wide traced lapel
+gets the rounded outline (`notch_lapel`), and a separate collar is sewn to its top edge with a 30° notch.
+
+```
+python3 blender/collar/foldfront.py CUT.blend LAPEL.blend '{"recipe":"notch_lapel"}'
+python3 blender/collar/notchcollar.py LAPEL.blend OUT.blend '{}'
+```
+
+foldfront writes `LAPEL.blend.lapels.npz` (each lapel's points, its cut edge and its crease), which notchcollar reads.
+
+The collar is two pieces of the bodice's wool, at the bodice's thickness:
+
+1. **The stand.** It rises from the neckline round the back (2.5 cm at the back) and dies away over about 6 cm toward
+   each lapel's crease. Its top is the roll line.
+2. **The fall.** It is turned down over the stand and lies on whatever is under it. To lay it, the cloth is seen from a
+   point F inside the chest. Each line of constant azimuth seen from F (a meridian) is walked down from the roll, and
+   the chart is (azimuth, length down the cloth). The outline is drawn on that chart and meshed there. Its parts are
+   the roll, each gorge, each collar end, and the outer edge (4.2 cm deep at the back, about 7 cm at the points).
+3. **The notch.** G sits halfway along the lapel's top edge. The collar's end G to C is turned off the lapel's edge
+   (G to the lapel's point P) by 30° in the cloth's own plane at G. C is 0.9 of GP from G.
+
+Three things made the fronts clean. Each one fixed a flaw that showed in the renders:
+
+- **The seam is measured along itself.** The gorge runs nearly along a meridian, on the lapel's steep edge. Looked up
+  through the walked meridians, its points jumped up and down the chart: a lapel point and a point behind it share a
+  direction from F. The cloth then folded on itself and solidify made spikes, and one side came out 3 cm deeper than
+  the other. Now the gorge's place on the chart is its own length: each step along it is split into what goes across
+  the meridians and what goes down them.
+- **The collar's end is laid straight as cut.** The boundary points from G to where the point starts to round are put
+  on the straight line G to C (pushed off what lies under them). The notch then opens on the cloth exactly as cut:
+  31.4° and 30.6°. Turning it on the chart instead came out at 55° to 80°, because the chart is not true to the cloth
+  at G.
+- **The fall hangs as a membrane.** Over the lapels' rolls and the stand's dying end, the ground seen from F is steep
+  and stepped. A nearest-point push sends neighbouring points different ways and crumples the cloth. So, after laying,
+  the fall is smoothed hard (250 rounds) and only ever pushed outward along the line from F, which bridges the steps.
+  The smoothing is eased in from the back (0.6 of full strength there) to the fronts, so it leaves no crease where it
+  starts. Points near the seam are not pushed: they hang from it. The seam's own points slide along the lapel's edge,
+  kept in order and evenly spaced, because two points on one spot make a spike.
+
+`notch_lapel` also takes `metric3d`, as the classical lapel does. Her left lapel's strain went from 5.6% to 4.7%
+mean, and on the visible cloth from 5.2% to 4.3%. The worst edges in the strain print (−84%) are on the part of the
+under lapel hidden behind the upper front, which is pressed flat there on purpose.
+
+What to read in notchcollar's output: the notch "as cut" and "as laid" should both be near 30, the fall's depth at the
+two points should match, and the fall should be at least a few hundredths off the bodice.
