@@ -13,6 +13,7 @@ the Gaussian curvature map only (`derive.field_png`).
 | `tension.py` | numpy, scipy | The solver. ARAP flattening (LSCM start), principal stretches and directions, the `Front` (one bare front, its best flat cut) and `Front.evaluate` (open the front on a roll line, turn the lapel onto it, score the strain). |
 | `read_bodice.py` | Blender (bpy) | CUT.blend to an .npz: points, faces, front layers, measures, cloth thickness. |
 | `derive.py` | numpy, scipy, matplotlib | The field (field.png, field.json), the roll-line search, the outline search, and the choice within the design's limits (derived.json with foldfront options). |
+| `foldcollar_gauge.py` | numpy | The folded collar's crease (turn and sharpness on the roll line), body off the stand, and the share of its fall sunk in the coat's cloth. |
 | `dump_build.py` | bpy | A built .blend (after foldfront and notchcollar) to an .npz for the contour sheet. |
 | `contour_sheet.py` | numpy, matplotlib | Before against after: level, side and coronal sections. |
 | `clay.py` | bpy | Cheap draft renders, clay or colour-coded by design part (fronts, each lapel, collar, buttons), on fixed ortho cameras with an off-centre `at`. |

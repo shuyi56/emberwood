@@ -672,3 +672,36 @@ was the wrong cut for it.
   `corner` moved 0.2 to 0.8); the corner is set by eye at 0.5 and not yet measured against the photo's 0.115.
 - `open` is still at its lower limit of 5 degrees.
 - The folded collar is not yet in the main build, and `join.py` has not been run on it.
+
+## Phase 11: the collar was sunk in the coat, and too thin (2026-11-24)
+
+John: "Why is the close now imperceptible nearly perfect with the bodice", "Adjust that triangle part to the neck bone
+it's on", "Why does every adjustment we make reduce creasing and makes the collar thinner".
+
+**The finding.** The close fit was a fault. The coat's cloth stands 0.167 (4.4 mm) outside its mesh; the collar's fall
+was held 0.14 off that mesh, so 84% of the fall over the coat lay inside the coat's cloth. And `foldcollar_blend` gave
+the collar a thickness of 0.06 (1.6 mm). My first answer to John (the shared seam, the solved cut) was wrong about the
+cause; so was my claim that the roll line's crease had been softened (the new gauge reads its sharpness 0.73 fitted,
+0.96 shaped).
+
+**Why each round went that way.** Stretch, the join's kink and turn, and a one-camera outline gap all reward a smoother,
+flatter, closer collar. Nothing measured body, crease or sinking. `blender/tension/foldcollar_gauge.py` now does:
+
+| Collar | Crease turn, back | Crease sharpness | Fall off the stand (cloth thicknesses) | Sunk in the coat | Cloth drawn |
+|---|---|---|---|---|---|
+| First folded rectangle | 152 | 0.84 | 2.6 | 62% | 0.36 |
+| Fitted (phase 9) | 170 | 0.73 | 1.3 | 91% | 0.36 |
+| Shaped (phase 10) | 157 | 0.96 | 1.7 | 84% | 0.36 |
+| **Lifted, full cloth (this phase)** | 144 | 0.93 | 2.6 | 20% | 1.0 |
+
+**Changes (experimental).**
+- `foldcollar_blend.py`: the collar's Solidify takes the coat's thickness, centred.
+- Build options `lift` 0.19 (a thickness between stand and fall), `clear` 0.27 (1.5 thicknesses and a hair off the
+  coat's mesh), `push_rounds` 3. More rounds overshoot (2.2 thicknesses) and stretch the rectangle 60 to 90%.
+- `bone` (0 to 1): each end raised or lowered so its lower edge lies on the collarbone's line (the gown's
+  `collarbones`: z 50.2 rising 0.2 from |x| 0.75 to 4.7). The edge fell away outward at slope -0.42 (23 degrees); with
+  `bone` 1 it is -0.10 (6 degrees). The skin of this body has no collarbone ridge to measure against.
+
+**Worse, and stopped on it (stop rule):** the outline gap to the photo went from 0.036 to 0.055 and the outline reads 5
+sides. The lifted, thicker end is rounded where the photo's is a flat triangle, and the end's edge is ragged beside the
+seam in the collar-alone view. The remaining 20% sunk is in the first 5 cm of each end.

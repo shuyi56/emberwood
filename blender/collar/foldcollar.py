@@ -25,7 +25,7 @@ Method (closed form, then a push off the coat):
   5. the fall is pushed off the coat and the lapels (BUILD's build.npz) by the cloth's thickness
 
 Options: width 2.2, stand 0.9, fold_angle 45, corner 0.5, open 25, mesh 0.06, lift 0.1, clear 0.14.
-Shaping to the neck (off by default): fold_k (the roll line's turn spread, 3), lift_run (the crease's turn, 0.3),
+Shaping to the neck (off by default; `bone` 0..1 lays each end's lower edge on the collarbone's line): fold_k (the roll line's turn spread, 3), lift_run (the crease's turn, 0.3),
 push_even/push_grow (600/20), shape_cut (the flat cut solved from the lay; saves uv and uv_rect).
 Units are the build's (1 = 2.62 cm)."""
 import sys, json, math
@@ -126,6 +126,23 @@ def build(B, opt):
             need = np.maximum(need, 0.9 * nb_max) * fall
         for _s in range(opt.get('push_even', 30)): need = (0.5 * need + 0.5 * (Adj @ need) / dg) * fall     # (then evened)
         X3 += need[:, None] * dirn; moved += need
+    # 5b. the turned end on the collarbone: John, 2026-11-24, "Adjust that triangle part to the neck bone it's on".
+    # The collarbone runs from the notch (|x| 0.75) out to the top of the shoulder (4.7), level and a little higher at
+    # its outer end (blender/gown/gown.py `collarbones`: z 50.2 rising 0.2 along u^1.5). The laid triangle's lower edge
+    # fell away outward (0.8 over 2.5 units, 23 degrees) because the fall carries the neckline's own drop. Each end is
+    # raised or lowered, whole and smoothly, so its lower edge lies on the bone's line plus `bone_off` (the cloth and the
+    # coat's thickness), by `bone` of the way (0 off, 1 all the way).
+    if opt.get('bone'):
+        Lend = float(opt.get('bone_len', 4.0)); xe_ = np.minimum(UV[:, 0], Ls - UV[:, 0]); u_ = np.clip(1 - xe_ / Lend, 0, 1); wgt = u_ * u_ * (3 - 2 * u_)
+        bz = lambda ax: 50.2 + 0.2 * np.clip((ax - 0.75) / (4.7 - 0.75), 0, 1) ** 1.5
+        for sg, side in ((1, UV[:, 0] < Ls / 2), (-1, UV[:, 0] >= Ls / 2)):
+            m = fall & side & (np.sign(X3[:, 0]) == sg); ax = np.abs(X3[:, 0]); xs_, dz_ = [], []
+            for lo in np.arange(0.75, 4.25, 0.5):
+                q = m & (ax >= lo) & (ax < lo + 0.5)
+                if q.sum() > 5: xs_.append(lo + 0.25); dz_.append(bz(lo + 0.25) + opt.get('bone_off', 0.15) - X3[q, 2].min())
+            if len(xs_) >= 2:
+                dz = np.interp(ax, xs_, dz_) * float(opt['bone']) * wgt
+                X3[:, 2] += np.where(m | (fall & side), dz, 0.0)
     # the strain the laying left (each edge against its length on the flat)
     ed = np.unique(np.sort(np.vstack([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]), 1), axis=0)
     l0 = np.linalg.norm(UV[ed[:, 0]] - UV[ed[:, 1]], axis=1); l1 = np.linalg.norm(X3[ed[:, 0]] - X3[ed[:, 1]], axis=1); st = l1 / l0 - 1

@@ -7,11 +7,12 @@
 # Experimental (phases 9 and 10 of docs/clothing-solvers/lapel-tension-solver.md); the options are the photo fit.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"; T="$HERE/../tension"; L="$1"; O="$2"; mkdir -p "$O"
-FIT='{"width":2.05,"stand":0.7,"fold_angle":21,"open":5,"corner":0.5,"seam_from":-16,"fold_k":3,"push_even":600,"push_grow":20,"lift_run":0.3,"shape_cut":1}'
+FIT='{"width":2.05,"stand":0.7,"fold_angle":21,"open":5,"corner":0.5,"seam_from":-16,"fold_k":3,"push_even":600,"push_grow":20,"lift_run":0.3,"shape_cut":1,"bone":1.0,"lift":0.19,"clear":0.27,"push_rounds":3}'
 for s in "" .lapels.npz .strain.npz; do cp "$L$s" "$O/lapel.blend$s"; done
 python3 -I "$HERE/notchcollar.py" "$O/lapel.blend" "$O/out.blend" '{}' > "$O/notchcollar.log" 2>&1
 python3 -I "$T/dump_build.py" "$O/out.blend" "$O/build.npz" > /dev/null 2>&1
 python3 "$HERE/foldcollar.py" "$O" "$O/collar.npz" "${3:-$FIT}"
 python3 -I "$HERE/foldcollar_blend.py" "$O/lapel.blend" "$O/collar.npz" "$O/out.blend" > "$O/blend.log" 2>&1
-cp "$O/collar.npz" "$O/out.blend.collar.npz"
+cp "$O/out.blend.collar.npz" "$O/notchcollar.collar.npz"; cp "$O/collar.npz" "$O/out.blend.collar.npz"
+python3 "$T/foldcollar_gauge.py" "$O" "$O/collar.npz" "$O/collar_gauge.json"
 python3 "$T/join.py" "$O" "$O/join.json" > /dev/null 2>&1 && echo "foldcollar_build: $O/out.blend, join gauge in $O/join.json"
