@@ -34,3 +34,6 @@ if __name__ == '__main__':
         print('%-40s polygon error %.3f' % (B, err))
         for k in Lr: print('   %-11s ref %7.2f  model %7.2f' % (k, Lr[k], Lm[k]))
         for k in R_: print('   %-3s ref (%.2f, %.2f) model (%.2f, %.2f)' % (k, *R_[k], *M[k]))
+        # and the polygon check after every fit (John, 2026-11-23: "Add a proper polygon check with side count")
+        import os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import polycheck
+        print(polycheck.report(polycheck.check(B.rstrip('/'))))

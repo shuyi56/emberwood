@@ -50,7 +50,7 @@ def draw(ax, parts, n, c, axes, col, lw, box):
 if __name__ == '__main__':
     A, M = load(sys.argv[1]); B, _ = load(sys.argv[2])
     zs = [M['z_bust'] - 1.0, M['z_bust'], M['z_bust'] + 1.5, M['z_bust'] + 3.0, M['z_bust'] + 4.5, M['z_neck_front'] + 0.6]
-    fig, axs = plt.subplots(3, 4, figsize=(20, 15))
+    fig, axs = plt.subplots(4, 4, figsize=(20, 20))
     for i, z in enumerate(zs):
         ax = axs.flat[i]; box = (-4.5, 4.5, -5.5, 1.0)
         draw(ax, A, np.array([0, 0, 1.0]), z, [0, 1], '0.65', 2.0, box)
@@ -71,6 +71,16 @@ if __name__ == '__main__':
         draw(ax, B, np.array([0, 1.0, 0]), y, [0, 2], 'k', 0.8, box)
         ax.set_xlim(box[0], box[1]); ax.set_ylim(box[2], box[3]); ax.set_aspect('equal')
         ax.set_title('coronal section y %.1f (front view)' % y)
+    # the polygon check (polycheck.py) of the after build, if it is a lapel and collar build: side counts, every
+    # mismatched edge, and the curvature against the riding-habit photo (John, 2026-11-23)
+    import os
+    Bd = os.path.dirname(os.path.abspath(sys.argv[2]))
+    for ax in axs.flat[12:]: ax.axis('off')
+    if os.path.exists(Bd + '/lapel.blend.lapels.npz'):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import polycheck
+        r = polycheck.check(Bd); axs.flat[12].axis('on'); polycheck.draw(axs.flat[12], r)
+        axs.flat[13].text(0, 1, polycheck.report(r), va='top', family='monospace', fontsize=7, transform=axs.flat[13].transAxes)
+        print(polycheck.report(r).splitlines()[0])
     fig.suptitle('grey: before (%s)   black: after (%s)' % (sys.argv[1].split('/')[-2], sys.argv[2].split('/')[-2]))
     plt.tight_layout(); plt.savefig(sys.argv[3], dpi=60)
     print('contour_sheet: wrote', sys.argv[3])

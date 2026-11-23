@@ -495,3 +495,73 @@ the roll line comes to the photo's (flatter, meeting the neck further out), the 
 its turn meets the lapel's roll (tip fold 35° at Fit A, 94-113° beyond it). This is the same junction as rejection 128:
 the collar's turn is built as a vertical half round, while the lapel's roll at its top runs at the crease's angle.
 **Experimental:** Fit A is not approved (rejection 130).
+
+## Phase 8: a four-sided lapel, and a polygon check that counts sides
+
+John, 2026-11-23: "Your lapel is a triangle there's has 4 sides", "Properly get the number of sides right", "Read up on
+trapezoidal lapels", "Get collar lapel right as well it's a combination of a rectangle and a triangle", "Add a proper
+polygon check with side count".
+
+**What went wrong in phase 7.** The fit compared five chosen points. The model's lapel had three sides (the roll line,
+the end edge, the lower edge), because foldfront's outline ran straight from the roll top to the lapel's point. The
+photo's lapel has four: the roll line, a level top edge along the neckline, the end edge, the lower edge. A triangle
+scored 0.087 against it because nothing counted sides.
+
+**Sources.** Gentleman's Gazette (the gorge is "the meeting point of collar and lapel"); the fabrics-store notched
+collar draft (lapel about 3 in wide); The Delineator, Aug 1890, riding basque No. 3409 ("fashioned to roll in small
+lapels, which meet a rolling collar in notches").
+
+**foldfront `outline_inner`.** A list [[t, d], ..., [0, 0]]: the lapel's top edge from its corner back to the roll top.
+It lies at t < 0 (past the roll top, along the neckline), which the width-over-fold outline could not reach. The cut
+gets a lower boundary there. Default lapels are unchanged: the classical lapel built byte for byte the same.
+notchcollar reads it: the gorge walks the top edge to the corner and then the end edge, and the notch defaults to the
+corner.
+
+**`polycheck.py`.** The check finds the corners on its own.
+- Lapel: the corners of the cut outline.
+- Collar: the corners of the collar patch visible in a depth buffer from the photo's camera.
+- Corner detection: Douglas-Peucker, then turning of at least 25 degrees, then rounded runs merged.
+- Fail rule: the side count must match the photo (lapel 4, collar front 4). After that it lists every edge off in
+  direction, length share or bow, and every corner off in angle or rounding radius.
+- On the triangle lapel of phase 7 (b/HF1) it fails: lapel 3 sides of 4.
+
+**Pentagon or curve?** Measured on the photo, the collar front has four corners:
+
+| Feature | Measurement |
+|---|---|
+| Corner T (top) | radius 0.04 lapel spans |
+| Corner K (shoulder) | radius 0.12 |
+| Front edge | nearly straight (bows 6%) |
+| Outer edge T to K | one S-curve (+4% / -7%), with no corner along it |
+
+The model's fifth side was a 27° bend in the collar's bottom edge, where its point hung below the lapel's top.
+**Cut against view (`flatview.py`).**
+- The collar's flat cut is a curved band.
+- From the side, two of its front corners (the notch and the rounded point) are cut corners.
+- T and K come from the bend: T is where the outline stops being the cut edge and becomes the roll's silhouette (the
+  front edge up the neck is 72% fold), and K is where the outer edge turns away round the neck.
+
+**The inverse (`lapel_inverse.py`).** Steps:
+1. Fit the map from the flat cut (t, d) to the view on the solved lapel. It is close to affine, residual 0.04.
+2. Put the photo's corners through its inverse.
+3. Rebuild. The polygon error went from 0.07 to 0.001.
+
+The angles came out as:
+
+| Edge | Photo | Model |
+|---|---|---|
+| Roll | 53° | 51° |
+| Top | 7° | 9° |
+| End | 132° | 128° |
+| Lower | 6° | 5° |
+
+The size is set by where the lapel point lies between the front edge and the body's outline: 0.49, against 0.46 to 0.53
+on the photo. The first wide fit (12.3 cm out) matched the shape at 0.67 and was too wide.
+
+Lapel TZ41: `{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.0,1.0],[-0.8,2.0],[1.0,0.0]],"outline_inner":[[-1.0,1.0],[0.0,0.0]]}`.
+
+**The collar is not fitted yet** (experimental, not approved). On TZ41 the collar front reads 3 sides of 4. Its fall
+covers the whole top edge from the roll top, so the patch's corner sits at the roll top instead of the notch. The tip
+fold at the gorge's top is 149-178°, a hairpin. Changing stand, fall_over, point_len and notch_angle (four builds) did
+not change the side count. Open question to John: is the collar's front edge against the scarf the collar's own rolled
+edge, or the scarf lying over the collar?

@@ -468,3 +468,11 @@ lapel". On `classical_lapel` the collar needs the roll line to meet the neck 2.4
 the lapel's roll at each roll top. Best so far: `{"recipe":"classical_lapel","neck_x":2.4,"foot":48.25,"belly":0.001}`
 with notchcollar `{"notch_angle":20,"notch_at":0.6,"point_len":0.5,"roll_r":0.16,"join_h":0.08,"join_run":2}`. Not
 approved: a small curl shows where the two rolls meet. Rounds: docs/clothing-solvers/lapel-tension-solver.md, phase 6.
+
+## Four-sided lapel (phase 8)
+
+Give the lapel its level top edge with `outline_inner` and fit its corners with `blender/tension/lapel_inverse.py`
+rather than by hand. Set the roll line (foot, neck_x) to the photo's roll angle first. Run
+`blender/tension/polycheck.py` on every build: the side count must match before anything else is compared. Fitted
+lapel: `{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.0,1.0],[-0.8,2.0],[1.0,0.0]],"outline_inner":[[-1.0,1.0],[0.0,0.0]]}`
+(the collar on it is not fitted yet).

@@ -23,6 +23,9 @@ the Gaussian curvature map only (`derive.field_png`).
 | `gauge_fold.py` | blender/zipboot/gauge.py | The sharpest dihedral of a patch. |
 | `sweep.py` | foldfront, notchcollar | Builds one lapel and a grid of collars on it, each gauged; the coupled sweep's builder. |
 | `rollcrease.py` | numpy | The angle between the collar's fall and its roll turn over the fronts: the crease a roll-top change leaves when the collar is not re-solved. |
+| `polycheck.py` | numpy, scipy, contourpy, PIL | The polygon check against the riding-habit photo: finds the corners of the lapel and the collar front from the photo's camera by itself (depth buffer for the collar), fails on a wrong side count (lapel 4, collar front 4), then lists every edge off in direction (12 deg), share of the outline (a third) or bow, and every corner off in angle (15 deg) or rounding radius. `--photo` remeasures the photo's curvature. The contour sheet draws it. On the old triangle lapel (b/HF1) it fails: lapel 3 sides of 4. |
+| `lapel_inverse.py` | numpy | The inverse of the lapel's bend: the cut corners that land on the photo's corners, from the solved lapel's cut-to-view map. |
+| `flatview.py` | matplotlib | The flat cut beside the outline from the photo's camera, each side marked as a cut edge or an edge made by the fold or the view. |
 | `feasible.py` | matplotlib | Stage 1 and 2 of the coupled solve: the limits (the approved build's own numbers), the feasible map, the join objective. |
 
 ## Run

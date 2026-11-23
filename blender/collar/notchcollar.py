@@ -255,9 +255,16 @@ def notch(L):
     pts, t, d, e = LP['pts%d' % L], LP['t%d' % L], LP['d%d' % L], LP['edge%d' % L]
     kP = np.argmax(np.where(e, d, -1))
     m = e & (t <= t[kP] + 1e-6); top3 = np.vstack([LP['crease%d' % L][0], pts[m][np.argsort(t[m])]])
-    top3 = smooth_curve(resample(top3, 0.04), 3)
+    four = ('inner%d' % L) in LP.files       # a four-sided lapel (foldfront's outline_inner): its top edge runs level along
+    if four:                                 # the neckline from the roll top to the corner, then the end edge down to the point
+        mi = LP['inner%d' % L] & ~m; top_ = pts[mi][np.argsort(d[mi])]; end_ = pts[m][np.argsort(t[m])]
+        top3 = np.vstack([LP['crease%d' % L][0], top_, end_])
+        Lc_ = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(top3, axis=0), axis=1))])
+        f_corner = Lc_[len(top_)] / Lc_[-1]  # (where along the top line the corner lies)
+    top3 = smooth_curve(resample(top3, 0.04), 3) if not four else resample(top3, 0.04)
     Lt = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(top3, axis=0), axis=1))])
-    kG = int(np.searchsorted(Lt, notch_at * Lt[-1]))
+    kG = int(np.searchsorted(Lt, (f_corner if four and 'notch_at' not in opt else notch_at) * Lt[-1]))
+    if four: kG = min(kG, len(top3) - 2)
     G3, P3 = top3[kG], top3[-1]
     nG = np.array(BT.find_nearest(Vector(G3))[1]); nG = nG if nG @ radial(G3) > 0 or nG[1] < 0 else -nG
     u = P3 - G3; u -= nG * (u @ nG); lu = np.linalg.norm(u); u /= lu

@@ -105,6 +105,12 @@ bow = opt.get('bow', 0.0 if belly else None)           # (the earlier way: the c
 # wider there, as a tailor draws the lapel onto the front's pattern.
 outline = opt.get('outline', None if 'bow' in opt else [[0.04, 0.0], [0.27, 0.40], [1.0, 0.0]])
 if outline and not belly: belly = 1e-6
+# a four-sided lapel (John, 2026-11-24: "Your lapel is a triangle there's has 4 sides"; the riding habit's lapel is a
+# trapezoid: roll line, a top edge that leaves the roll top and runs out along the neckline to the notch, the end edge
+# down to the point, the lower edge back to the break). outline_inner [[t, d], ..., [0, 0]]: the lapel's top edge, from
+# its outer corner (t < 0: past the roll line's top, along its line carried on) back to the roll top. The lapel is then
+# the cloth between this edge and the outline (whose first point is that same corner).
+outline_inner = opt.get('outline_inner')
 belly_top = opt.get('belly_top', 0.0)    # a second swing near the neck, 6.75 t (1-t)^2 (peak 1 at a third of the way down): out from the V if positive
 def swing(t):
     return belly * 6.75 * t * t * (1 - t) + belly_top * 6.75 * t * (1 - t) ** 2
@@ -187,7 +193,7 @@ from scipy.spatial import cKDTree
 for s in sides:
     sd = (q - s['N']) @ s['n']; tl = ((q - s['N']) @ s['u']) / s['ln']
     if belly:                                         # distance past the CURVE, and where along it
-        td = np.linspace(0, 1, 1200)
+        td = np.linspace(min(0.0, min(p_[0] for p_ in outline_inner) - 0.05) if outline_inner else 0.0, 1, 1200)
         Cd = s['N'][None] + (td * s['ln'])[:, None] * s['u'][None] - swing(td)[:, None] * s['n'][None]
         tg = np.gradient(Cd, axis=0); nd = np.column_stack([-tg[:, 1], tg[:, 0]]); nd /= np.linalg.norm(nd, axis=1)[:, None]
         nd = np.where(((nd @ s['n']) > 0)[:, None], nd, -nd)
@@ -197,10 +203,10 @@ for s in sides:
         snap = mine & (np.abs(sdc) < opt.get('snap', 0.012)) & (tl > -0.02) & (tl < 1.02)
         q[snap] -= sdc[snap][:, None] * nd[jn][snap]; W[snap, 0], W[snap, 2] = q[snap, 0], q[snap, 1]; sdc[snap] = 0.0
         chord = tl.copy(); sd, tl = sdc, td[jn]
-        f = mine & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (chord > -0.15)
+        f = mine & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (chord > (min(p_[0] for p_ in outline_inner) - 0.1 if outline_inner else -0.15))
         s.update(sd=sd, tl=tl, fold=f, crease=snap, C=Cd[jn], nl=nd[jn], Cd=Cd, nd=nd, td=td)
         continue
-    f = (L_ == s['layer']) & (W[:, 1] < yc) & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (tl > -0.15)
+    f = (L_ == s['layer']) & (W[:, 1] < yc) & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (tl > (min(p_[0] for p_ in outline_inner) - 0.1 if outline_inner else -0.15))
     s.update(sd=sd, tl=tl, fold=f, crease=(L_ == s['layer']) & (W[:, 1] < yc) & (np.abs(sd) <= 1e-6) & (tl > -0.02) & (tl < 1.02))
 if outline:
     from scipy.spatial import Delaunay
@@ -233,6 +239,8 @@ if outline:
     for si, s in enumerate(sides):
         cv, ct, cy = rec[si]; Lc = s['ln']
         Dfun = lambda t_, Lc=Lc: np.interp(t_, OT[:, 0], OT[:, 1] * Lc, left=0.0, right=0.0)
+        OI = np.array(sorted(outline_inner), float) if outline_inner else None
+        Dlo = (lambda t_, Lc=Lc: np.interp(t_, OI[:, 0], OI[:, 1] * Lc, left=0.0, right=0.0)) if outline_inner else (lambda t_: 0.0 * np.asarray(t_, float))
         if opt.get('outline_round'):
             # a curved edge: its points are set evenly along the edge itself and the rows stop short of it, so no thin
             # triangle is left between a row's end and the edge (thick cloth turns each into a spike)
@@ -245,10 +253,15 @@ if outline:
                     n_ = int(np.ceil(D / hm)); pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
             pts = np.array(pts)
         else:
-            pts = [(OT[k_, 0], OT[k_, 1] * Lc) for k_ in range(1, len(OT) - 1)]      # (every corner of the outline is a point of the mesh)
+            pts = [(OT[k_, 0], OT[k_, 1] * Lc) for k_ in range(0 if outline_inner else 1, len(OT) - 1)]      # (every corner of the outline is a point of the mesh)
             for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
-                D = float(Dfun(t_)); n_ = int(np.ceil(D / hm))
-                pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
+                D = float(Dfun(t_)); Dl = float(Dlo(t_)); n_ = int(np.ceil((D - Dl) / hm))
+                if outline_inner and t_ < 0: pts += [(t_, Dl + (D - Dl) * j / max(n_, 1)) for j in range(0, n_ + 1)]
+                else: pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
+            if outline_inner:       # (the top edge's own points, evenly along it)
+                for a_, b_ in zip(OI[:-1], OI[1:]):
+                    ab = np.array([(b_[0] - a_[0]) * Lc, (b_[1] - a_[1]) * Lc]); m_ = int(np.ceil(np.linalg.norm(ab) / hm))
+                    pts += [(a_[0] + (b_[0] - a_[0]) * j / m_, (a_[1] + (b_[1] - a_[1]) * j / m_) * Lc) for j in range(1, m_)]
             pts = np.array(pts)
         keep = np.nonzero((ct >= OT[0, 0] - 1e-6) & (ct <= 1 + 1e-6))[0]; nc = len(keep)
         allp = np.vstack([np.column_stack([ct[keep] * Lc, np.zeros(nc)]), np.column_stack([pts[:, 0] * Lc, pts[:, 1]])])
@@ -264,13 +277,19 @@ if outline:
         nf = 0
         for a_, b_, c_ in tri:
             if max(a_, b_, c_) < nc: continue
+            if outline_inner:       # (Delaunay fills the hull: the wedge between the top edge and the roll line carried on is not cloth)
+                tc_, dc_ = (tt[a_] + tt[b_] + tt[c_]) / 3, (dd[a_] + dd[b_] + dd[c_]) / 3
+                if tc_ < 0 and dc_ < float(Dlo(tc_)) - 1e-6: continue
             e1, e2 = flat[b_] - flat[a_], flat[c_] - flat[a_]; ny = e1[1] * e2[0] - e1[0] * e2[1]
             if abs(ny) < 1e-9: continue
             if opt.get('outline_round') and abs(ny) < 0.02 * hm * hm: continue
             order = (a_, b_, c_) if ny * ref_ny > 0 else (a_, c_, b_)
             try: bm.faces.new([vs[int(i)] for i in order]); nf += 1
             except ValueError: pass
-        s['Dfun'] = Dfun
+        s['Dfun'] = Dfun; s['Dlo'] = Dlo
+        if outline_inner:       # (a point of the top edge that no kept face reached is not cloth: it would be loose in the solve)
+            for v in vs[nc:]:
+                if not v.link_faces: info.pop(v, None); bm.verts.remove(v)
         print('foldfront: front %d: cut to the traced lapel: point %.2f of the way down the fold, %.1f cm out; %d points, %d faces of its own cloth'
               % (s['layer'], OT[kpt, 0], 2.62 * OT[kpt, 1] * Lc, len(tt) - nc, nf))
     # the seam between the lapel and the rest of its front must be whole. Where a point of the front's cut edge was not
@@ -340,6 +359,7 @@ for s in (und, top):                                  # the under front first: t
     bins = np.linspace(0, 1, 25); wb = np.array([d[(t >= lo) & (t <= hi)].max() if ((t >= lo) & (t <= hi)).any() else 0 for lo, hi in zip(bins[:-1], bins[1:])])
     wloc = np.maximum(np.interp(t, 0.5 * (bins[:-1] + bins[1:]), wb), 1e-3)
     if outline: wloc = np.maximum(s['Dfun'](t), 1e-3)
+    if outline_inner: wloc = np.maximum(s['Dfun'](tl[ii]) - s['Dlo'](tl[ii]), 1e-3)     # (the lapel's width past the roll top: between its top edge and its outline)
     # the roll: a half turn of radius rr at the break (open all the way down, tapering at the foot), then the lapel
     # bends back toward the chest on a wide arc so its edge lies on the front
     pr = (opt.get('press') if 'press' in opt else ({} if 'bow' in opt else {'left': 0.85})).get('left' if s['layer'] == 2 else 'right', 0.0)
@@ -590,6 +610,10 @@ for s in (und, top):                                  # the under front first: t
     s['lapel_pts'] = W[ii].copy(); s['lapel_t'] = t.copy()
     s['lapel_d'] = d.copy(); ck_ = np.nonzero(s['crease'])[0]; ck_ = ck_[np.argsort(s['tl'][ck_])]; s['crease_pts'] = W[ck_].copy(); s['crease_t'] = s['tl'][ck_].copy()
     if outline: s['lapel_edge'] = d >= s['Dfun'](t) - 0.02     # (the points on the lapel's cut edge)
+    if outline_inner:
+        tr_ = s['tl'][ii]; s['lapel_t'] = tr_.copy()              # (where along the roll line carried on: below 0 past its top)
+        s['lapel_edge'] = d >= s['Dfun'](tr_) - 0.02
+        s['lapel_inner'] = (tr_ < 0) & (d <= s['Dlo'](tr_) + 0.02)   # (the top edge, from the roll top out to the corner)
     # the lapel against the body, as ratios (John: "get better at ground truth measuring ratios from photos like lapel
     # to shoulder or lapel to neck"): the same numbers are read off a reference photo on a pixel grid and compared.
     # Widths are taken against the half shoulder (middle to shoulder point), heights against neck pit to waist.
@@ -698,6 +722,6 @@ if opt.get('truth'):
 if outline:
     np.savez(out + '.lapels.npz', **{'%s%d' % (k_, s_['layer']): s_[v_] for s_ in sides for k_, v_ in
                                      (('pts', 'lapel_pts'), ('t', 'lapel_t'), ('d', 'lapel_d'), ('edge', 'lapel_edge'), ('crease', 'crease_pts'), ('ct', 'crease_t'))},
-             ln1=top['ln'], ln2=und['ln'], OT=OT)
+             ln1=top['ln'], ln2=und['ln'], OT=OT, **({'inner%d' % s_['layer']: s_['lapel_inner'] for s_ in sides} if outline_inner else {}))
 np.savez(out + '.strain.npz', **{'st%d' % s_['layer']: s_['strain']['st'] for s_ in sides}, **{'mid%d' % s_['layer']: s_['strain']['mid'] for s_ in sides})
 bpy.ops.wm.save_as_mainfile(filepath=out)
