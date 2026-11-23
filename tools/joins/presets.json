@@ -1,0 +1,15 @@
+{
+ "about": "The joins the project checks. type 'join': a (and b) are mesh names in the built scene; mode intersect = a passes into b (the join is the crease where they meet), boundary = a's open edge meets b's, seam = one mesh cut along seam_plane (origin, normal) within clip. type 'profile': a line cut by plane, kept within clip and the polar fan (cy,cz,a0,a1 in the y-z plane), with joins_at naming where a join lies on it (cm from the low end, or kmax:AXIS:LO:HI). Add a join here when its figure is built and its mesh names are checked with tools/joins/dump.py.",
+ "joins": {
+  "neck": {"type": "join", "a": "Head shape", "b": "Skin body", "mode": "intersect", "near": "0,0,53.2",
+           "radius": 3.5, "kind": "matte",
+           "note": "the mannequin's head where it passes into the body's neck (the visible neck is the body's; the rig's Neck object lies inside it)"},
+  "foot-top": {"type": "profile", "a": "Skin body", "plane": "x=-2.8", "polar": "-2,1,-5,115", "clip": "z<6,y<1",
+               "smooth_u": 0.5, "window_cm": 1.0, "skip_ends_cm": 2.5, "joins_at": ["kmax:y:-2.6:-0.6"],
+               "note": "the right foot's top line through its middle, toe tip to the shin, as the foot study takes it (x0 -2.8, centre (y,z) = (-2,1), -5..100 deg); the join is the ankle's front, where the shin meets the instep"},
+  "foot-top-inner": {"type": "profile", "a": "Skin body", "plane": "x=-2.2", "polar": "-2,1,-5,115", "clip": "z<6,y<1",
+               "smooth_u": 0.5, "window_cm": 1.0, "skip_ends_cm": 2.5, "joins_at": ["kmax:y:-2.6:-0.6"]},
+  "foot-top-outer": {"type": "profile", "a": "Skin body", "plane": "x=-3.4", "polar": "-2,1,-5,115", "clip": "z<6,y<1",
+               "smooth_u": 0.5, "window_cm": 1.0, "skip_ends_cm": 2.5, "joins_at": ["kmax:y:-2.6:-0.6"]}
+ }
+}
