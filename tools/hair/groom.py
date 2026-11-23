@@ -116,7 +116,7 @@ class Colliders:
 
 
 # ---------------------------------------------------------------------------------------------------- the rod
-def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, layer=None, kb0=None):
+def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, layer=None, kb0=None, pin=None):
     """Total energy (J) of the guides. D: free segment directions (G, S-1, 3), unnormalised; d0: the clamped first
     segment along the follicle (G, 3). Positions are built by walking the unit directions, so the length is exact.
     mask (G, S): 1 for segments the guide still has after the cut, 0 past its end (they weigh and bend nothing).
@@ -144,11 +144,16 @@ def rod_energy(torch, D, roots, d0, n_hairs, seg_hh, col, k_contact, mask=None, 
     o = layer(X).reshape(-1) if layer is not None else 0.0
     pen = torch.relu(col.head_depth(P) + o) + torch.relu(col.body_depth(P) + o)
     E_c = (k_contact * (n * mask).reshape(-1) * (pen * HH_M) ** 2).sum()
+    if pin is not None:
+        # a styled hold (the hair set behind the ear, laid in at the temple): each node drawn to its styled place
+        # with stiffness k per hair, weighted w (G, S) (pin = (targets (G, S, 3), w, k))
+        Xt, w, k = pin
+        E_c = E_c + (k * n * w * mask * (((X - Xt) * HH_M) ** 2).sum(-1)).sum()
     return E_b + E_g + E_c, X, (E_b.item(), E_g.item(), E_c.item())
 
 
 def settle(roots, d0, D_init, n_hairs, seg_hh, col, iters=400, k_contact=(1e3, 1e4, 1e5), mask=None, layer=None,
-           log=None, kb0=None):
+           log=None, kb0=None, pin=None):
     """Static equilibrium by minimising the energy (L-BFGS), the contact stiffened in steps (continuation) so the
     first steps can move hair out of the colliders without the penalty freezing the solve. Returns the settled
     nodes (G, S+1, 3) in HH and the directions."""
@@ -158,6 +163,7 @@ def settle(roots, d0, D_init, n_hairs, seg_hh, col, iters=400, k_contact=(1e3, 1
     mk = t(mask) if mask is not None else None
     kb = t(kb0) if kb0 is not None else None
     D = t(D_init).requires_grad_(True)
+    pn = None if pin is None else (t(pin[0]), t(pin[1]), float(pin[2]))
     scale = 1.0 / (HAIR_W * SEG_M * 1e-3 * max(1.0, float(np.mean(n_hairs))))   # energies of order 1 for the optimiser
     for k in np.atleast_1d(k_contact):
         opt = torch.optim.LBFGS([D], lr=1, max_iter=iters, history_size=30, line_search_fn='strong_wolfe',
@@ -165,12 +171,12 @@ def settle(roots, d0, D_init, n_hairs, seg_hh, col, iters=400, k_contact=(1e3, 1
 
         def closure():
             opt.zero_grad()
-            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer, kb)
+            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer, kb, pn)
             (E * scale).backward()
             return E
         opt.step(closure)
         with torch.no_grad():
-            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer, kb)
+            E, X, parts = rod_energy(torch, D, R, d0t, nt, seg_hh, col, k, mk, layer, kb, pn)
         if log is not None:
             log.append(dict(k=float(k), E=E.item(), bend=parts[0], grav=parts[1], contact=parts[2]))
     X = X.numpy()
@@ -1709,6 +1715,45 @@ def shoulder_flow(X, roots, keep, col, keep_shape=False):
     return X
 
 
+# The Warden's sides solved again, as the back is: the shape passes (the swing back, the tuck, the width, the comb)
+# set where her side hair sits at the temple and the ear, and the solver hangs the rest, with her rest wave, against
+# her head, shoulders and collar. Measured before (2026-11-24): the passes left the side guides 20 mm (median) and
+# 85 mm (90th pct) from the solve, against the back's 14 and 19, and neighbouring side strands 6 to 10 degrees apart
+# 30 cm down (the back: 4.4); the back, solved and barely touched, is the part John called perfect.
+SIDE_SOLVE_TH = 2.4          # |theta| of the roots solved again (the back beyond is left as it settled)
+SIDE_PIN_Z = (0.15, 0.45)    # HH: the styled hold fades from full above 0.45 (the ear's middle) to none below 0.15 (the
+                             # jaw): the tuck and the temple are held, the fall below hangs free, STYLE
+SIDE_PIN_K = 1.0e-2          # N/m^2 per hair per node: the hold, CALIBRATED (holds the tucked hair within ~1 mm of
+                             # its styled place against the weight of 40 cm hanging below it)
+
+
+def side_resolve(X, roots, keep, d0, n_hairs, seg_hh, col, layer, kb0, iters, log=None):
+    """The side guides (|theta| < SIDE_SOLVE_TH, not keep) settled again from their styled shape: held to it near the
+    root (SIDE_PIN_Z), free below, with their rest wave (kb0), cut where they are cut now."""
+    th = np.abs(SF.theta(roots))
+    sel = (th < SIDE_SOLVE_TH) & ~keep
+    if not sel.any():
+        return X
+    Xs = X[sel]
+    G, S1 = Xs.shape[:2]
+    ok = ~np.isnan(Xs[..., 0])
+    n = ok.sum(1)
+    F = Xs.copy()
+    for g in range(G):                                     # (past the end: the last direction carried on)
+        k = n[g]
+        if k < S1:
+            F[g, k:] = F[g, k - 1] + (F[g, k - 1] - F[g, k - 2]) * np.arange(1, S1 - k + 1)[:, None]
+    D = np.diff(F, axis=1)[:, 1:]
+    mask = (np.arange(S1 - 1)[None] < (n - 1)[:, None]).astype(float)
+    w = SF.sm(SIDE_PIN_Z[0], SIDE_PIN_Z[1], F[:, 1:, 2])
+    Y, _ = settle(roots[sel], d0[sel], D, n_hairs[sel], seg_hh, col, iters=iters, layer=layer.subset(sel), log=log,
+                  kb0=kb0[sel], mask=mask, pin=(F[:, 1:], w, SIDE_PIN_K))
+    Y[~ok] = np.nan
+    X = X.copy()
+    X[sel] = Y
+    return X
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -1959,15 +2004,15 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # the sides combed and laid over the shoulder (see SHOULDER_*): a light comb, then each side strand smoothed
         # along the body as it passes over the shoulder, then the ends turned under
         X2 = comb_pass(X2, lk * 1000 + clump, col, cap, passes=2)
-        X2 = shoulder_flow(X2, roots, bang, col, keep_shape=wavy)
-        X2 = relax_kinks(X2, col, cap, keep=bang)
-        X2 = end_roll(X2, roots, bang, SIDE_ROLL_DEG, col)
+        if wavy:
+            # the Warden's sides hung by the solver, as her back is (see SIDE_SOLVE_TH): styled at the top, free below
+            X2 = side_resolve(X2, roots, bang, d0, n_hairs, seg_hh, col, layer, kb0, WAVE_ITERS, log)
+        else:
+            X2 = shoulder_flow(X2, roots, bang, col)
+            X2 = relax_kinks(X2, col, cap, keep=bang)
+        X2 = end_roll(X2, roots, bang, SIDE_ROLL_DEG, col)        # (the ends under, the back's as John approved them)
         # (relax ends on the cap, which runs down through her shoulders and cape: the last word is the body's, and a
         # relax without the cap takes out the bends that push leaves)
-        if wavy:
-            # the waves set last, as the stylists curl after the brush: the comb, the shoulder pass and the relax had
-            # smoothed the Warden's settled wave to half (7 mm at the 90th percentile, against the creator's 13)
-            X2 = wave_set(X2, roots, bang, lam, ph, seg_hh)
         X2 = push_valid(col, X2)
         X2 = relax_kinks(X2, col, None, keep=bang)
     if trace and not wavy:
