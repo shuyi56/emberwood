@@ -640,3 +640,35 @@ steps (0.3 units) further front than the lapel's corner. It reads 4 sides of 4. 
 - The laid cloth is stretched 34% at the 95th percentile, where the roll line turns from parallel to diagonal. A real
   collar takes that up with a curved neck edge.
 - `open` ended at its lower limit (5°) and the fold angle near its limit (20°).
+
+## Phase 10: the collar's cut shaped to the neck (2026-11-24)
+
+John: "Adjust the shape more for the neck deformation".
+
+**Where the 34% came from** (measured by region, `strain` per edge against its flat length):
+
+| Cause | Stretch it left (95th percentile) | Fix | After |
+|---|---|---|---|
+| The roll line turned from parallel to diagonal in a short run, so the mirrored fall folded onto itself there (a wedge of twice the fold angle, edges squeezed up to 97%) | 38% in the fall beside the turn | `fold_k` 3: the same end angle, the stand reached gradually | 15% |
+| The push off the coat rose steeply over the lapels | 50 to 60% at the ends | `push_even` 600, `push_grow` 20 | 25% |
+| The cloth's thickness at the crease taken in one edge | 70% mean on the crease's edges | `lift_run` 0.3 | 10% |
+| A straight band on a neck that flares to the shoulders | 13 to 17% everywhere, the stand included | `shape_cut` (below) | 5.6% |
+
+**`shape_cut` (experimental).** The flat pattern is solved from the lay: the flat points move until every edge on the
+flat is as long as it lies on the neck (sparse least squares from the rectangle, `foldcollar.shape_cut`). The cut that
+comes out is the pattern books' curved collar: the neck edge bows 4.4 cm over its 37 cm, high at the centre back and
+dropping to the ends (source: dresspatternmaking.com, the straighter the neck edge the higher the collar stands, the
+more curved the flatter it lies). Stretch after: mean 1.7%, 95th percentile 5.6%. No triangle of the mesh flips.
+
+**Rejected on the way:** a harder relaxation (displacement smoothing with resets, 600 to 1500 rounds, the stand freed)
+brought the stretch to 13 to 17% but crumpled the ends and rippled the stand's top. The lay is right; the rectangle
+was the wrong cut for it.
+
+**Refit** (`foldcollar_fit.py`, now with `fold_k` and `--fixed`/`--start`): width 2.05, corner 0.5, the rest as phase
+9. Outline gap 0.036 (phase 9: 0.038), 4 sides of 4.
+
+**Open:**
+- The K corner's radius gauge on the pixel outline is unreliable (it read 0.006 to 0.10 for the same corner as
+  `corner` moved 0.2 to 0.8); the corner is set by eye at 0.5 and not yet measured against the photo's 0.115.
+- `open` is still at its lower limit of 5 degrees.
+- The folded collar is not yet in the main build, and `join.py` has not been run on it.

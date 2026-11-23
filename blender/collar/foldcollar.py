@@ -25,6 +25,8 @@ Method (closed form, then a push off the coat):
   5. the fall is pushed off the coat and the lapels (BUILD's build.npz) by the cloth's thickness
 
 Options: width 2.2, stand 0.9, fold_angle 45, corner 0.5, open 25, mesh 0.06, lift 0.1, clear 0.14.
+Shaping to the neck (off by default): fold_k (the roll line's turn spread, 3), lift_run (the crease's turn, 0.3),
+push_even/push_grow (600/20), shape_cut (the flat cut solved from the lay; saves uv and uv_rect).
 Units are the build's (1 = 2.62 cm)."""
 import sys, json, math
 import numpy as np
@@ -74,6 +76,11 @@ def build(B, opt):
     # 3. the roll line on the band
     xf = np.arange(0, Ls + 1e-9, 0.01); hf = np.minimum(h0, np.tan(al) * np.minimum(xf, Ls - xf))
     hf = gaussian_filter1d(hf, opt.get('fold_round', 8), mode='nearest'); hf[0] = hf[-1] = 0.0
+    if opt.get('fold_k'):
+        # (the turn spread along the band: the same angle at the end, the stand reached gradually. A roll line that
+        # turns in a short run folds its fall onto itself there, a wedge of twice the angle; spread, the same wedge is
+        # a few percent of length the iron takes up. k large is the sharp turn again)
+        k = float(opt['fold_k']); tt = np.tan(al) * np.minimum(xf, Ls - xf) / h0; hf = h0 * tt / (1 + tt ** k) ** (1 / k)
     F = np.column_stack([xf, hf]); tF = np.gradient(F, axis=0); tF /= np.linalg.norm(tF, axis=1)[:, None]
     gx, gy = np.meshgrid(np.arange(0, Ls, hm), np.arange(0, Wd, hm * 0.866)); gx = gx + (np.arange(gx.shape[0])[:, None] % 2) * 0.5 * hm
     G2 = np.column_stack([gx.ravel(), gy.ravel()]); G2 = G2[path.contains_points(G2)]
@@ -88,7 +95,9 @@ def build(B, opt):
     _, jf = cKDTree(F).query(UV[fall]); Fq, tq = F[jf], tF[jf]; dq = UV[fall] - Fq
     mir = Fq + 2 * (dq * tq).sum(1)[:, None] * tq - dq                         # (mirrored across the roll line, on the flat)
     Pm, _, _, nm = emb(mir[:, 0], mir[:, 1], lift)                              # (laid against the stand, the cloth's thickness off it)
-    Pf, tfx, ufx, nfx = emb(Fq[:, 0], Fq[:, 1], 0.5 * lift)
+    if opt.get('lift_run'):                                                     # (the turn of the cloth at the crease: the thickness reached over a short run, not in one edge)
+        rho = np.linalg.norm(dq, axis=1); Pm = Pm - (lift * (1 - np.clip(rho / opt['lift_run'], 0, 1)))[:, None] * nm
+    Pf, tfx, ufx, nfx = emb(Fq[:, 0], Fq[:, 1], 0.0 if opt.get('lift_run') else 0.5 * lift)
     ax = tq[:, :1] * tfx + tq[:, 1:] * ufx; ax /= np.linalg.norm(ax, axis=1)[:, None]      # (the roll line's own direction in space)
     r = Pm - Pf; c_, s_ = math.cos(op), math.sin(op)
     rot = lambda sg: Pf + r * c_ + sg * np.cross(ax, r) * s_ + ax * (ax * r).sum(1)[:, None] * (1 - c_)
@@ -147,11 +156,51 @@ def relax(R, B, opt):
     return X, st
 
 
+def shape_cut(R, opt):
+    """The cut shaped to the neck: the flat pattern whose lengths are the laid collar's own.
+
+    John, 2026-11-24: "Adjust the shape more for the neck deformation". The rectangle laid round a neck that flares to
+    the shoulders is stretched and squeezed (the stand's top edge runs a shorter way round than the seam, the fall's
+    outer edge a longer one). A tailor does not leave that to the cloth: the band is cut curved, so each line of it
+    already has the length its place on the neck asks (dresspatternmaking.com: the straighter the neck edge the higher
+    the collar stands, the more curved the flatter it lies). Here the curve is not drawn by eye but solved: the flat
+    points are moved until every edge on the flat is as long as it lies on the neck (sparse least squares, the
+    rectangle as the start). What is left is what no flat cut can give, the iron's share."""
+    from scipy.optimize import least_squares
+    from scipy.sparse import coo_matrix
+    UV, X, ed = R['uv'], R['pts'], R['edges']; n = len(UV); m = len(ed)
+    l3 = np.linalg.norm(X[ed[:, 0]] - X[ed[:, 1]], axis=1); w = 1e-3
+    def res(z):
+        Q = z.reshape(n, 2); d = Q[ed[:, 0]] - Q[ed[:, 1]]
+        return np.concatenate([np.linalg.norm(d, axis=1) - l3, w * (z - UV.ravel())])
+    def jac(z):
+        Q = z.reshape(n, 2); d = Q[ed[:, 0]] - Q[ed[:, 1]]; g = d / np.maximum(np.linalg.norm(d, axis=1), 1e-12)[:, None]
+        r = np.repeat(np.arange(m), 4); c = np.column_stack([2 * ed[:, 0], 2 * ed[:, 0] + 1, 2 * ed[:, 1], 2 * ed[:, 1] + 1]).ravel()
+        v = np.column_stack([g[:, 0], g[:, 1], -g[:, 0], -g[:, 1]]).ravel()
+        r = np.concatenate([r, m + np.arange(2 * n)]); c = np.concatenate([c, np.arange(2 * n)]); v = np.concatenate([v, np.full(2 * n, w)])
+        return coo_matrix((v, (r, c)), shape=(m + 2 * n, 2 * n)).tocsr()
+    sol = least_squares(res, UV.ravel(), jac=jac, method='trf', tr_solver='lsmr', max_nfev=opt.get('cut_rounds', 60))
+    Q = sol.x.reshape(n, 2); tri = R['tri']
+    a0 = lambda Z: (Z[tri[:, 1], 0] - Z[tri[:, 0], 0]) * (Z[tri[:, 2], 1] - Z[tri[:, 0], 1]) - (Z[tri[:, 2], 0] - Z[tri[:, 0], 0]) * (Z[tri[:, 1], 1] - Z[tri[:, 0], 1])
+    flipped = int((np.sign(a0(Q)) != np.sign(a0(UV))).sum())
+    st = l3 / np.maximum(np.linalg.norm(Q[ed[:, 0]] - Q[ed[:, 1]], axis=1), 1e-9) - 1
+    # the cut's measures: how far the neck edge and the outer edge bow off their chords, and their lengths
+    Ls = UV[:, 0].max(); Wd = UV[:, 1].max(); out = {}
+    for nm_, sel in (('neck', UV[:, 1] < 1e-6), ('outer', UV[:, 1] > Wd - 1e-6)):
+        i = np.nonzero(sel)[0]; i = i[np.argsort(UV[i, 0])]; E_ = Q[i]; ch = E_[-1] - E_[0]; L_ = np.linalg.norm(ch); nrm = np.array([-ch[1], ch[0]]) / L_
+        off = (E_ - E_[0]) @ nrm; out[nm_ + '_bow_cm'] = float(2.62 * off[np.argmax(np.abs(off))])
+        out[nm_ + '_len_cm'] = float(2.62 * np.linalg.norm(np.diff(E_, axis=0), axis=1).sum()); out[nm_ + '_len_rect_cm'] = float(2.62 * (UV[i, 0].max() - UV[i, 0].min()))
+    out.update(cut_strain_mean=float(np.abs(st).mean()), cut_strain_p95=float(np.percentile(np.abs(st), 95)), cut_flipped=flipped)
+    return Q, st, out
+
+
 if __name__ == '__main__':
     B = sys.argv[1].rstrip('/'); out = sys.argv[2]; opt = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
     R, info = build(B, opt)
     if opt.get('relax', True):
         X, st = relax(R, B, opt); info['strain_mean_relaxed'] = float(np.abs(st).mean()); info['strain_p95_relaxed'] = float(np.percentile(np.abs(st), 95))
         info['moved_mean'] = float(np.linalg.norm(X - R['pts'], axis=1).mean()); R['pts'] = X; R['strain'] = st
+    if opt.get('shape_cut'):
+        Q, st, ci = shape_cut(R, opt); info.update(ci); R['uv_rect'] = R['uv']; R['uv'] = Q; R['strain'] = st
     np.savez(out, **R); json.dump(dict(opt=opt, info=info), open(out + '.json', 'w'), indent=1)
     print('foldcollar: ' + ', '.join('%s %s' % (k, ('%.3f' % v) if isinstance(v, float) else v) for k, v in info.items()))
