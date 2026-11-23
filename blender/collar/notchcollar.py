@@ -767,6 +767,6 @@ vg_ = o.vertex_groups.new(name='thick'); vg_.add(list(range(len(verts))), 1.0, '
 for q_, t_ in thin.items(): vg_.add([int(q_)], float(t_), 'REPLACE')
 s2 = o.modifiers.new('Solidify', 'SOLIDIFY'); s2.thickness = th; s2.offset = sol.offset; s2.use_rim = True; s2.use_even_offset = False; s2.vertex_group = 'thick'; s2.thickness_vertex_group = 0.1
 if b.parent: o.parent = b.parent; o.matrix_parent_inverse = b.parent.matrix_world.inverted()
-np.savez(out + '.collar.npz', uv=UV, pts=P3, tri=tri)
+np.savez(out + '.collar.npz', uv=UV, pts=P3, tri=tri, neckline=E, neck_up=upE)     # (the neckline between the roll tops and the stand's own up along it, for foldcollar.py)
 bpy.ops.wm.save_as_mainfile(filepath=out)
 print('notchcollar: saved', out)
