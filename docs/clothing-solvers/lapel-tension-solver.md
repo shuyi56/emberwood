@@ -448,3 +448,12 @@ twisted. Turning the collar's turn cross-section at the roll top into the lapel'
 - **Caught:** sections through the neck's axis at fixed azimuths showed the gap and the ridge the renders only hinted at.
 - **Missed:** the tip fold gauge sits at the top of the gorge seam, which on a high lapel is the roll junction: it
   reads the junction's twist, so collar point settings could never move it.
+
+### The lapel freed as well
+
+John: "Change the lapels as well if it's creating too much tension". The lapel's top (within 2.6 cm of the roll top)
+carries about twice the strain of the rest (95th pct 14% against 7%), but it is under the 15% limit everywhere. Nine
+lapel variants under the joined collar (top swing `belly_top` -0.14 / +0.12, top edge start 0.06, width 0.40, point
+0.12, `neck_x` 2.2, press 0.5 / 0.3, press 0.5 with `roll_radius` 0.3) left the top strain at 12.9-16.2% and raised the
+collar's junction fold to 17.2-38.8° (rejection 129). Two rounds without gain: stopped. The lapel is not what twists
+the junction; the collar's turn is.
