@@ -451,3 +451,11 @@ crease's slope, rose at 0.71 instead of 1.13: the fall creased where it meets th
 neck. Worn together: `{"recipe": "eased_top_lapel"}` with notchcollar `{"notch_angle": 30, "rise_gain": 1.6}`, which
 restores the rise (1.14) and takes the crease out; every lapel number is phase 3's. Rounds: docs/clothing-solvers/
 lapel-tension-solver.md, phase 4.
+
+## The collar's shape (2026-11-23)
+
+John: "How do you solve for shape not just angle of the collar". Three shape options in notchcollar (`stand_shoulder`,
+`fall_side`, `end_bow`), started from Mueller & Sohn's stand taper and searched over three rounds. The taper creased
+the roll on this low stand, so the stand stays full; a slight hollow in the collar end evens the gorge load (cv 0.43 to
+0.39). Worn: `{"recipe": "eased_top_lapel"}` with notchcollar `{"notch_angle": 30, "rise_gain": 1.6, "end_bow": -0.2}`.
+Rounds: docs/clothing-solvers/lapel-tension-solver.md, phase 5.

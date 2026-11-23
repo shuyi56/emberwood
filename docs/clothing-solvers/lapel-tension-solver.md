@@ -317,3 +317,61 @@ notchcollar `{"notch_angle": 30, "rise_gain": 1.6}`, everything else in the coll
   the roll, and the stand's rise printed per build gave the cause.
 - **Do differently:** solve any change at the lapel's roll top with the collar's stand free, and print the stand's rise
   for every build.
+
+# Phase 5: the collar's shape, not only its angle (2026-11-23)
+
+John: "How do you solve for shape not just angle of the collar", then "Begin with some research to get a good shape
+as a starting point then iterate".
+
+## Research for the starting shape
+
+| Source | What it gives | Used as |
+|---|---|---|
+| Mueller & Sohn, women's lapel collar | stand 2-2.5 cm at the front and shoulder, 2.5-3 cm at the back ("approx. 0.5 cm more than at the shoulder"); the outer edge set by a 0.5-1 cm overlap past the shoulder | `stand_shoulder` 0.82 (2.5/3.0 ratio) as the start |
+| Devere, *Handbook of Practical Cutting* (1866) | stand 1¼" (3.2 cm), fall 3¾" (9.5 cm) | the fall depth range checked by `fall_side` |
+| Minerva, collar drafting notes | a neck edge that curves like the neckline lies flatter | kept notchcollar's neckline-drafted stand |
+| Fabrics-store, notched collar draft | the collar end is drafted straight | limit on `end_bow`: small bows only |
+
+Three new notchcollar shape options, all default to the phase 4 collar:
+
+- `stand_shoulder`: the stand at the side neck as a share of the back stand, eased in by azimuth.
+- `fall_side`: the fall's outer edge deepened (or shallowed) at the sides by `fall_side * sin(pi u)^2`.
+- `end_bow`: the straight end G to C bowed by this share of its length (negative: hollowed in toward the lapel).
+
+## Rounds (objective cv/0.52 + turn/53.3 + tip/13.6 + crease/36.5; approved 4.0, phase 4 3.56)
+
+| Round | Build | Objective | Notes |
+|---|---|---|---|
+| 1 | Mueller start, `stand_shoulder` 0.82 | 3.74 | fall/turn crease 36.3 -> 42.7°: worse (rejection 122) |
+| 1 | `stand_shoulder` 0.7 / 0.95 | 3.94 / 3.62 | the crease grows steadily with the taper |
+| 1 | + `fall_side` ±0.15, `rise` 1.0 / 1.6, `end_bow` ±0.1 | 3.71-3.80 | only `end_bow` -0.1 helped (cv 0.42 -> 0.41); +0.1 failed notch and sharp fold |
+| 2 | `end_bow` -0.1 / -0.2, full stand | 3.53 / **3.50** | cv 0.43 -> 0.39, crease unchanged; `fall_side` and `rise` on top add nothing |
+| 3 | `end_bow` -0.3 / -0.4 | 3.49 / 3.45 | -0.3 fails the notch (3.9°) with a sharp fold; -0.4 passes but the end cups in neck34 (rejection 123) |
+
+Round 1 was worse and rounds 2 and 3 each gained under 2%, so the search stops. The chosen shape: notchcollar
+`{"notch_angle": 30, "rise_gain": 1.6, "end_bow": -0.2}` on `eased_top_lapel`. **Experimental:** the -0.2 is the
+solver's number; the research only says the end is drafted straight, and -0.2 is the largest bow that keeps a full
+margin to the failing -0.3.
+
+## Before and after (her right / her left)
+
+| Measure | Phase 4 | Shape (end bow -0.2) |
+|---|---|---|
+| gorge load evenness (cv) | 0.43 / 0.43 | 0.40 / 0.39 |
+| turn across the gorge, 90th pct | 39.7 / 41.2° | 39.8 / 41.3° |
+| fall/turn crease, fronts p90 | 36.3° | 36.3° |
+| collar tip fold | 13.3 / 12.4° | 13.3 / 12.4° |
+| collar flat cut, 95th pct | 2.13% | 2.14% |
+| notch as laid (30 asked) | 29.8 / 30.8° | 30.0 / 30.9° |
+| refmeasure lapel point reach / drop, collar point reach | 0.545 / 0.413, 0.512 | 0.545 / 0.413, 0.513 / 0.512 |
+
+Contour sections at z 44.3 to 50.9 and x ±1.4 / ±2.6 lie on phase 4's: the change stays at the collar end.
+
+## What the phase taught
+
+- **Missed:** the tailoring ratio. Mueller's stand taper assumes a 2.5-3 cm stand; on John's pressed-down 1.0 cm
+  back stand, lowering the side further sharpens the roll turn. A published ratio needs checking against the stand it
+  was written for.
+- **Caught:** the fall/turn crease gauge from phase 4 flagged the taper at once; the close-ups caught the cupped end
+  at -0.4 that the gauges passed.
+- **Do differently:** a gauge pass next to a failing neighbour is no margin; pick inside the passing region.

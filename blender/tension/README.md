@@ -54,8 +54,8 @@ python3 -I blender/tension/feasible.py SWEEP OUT [--field preL.jsonl]     # OUT/
 ```
 
 The chosen pair of 2026-11-23: `{"recipe":"eased_top_lapel"}` (phase 3: `joined_lapel` with the roll line's top eased,
-`belly_top` -0.14) with notchcollar `{"notch_angle":30,"rise_gain":1.6}` (phase 4: the collar's stand re-solved with
-the roll line; see the retrospective).
+`belly_top` -0.14) with notchcollar `{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2}` (phase 4: the collar's stand re-solved with
+the roll line; phase 5: the collar end's shape, `end_bow`; see the retrospective).
 
 Run Blender-module scripts with `python3 -I` when the working directory holds a file named like a standard module.
 

@@ -150,6 +150,14 @@ if opt.get('from_neck', True):
     print('notchcollar: the stand rises off the roll tops at slope %.2f and %.2f' % (aA, aB))
     print('notchcollar: the stand drafted from the neckline: it rises off each roll top at the lapel crease\'s slope (the roll turns %.0f and %.0f degrees off the crease, was %.0f and %.0f), full at the side neck points %.1f and %.1f cm round'
           % (angA, angB, angA0, angB0, 2.62 * SA, 2.62 * SB))
+# the stand's own shape round the neck (Mueller & Sohn, women's lapel collar: the back stand "approx. 0.5 cm more than
+# at the shoulder"): full at the centre back, stand_shoulder of it from each side neck point on toward the front
+stand_sh = opt.get('stand_shoulder', 1.0)
+if stand_sh != 1.0:
+    psE_ = np.mod(np.arctan2(E[:, 0], -(E[:, 1] - yc)), 2 * np.pi)
+    w_ = np.clip(np.abs(psE_ - np.pi) / (0.5 * np.pi), 0, 1)          # 0 at the back, 1 at the side neck points
+    st = np.minimum(st, stand * (1 - (1 - stand_sh) * ss(0.0, 1.0, w_)))     # (the rise off each roll top kept)
+    print('notchcollar: the stand %.2f cm at the back, %.2f cm at the side neck points' % (2.62 * stand, 2.62 * stand * stand_sh))
 print('notchcollar: the neckline round the back %.1f cm, from z %.2f at the roll lines to %.2f at the back' % (2.62 * eL[-1], NA[2], E[:, 2].max()))
 
 # 2. the stand: from the neckline up to the roll line, leaning in, off the neck. Its top is the roll line.
@@ -383,10 +391,21 @@ for Nt in (NtA, NtB):
     dpC = (np.mod(chart(Nt['C3'])[0] - gps[-1] + np.pi, 2 * np.pi) - np.pi) * RG
     dzC = math.sqrt(max(lgc ** 2 - dpC ** 2, (0.2 * lgc) ** 2)) * (1.0 if gc_[2] <= 0 else -1.0)
     Nt['Cv'] = Nt['Gv'] + np.array([dpC / RG, dzC])
-    Nt['ev'] = Nt['Gv'] + np.linspace(0, 1, 30)[:, None] * (Nt['Cv'] - Nt['Gv'])
+    u_e = np.linspace(0, 1, 30)[:, None]
+    Nt['ev'] = Nt['Gv'] + u_e * (Nt['Cv'] - Nt['Gv'])
+    eb = opt.get('end_bow', 0.0)        # the collar's end G to C bowed by this share of its length (positive: toward the fall's depth; negative hollows it toward the gorge)
+    if eb:
+        dv_ = (Nt['Cv'] - Nt['Gv']) * np.array([3.0, 1.0]); nv_ = np.array([-dv_[1], dv_[0]]) / np.linalg.norm(dv_)
+        nv_ = nv_ if nv_[1] > 0 else -nv_                        # (toward the fall's depth: away from the gorge's side)
+        Nt['ev'] = Nt['ev'] + (eb * np.linalg.norm(dv_) * 4 * u_e * (1 - u_e)) * (nv_ / np.array([3.0, 1.0]))[None]
 FcA, FcB = NtA['Cv'][1], NtB['Cv'][1]
+fall_side = opt.get('fall_side', 0.0)    # the fall this much deeper (or shallower) at the side neck, faded to nothing at the back and the points
 def Flen(ps):
-    return Fb + (FcA - Fb) * ss(NtA['Cv'][0] - rise, NtA['Cv'][0], ps) + (FcB - Fb) * ss(NtB['Cv'][0] + rise, NtB['Cv'][0], ps)
+    base = Fb + (FcA - Fb) * ss(NtA['Cv'][0] - rise, NtA['Cv'][0], ps) + (FcB - Fb) * ss(NtB['Cv'][0] + rise, NtB['Cv'][0], ps)
+    if not fall_side: return base
+    uA = np.clip((ps - np.pi) / (NtA['Cv'][0] - np.pi), 0, 1); uB = np.clip((np.pi - ps) / (np.pi - NtB['Cv'][0]), 0, 1)
+    u_ = np.maximum(uA, uB)
+    return base + fall_side * np.sin(np.pi * u_) ** 2
 pss = np.linspace(NtB['Cv'][0], NtA['Cv'][0], 200)
 outer = np.column_stack([pss, Flen(pss)])
 print('notchcollar: the fall %.1f cm deep at the back, %.1f and %.1f cm at the points (along the cloth from the roll)'
