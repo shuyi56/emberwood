@@ -40,7 +40,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         world: resolve(import.meta.dirname, 'index.html'),
-        bench: resolve(import.meta.dirname, 'bench.html')
+        bench: resolve(import.meta.dirname, 'bench.html'),
+        capeLab: resolve(import.meta.dirname, 'cape-lab.html')
       }
     }
   }
