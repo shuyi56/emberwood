@@ -271,6 +271,7 @@ def notch(L):
     lift = lambda p: (p + (th + gap) * nG)
     print('notchcollar: front %d: gorge %.1f cm from the roll line to the notch, the lapel\'s point %.1f cm past it, the collar\'s %.1f cm'
           % (L, 2.62 * Lt[kG], 2.62 * lu, 2.62 * point_len * lu))
+    print('notchcollar: front %d: notch G at (%.3f, %.3f, %.3f), collar point C at (%.3f, %.3f, %.3f), lapel point P at (%.3f, %.3f, %.3f)' % (L, *G3, *C3, *P3))
     return dict(G3=lift(G3), P3=lift(P3), C3=C3, gorge=np.array([lift(p) for p in top3[:kG + 1]]), nG=nG)
 NtA = notch(1); NtB = notch(2)
 for Nt in (NtA, NtB):

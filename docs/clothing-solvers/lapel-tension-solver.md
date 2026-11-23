@@ -457,3 +457,41 @@ lapel variants under the joined collar (top swing `belly_top` -0.14 / +0.12, top
 0.12, `neck_x` 2.2, press 0.5 / 0.3, press 0.5 with `roll_radius` 0.3) left the top strain at 12.9-16.2% and raised the
 collar's junction fold to 17.2-38.8° (rejection 129). Two rounds without gain: stopped. The lapel is not what twists
 the junction; the collar's turn is.
+
+# Phase 7: the high lapel fitted to the reference photo (2026-11-23)
+
+John: "Back to reference you need to use the shape of the collar as reference", "look at that join and angle", "Trace
+the polygon lines of the lapel". The 1890s riding habit, her left side (the side facing the camera), traced on a
+gamma-lifted 7x close-up with a 10 px grid. Unit: the lapel's lower edge span, break L0 to lapel point P, across.
+
+| Point | Photo (px) | Normalized (across, up) |
+|---|---|---|
+| L0 visible break | (590, 302) | (0, 0) |
+| P lapel point | (693, 292) | (1.00, 0.10) |
+| G notch | (675, 263) | (0.83, 0.38) |
+| C collar point | (705, 272) | (1.12, 0.29) |
+| N roll top | (667, 250) | (0.75, 0.50) |
+
+What the trace says about the join. The lapel's lower edge is almost level (5.5°). The gorge is short (0.15) and steep,
+so the notch sits just below the roll top. In the fold's own measure, the notch and the lapel point both lie on one line
+square off the roll line's top, the notch 0.31 of the way out (`notch_at` 0.3). The collar's end is as long as the
+lapel's end (0.30 against 0.33, `point_len` 0.9). It runs out and slightly down (17° below level), so the collar's point
+hangs past the lapel's point (0.12 further out). The notch opens 41° in the photo.
+
+`blender/tension/fitref.py` measures a build the same way (az 30 ortho, her left; G and C as notchcollar cut them, now
+printed in collar.log) and sums the squared gaps of the five points.
+
+| Build | Polygon error | Lower edge | Roll rise | Notch | Collar end / direction | Gauges |
+|---|---|---|---|---|---|---|
+| Photo | 0 | 5.5° | 0.50 | 41° | 0.30 / -17° | |
+| Phase 6b high lapel (notch 20 at 0.6, point 0.5) | 0.20 | 17.8° | 0.73 | no collar point past the notch | 0.00 | tip 18.0°, crease 24.9° |
+| Collar fitted on that lapel (notch 40 at 0.3, point 0.9) | 0.12-0.13 | 13.4° | 0.64 | 42° | 0.30 / -22° | |
+| **Fit A**: lapel break 49.0, neck_x 2.4, + fitted collar | **0.087** | 9.9° | 0.58 | 46° | 0.23 / -27° | tip 35°, notch laid 33 / 24 (40 asked), crease 33.5° |
+| Fit B: wider lapel (0.55), neck_x 2.7, break 48.6 | 0.066 | 10.0° | 0.61 | 41° | | tip 94°, 3 sharp folds: crumpled |
+| neck_x 2.7, break 49.3 | 0.091 | 5.0° | 0.52 | 48° | | tip 113°, 14 sharp folds |
+
+The shape can be matched: Fit A follows the photo's polygon to within 0.09. The cloth cannot follow it yet. The closer
+the roll line comes to the photo's (flatter, meeting the neck further out), the harder the collar's ends twist where
+its turn meets the lapel's roll (tip fold 35° at Fit A, 94-113° beyond it). This is the same junction as rejection 128:
+the collar's turn is built as a vertical half round, while the lapel's roll at its top runs at the crease's angle.
+**Experimental:** Fit A is not approved (rejection 130).
