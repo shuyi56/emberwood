@@ -191,3 +191,13 @@ repeated on more than one garment. The reviewer applies them once John merges th
   segment clears the skin, and no node lies inside the eye socket; for bangs compare the inner tip's |x| with the pupil's
   and the bang's outward angle with the head's width at that height, and fix the set in one pass from a styled target
   shape instead of one parameter per round.
+
+## R009 Hair face-frame ends cut square, rolled, or hooked
+
+- **Seen:** 3 rejections on the Ranger hair (2026-11-22, 11:26Z, logged by the thread itself): the face frame cut
+  straight across read as a shelf at the cheek, ends rolled outward flicked into wings at the jaw, and cut ends hooked
+  out where the push-back had bent them.
+- **Spot:** The diff cuts or styles the ends of the face-framing locks (a cut height, a roll, a push-back) and the
+  first render of the round is the first look at the ends in front, 3/4 and profile.
+- **Fix:** Point cut the ends with a 2 cm stagger instead of a straight line, leave the ends unrolled, let a cut end hang
+  toward plumb, and check the ends at the jaw in the 3/4 and profile views before the front view.
