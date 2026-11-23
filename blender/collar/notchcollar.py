@@ -395,7 +395,10 @@ for Nt in (NtA, NtB):
     gps = smooth_curve(np.column_stack([gps, np.zeros_like(gps)]), 4)[:, 0]
     Rh = np.linalg.norm((g3 - F0)[:, :2], axis=1)
     ds = np.linalg.norm(np.diff(g3, axis=0), axis=1); dps = np.diff(gps) * 0.5 * (Rh[1:] + Rh[:-1])
-    gvv = np.concatenate([[0.0], np.cumsum(np.sqrt(np.maximum(ds ** 2 - dps ** 2, (0.2 * ds) ** 2)))])
+    gvv = np.concatenate([[0.0], np.cumsum(np.sqrt(np.maximum(ds ** 2 - dps ** 2, (opt.get('gorge_floor', 0.2) * ds) ** 2)))])
+    # (gorge_floor: the least share of each step counted as down. 0.2 suits a gorge on the lapel's steep end; a four-sided
+    # lapel's top edge runs level, across the meridians, and 0.2 of it counted as down drafts the seam slanting on the
+    # cut while it lies level on the cloth)
     Nt['gv'] = np.column_stack([np.mod(gps, 2 * np.pi), gvv]); Nt['Gv'] = Nt['gv'][-1].copy()
     # the collar's end: the lapel's edge carried on past G (the seam's own direction there) turned by the notch's angle
     # toward the back, measured on the chart scaled to lengths at G, so the notch opens the same on the cloth both sides
@@ -439,6 +442,27 @@ oc = outer * SC
 rB = tip_r * np.linalg.norm(eB[-1] - eB[0]); rA = tip_r * np.linalg.norm(eA[-1] - eA[0])
 poly = np.vstack([roll_c, gA[1:], eA[1:-2], fillet(eA[-3], eA[-1], oc[-4], rA), oc[-4:3:-1],
                   fillet(oc[3], eB[-1], eB[-3], rB), eB[-3:0:-1], gB[::-1][:-1]])
+rect = opt.get('rect')
+if rect:
+    # the collar cut as a rectangle and deformed (John, 2026-11-24: "Begin with a rectangle and deform", "Rounded corners
+    # on the rectangle as well"): a band of one width, its long neck edge sewn along the whole seam (her right's gorge,
+    # the roll line round the neck, her left's gorge, notch to notch), each across-line laid straight down the cloth
+    # (the chart's second coordinate is length along the cloth), ends square to the seam, the two outer corners rounded
+    # (rect_round, a share of the width). rect is the width, in the chart's length units (the fall's depth's units).
+    Tn = np.vstack([gB[::-1], roll_c[1:-1], gA])
+    Tn = smooth_curve(resample(Tn, 0.25 * hm), 3); Tn[0], Tn[-1] = gB[-1], gA[-1]
+    tg_ = np.gradient(Tn, axis=0); tg_ /= np.linalg.norm(tg_, axis=1)[:, None]
+    nr_ = np.column_stack([-tg_[:, 1], tg_[:, 0]]); nr_ = np.where((nr_[:, 1] > 0)[:, None], nr_, -nr_)
+    from scipy.ndimage import gaussian_filter1d
+    nr_ = gaussian_filter1d(nr_, opt.get('rect_normal_sigma', 6), axis=0, mode='nearest'); nr_ /= np.linalg.norm(nr_, axis=1)[:, None]
+    Wr = float(rect); Ou = Tn + Wr * nr_                                         # (the outer edge, the band's width off the seam)
+    rr_ = opt.get('rect_round', 0.35) * Wr
+    eAo, eBo = Ou[-1], Ou[0]
+    poly = np.vstack([Tn, fillet(Tn[-1], eAo, Ou[-6], rr_), Ou[-6:5:-1], fillet(Ou[5], eBo, Tn[0], rr_)])
+    poly = poly[np.concatenate([[True], np.linalg.norm(np.diff(poly, axis=0), axis=1) > 1e-6])]
+    for Nt, e_ in ((NtA, eAo), (NtB, eBo)): Nt['ev'] = np.array([[1e3, 1e3]])      # (no end laid as a straight notch line)
+    print('notchcollar: cut as a rectangle %.1f cm wide, its neck edge along the seam from notch to notch, the outer corners rounded %.1f cm'
+          % (2.62 * Wr, 2.62 * rr_))
 path = Path(poly)
 def densify(P, h):
     o_ = []
