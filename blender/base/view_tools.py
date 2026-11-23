@@ -92,6 +92,8 @@ def looks(argv):
         if bad or not names:
             raise SystemExit(f'views.py: --look takes full, clay, matcap (got {",".join(bad) or "nothing"})')
         return tuple('' if x == 'full' else '-' + x for x in names)
+    if '--clay-only' in argv:
+        return ('-clay',)
     return ('', '-clay') if '--clay' in argv else ('',)
 
 

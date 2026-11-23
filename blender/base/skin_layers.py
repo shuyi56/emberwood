@@ -76,6 +76,29 @@ FRECKLE = [150, 96, 66]
 BLEMISH = [168, 98, 84]
 
 
+# ---- the lips, in two layers (John 2026-11-20: "a smoother pink under layer and a more rough layer on top"). The same
+# numbers as the Face Creator's LIP_LAYERS (tools/face-creator/apply-lip-layers.py), which has the research.
+#   under layer: the vascular tissue under a thin epithelium: the painted lip colour, smooth (LIP_BASE_ROUGH, dry to
+#     wet), a weak specular (LIP_BASE_SPEC of the skin's: the interface lies under the epithelium), only LIP_BASE_FURROW
+#     of the grooves in its relief, and a short, red scatter (LIP_SSS_RADIUS, LIP_SSS_SCALE: shallower than the skin's,
+#     the blood near the surface takes green first)
+#   top layer: the cornified layer as Principled's coat: its weight and roughness from the lips' wetness (LIP_COAT,
+#     LIP_COAT_ROUGH: wet at the parting, dry at the border), its own normal carrying the grooves and the dry flakes
+# Measured from the head: HEAD_H units of about 27 mm, so the grooves are LIP_PITCH_MM apart at the parting.
+LIP_PITCH_MM = 1.1
+LIP_FLAKE_MM = 0.45
+LIP_BASE_FURROW = 0.35
+LIP_BASE_ROUGH = (0.36, 0.24)
+LIP_BASE_SPEC = 0.35
+LIP_COAT = (0.6, 0.9)
+LIP_COAT_ROUGH = (0.46, 0.22)
+LIP_COAT_BUMP = 0.004           # the grooves' depth in units (0.1 mm)
+LIP_SSS_RADIUS = (1.0, 0.3, 0.22)
+LIP_SSS_SCALE = 0.04            # (about 1 mm of red reach: the skin's SSS_SCALE is 0.2)
+LIP_SSS_WEIGHT = 0.6
+MM_PER_UNIT = 27.0
+
+
 def _lin(c):
     c = np.asarray(c, dtype=np.float64) / 255.0
     return tuple(float(x) for x in np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92))
@@ -480,3 +503,58 @@ def apply(material, show='all'):
     tone = nt.nodes.new('ShaderNodeVertexColor')
     tone.layer_name = 'skin'
     skin_layers(nt, out, show, tone.outputs['Color'])
+
+
+def lip_material(nt, out, colour, layers):
+    """The lips' two layers on one Principled BSDF. colour: the lip painting's image node (colour and alpha); layers:
+    the lip layers image node (red: how wet, green: the grooves, blue: the dry flakes), both on the same patch."""
+    L = nt.links.new
+    p = nt.nodes.new('ShaderNodeBsdfPrincipled')
+    sep = nt.nodes.new('ShaderNodeSeparateColor')
+    L(layers.outputs['Color'], sep.inputs['Color'])
+    wet, groove, flake = sep.outputs[0], sep.outputs[1], sep.outputs[2]
+
+    def ramp(v, a, b):
+        n = nt.nodes.new('ShaderNodeMapRange')
+        L(v, n.inputs['Value'])
+        n.inputs['To Min'].default_value, n.inputs['To Max'].default_value = a, b
+        return n.outputs['Result']
+
+    def add(a, b, k):
+        n = nt.nodes.new('ShaderNodeMath')
+        n.operation = 'MULTIPLY_ADD'
+        L(b, n.inputs[0])
+        n.inputs[1].default_value = k
+        L(a, n.inputs[2])
+        n.use_clamp = True
+        return n.outputs[0]
+    # the under layer
+    L(colour.outputs['Color'], p.inputs['Base Color'])
+    L(colour.outputs['Alpha'], p.inputs['Alpha'])
+    L(ramp(wet, *LIP_BASE_ROUGH), p.inputs['Roughness'])
+    p.inputs['Specular IOR Level'].default_value = SPECULAR * LIP_BASE_SPEC      # (the skin's, cut: the under layer's interface lies under the epithelium)
+    p.subsurface_method = 'BURLEY'      # (a disc, not a random walk: the lips are a thin shell over the head)
+    p.inputs['Subsurface Weight'].default_value = LIP_SSS_WEIGHT
+    p.inputs['Subsurface Radius'].default_value = LIP_SSS_RADIUS
+    p.inputs['Subsurface Scale'].default_value = LIP_SSS_SCALE
+    base_bump = nt.nodes.new('ShaderNodeBump')
+    base_bump.invert = True
+    base_bump.inputs['Distance'].default_value = LIP_COAT_BUMP * LIP_BASE_FURROW
+    L(groove, base_bump.inputs['Height'])
+    L(base_bump.outputs['Normal'], p.inputs['Normal'])
+    # the top layer
+    L(ramp(wet, *LIP_COAT), p.inputs['Coat Weight'])
+    L(add(ramp(wet, *LIP_COAT_ROUGH), flake, 0.3), p.inputs['Coat Roughness'])
+    p.inputs['Coat IOR'].default_value = 1.45
+    hmix = nt.nodes.new('ShaderNodeMath')
+    hmix.operation = 'MULTIPLY_ADD'
+    L(flake, hmix.inputs[0])
+    hmix.inputs[1].default_value = 0.4
+    L(groove, hmix.inputs[2])
+    coat_bump = nt.nodes.new('ShaderNodeBump')
+    coat_bump.invert = True
+    coat_bump.inputs['Distance'].default_value = LIP_COAT_BUMP
+    L(hmix.outputs[0], coat_bump.inputs['Height'])
+    L(coat_bump.outputs['Normal'], p.inputs['Coat Normal'])
+    L(p.outputs['BSDF'], out.inputs['Surface'])
+    return p

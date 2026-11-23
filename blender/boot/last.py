@@ -100,7 +100,7 @@ RATIOS = {
     'eyelet': 0.018,         # an eyelet's outer radius (its ring about 9 mm across)
     'lace': 0.0042,          # the lace's radius (a round cord about 2.7 mm across)
 }
-PLAIN = ('top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
+PLAIN = ('toe_side', 'sole_toe', 'toe_bow', 'toe_sweep', 'toe_spare', 'toe_ease', 'sole_blur', 'toe_nose', 'toe_box', 'toe_sq', 'toe_front', 'toe_wall', 'toe_cut_r', 'toe_rake', 'throat_line', 'throat_from', 'toe_ext', 'toe_narrow', 'toe_shell', 'drape', 'top_over_welt', 'top_snug', 'top_fit', 'slope', 'ankle_girth', 'toe_long', 'throat', 'vamp_sole', 'throat_round', 'cap_at', 'cap_sweep')
 ROW = 0.15                   # the shaft's sections, this far apart
 COLS = 96                    # and this many directions round each
 GRAIN = 0.10                 # the sheets' own mesh, about this far between points
@@ -147,10 +147,12 @@ def shaft(P, leg, M, z_top, r, log=print):
     R = (R[None, :, :] - r['slope'] * dz[:, :, None]).max(1)
     # over the calf the lacing draws the leather in to the leg: the calf's width is not carried on up to the top
     # (which left the top a wide ring standing off the leg all round), the leg's own section is, nearly
-    w = (r['top_fit'] * _ss(M['calf_z'], z_top - 0.5, zs))[:, None]
+    # (an ankle boot's top stands under the calf: the fit is drawn in from a span under the top instead)
+    lo = min(M['calf_z'], z_top - 1.0)
+    w = (r['top_fit'] * _ss(lo, z_top - 0.5, zs))[:, None]
     R = R * (1.0 - w) + taut * w
     # (laced, the leather lies closer to the leg the higher it goes: the ease is let down over the calf to the top)
-    R = R + (r['ease'] * (1.0 - r['top_snug'] * _ss(M['calf_z'], z_top - 0.3, zs)))[:, None] \
+    R = R + (r['ease'] * (1.0 - r['top_snug'] * _ss(lo, z_top - 0.3, zs)))[:, None] \
         + r['flare'] * _ss(z_top - r['flare_span'], z_top, zs)[:, None] ** 2
     R = R + r['calf_swell'] * np.exp(-((zs - M['calf_z']) / r['calf_span']) ** 2)[:, None]
     girth = (R * (2 * np.pi / COLS)).sum(1)
@@ -278,6 +280,65 @@ def _compact(D, fs):
     return D[used], [[int(km[i]) for i in f] for f in fs]
 
 
+def _nbr_sum(X, E):
+    """For each point the sum of the points joined to it by the edges E (a fast scatter-add: bincount, not add.at)."""
+    n = len(X)
+    return np.stack([np.bincount(E[:, 0], weights=X[E[:, 1], k], minlength=n)
+                     + np.bincount(E[:, 1], weights=X[E[:, 0], k], minlength=n) for k in range(3)], axis=1)
+
+
+def _largest(D, fs, name='tongue'):
+    """The faces fs joined by shared points into islands: keep the biggest one only (a piece of leather is one piece;
+    a fragment cut off from it by the fields' cross-over is not part of it) and compact it. Returns (points, faces)."""
+    par = {}
+
+    def root(i):
+        while par.setdefault(i, i) != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+    for f in fs:
+        for i in f[1:]:
+            par[root(i)] = root(f[0])
+    count = {}
+    for f in fs:
+        count[root(f[0])] = count.get(root(f[0]), 0) + 1
+    big = max(count, key=count.get) if count else None
+    keep = [f for f in fs if root(f[0]) == big]
+    if len(keep) < len(fs):
+        print('boot: the %s was %d islands; kept the main one (%d faces), dropped %d faces'
+              % (name, len(count), len(keep), len(fs) - len(keep)))
+    return _compact(D, keep)
+
+
+def _main_run(mask, fs):
+    """The mask's points joined along the faces fs into runs: keep the longest run only (a label is one edge run,
+    not a run with a stray fragment beside it). Returns the mask."""
+    mask = np.asarray(mask, bool)
+    par = {}
+
+    def root(i):
+        while par.setdefault(i, i) != i:
+            par[i] = par[par[i]]
+            i = par[i]
+        return i
+    for f in fs:
+        on = [i for i in f if mask[i]]
+        for i in on[1:]:
+            par[root(i)] = root(on[0])
+    idx = np.nonzero(mask)[0]
+    if len(idx) == 0:
+        return mask
+    cnt = {}
+    for i in idx:
+        cnt[root(int(i))] = cnt.get(root(int(i)), 0) + 1
+    big = max(cnt, key=cnt.get)
+    out = np.zeros(len(mask), bool)
+    for i in idx:
+        out[i] = root(int(i)) == big
+    return out
+
+
 def _sole(edge, z_welt, r):
     """The sole: a slab under the upper's cut edge (its points, edge), its upper face at z_welt, wider than the upper
     all round by the welt, its rims eased. Returns (points, faces, seam_d, seam_u, the welt's row of stitches: a
@@ -290,8 +351,15 @@ def _sole(edge, z_welt, r):
     have = np.unique(bins)
     rad = np.array([rr[bins == b].max() for b in have])
     rad = np.interp(np.arange(na), np.concatenate([have - na, have, have + na]), np.tile(rad, 3))
-    rad = fit._blur(rad, 4.0, 0, True) + r['leather']                        # (the upper's outer face)
     aa = (np.arange(na) + 0.5) / na * 2 * np.pi - np.pi
+    # (r['sole_toe']: round the toe the outline is eased far less, so the sole turns the toe's corners with the upper;
+    # the same easing as the waist's rounds them off and leaves the sole standing out at each corner)
+    if r.get('sole_toe'):
+        wt_ = np.exp(-(aa / 0.75) ** 2)
+        rad = wt_ * fit._blur(rad, r['sole_toe'], 0, True) + (1.0 - wt_) * fit._blur(rad, r.get('sole_blur', 4.0), 0, True)
+    else:
+        rad = fit._blur(rad, r.get('sole_blur', 4.0), 0, True)
+    rad = rad + r['leather']                                                 # (the upper's outer face)
     bev = 0.18 * r['sole']
     out, zb = rad + r['welt'], z_welt - r['sole']
     rings = [(rad - 2.0 * r['welt'], z_welt), (out - bev, z_welt), (out, z_welt - bev), (out, zb + bev), (out - bev, zb)]
@@ -389,17 +457,192 @@ def cut_lace(D, faces, f, r, weights, lift_on):
     Dt, ft = _compact(*fit.trim(*fit.trim(*fit.trim(*fit.trim(D, faces, lambda A: tw(A) - np.abs(side(A))),
                                                     lambda A: front(A)), lambda A: -vs(A)),
                                 lambda A: zt - A[:, 5] - TONGUE_CORNER * tw(A) * (np.abs(side(A)) / tw(A)) ** 6))
+    Dt, ft = _largest(Dt, ft)                          # (one piece: no fragment of the tongue's region cut off from it)
     lt = np.zeros(len(Dt))
     Vt = lift_on(Dt, lt)
     pieces.append(dict(name='tongue', V=Vt, F=ft, up=(0, 0, 1), lift=lt,
                        edges={'C': np.abs(vs(Dt)) < NEAR, 'H': np.abs(np.abs(side(Dt)) - tw(Dt)) < NEAR},
                        sd=np.full(len(Dt), FAR), su=np.zeros(len(Dt)), W=Dt[:, 9:]))
+    rows = [p for p in pieces if p['name'].endswith(' shaft') and 'eyelets' in p]
+    if len(rows) == 2:
+        # (the two rows pair by height: a row that starts lower (a panel reaching lower over the foot) loses its lowest
+        # eyelets until the rows stand level, then both are cut to the same count at the top)
+        za, zb_ = (np.asarray(p['V'])[p['eyelets'], 2] for p in rows)
+        best = None
+        for k in range(-8, 9):                          # (k > 0: drop the first row's lowest k; k < 0: the second's)
+            a_ = za[max(k, 0):]
+            b_ = zb_[max(-k, 0):]
+            m = min(len(a_), len(b_))
+            if m < 4:
+                continue
+            cost = float(np.abs(a_[:m] - b_[:m]).mean()) + 0.02 * abs(len(a_) - len(b_))
+            if best is None or cost < best[0]:
+                best = (cost, k, m)
+        if best:
+            _, k, m = best
+            rows[0]['eyelets'] = rows[0]['eyelets'][max(k, 0):][:m]
+            rows[1]['eyelets'] = rows[1]['eyelets'][max(-k, 0):][:m]
+            print('boot: the eyelet rows paired by height: %d a side, the first row lost its lowest %d, the second its lowest %d '
+                  '(rows %.2f apart in height on average)' % (m, max(k, 0), max(-k, 0), best[0]))
+    return pieces
+
+
+# The zip ankle boot's numbers. The style is read off John's reference photo (a sock-fit suede ankle boot with an
+# inside zip; uploads 07a27853, measured with tools/refmeasure: /mnt/project-files/zip-ankle-boot/ref/
+# suede-zip-ankle.measure.json, the unit the foot's length L); the zip's sizes are a #3 nylon coil's.
+ZIP = {
+    'top_over_welt': 0.661,  # the topline at the back over the upper's foot, x L (photo: 0.825 L over the floor, less
+                             # the heel's 0.164 L at the back)
+    'top_back': 0.027,       # the topline stands this much higher at the back than at the front, x L (photo)
+    'zip_at': 0.494,         # the zip crosses the topline this share of the inner side's depth back from the front (photo)
+    'zip_stop': 0.020,       # and stops this far over the upper's foot on the inner side, x L (photo: the zip's end
+                             # stands just over the sole; the lasting allowance, 15 mm at the seat and waist (Pattern
+                             # Cutting Step-by-Step), is folded under below it)
+    'teeth_mm': 4.3,         # a #3 coil's teeth closed, across (UCAN Zippers, nylon coil: 4.3 mm)
+    'tape_mm': 22.7,         # and its tape, both sides (UCAN: 22.7 mm)
+    'clear_mm': 2.5,         # the leather's folded edge stands this far off the teeth either side, the tape showing
+                             # between: 1.0 left the coil buried under the edges, reading as torn leather (John: more
+                             # space). EXPERIMENTAL
+    'fold_mm': 5.0,          # the zip's edges and the topline turned under (Pattern Cutting Step-by-Step: a 5 mm
+                             # fold allowance)
+    'guard_mm': 20.0,        # the zip guard behind the zip: a strip this wide, set 0.4 of it toward the front.
+                             # EXPERIMENTAL (no source gives the gusset's width)
+}
+
+
+def cut_zip(D, faces, f, r, weights, lift_on):
+    """The zip ankle boot's upper (SHAFTS['zip'], which cuts the whole upper: the foot has no vamp or toe cap of its
+    own). As the reference is made: no seam on the outer side, one piece from the inner side's zip round the toe and
+    the front, down the outer side to a back seam; and the inner quarter from the back seam forward to the zip.
+
+      vamp and outer quarter   laps over the inner quarter down the back (B)
+      inner quarter            meets it down the inner side on a plumb line (the reference's zip is plumb):
+                               above the stop the two edges are folded (fold_mm) and sewn to the zip's tape, apart by
+                               the teeth and a little clearance (Z); below the stop the inner quarter laps over the
+                               front piece to the sole (Y)
+      zip guard                a strip behind the zip, sewn under the inner quarter's zip edge, so the foot does not
+                               ride on the teeth (Z, under)
+
+    Returns the pieces, each with 'zip' (the zip's line, its stop and top) for the zipper's build (sew.zipper)."""
+    tl, lap = r['leather'], r['lap']
+    side, front, zw, L = f['side'], f['front'], f['z_welt'], f['L']
+    mm = 1.0 / (10.0 * 165.0 / 63.0)                    # (a millimetre in units)
+    pts = D[np.unique(np.concatenate([np.asarray(fc) for fc in faces]))]
+    z_top = f['z_top']
+    topz = lambda A: z_top + ZIP['top_back'] * L * (1.0 - _ss(-0.6, 0.6, front(A)))  # noqa: E731
+    ring = pts[(np.abs(pts[:, 5] - z_top) < 0.2) & (side(pts) < 0)]
+    y_f, y_b = float(ring[:, 4].min()), float(ring[:, 4].max())
+    y_zip = y_f + ZIP['zip_at'] * (y_b - y_f)
+    z_stop = zw + ZIP['zip_stop'] * L
+    g = (0.5 * ZIP['teeth_mm'] + ZIP['clear_mm']) * mm
+    zipf = lambda A: A[:, 4] - y_zip                    # noqa: E731   (behind the zip's plane: above zero)
+    up = lambda A: _ss(z_stop - 0.05, z_stop + 0.05, A[:, 5])          # noqa: E731   (1 above the stop)
+    inner_side = lambda A: _ss(0.15, -0.15, side(A))    # noqa: E731   (1 on the inner side)
+    back = lambda A: front(A) <= 0                      # noqa: E731
+
+    def f_front(A):                                     # (the front piece: the outer side and a lap past the back's
+        f1 = side(A) + np.where(back(A), lap, 0.0)      # middle, or ahead of the zip on the inner side)
+        f2 = -zipf(A) - g * up(A)
+        return np.maximum(f1, f2)
+
+    def f_inner(A):                                     # (the inner quarter: the inner side, behind the zip)
+        return np.minimum(-side(A), zipf(A) - (g * up(A) - lap * (1.0 - up(A))))
+    pieces = []
+    cuts = (('vamp and outer quarter', f_front), ('inner quarter', f_inner))
+    for name, fld in cuts:
+        Dp, fp = _largest(*_compact(*fit.trim(*fit.trim(D, faces, fld), lambda A: topz(A) - A[:, 5])), name=name)
+        z = Dp[:, 5]
+        on = np.abs(fld(Dp)) < NEAR
+        hi = z > z_stop
+        bk = back(Dp)
+        if name == 'inner quarter':
+            e = {'B': on & bk & (np.abs(side(Dp)) < NEAR) & (zipf(Dp) > 2 * lap), 'Z': on & hi & (np.abs(zipf(Dp) - g) < NEAR),
+                 'Y': on & ~hi & (np.abs(zipf(Dp) + lap) < 2 * NEAR)}
+            d_y = np.where(z < z_stop + lap, zipf(Dp) + lap, FAR)
+            d_z = np.where(hi, np.abs(zipf(Dp) - g), FAR)
+            lift = 1.1 * tl * _ss(4.0 * lap, 0.0, d_y)
+            sd, su = np.minimum(d_y, d_z), z
+        else:
+            e = {'B': on & bk & (np.abs(side(Dp) + lap) < NEAR) & (inner_side(Dp) > 0.5),
+                 'Z': on & hi & (np.abs(zipf(Dp) + g) < NEAR), 'Y': on & ~hi & (np.abs(zipf(Dp)) < 2 * NEAR)}
+            d_b = np.where(bk, side(Dp) + lap, FAR)
+            d_z = np.where(hi & (side(Dp) < 0), np.abs(zipf(Dp) + g), FAR)
+            lift = 1.1 * tl * _ss(4.0 * lap, 0.0, d_b)
+            sd, su = np.minimum(d_b, d_z), z
+        e['E'] = z < zw + NEAR
+        e['top'] = z > topz(Dp) - NEAR
+        pieces.append(dict(name=name, V=lift_on(Dp, lift), F=fp, up=(0, 0, 1), lift=lift, edges=e, sd=sd, su=su,
+                           W=Dp[:, 9:], lasted=(name != 'inner quarter')))
+    # the zip guard: behind the zip from the stop to just under the topline, sewn under the inner quarter's zip edge
+    gw = ZIP['guard_mm'] * mm
+    f_g = lambda A: np.minimum(np.minimum(0.5 * gw - np.abs(zipf(A) - 0.1 * gw), -side(A)),  # noqa: E731
+                               np.minimum(A[:, 5] - z_stop, topz(A) - ZIP['fold_mm'] * mm - A[:, 5]))
+    Dg, fg = _largest(*_compact(*fit.trim(D, faces, f_g)), name='zip guard')
+    lg = np.full(len(Dg), -1.1 * tl)
+    pieces.append(dict(name='zip guard', V=lift_on(Dg, lg), F=fg, up=(0, 0, 1), lift=lg,
+                       edges={'Z': np.abs(zipf(Dg) - g) < 0.6 * GRAIN}, sd=np.full(len(Dg), FAR), su=Dg[:, 5],
+                       W=Dg[:, 9:]))
+    for p in pieces:
+        p['zip'] = dict(y=y_zip, stop=z_stop, top=z_top, gap=g, mm=mm)
+    print('boot: the zip on the inner side at y %.2f (%.2f of the topline\'s depth), from the stop at z %.2f (%.2f over '
+          'the welt) to the top at %.2f: %.1f cm long; the edges %.1f mm apart'
+          % (y_zip, ZIP['zip_at'], z_stop, z_stop - zw, z_top, (z_top - z_stop) * 165 / 63, 2 * g / mm))
     return pieces
 
 
 # The shafts, by name: each cuts everything of the upper behind the vamp's seam (the foot, which every shaft shares,
 # is the toe cap, the vamp and the sole), with the numbers its last is drafted with over the foot's.
-SHAFTS = {'lace': dict(cut=cut_lace, ratios={})}
+SHAFTS = {'lace': dict(cut=cut_lace, ratios={}),
+          # (the zip ankle boot: sock-fit, its own last over the leg: little ease and no laced ankle girth to pass the
+          # heel, since the zip opens; the ease is heelboot's 0.015 H, 'ankle_girth' checked by zipboot.entry)
+          # (and 'slope' 1.0: a pull-on or laced shaft must stand off the leg as far up as the heel's bulge, closing in
+          # at the 0.2 slope, or the heel would not pass; the zip opens past the heel, so the shaft closes onto the
+          # leg within about its own height over the heel counter)
+          'zip': dict(cut=cut_zip, whole=True, ratios={'ease': 0.012, 'ankle_girth': 1.0, 'calf_swell': 0.0,
+                                                       'top_fit': 1.0, 'top_snug': 0.5, 'slope': 1.0,
+                                                       'own_by': 0.20})}
+
+
+def _hull2(q):
+    """The convex hull of 2D points, counter-clockwise (Andrew's monotone chain)."""
+    pts = sorted(map(tuple, np.round(q, 6)))
+    if len(pts) < 3:
+        return np.array(pts)
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, hi = [], []
+    for p_ in pts:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], p_) <= 0:
+            lo.pop()
+        lo.append(p_)
+    for p_ in reversed(pts):
+        while len(hi) >= 2 and cross(hi[-2], hi[-1], p_) <= 0:
+            hi.pop()
+        hi.append(p_)
+    return np.array(lo[:-1] + hi[:-1])
+
+
+def _to_hull(q, h, c):
+    """Each 2D point q moved out from c along its own direction to the hull h's boundary (never inward)."""
+    out = q.copy()
+    a, b = h, np.roll(h, -1, axis=0)
+    e = b - a
+    for i, p_ in enumerate(q):
+        d = p_ - c
+        nd = np.linalg.norm(d)
+        if nd < 1e-9:
+            continue
+        # c + t d = a + s e: solve for t, s on each edge
+        den = d[0] * e[:, 1] - d[1] * e[:, 0]
+        ok = np.abs(den) > 1e-12
+        ac = a - c
+        t = np.where(ok, (ac[:, 0] * e[:, 1] - ac[:, 1] * e[:, 0]) / np.where(ok, den, 1.0), -1.0)
+        s_ = np.where(ok, (ac[:, 0] * d[1] - ac[:, 1] * d[0]) / np.where(ok, den, 1.0), -1.0)
+        good = ok & (t > 0) & (s_ >= -1e-6) & (s_ <= 1 + 1e-6)
+        if good.any():
+            out[i] = c + d * max(1.0, float(t[good].max()))
+    return out
 
 
 def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot', ratios=RATIOS, shaft_name='lace',
@@ -416,9 +659,12 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     tl = r['leather']
     col = {n: i for i, n in enumerate(names)}
     arm = sum(W[:, col[n]] for n in names if n.split('.')[0] in draft.ARM_GROUPS)
-    z_top = M['knee_z'] - r['top_below_knee']
-    M['boot_top'] = z_top
     L = M['heel_y'] - M['toe_y']
+    z_top = M['knee_z'] - r['top_below_knee']
+    if r.get('top_over_welt'):                         # (an ankle boot: its top this share of the foot's length over the welt)
+        z_foot0 = float(P[(arm < 0.02), 2].min())
+        z_top = z_foot0 - 0.35 * r['under'] + r['top_over_welt'] * L
+    M['boot_top'] = z_top
     y_ball = M['toe_y'] + 0.30 * L                     # the ball of the foot: 70 percent of the way from the heel
 
     z_cut = z_top + r['tongue_rise']                   # (the last carries on above the top, for the tongue)
@@ -460,8 +706,16 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             rs = dict(r, **{k: v * H if k not in PLAIN else v for k, v in more.items()})
             zs, C, Rf = tables[sgn]
             _, _, Rs = shaft(P, leg, M, z_top, rs, log=lambda *a: None)
-            w = _ss(M['ankle_z'] + r['join'] + r['lap'], M['ankle_z'] + r['join'] + 9.0 * r['lap'], zs)[:, None]
+            hi = min(M['ankle_z'] + r['join'] + 9.0 * r['lap'], z_top - 0.2)   # (an ankle boot: fully its own by the top)
+            if rs.get('own_by'):                       # (a sock fit: its own this far over the ankle's joint)
+                hi = min(M['ankle_z'] + rs['own_by'], hi)
+            lo_ = min(M['ankle_z'] + r['join'] + r['lap'], hi - 0.8)
+            w = _ss(lo_, hi, zs)[:, None]
             shafts[sgn] = (zs, C, Rf * (1 - w) + Rs * w)
+            if sgn < 0:
+                g_ = (shafts[sgn][2] * (2 * np.pi / COLS)).sum(1) * 165.0 / 63.0
+                log('boot: the shaft as cut (its own last from z %.2f, wholly by %.2f): %s' % (lo_, hi, ', '.join(
+                    '%.0f cm at z %.2f' % (g_[i], zs[i]) for i in range(0, len(zs), max(1, len(zs) // 6)))))
         else:
             shafts[sgn] = tables[sgn]
         mine = X0[:, 0] * sgn > 0
@@ -470,19 +724,104 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
     # room over the instep and the front of the ankle, to flex into: the last above is the leg's own, which would
     # leave the leather no more than the gap off the instep, and a stride (the foot's toe-off) presses the foot up
     # into it (the shaft's table, carried down over the foot, cuts in there)
-    X += Nr * (r['instep_room'] * _ss(1.2, 2.8, z) * (1.0 - _ss(M['ankle_z'] + r['join'], M['ankle_z'] + 3.0 * r['join'], z))
+    # (a sock-fit shaft, r['shaft_gap']: the room ends over the instep, by the ankle's joint, and is not carried up the shin)
+    ir0, ir1 = (M['ankle_z'] - 0.3 * r['join'], M['ankle_z'] + 0.7 * r['join']) if r.get('shaft_gap') \
+        else (M['ankle_z'] + r['join'], M['ankle_z'] + 3.0 * r['join'])
+    X += Nr * (r['instep_room'] * _ss(1.2, 2.8, z) * (1.0 - _ss(ir0, ir1, z))
                * np.clip(-Nr[:, 1], 0.0, 1.0))[:, None]
     # the foot's hollows bridged
     deg = np.bincount(E.ravel(), minlength=n).astype(float)
     lift = np.zeros(n)
     for _ in range(160):
-        acc = np.zeros_like(X)
-        np.add.at(acc, E[:, 0], X[E[:, 1]])
-        np.add.at(acc, E[:, 1], X[E[:, 0]])
-        lap = acc / np.maximum(deg, 1)[:, None] - X
+        lap = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
         out = np.minimum(np.maximum((lap * Nr).sum(1), 0.0) * 0.6, r['bridge'] - lift)
         lift += out
         X += Nr * out[:, None]
+    toe_w = _ss(y_ball + 0.20 * L, y_ball - 0.05 * L, X[:, 1]) * (X0[:, 2] < M['ankle_z'])
+    # the least room off the skin, by height: the foot's (r['gap']) to the ankle's joint, and a sock-fit shaft's
+    # (r['shaft_gap']: the hose and the leather's own lining, no air) from r['shaft_gap_by'] over it. The foot's gap
+    # carried up the leg stood the shaft 8 mm off it all round, a tube 5 cm wider than the leg
+    gap_ = np.full(n, r['gap'])
+    if r.get('heel_gap'):                              # (the quarters and the counter, behind the instep: closer too)
+        gap_ += (r['heel_gap'] - r['gap']) * _ss(M['toe_y'] + 0.50 * L, M['toe_y'] + 0.70 * L, y)
+    if r.get('shaft_gap'):
+        gap_ += (r['shaft_gap'] - gap_) * _ss(M['ankle_z'] + 0.25 * r['shaft_gap_by'], M['ankle_z'] + r['shaft_gap_by'], z)
+    # a sock-fit last (RATIOS['drape'] passes, 0 for none): the whole last drawn taut over the foot and the leg, as a
+    # stocking is: smoothed (a Laplacian step) and put back out to the gap from the skin, in turn, so the toes'
+    # ridges and the step where the shaft's table meets the foot over the ankle are spanned by one smooth surface
+    # that never comes nearer the skin than the gap (the last's toe is turned smooth, not cast from the toes)
+    if r.get('drape'):
+        tree0 = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
+        wt = _ss(z_welt, z_welt + 0.6, z) * (1.0 - toe_w)       # (held where it meets the sole, and over the toe box)
+        Xs = X.copy()
+        for k_ in range(int(r['drape'])):
+            lap = _nbr_sum(Xs, E) / np.maximum(deg, 1)[:, None] - Xs
+            Xs += lap * (0.5 * wt)[:, None]
+            if k_ % 8 == 7 or k_ == int(r['drape']) - 1:
+                for i in range(n):
+                    loc, nrm, _, d = tree0.find_nearest(Xs[i])
+                    if loc is None:
+                        continue
+                    sd_ = float(np.dot(Xs[i] - np.array(loc), np.array(nrm)))
+                    if sd_ < gap_[i]:
+                        Xs[i] += np.array(nrm) * (gap_[i] - sd_)
+        log('boot: the last drawn taut over the foot and leg (%d passes): it moved %.3f on average, %.3f at most'
+            % (int(r['drape']), float(np.linalg.norm(Xs - X, axis=1).mean()), float(np.linalg.norm(Xs - X, axis=1).max())))
+        X = Xs
+    # the throat fitted (r['throat_line'], None for none): a boot last is built up on the throat, above the instep
+    # ("the most important place is on the throat of the boot above the instep": a fitting tacked on there turns a
+    # shoe last into a boot last; leyuha, boot lasts vs shoe lasts), and the front of the pattern "should be nearly
+    # straight" from the vamp to the top (Golding, The Manufacture of Boots and Shoes, System No. 1). The leg's own
+    # front meets the foot's back at a corner, and leather cut to it turns there almost square. So seen from the
+    # side the front line is redrawn from the vamp point (r['throat_from'] of the foot's length behind the toe, on
+    # the foot's back) to the top's front as one curve: the chord, bowed into the corner by the share r['throat_line'] of
+    # the corner's depth (0: straight), and the front half of the last is drawn forward to it, never back.
+    if r.get('throat_line') is not None:
+        for sgn in (-1, 1):
+            zs_, C_, _ = shafts[sgn]
+            mine = X0[:, 0] * sgn > 0
+            cxp = np.interp(X[:, 2], zs_, C_[:, 0])
+            cyp = np.interp(X[:, 2], zs_, C_[:, 1])
+            mid = mine & (np.abs(X[:, 0] - cxp) < 0.5) & (X[:, 1] < cyp)
+            y_v = M['toe_y'] + r.get('throat_from', 0.42) * L
+            near = mid & (np.abs(X[:, 1] - y_v) < 0.15) & (X[:, 2] < M['ankle_z'] + 1.0)
+            if not near.any():
+                continue
+            z_v = float(X[near, 2].max())
+            top = mid & (np.abs(X[:, 2] - z_top) < 0.1)
+            if not top.any():
+                continue
+            A, V = np.array([float(X[top, 1].min()), z_top]), np.array([y_v, z_v])
+            S = float(np.linalg.norm(A - V))
+            ch = (A - V) / S
+            nr_ = np.array([ch[1], -ch[0]])                 # (square to the chord, out of the corner: forward and up)
+            if nr_[0] > 0:
+                nr_ = -nr_
+            q = X[:, 1:3] - V
+            sp, dp = q @ ch, q @ nr_
+            sb = np.linspace(0.0, S, 40)
+            prof = np.array([dp[mid & (np.abs(sp - sc) < 0.6 * S / 39)].max()
+                             if (mid & (np.abs(sp - sc) < 0.6 * S / 39)).any() else np.nan for sc in sb])
+            ok = ~np.isnan(prof)
+            sb, prof = sb[ok], np.minimum(prof[ok], 0.0)
+            prof[0] = prof[-1] = 0.0
+            kc_ = int(np.argmin(prof))
+            # (a curve from end to end, bowed into the corner by the share r['throat_line'] of its depth)
+            t_ = np.linspace(0, 1, 200)
+            ctrl = np.array([sb[kc_], 2.0 * r['throat_line'] * prof[kc_]])
+            bs = 2 * t_ * (1 - t_) * ctrl[0] + t_ ** 2 * S
+            bd = 2 * t_ * (1 - t_) * ctrl[1]
+            push = np.maximum(np.interp(sb, bs, bd) - prof, 0.0)
+            for _ in range(3):
+                push[1:-1] = 0.25 * push[:-2] + 0.5 * push[1:-1] + 0.25 * push[2:]
+            pp = np.interp(sp, sb, push, left=0.0, right=0.0)
+            depth = np.interp(sp, sb, prof) - dp               # (how far under the front line the point lies)
+            wgt = _ss(1.6, 0.2, depth) * _ss(z_welt + 0.3, z_welt + 0.9, X[:, 2]) * mine
+            X[:, 1:3] += (pp * wgt)[:, None] * nr_[None, :]
+            if sgn < 0:
+                log('boot: the throat fitted: the front line from the vamp point (z %.2f) to the top, the corner %.2f '
+                    'behind the chord drawn out by %.2f at most (%.1f cm)'
+                    % (z_v, float(-prof.min()), float(push.max()), float(push.max()) * 165 / 63))
     # and never nearer the skin than the gap
     tree = BVHTree.FromPolygons([tuple(p) for p in P], B['faces'])
     pushed = 0
@@ -491,12 +830,197 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         if loc is None:
             continue
         side = float(np.dot(X[i] - np.array(loc), np.array(nrm)))
-        if side < r['gap']:
-            X[i] += np.array(nrm) * (r['gap'] - side)
+        if side < gap_[i]:
+            X[i] += np.array(nrm) * (gap_[i] - side)
             pushed += 1
     log('boot: the last\'s foot, %d points; %d bridged over hollows (by %.3f at most), %d put out to the gap'
         % (n, int((lift > 0.01).sum()), lift.max(), pushed))
 
+    # the toe turned as a last's is (r['toe_shell'] passes): a last is carved as one smooth box over the toes, never
+    # cast from them (Golding, The Manufacture of Boots and Shoes), and the gap pushed out over each toe above leaves
+    # the toes' own ridges in it. Ahead of the ball the last is smoothed (a Laplacian step each pass), then let out
+    # again by a push that is itself smooth: the most each point lies under the gap off the skin, spread over its
+    # neighbours (never less than any point's own need), so the toe box clears the toes everywhere by the gap
+    # without taking their shape. (Tried first and dropped: slab-by-slab convex hulls, which left the surface torn
+    # between slabs, and letting the surface out only where it was hollow, which found no hollows at the mesh's
+    # scale: the toes' ridges are the gap's push, not hollows.)
+    if r.get('toe_shell'):
+        tw = toe_w * _ss(z_welt, z_welt + 0.15, X[:, 2])
+        X1 = X.copy()
+        # the toe's shape seen from above (r['toe_ext'], r['toe_narrow']): an almond toe is drawn past the toes (the
+        # toe allowance, x L) and narrowed toward a point over the second toe; the push below keeps the toes clear,
+        # so the narrowing shows ahead of them and the toe box's sides stay where the toes need them
+        if r.get('toe_ext') or r.get('toe_narrow'):
+            for sgn in (-1, 1):
+                mine = (X0[:, 0] * sgn > 0) & (toe_w > 0)
+                if not mine.any():
+                    continue
+                tip = np.nonzero(mine)[0][np.argmin(X[mine, 1])]
+                y_tip, cx_ = X[tip, 1], X[tip, 0]
+                u = np.clip((y_ball - X[mine, 1]) / max(y_ball - y_tip, 1e-6), 0.0, 1.0)
+                wm = toe_w[mine]
+                X[mine, 0] += (cx_ + (X[mine, 0] - cx_) * (1.0 - r.get('toe_narrow', 0.0) * u ** 2) - X[mine, 0]) * wm
+                X[mine, 1] -= r.get('toe_ext', 0.0) * L * u ** 2 * wm
+        for _ in range(int(r['toe_shell'])):          # (along the ground at the welt too: z held there, for the sole)
+            dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+            X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
+            X[:, 2] += 0.5 * tw * dl[:, 2]
+        need = np.zeros(n)
+        for i in np.nonzero(tw > 0)[0]:
+            loc, nrm, _, d = tree.find_nearest(X[i])
+            if loc is not None:
+                need[i] = max(r['gap'] - float(np.dot(X[i] - np.array(loc), np.array(nrm))), 0.0)
+
+        def avg1(v):
+            return (np.bincount(E[:, 0], weights=v[E[:, 1]], minlength=n)
+                    + np.bincount(E[:, 1], weights=v[E[:, 0]], minlength=n)) / np.maximum(deg, 1)
+        push = need.copy()
+        for _ in range(int(r['toe_shell'])):
+            push = np.maximum(need, avg1(push))
+        for _ in range(int(r['toe_shell']) // 2):
+            push = np.maximum(need, avg1(push) * tw + push * (1 - tw))
+        X += Nr * (push * tw)[:, None]
+        # (the push goes out along the skin's own normals, which fan apart round a toe's tip and left a lump there at
+        # the big toe; smoothed once more after it, a third as long, the lump is spread into the box. The gap is
+        # no longer exact at the tip: it is 8 mm here, and the smoothing takes back well under that)
+        for _ in range(int(r['toe_shell']) // 3):
+            dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+            X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
+            X[:, 2] += 0.5 * tw * dl[:, 2]
+        # (and the toes kept clear after it, by 0.6 of the gap: the smoothing took the box back onto the hose at the
+        # toes' tips, low by the welt, where the first push is held for the sole. A second, smaller push of the
+        # same smooth kind, sideways at the welt (z held there) and along the normal above it)
+        need = np.zeros(n)
+        for i in np.nonzero(toe_w > 0)[0]:
+            loc, nrm, _, d = tree.find_nearest(X[i])
+            if loc is not None:
+                need[i] = max(0.6 * r['gap'] - float(np.dot(X[i] - np.array(loc), np.array(nrm))), 0.0)
+        push = need.copy()
+        for _ in range(int(r['toe_shell']) // 3):
+            push = np.maximum(need, avg1(push))
+        for _ in range(int(r['toe_shell']) // 6):
+            push = np.maximum(need, avg1(push) * toe_w + push * (1 - toe_w))
+        Nh = Nr[:, :2] / np.maximum(np.linalg.norm(Nr[:, :2], axis=1, keepdims=True), 0.3)
+        X[:, :2] += Nh * (toe_w * push)[:, None]
+        X[:, 2] += Nr[:, 2] * tw * push
+        for _ in range(12):                               # (and eased, so the second push leaves no band of its own)
+            dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+            X[:, :2] += (0.5 * toe_w)[:, None] * dl[:, :2]
+            X[:, 2] += 0.5 * tw * dl[:, 2]
+        log('boot: the toe box kept clear of the toes after its smoothing: %d points let out again, %.3f at most'
+            % (int((need > 1e-3).sum()), float(need.max())))
+        # the toe box drawn as a last's is (r['toe_box'] and the rest): a square toe is "a leading edge that is rather
+        # straight across the front" (Gentleman's Gazette), low in front, its top running down nearly flat to a
+        # sharp edge (Shoegazing, Guide: toe shapes: chiselled in profile). Ahead of the ball each cross-section is
+        # redrawn as a superellipse of power toe_sq (a flat top folded sharply into short side walls) standing on the
+        # welt: its width eased from the ball's to toe_front of it at the cut, its height a straight line from the
+        # ball's down to the front wall's, both let out wherever the foot's own skin plus 0.6 of the gap needs more.
+        # The cut stands toe_box x L ahead of the toes (the toe allowance); the last ahead of it is folded onto the
+        # cut as the front wall (leaning back by toe_rake, its edge as soft as toe_cut_r). After the smoothing above.
+        if r.get('toe_box'):
+            g_, n_ = 0.6 * r['gap'], r.get('toe_sq', 4.0)
+            for sgn in (-1, 1):
+                idx = np.nonzero((X0[:, 0] * sgn > 0) & (toe_w > 0))[0]
+                if not len(idx):
+                    continue
+                # (the last drawn out ahead of the ball first, so toe_nose of it lies ahead of the cut to make the wall)
+                sk_tip = X0[idx, 1].min()
+                y_cut = sk_tip - r['toe_box'] * L
+                fw = X[idx, 1] < y_ball
+                k_ = (y_ball - (y_cut - r.get('toe_nose', 0.5))) / max(y_ball - X[idx, 1].min(), 1e-6)
+                X[idx[fw], 1] = y_ball - (y_ball - X[idx[fw], 1]) * max(k_, 1.0)
+                x_, y_, z_ = X[idx, 0].copy(), X[idx, 1].copy(), X[idx, 2].copy()
+                y_tip = y_.min()
+                ys = np.linspace(y_tip, y_ball + 0.2 * L, 60)
+                hw = ys[1] - ys[0]
+
+                def binned(v, yy, fn):
+                    o_ = np.full(len(ys), np.nan)
+                    for j, yv in enumerate(ys):
+                        m_ = np.abs(yy - yv) < hw
+                        if m_.any():
+                            o_[j] = fn(v[m_])
+                    return o_
+                Llo, Lhi = binned(x_, y_, np.min), binned(x_, y_, np.max)
+                Ltop = binned(z_, y_, np.max) - z_welt
+                gs_ = g_ + r.get('toe_spare', 0.0)               # (and a little over: the easing below draws the box in)
+                Slo, Shi = binned(X0[idx, 0], X0[idx, 1], np.min) - gs_, binned(X0[idx, 0], X0[idx, 1], np.max) + gs_
+                Stop = binned(X0[idx, 2], X0[idx, 1], np.max) + g_ - z_welt
+                at = lambda A, yv: float(np.interp(yv, ys[~np.isnan(A)], A[~np.isnan(A)]))  # noqa: E731
+                lo_b, hi_b, h_b = at(Llo, y_ball), at(Lhi, y_ball), at(Ltop, y_ball)
+                c_b, a_b = 0.5 * (lo_b + hi_b), 0.5 * (hi_b - lo_b)
+                c_t = 0.5 * (at(Slo, sk_tip + 0.08 * L) + at(Shi, sk_tip + 0.08 * L))
+                t = np.clip((y_ball - ys) / (y_ball - y_cut), 0.0, 1.0)
+                a_ = a_b * (1.0 - (1.0 - r.get('toe_front', 0.68)) * t ** 1.6)
+                c_ = c_b + (c_t - c_b) * t
+                lo, hi = c_ - a_, c_ + a_
+                for _ in range(60):          # (let out for the toes, and the letting out eased along the box: no step)
+                    lo = np.fmin(lo, Slo)
+                    hi = np.fmax(hi, Shi)
+                    lo[1:-1] = np.minimum(lo[1:-1], 0.25 * lo[:-2] + 0.5 * lo[1:-1] + 0.25 * lo[2:])
+                    hi[1:-1] = np.maximum(hi[1:-1], 0.25 * hi[:-2] + 0.5 * hi[1:-1] + 0.25 * hi[2:])
+                # (the profile, as a toe is capped: the box keeps the toes' own thickness over them, about 2 cm (a last's
+                # toe thickness: the toes' plus the sock's and the lining's), and only then sweeps up to the instep, a
+                # hollow curve of power toe_sweep; a straight ramp from the edge to the ball reads as a wedge. Let out
+                # wherever the skin needs more, and that eased along the box so it leaves no bump)
+                tips = ~np.isnan(Stop) & (ys < sk_tip + 0.03 * L)
+                hf = max(r.get('toe_wall', 0.5), float(np.nanmax(Stop[tips])) if tips.any() else 0.0)
+                h_ = hf + (h_b - hf) * (1.0 - t) ** r.get('toe_sweep', 2.2)
+                for _ in range(40):
+                    h_ = np.fmax(h_, Stop)
+                    h_[1:-1] = np.maximum(h_[1:-1], 0.25 * h_[:-2] + 0.5 * h_[1:-1] + 0.25 * h_[2:])
+                # (and the toe's recede: ahead of the toes' tips the top turns down to the front wall, toe_wall high, as
+                # a quarter of an ellipse over the toe allowance; the cap's curve, not a box's corner)
+                hw_ = r.get('toe_wall', 0.4)
+                u_r = np.clip((sk_tip + 0.1 - ys) / max(sk_tip + 0.1 - y_cut, 1e-6), 0.0, 1.0)
+                h_ = np.where(u_r > 0, np.minimum(h_, hw_ + (max(hf, hw_) - hw_) * np.sqrt(1.0 - u_r ** 2)), h_)
+                fill = lambda A: np.interp(ys, ys[~np.isnan(A)], A[~np.isnan(A)])  # noqa: E731
+                Llo, Lhi, Ltop = fill(Llo), fill(Lhi), np.maximum(fill(Ltop), 1e-3)
+                # (ahead of the cut the nose is read in the cut section's own frame, and its distance from that
+                # section's foot fills the wall: a polar reading alone is singular where the nose closes)
+                yc = np.maximum(y_, y_cut)
+                cl, al = 0.5 * (np.interp(yc, ys, Llo) + np.interp(yc, ys, Lhi)), 0.5 * (np.interp(yc, ys, Lhi) - np.interp(yc, ys, Llo))
+                u_, v_ = (x_ - cl) / np.maximum(al, 1e-3), np.maximum(z_ - z_welt, 0.0) / np.interp(yc, ys, Ltop)
+                th = np.arctan2(v_, u_)
+                s_ = np.where(y_ < y_cut, np.clip(np.hypot(u_, v_), 0.0, 1.0), 1.0)
+                # (the squareness grown along the box: a round section at the ball, toe_sq at the cut, so the top flows
+                # out of the instep as one surface and only folds toward the front)
+                nv = 2.0 + (n_ - 2.0) * np.clip((y_ball - yc) / (y_ball - y_cut), 0.0, 1.0) ** 2.5
+                cv, av, hv = 0.5 * (np.interp(yc, ys, lo) + np.interp(yc, ys, hi)), 0.5 * (np.interp(yc, ys, hi) - np.interp(yc, ys, lo)), np.interp(yc, ys, h_)
+                # (the section: upright sides toe_side high, as a last's stand over its feather line, and over them
+                # a dome, a superellipse's upper half, meeting them upright so no shoulder shows. Its radius along
+                # each point's ray found by halving)
+                ev = np.minimum(r.get('toe_side', 0.0), 0.35 * hv) / np.maximum(hv, 1e-6)
+                ct, st_ = np.abs(np.cos(th)), np.maximum(np.sin(th), 0.0)
+                r_lo, r_hi = np.zeros(len(th)), np.minimum(1.0 / np.maximum(ct, 1e-6), 1.0 / np.maximum(st_, 1e-6))
+                for _ in range(40):
+                    rm = 0.5 * (r_lo + r_hi)
+                    f_ = (rm * ct) ** nv + (np.maximum(rm * st_ - ev, 0.0) / (1.0 - ev)) ** nv - 1.0
+                    r_lo, r_hi = np.where(f_ < 0, rm, r_lo), np.where(f_ < 0, r_hi, rm)
+                rho = 0.5 * (r_lo + r_hi)
+                xn = cv + av * s_ * rho * np.cos(th)
+                zn = z_welt + hv * s_ * rho * np.sin(th)
+                # (the cut bowed back toward the corners, r['toe_bow'] of the half width at the corner and as its cube:
+                # seen from above the front is a shallow curve turning into the sides, not a line meeting them)
+                bow = r.get('toe_bow', 0.0) * av * np.clip(np.abs(xn - cv) / np.maximum(av, 1e-3), 0.0, 1.2) ** 3
+                d_ = y_ - (y_cut + r.get('toe_rake', 0.0) * (zn - z_welt) + bow)
+                kr = r.get('toe_cut_r', 0.08)
+                yn = y_ - d_ + 0.5 * (d_ + np.sqrt(d_ ** 2 + kr ** 2))
+                wv = _ss(y_ball + 0.10 * L, y_ball - 0.08 * L, y_) * toe_w[idx]   # (short: the foot's own ridges end at the ball)
+                X[idx, 0] += (xn - x_) * wv
+                X[idx, 1] += (yn - y_) * wv
+                X[idx, 2] += (zn - z_) * wv * (z_ > z_welt)
+                log('boot: the toe box drawn square: cut %.2f ahead of the toes, %.2f wide there of %.2f at the ball, '
+                    'the front wall %.2f high, %.2f over the toes\' tips, the top %.2f at the ball' % (sk_tip - y_cut, 2 * av[np.argmin(np.abs(y_ - y_cut))], 2 * a_b, hw_, hf, h_b))
+        if r.get('toe_box') and r.get('toe_ease'):        # (the box eased: its folds and the wall's edge left soft)
+            for _ in range(int(r['toe_ease'])):
+                dl = _nbr_sum(X, E) / np.maximum(deg, 1)[:, None] - X
+                X[:, :2] += (0.5 * toe_w * (X[:, 2] > z_welt + 0.05))[:, None] * dl[:, :2]
+                X[:, 2] += 0.5 * tw * dl[:, 2]
+        mv = np.linalg.norm(X - X1, axis=1)
+        log('boot: the toe turned as one smooth box over the toes (%d passes): %d points moved, %.3f on average, %.3f '
+            'at most' % (int(r['toe_shell']), int((mv > 0.01).sum()), float(mv[mv > 0.01].mean()) if (mv > 0.01).any()
+                         else 0.0, float(mv.max())))
     # ---- the foot's pieces, cut from the last: columns 0:3 the skin, 3:6 the last, 6:9 the normal, then the weights
     nw = len(names)
     D0 = np.concatenate([X0, X, Nr, Wr], 1)
@@ -551,21 +1075,24 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
         def toe_seam(A):                                                    # (ahead of the seam: above zero)
             return y_cap + k_cap * (A[:, 3] - fx) ** 2 - A[:, 4]
         tongue_w = 0.5 * r['lace_gap'] + r['tongue']
-        # the vamp: ahead of its seam and behind the toe cap's, under everything
-        Dv, fv = _compact(*fit.trim(*fit.trim(D0, mine, vamp_f), lambda A: -toe_seam(A)))
-        add(Dv[:, 3:6], fv, np.full(len(Dv), FAR), np.zeros(len(Dv)), Dv[:, 9:9 + nw])
-        on = np.abs(vamp_f(Dv)) < NEAR
-        throat = np.abs(side_f(Dv)) < tongue_w
-        pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), lift=np.zeros(len(Dv)), lasted=True, edges={
-            'A inner': on & ~throat & (side_f(Dv) < 0), 'A outer': on & ~throat & (side_f(Dv) > 0), 'C': on & throat,
-            'E': np.abs(Dv[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dv)) < NEAR}))
-        # the toe cap: ahead of its seam, its back edge lapped over the vamp
-        Dc, fc = _compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap']))
-        add(lift_on(Dc, 1.1 * tl), fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
-        pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), lift=np.full(len(Dc), 1.1 * tl), lasted=True,
-                           edges={'E': np.abs(Dc[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dc) + r['lap']) < NEAR}))
+        whole = SHAFTS[shaft_name].get('whole', False)
+        if not whole:                                                       # (else the shaft cuts the whole upper)
+            # the vamp: ahead of its seam and behind the toe cap's, under everything
+            Dv, fv = _compact(*fit.trim(*fit.trim(D0, mine, vamp_f), lambda A: -toe_seam(A)))
+            add(Dv[:, 3:6], fv, np.full(len(Dv), FAR), np.zeros(len(Dv)), Dv[:, 9:9 + nw])
+            on = np.abs(vamp_f(Dv)) < NEAR
+            throat = np.abs(side_f(Dv)) < tongue_w
+            pieces.append(dict(name='vamp', V=V[-1], F=fv, up=(0, -1, 0.35), lift=np.zeros(len(Dv)), lasted=True, edges={
+                'A inner': on & ~throat & (side_f(Dv) < 0), 'A outer': on & ~throat & (side_f(Dv) > 0), 'C': _main_run(on & throat, fv),
+                'E': np.abs(Dv[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dv)) < NEAR}))
+            # the toe cap: ahead of its seam, its back edge lapped over the vamp
+            Dc, fc = _largest(*_compact(*fit.trim(D0, mine, lambda A: toe_seam(A) + r['lap'])), name='toe cap')
+            add(lift_on(Dc, 1.1 * tl), fc, toe_seam(Dc) + r['lap'], Dc[:, 3], Dc[:, 9:9 + nw])
+            pieces.append(dict(name='toe cap', V=V[-1], F=fc, up=(0, -1, 0.2), lift=np.full(len(Dc), 1.1 * tl), lasted=True,
+                               edges={'E': np.abs(Dc[:, 5] - z_welt) < NEAR, 'G': np.abs(toe_seam(Dc) + r['lap']) < NEAR}))
         # the shaft: everything behind the vamp's seam
-        f = dict(side=side_f, front=front_f, vamp=vamp_f, kc=kc, z_welt=z_welt, z_top=z_top)
+        f = dict(side=side_f, front=front_f, vamp=vamp_f, kc=kc, z_welt=z_welt, z_top=z_top, L=L, T=T, M=M,
+                 toe_y=M['toe_y'], heel_y=M['heel_y'])
         for p in SHAFTS[shaft_name]['cut'](D0, mine, f, r, lambda G: _weights(Pl, Wl, G), lift_on):
             add(p.pop('V'), p['F'], p.pop('sd'), p.pop('su'), p.pop('W')[:, :nw])
             p['V'] = V[-1]
@@ -575,7 +1102,8 @@ def build_boots(body, M, rig=None, material=None, sole_material=None, name='Boot
             p['start'] = k0
             k0 += len(p['V'])
         Vall = np.concatenate(V)
-        o = _object('%s.%s' % (name, side), Vall, F, np.concatenate(WW), names, body, rig, material,
+        Wall = np.concatenate(WW)
+        o = _object('%s.%s' % (name, side), Vall, F, Wall, names, body, rig, material,
                     np.concatenate(SD), np.concatenate(SU), thickness=tl, skive=3.0 * r['lap'])
         res[side] = o
         log('boot: %s, %d points: %s' % (o.name, len(Vall), ', '.join('%s %d' % (p['name'], len(p['V'])) for p in pieces)))

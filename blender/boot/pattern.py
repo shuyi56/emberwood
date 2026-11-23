@@ -18,7 +18,8 @@ SEAMS = {'A': ('vamp to quarter', (196, 60, 50)), 'B': ('heel back seam', (40, 1
          'C': ('ankle seam', (30, 140, 80)), 'D': ('shaft back seam', (150, 70, 170)),
          'E': ('upper to sole', (210, 130, 20)), 'F': ('binding', (90, 90, 90)),
          'G': ('toe cap to vamp', (20, 150, 160)), 'H': ('tongue under the panels', (120, 120, 30)),
-         'L': ('lacing edge (eyelets)', (200, 40, 120)), 't': ('top edge', (90, 90, 90))}
+         'L': ('lacing edge (eyelets)', (200, 40, 120)), 't': ('top edge', (90, 90, 90)),
+         'Z': ('zip edge (to the tape)', (230, 90, 160)), 'Y': ('zip seam under the stop', (110, 170, 40))}
 
 
 def flatten(piece):
