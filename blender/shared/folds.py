@@ -28,6 +28,8 @@ src/world/fabric-core.js (crease, fold; PR #61):
     c = F.add(line, angle, radius=0.0, side=+1)        line: points on the pattern [k, 2]; angle in radians
     report = F.bake(body=None, h=1/240, tol_deg=1.0, ...)
     report.ok, report.achieved_deg, report.target_deg, report.steps
+    F.land()                                           where each flap lands against its draft (along, off, worst)
+    F.band()                                           the points of the creases' turns (bake(body_band=False) frees them)
     pos, report, state = fo.bake_cached(name, fab, flat, T, creases, ...)   the fold cache (see bake_cached)
 
 A crease's angle is how far the far side turns from flat: 0 flat, about 175 degrees for a pressed lapel lying back on
@@ -45,7 +47,7 @@ import time
 
 import numpy as np
 
-CACHE_VERSION = 1
+CACHE_VERSION = 3
 
 
 # ------------------------------------------------------------------ geometry
@@ -361,8 +363,10 @@ class Report:
     def __str__(self):
         head = 'folds: %s in %d steps (%d corrections)' % ('reached' if self.ok else 'STOPPED SHORT (%s)' % self.why,
                                                          self.steps, self.corrections)
-        rows = ['  %s: %.1f of %.1f deg (worst along the line %.1f), %d hinges over a band %.3f wide'
-                % (c['name'], c['achieved_deg'], c['target_deg'], c['worst_deg'], c['hinges'], c['band'])
+        rows = ['  %s: %.1f of %.1f deg (worst along the line %.1f), %d hinges over a band %.3f wide; the flap lands '
+                '%+.3f along its draft, %+.3f off it (worst %.3f)'
+                % (c['name'], c['achieved_deg'], c['target_deg'], c['worst_deg'], c['hinges'], c['band'],
+                   c.get('land_along', float('nan')), c.get('land_off', float('nan')), c.get('land_worst', float('nan')))
                 for c in self.creases]
         return '\n'.join([head] + rows)
 
@@ -454,6 +458,8 @@ class Folds:
             out.append((float(angs.mean()), float(angs[np.argmax(np.abs(angs - tgt))])))
         return out
 
+    # -- solving
+
     def measure_segments(self, x=None):
         """Per crease: (t from, t to, angle in degrees) for each segment of its line, measured as measure() does."""
         x = self.fab.pos if x is None else x
@@ -527,17 +533,19 @@ class Folds:
             out.append(dict(move=np.nonzero(s > 1e-9)[0], seg=k, near=near, tseg=kt, on=on, onseg=k[on]))
         return out, up
 
-    def _lay(self, x, sides, up, f):
-        """Lay each crease's moving side over to f of its fold, in the frame of the crease as it lies now (its axis
-        through the points where the turn begins, the fixed side's direction and normal): the fold as made from the
-        pattern (see Crease.folded), so the band takes the fold's arc and the cloth past it is turned whole, every
-        length on the moving side kept. The hand that lays the flap over while the iron goes down."""
+    def _targets(self, x, sides, up, f):
+        """Per crease, per segment of its line: where the fold as drafted (see Crease.folded, f of its angle) puts the
+        moving side's free points, in the frame of the crease as it lies now (its axis through the points where the
+        turn begins, the fixed side's direction and normal). Yields (crease index, points, their targets, the
+        drafted flap's direction past the band, and its normal)."""
         N = np.cross(x[self.T[:, 1]] - x[self.T[:, 0]], x[self.T[:, 2]] - x[self.T[:, 0]]) * up
         w = self.fab.w
         P = self.flat[:, :2]
-        for c, sd in zip(self.creases, sides):
+        for ci, (c, sd) in enumerate(zip(self.creases, sides)):
             r = c.radius if c.width(self.h) > 0 else 0.0
             part = Crease(c.line, c.angle * f, r, c.side)
+            th = abs(part.angle)
+            zs = part.side * (1.0 if part.angle >= 0 else -1.0)
             for seg in range(len(c.line) - 1):
                 pts = sd['on'][sd['onseg'] == seg]
                 sel = (sd['seg'][sd['move']] == seg) & (w[sd['move']] > 0)
@@ -563,10 +571,62 @@ class Folds:
                 F3 = part.folded(P[mv], seg)
                 t = (F3[:, :2] - A) @ u
                 sa = (F3[:, :2] - A) @ nrm
-                x[mv] = O + t[:, None] * ax + sa[:, None] * pa + F3[:, 2:3] * n
+                tgt = O + t[:, None] * ax + sa[:, None] * pa + F3[:, 2:3] * n
+                d = math.cos(th) * pa + zs * math.sin(th) * n            # (the flap's way out past the band)
+                fn = -zs * math.sin(th) * pa + math.cos(th) * n          # (and the flap's own normal)
+                yield ci, mv, tgt, d, fn
+
+    def _lay(self, x, sides, up, f):
+        """Lay each crease's moving side over to f of its fold (see _targets): the band takes the fold's arc and the
+        cloth past it is turned whole, every length on the moving side kept. The hand that lays the flap over while
+        the iron goes down."""
+        for _, mv, tgt, _, _ in list(self._targets(x, sides, up, f)):
+            x[mv] = tgt
+
+    def band(self, pad=1.0):
+        """The points of every crease's turn: across its line from pad rows before it to pad rows past the band
+        (r * angle), and along it no further than pad rows past its ends. A floor or body pushing on these pushes
+        the turn open (the turn's rows rise from the line through the floor's height); see bake(body_band=)."""
+        P = self.flat[:, :2]
+        out = np.zeros(len(P), bool)
+        for c in self.creases:
+            k, t, s = c.frame(P)
+            Ln = np.linalg.norm(c.line[1:] - c.line[:-1], axis=1)[k]
+            W = c.width(self.h)
+            out |= (s > -pad * self.h) & (s < W + pad * self.h) & (t > -pad * self.h) & (t < Ln + pad * self.h)
+        return out
+
+    def land(self, x=None):
+        """Per crease: where the flap (the moving side past the band) lands against the fold as drafted, in the
+        crease's frame as it lies now. The angle across the fold (measure) can be on target while the flap sits off
+        its line: a turn that leans or flattens spends less cloth than its arc, and the rest goes into the flap.
+        Returns dicts: along (mean offset along the drafted flap's way out: + the flap reaches past its draft, the
+        turn took less cloth than its arc), off (mean offset along the flap's normal: + stands off), worst (the
+        largest distance from the draft), rms."""
+        x = self.fab.pos if x is None else x
+        sides, up = self._sides()
+        P = self.flat[:, :2]
+        acc = [[] for _ in self.creases]
+        for ci, mv, tgt, d, fn in self._targets(x, sides, up, 1.0):
+            c = self.creases[ci]
+            _, _, s = c.frame(P[mv])
+            past = s > c.width(self.h) + self.h
+            if past.any():
+                acc[ci].append((x[mv[past]] - tgt[past], d, fn))
+        out = []
+        for a in acc:
+            if not a:
+                out.append(dict(along=float('nan'), off=float('nan'), worst=float('nan'), rms=float('nan')))
+                continue
+            al = np.concatenate([e @ d for e, d, _ in a])
+            of = np.concatenate([e @ fn for e, _, fn in a])
+            dist = np.concatenate([np.linalg.norm(e, axis=1) for e, _, _ in a])
+            out.append(dict(along=float(al.mean()), off=float(of.mean()), worst=float(dist.max()),
+                            rms=float(np.sqrt((dist ** 2).mean()))))
+        return out
 
     def bake(self, body=None, h=1.0 / 240, ramp=None, speed=6.0, tol_deg=1.0, tol=2e-4, most=3000, passes=4,
-             damping=0.35, guide=True, correct=True, sheet=None, target=None, log=print):
+             damping=0.35, guide=True, correct=True, body_band=True, sheet=None, target=None, log=print):
         """Fold the sheet:
 
           1. over ramp seconds (default: the largest angle over speed, radians a second) the creases' rest angles
@@ -588,10 +648,21 @@ class Folds:
         the profiles, the angle along each crease, strain and bend on the pattern) to sheet (a .png path; default
         a new file in the fold cache's sheets folder; False: none), over target ([n, 3]: the shape it should take,
         if there is one), and report.sheet names it: look at it before any render (John's rule, 2026-11-20).
+        body_band: False leaves the creases' turns (see band) out of the body: only the cloth before and past each
+        turn is pushed. A floor under a rolled fold otherwise pushes the turn's own rows open (the lapel: strain 5/95 %
+        of -6/15 %, worst 300-500 %; with the band left out -1.3/3.7 %). The hinges hold the turn.
 
         passes: hinge walks a step. Returns a Report; report.ok is False if `most` steps ran out first, and
         report.why says by how much and where."""
         fab = self.fab
+        if body is not None and not body_band:
+            free = self.band()
+            whole = body
+
+            def body(x, whole=whole, keep=~free):
+                p, t = x.copy(), np.zeros(len(x), bool)
+                p[keep], t[keep] = whole(x[keep])
+                return p, t
         H = np.concatenate(self._H)
         rest = np.concatenate(self._rest)
         comp = np.concatenate(self._comp)
@@ -655,10 +726,13 @@ class Folds:
             fab.prev[:] = fab.pos
         rep.steps = k
         m = self.measure()
-        for (a, worst), c, Hc in zip(m, self.creases, self._H):
+        ld = self.land()
+        for (a, worst), c, Hc, l in zip(m, self.creases, self._H, ld):
             rep.creases.append(dict(name=c.name, target_deg=round(math.degrees(abs(c.angle)), 2),
                                     achieved_deg=round(a, 2), worst_deg=round(worst, 2), hinges=int(len(Hc)),
-                                    band=round(max(c.width(self.h), self.h), 4)))
+                                    band=round(max(c.width(self.h), self.h), 4),
+                                    land_along=round(l['along'], 4), land_off=round(l['off'], 4),
+                                    land_worst=round(l['worst'], 4)))
         if not rep.ok:
             short = [c for c in rep.creases if not abs(c['achieved_deg'] - c['target_deg']) <= tol_deg]
             rep.why = ('%s %.1f deg off' % (short[0]['name'], short[0]['achieved_deg'] - short[0]['target_deg'])
