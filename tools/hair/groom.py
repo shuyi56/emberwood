@@ -601,6 +601,58 @@ def wave_rest(X, lengths, lam, ph, seg_hh):
     return kb0, Ys, ds
 
 
+# Waves that drape, from stylists [WS-*]: curl last, after the brush, and let it set [WS-AS]; start below the root, at
+# the cheekbone or eye level [WS-AS][WS-WWW] (WAVE_Z_RAMP); leave the last inch straight [WS-TYMO][WS-BTC]; weight
+# stretches the wave near the top [WS-HF] (wave_rest's hang). [WS-AS] americansalon.com, natural beach waves;
+# [WS-WWW] whowhatwear.com, S-waves; [WS-TYMO] tymobeauty.com wave guide; [WS-BTC] behindthechair.com, Hollywood and
+# beachy waves; [WS-HF] hairfinder.com, weighed-down hair. CG: Pixar (Merida) and Disney keep the curl's rest shape
+# against gravity (fxguide, Brave; Disney, gravity preloading): here the wave is laid again after the passes.
+WAVE_SET_GAIN = 0.8                # the set wave's share of the rest wave, CALIBRATED: the sides' median wave 8 mm, the
+                                   # creator's 8.2 (at 1.0: 10.3, and the neighbours' waves crossed)
+WAVE_END_STRAIGHT = 2.5            # nodes (2.5 cm, an inch): the ends left straight
+WAVE_SET_TH = (2.0, 2.6)           # |theta| of the roots: the wave set fades from the sides to none at the back
+WAVE_SET_ITERS = 60                # Laplacian steps that take the wave out of a path to find its middle line (a 14 cm
+                                   # wave falls to 5%, the shoulder's 60 cm curve keeps 85%)
+
+
+def wave_set(X, roots, keep, lam, ph, seg_hh):
+    """The wave set again as the last step, as a stylist curls last, after the brush [see WAVE_SET sources in
+    build_groom]: the combing, the shoulder pass and the relax smooth the solved wave away. Each strand's middle line
+    (the wave smoothed out of it, the root held) gets the formula's settled wave laid back along it (wave_paths, with
+    the amplitude each node's hang leaves it, as wave_rest), at the rod's segment length. keep: left as they are."""
+    X = X.copy()
+    G, S1 = X.shape[:2]
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    C = X.copy()
+    for g in range(G):                                     # (past the end: the last direction carried on)
+        k = n[g]
+        if k < S1:
+            d = C[g, k - 1] - C[g, k - 2]
+            C[g, k:] = C[g, k - 1] + d * np.arange(1, S1 - k + 1)[:, None]
+    # (smoothed only where the wave lives, below WAVE_Z_RAMP's top: above it the tuck behind the ear and the combed
+    # top keep their line; smoothed there, the tucked sides swung forward over the cheek)
+    wz = SF.sm(WAVE_Z_RAMP[0], WAVE_Z_RAMP[1], C[..., 2])[..., None]
+    for _ in range(WAVE_SET_ITERS):
+        L = np.zeros_like(C)
+        L[:, 1:-1] = 0.5 * (C[:, :-2] + C[:, 2:]) - C[:, 1:-1]
+        L[:, -1] = C[:, -2] - C[:, -1] + (C[:, -2] - C[:, -3])          # (the end: toward its line's continuation)
+        C = C + 0.5 * L * wz
+    A0 = WAVE_SET_GAIN * WAVE_A_MM / SF.HH_MM * SF.sm(WAVE_Z_RAMP[0], WAVE_Z_RAMP[1], C[..., 2])
+    # the last inch left out of the iron, straight [WS-TYMO][WS-BTC]
+    A0 = A0 * np.clip(((n - 1)[:, None] - np.arange(S1)[None]) / WAVE_END_STRAIGHT, 0, 1)
+    hang_m = np.maximum((n - 1)[:, None] - np.arange(S1)[None], 0) * SEG_M
+    kw = 2 * np.pi / (lam * HH_M)
+    f = 1.0 / (1.0 + hang_m / (ELASTOGRAVITY_M ** 3 * kw[:, None] ** 2))
+    Y, _ = wave_paths(C, lam, ph, A0 * f, seg_hh)
+    Y[~ok] = np.nan
+    # the sides only: the back kept as it settled (John, 2026-11-23: "the back is perfect, the sides need work"),
+    # the set fading out behind the shoulder
+    w = (1.0 - SF.sm(WAVE_SET_TH[0], WAVE_SET_TH[1], np.abs(SF.theta(roots)))) * ~keep
+    X = X + w[:, None, None] * (Y - X)
+    return X
+
+
 def push_out(col, X, layer=None, margin_hh=1.0 / SF.HH_MM, steps=8):
     """Nodes of a placed (combed, not solved) path moved out of the head and the body along the depth's gradient,
     to the hair's layer off them plus a margin; the root stays."""
@@ -1912,6 +1964,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X2 = end_roll(X2, roots, bang, SIDE_ROLL_DEG, col)
         # (relax ends on the cap, which runs down through her shoulders and cape: the last word is the body's, and a
         # relax without the cap takes out the bends that push leaves)
+        if wavy:
+            # the waves set last, as the stylists curl after the brush: the comb, the shoulder pass and the relax had
+            # smoothed the Warden's settled wave to half (7 mm at the 90th percentile, against the creator's 13)
+            X2 = wave_set(X2, roots, bang, lam, ph, seg_hh)
         X2 = push_valid(col, X2)
         X2 = relax_kinks(X2, col, None, keep=bang)
     if trace and not wavy:
