@@ -406,3 +406,45 @@ at the points.
 - **Missed:** notchcollar assumes the gorge runs well below the roll top. On a high lapel the whole lapel is roll, the
   collar end sits on the turn, and the stand-from-the-neckline construction stands the end up at the side neck. The
   habit itself solves this with a separate standing collar. Fixing it needs a change of construction, not settings.
+
+## Phase 6b: the collar's roll run into the lapel's (2026-11-23)
+
+John chose "Collar roll runs into the lapel". Sections through the neck's axis round the roll top showed why the high
+lapel creased: the collar's stand died to nothing at each roll top and its turn closed onto the fall (`end_taper`),
+while the lapel's own roll there is an open loop about 0.25 wide. The collar stood off it with a gap, and its fall
+rode over the lapel's roll ridge at the side neck.
+
+New notchcollar options, off by default (the low-lapel build comes out byte for byte the same):
+
+- `join_h`: the stand starts this high at each roll top instead of at nothing, and the turn is left open there
+  (`end_taper` 0), so the collar's turn meets the lapel's roll as one roll at the gorge.
+- `join_run`: over this length of roll line from each roll top the turn is a true half round, as the lapel's is.
+
+| Round | What | Result |
+|---|---|---|
+| 1 | `join_h` 0.25, and 0.15 with run 1.5 | fall/turn crease 43.9 -> 24.8°, objective 4.38 -> 3.93-3.99; the gap at the roll top closes |
+| 2 | `join_h` 0.08-0.2, run 1-6, notch 15 | lower is better: `join_h` 0.08, run 2, objective 3.89; the run moves the crease 26.0 -> 24.6° |
+| 3 | lapel `roll_radius` 0.30 / 0.36, break 49.0 | tip fold 21-33°: worse (rejection 127); stopped |
+
+Chosen: `{"recipe":"classical_lapel","neck_x":2.4,"foot":48.25,"belly":0.001}` with notchcollar
+`{"notch_angle":20,"notch_at":0.6,"point_len":0.5,"roll_r":0.16,"join_h":0.08,"join_run":2}`. **Experimental:** every
+number here is the solver's; the habit photo gives only the break and the lapel's ratios.
+
+| Measure (her right / her left) | Low lapel (phase 5) | High, no join | High, roll joined |
+|---|---|---|---|
+| lapel edge strain, 95th pct | 7.8 / 8.9% | 8.7 / 10.9% | 8.7 / 10.9% |
+| gorge load evenness (cv) | 0.40 / 0.39 | 0.59 | 0.59 / 0.62 |
+| turn across the gorge, 90th pct | 39.8 / 41.3° | 38.7° | 38.7 / 37.8° |
+| fall/turn crease, fronts p90 | 36.3° | 43.9° | 24.9° |
+| collar tip fold (limit 15.6) | 13.3 / 12.4° | 18.0° | 17.2 / 18.0° |
+| notch as laid | 30.0 / 30.9° (30 asked) | 22.3 / 20.0° (20 asked) | 22.4 / 20.2° (20 asked) |
+| refmeasure lapel point reach / drop, collar point reach | 0.545 / 0.413, 0.513 | | 0.449 / 0.214, 0.449 (sides within 0.003) |
+
+Still wrong in the close-ups (rejection 128): a small open curl where the collar's turn meets the lapel's roll, and
+the collar's top standing round at the side neck. The tip fold is over its limit. The collar's turn is built as a
+vertical half round off the stand; the lapel's roll at its top runs at the crease's angle, so the two loops meet
+twisted. Turning the collar's turn cross-section at the roll top into the lapel's is the next change.
+
+- **Caught:** sections through the neck's axis at fixed azimuths showed the gap and the ridge the renders only hinted at.
+- **Missed:** the tip fold gauge sits at the top of the gorge seam, which on a high lapel is the roll junction: it
+  reads the junction's twist, so collar point settings could never move it.

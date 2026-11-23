@@ -43,6 +43,12 @@ neck_clear = opt.get('neck_clear', 0.05)    # the stand's inside this far off th
 lean = opt.get('lean', 0.35)                # the stand leans in toward the neck (share of its height)
 roll_r = opt.get('roll_r', 0.08)           # the roll line's soft turn, radius (0: a hard fold between two pieces)
 end_taper = opt.get('end_taper', 0.25)     # below this stand height the turn tapers onto the fall's roll point: the collar's ends closed (0: left open)
+# the collar's roll run into the lapel's (John, 2026-11-23, for the high lapel: "Collar roll runs into the lapel"): at
+# each roll top the collar's turn starts as wide as the lapel's own turn there (join_h, the stand's height at the roll
+# top) and as round, so the two rolls meet at the gorge as one roll instead of the collar's standing off the lapel's
+join_h = opt.get("join_h", 0.0)        # (0: off, the stand dies to nothing at each roll top as before)
+join_run = opt.get('join_run', 1.0)       # (the turn is kept round over this length of roll line from each roll top)
+if join_h > 0 and 'end_taper' not in opt: end_taper = 0.0     # (the collar's turn meets the lapel's open, as one roll: not closed onto the fall)
 rise = opt.get('rise', 1.3)                 # the outer edge rises to each collar point over this much azimuth (radians)
 gap = opt.get('gap', 0.04)
 hm = opt.get('mesh', 0.06)
@@ -141,6 +147,7 @@ def _rise(k0, k1, crease):
     # (a rise with that slope at N that levels out smoothly to the full stand by the side neck point)
     ss_ = np.abs(eL - eL[k0]); k_ = max(a_ / stand, 3.0 / S)
     h = stand * (1 - np.exp(-k_ * ss_)) / (1 - np.exp(-k_ * S)); h = np.where(ss_ <= S, np.minimum(h, stand), stand)
+    if join_h > 0: h = join_h + (stand - join_h) * h / stand      # (the roll joined to the lapel's: the stand starts at the lapel's turn, not at nothing)
     ang0 = math.degrees(math.acos(np.clip(tE @ c_, -1, 1)))
     return h, best[0], ang0, a_, S
 if opt.get('from_neck', True):
@@ -687,6 +694,9 @@ for i in ir:
         F_ = P3[i]; Cc = 0.5 * (S_ + F_); hh = 0.5 * (S_ - F_); HH.append(2 * np.linalg.norm(hh))
         u_ = Z - lean * radial(S_); u_ = u_ - (u_ @ hh) / max(hh @ hh, 1e-12) * hh; u_ /= np.linalg.norm(u_)
         bb = roll_r * min(1.0, h_ / stand) ** 2     # (a flat half round over however wide the turn is; fading out fast where the stand dies away toward the lapels, so no lump or curl at its end)
+        if join_h > 0:     # (near each roll top the turn is a true half round, as the lapel's roll is, fading to the collar's own flat turn)
+            dN_ = min(abs(ps - Ec[0, 0]), abs(Ec[-1, 0] - ps)) * np.linalg.norm(S_[:2] - np.array([0.0, yc]))
+            bb = max(bb, np.linalg.norm(hh) * (1 - ss(0.0, join_run, dN_)))
         for t_ in np.linspace(0, 1, nA + 2)[1:-1]:
             ln_.append(len(P3) + len(sv)); sv.append(Cc + math.cos(math.pi * t_) * hh + math.sin(math.pi * t_) * bb * u_)
         ln_.append(int(i))

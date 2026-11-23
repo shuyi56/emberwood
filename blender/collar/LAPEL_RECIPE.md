@@ -459,3 +459,12 @@ John: "How do you solve for shape not just angle of the collar". Three shape opt
 the roll on this low stand, so the stand stays full; a slight hollow in the collar end evens the gorge load (cv 0.43 to
 0.39). Worn: `{"recipe": "eased_top_lapel"}` with notchcollar `{"notch_angle": 30, "rise_gain": 1.6, "end_bow": -0.2}`.
 Rounds: docs/clothing-solvers/lapel-tension-solver.md, phase 5.
+
+## The high (classical) lapel with the notch collar (2026-11-23)
+
+John: "Run the solver now with the harder problem of a high lapel", "The classic one", then "Collar roll runs into the
+lapel". On `classical_lapel` the collar needs the roll line to meet the neck 2.4 out (3.0 knots the collar ends), phase
+1's straight roll line, and the new `join_h` / `join_run` options, which start the collar's turn as wide and round as
+the lapel's roll at each roll top. Best so far: `{"recipe":"classical_lapel","neck_x":2.4,"foot":48.25,"belly":0.001}`
+with notchcollar `{"notch_angle":20,"notch_at":0.6,"point_len":0.5,"roll_r":0.16,"join_h":0.08,"join_run":2}`. Not
+approved: a small curl shows where the two rolls meet. Rounds: docs/clothing-solvers/lapel-tension-solver.md, phase 6.
