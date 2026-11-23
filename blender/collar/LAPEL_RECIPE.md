@@ -424,3 +424,13 @@ Strain mean 4.3/4.7% to 3.1/3.6%, 95% of edges 14.3/15.0% to 9.7/10.9%, worst vi
 the button pins about halved, the notch laid 40.4 on both sides. The outline is 0.42 wide (was 0.40) so the lapel's
 reach stays 0.64 of the half shoulder. The roll top, break, point and collar are unchanged: the field either did not
 care or its preferences did nothing built. See `docs/clothing-solvers/lapel-tension-solver.md`.
+
+## The lapel and collar solved together (2026-11-23)
+
+John: "solve for smooth joins between lapel and collar that evenly distributes load". `blender/tension/feasible.py`
+swept 57 lapel and collar builds against the approved build's limits (26 feasible), then searched the join. The
+chosen pair: `{"recipe": "joined_lapel"}` (the derived lapel with its point raised from 0.27 to 0.24 of the roll line)
+and notchcollar `{"notch_angle": 30}`. The collar meets the lapel at 39 degrees across the gorge (90th percentile)
+against 50 to 54; lapel strain stays at the derived 9.5 / 10.8% (95th pct). A 0.09 point fillet scored a little
+better and tore the right lapel's edge; the stand's settings do not reach the gorge. Numbers and rounds:
+docs/clothing-solvers/lapel-tension-solver.md, phase 2.

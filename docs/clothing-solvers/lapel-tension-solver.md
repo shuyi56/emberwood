@@ -98,3 +98,97 @@ purpose, in both builds.
   change.
 - Next: the evaluator should include the collar's ground (where the fall lies past the neck edge), and foldfront's
   outline mesher should be checked with an inverted-face count.
+
+# Phase 2: the coupled lapel-collar solve (2026-11-23)
+
+John: "Solve for the geometry with a couple solver first find a feasible space for tension then solve for smooth joins
+between lapel and collar that evenly distributes load sweep angle shape size". Stage 1 maps where tension stays inside
+limits across lapel and collar together; stage 2 picks, inside that region, the join that turns the collar onto the
+lapel most smoothly and spreads the load most evenly along the gorge. Code: `blender/tension/join.py` (the join gauge)
+and `blender/tension/feasible.py` (limits, map, objective).
+
+## The join gauge
+
+Per side, on the gorge seam (the collar's boundary that lies on the lapel's top edge): the gap to the lapel's edge,
+the turn between the collar's and the lapel's surfaces across the seam (from a plane fitted to each cloth within
+0.3 units, 7.9 mm), the seam line's kink, the strain on each side in a 0.4 band (the lapel's against its cut, the
+collar's against its own ARAP flat cut), cut into eight stretches along the seam: the coefficient of variation of each
+side's stretches (evenness, 0 is even) and the lapel's worst stretch over its mean (peak), and the collar tip's fold.
+
+## Stage 1: the feasible region
+
+No published strain limit for a fulled wool was found (Kawabata's KES-F gives tensile, shear and bending measures, not
+tailoring thresholds), so every limit is the approved build's own number: lapel edge strain 95th percentile under 15.0%
+on both fronts, the worst visible edge under +39%, the field's turned-lapel energy under 0.0169, the collar's flat cut
+under 2.5% at the 95th percentile with no neighbouring faces over 60 degrees apart, the notch laid within 2.5 degrees
+of the angle asked, the seam closed (under 8 mm, a cloth and a half), and the collar tip's fold under 15.6 degrees (the
+approved builds' 13.6 to 14.1, plus 10%).
+
+Sweep: 7 lapels (width 0.38 / 0.42 / 0.46 × point 0.24 / 0.27 / 0.30 of the roll line), a full 27-build collar grid on
+the derived lapel (notch angle 30 / 40 / 50 × notch position 0.35 / 0.5 / 0.65 × collar point 0.55 / 0.7 / 0.85) and a
+5-point star on each other lapel: 57 builds, **26 feasible**. Every lapel passes the tension limits (95th percentile
+10.3 to 11.4%); what fails is the notch not laying at the angle asked (most failures, 2.6 to 8.0 degrees off, worst at
+notch position 0.65 and point 0.55), one build with sharp folds (w0.38 p0.30, notch 50) and the tip fold at
+w0.46 p0.24 notch 40 at 0.35. Map: `/mnt/project-files/lapel-tension/phase2-feasible-map.png`.
+
+## Stage 2: the join, three rounds
+
+Objective: evenness / 0.52 + turn (90th pct) / 53.3 + tip fold / 13.6, each over the approved build's value, so the
+approved build scores 3.0. The lapel-to-collar load ratio is reported, not scored: lowering it by loading the collar
+would add tension, not spread it.
+
+| Round | Varied | Best | Gain | Verdict |
+|---|---|---|---|---|
+| 0, stage 1 | lapel width × point, notch angle × position × collar point | w0.42 p0.24, notch 30 at 0.5, point 0.7: 3.00 | derived 3.27 to 3.00 | notch 30 more even than 40 on all 6 star lapels (cv 0.51 to 0.63 against 0.59 to 0.72) |
+| 1 | the stand at the gorge: stand_run 2.6 to 4.0, roll_r 0.05 to 0.14, end_taper 0.15 to 0.4 (27 builds) | all identical | none | the fall mesh came out byte-identical: the stand does not touch the gorge (rejection 118) |
+| 2 | the gorge from the lapel side: where the top edge leaves the roll line (0.02 / 0.04 / 0.08), the point fillet (0.05 / 0.09), the collar tip rounding (0.15 / 0.30) | gorge from 0.04, fillet 0.09, notch 40: 2.90 | small (3%) | the 0.09 fillet tore the right lapel's edge at every mesh size tried (rejection 119); tip rounding 0.30 creased the collar (15 to 28 sharp folds) or stretched it to 11%; gorge from 0.08 pinched the tip (22 to 25 degrees) |
+
+Two rounds of small or no gain: stopped, per the iteration rules. The chosen build is round 0's best that is clean in
+close-up: `RECIPES['joined_lapel']` (the derived lapel with its point at 0.24) with notchcollar's notch_angle 30. Width
+0.46 at the same point and notch tied it (2.997 against 2.999, inside the sweep's spread); 0.42 is kept because it
+holds the reach refmeasure checked in phase 1, and a wider lapel carries more edge strain (11.2% against 10.8%).
+
+## Before and after (her right / her left)
+
+| Measure | Approved | Derived (phase 1) | Joined (phase 2) |
+|---|---|---|---|
+| lapel edge strain, mean | 4.3 / 4.7% | 3.1 / 3.6% | 3.1 / 3.6% |
+| lapel edge strain, 95th pct | 14.3 / 15.0% | 9.7 / 10.9% | 9.5 / 10.8% |
+| worst visible edge (her right) | +39% | +26.8% | +26.0% |
+| turn across the gorge, 90th pct | 52.9 / 53.8° | 50.8 / 50.3° | **38.6 / 39.0°** |
+| turn across the gorge, mean | 33.2 / 32.9° | 32.5 / 32.2° | 31.5 / 31.4° |
+| seam kink, 90th pct | 39.0 / 38.3° | 41.0 / 40.9° | 37.4 / 37.1° |
+| load evenness along the gorge (cv, lower is even) | 0.51 / 0.54 | 0.65 / 0.68 | 0.62 / 0.63 |
+| lapel's worst stretch over its mean | 1.76 / 1.83 | 2.14 / 2.23 | 2.45 / 2.63 |
+| lapel / collar load at the gorge | 2.85 / 0.52% | 2.83 / 0.49% | 2.63 / 0.58% |
+| collar tip fold | 13.6 / 13.6° | 13.9 / 14.1° | 11.3 / 14.5° |
+| collar flat cut, 95th pct | 2.12% | 2.16% | 2.16% |
+| notch as laid | 40.9 / 41.0° | 40.4 / 40.4° | 30.2 / 30.1° |
+| objective | 3.00 | 3.27 | 3.00 |
+| refmeasure, lapel point reach / drop (shoulder unit) | | 0.550 / 0.442 | 0.561 / 0.418 (both sides equal to 0.001) |
+
+What it bought: the collar meets the lapel at 39 degrees instead of 50 to 54 across most of the gorge, with the lapel
+strain kept at the phase 1 level. What it did not: the load along the gorge is still less even than the approved
+build's, because straightening the roll line in phase 1 put more of the lapel's strain at the roll end of the gorge
+(the peak 1.8 to 2.4 times the mean). Nothing on the collar side moves that; the next lever is the roll line's top
+itself, which ties back into phase 1's field. Her left lapel's hidden cusp (the last fifth of the under lapel, behind
+the upper front) reads +74% worst against +60% approved and +64% derived.
+
+## What failed in phase 2, and why
+
+| Problem | Numbers | Cause | Fix |
+|---|---|---|---|
+| Every build failed "lapel torn" | dihedral 170 to 180° on all 57, the approved build too | **gauge**: the lapel's points are triangulated on their chart, and the slivers this makes read as folds | the gauge reported, not applied; the worst-edge limit is what caught phase 1's swell tear |
+| The turn across the seam jumped 10 to 60° point to point | turn max 61 to 83°, the same on every build | **gauge**: face normals of the same chart triangulation | a plane fitted to each cloth within 0.3 units; the profile then holds at 0.12, 0.2 and 0.3 |
+| Evenness mostly measured the lapel/collar ratio | pooled cv 1.0 on every build | **gauge**: one cv over both sides, one carrying 5 times the other's strain | cv per side, averaged |
+| The stand's settings did nothing | 27 identical fall meshes | **design**: the stand hangs from the fall's roll line; the gorge is the fall's edge | rejection 118 |
+| The best-scoring lapel tore | inverted faces on her right lapel's edge below the point | **modelling** in foldfront's outline mesher at a 0.09 fillet, at lapel_mesh 0.065, 0.07 and 0.075 alike | rejection 119; fillet kept at 0.05 |
+
+## Which checks caught problems in phase 2
+
+- **Caught:** rendering the approved build through every gauge exposed the torn-lapel and turn gauges as noise (the
+  approved build failed them). The md5 of the fall mesh showed round 1 changed nothing. The clay neck close-ups
+  (both 3/4 sides) and a 1.6-unit close-up found the fillet tear that no number flagged.
+- **Missed:** none of the join numbers sees a torn edge: the tear is off the gorge.
+- **Next:** an inverted-face count on the turned lapel, the gap noted in phase 1, would have caught rejection 119 in
+  the sweep instead of at verification.

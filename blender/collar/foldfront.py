@@ -64,6 +64,11 @@ RECIPES['classical_lapel'] = dict(RECIPES['traced_lapel'], neck_x=3.0, foot=49.0
 # the bust. Built: strain mean 4.3/4.7% to 3.1/3.6%, 95% 14.3/15.0% to 9.7/10.9%. Outline 0.42 wide keeps the reach
 # 0.64 of the half shoulder. See docs/clothing-solvers/lapel-tension-solver.md.
 RECIPES['derived_lapel'] = dict(RECIPES['notch_lapel'], belly=0.001, outline=[[0.04, 0.0], [0.27, 0.42], [1.0, 0.0]])
+# the lapel of the coupled lapel-collar solve (John, 2026-11-23: "find a feasible space for tension then solve for smooth
+# joins between lapel and collar"): the point raised from 0.27 to 0.24 of the roll line turns the collar onto the lapel
+# 39 degrees across the gorge (90th percentile) instead of 50; worn with the notch collar at notch_angle 30. A 0.09
+# point fillet scored better and tore the right lapel's edge (rejection 119). See docs/clothing-solvers/lapel-tension-solver.md.
+RECIPES['joined_lapel'] = dict(RECIPES['derived_lapel'], outline=[[0.04, 0.0], [0.24, 0.42], [1.0, 0.0]])
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape

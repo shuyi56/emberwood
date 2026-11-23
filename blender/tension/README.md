@@ -18,6 +18,11 @@ the Gaussian curvature map only (`derive.field_png`).
 | `clay.py` | bpy | Cheap draft renders, clay or colour-coded by design part (fronts, each lapel, collar, buttons), on fixed ortho cameras with an off-centre `at`. |
 | `montage.py` | Pillow | Before/after sheets of clay.py renders. |
 | `landmarks.py` | bpy, tools/refmeasure | Projects a build's coat landmarks (roll tops, break, lapel points, collar points, shoulders, waist) into the front render and writes its refmeasure sheet. |
+| `join.py` | numpy, scipy | The join between each lapel and the collar on a build: gap, step, turn across the gorge (plane-fit normals), seam kink, load on each side along the seam (evenness, peak, ratio), collar tip fold. |
+| `collar_gauge.py` | numpy, scipy | The collar's ARAP flat cut and its stretches (join.py reads it). |
+| `gauge_fold.py` | blender/zipboot/gauge.py | The sharpest dihedral of a patch. |
+| `sweep.py` | foldfront, notchcollar | Builds one lapel and a grid of collars on it, each gauged; the coupled sweep's builder. |
+| `feasible.py` | matplotlib | Stage 1 and 2 of the coupled solve: the limits (the approved build's own numbers), the feasible map, the join objective. |
 
 ## Run
 
@@ -39,6 +44,15 @@ unchanged):
 ```
 python3 blender/collar/foldfront.py CUT.blend LAPEL.blend '{"recipe":"derived_lapel"}'
 ```
+
+The coupled lapel-collar solve (phase 2): build a sweep, map it, pick the join.
+
+```
+python3 blender/tension/sweep.py CUT.blend SWEEP w42_p24 '{"recipe":"joined_lapel"}' '{"notch_angle":[30,40,50],"notch_at":[0.35,0.5,0.65],"point_len":[0.55,0.7,0.85]}'
+python3 -I blender/tension/feasible.py SWEEP OUT [--field preL.jsonl]     # OUT/feasible.png, OUT/sweep.json, best feasible joins
+```
+
+The chosen pair of 2026-11-23: `{"recipe":"joined_lapel"}` with notchcollar `{"notch_angle":30}`.
 
 Run Blender-module scripts with `python3 -I` when the working directory holds a file named like a standard module.
 
