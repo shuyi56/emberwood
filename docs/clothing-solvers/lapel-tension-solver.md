@@ -192,3 +192,68 @@ the upper front) reads +74% worst against +60% approved and +64% derived.
 - **Missed:** none of the join numbers sees a torn edge: the tear is off the gorge.
 - **Next:** an inverted-face count on the turned lapel, the gap noted in phase 1, would have caught rejection 119 in
   the sweep instead of at verification.
+
+# Phase 3: the roll line's top (2026-11-23)
+
+John: "Fix the roll line". Phase 2 left the gorge load less even than the approved build's (cv 0.62 against 0.51), with
+the lapel's worst stretch of the gorge at its roll end, 2.4 times the mean. Straightening the roll line in phase 1 took
+away the approved line's swing near the neck along with the swing over the bust.
+
+Source: the historical-tailoring masterclass on Devere's 1866 manual (masterclasses.historical-tailoring.com, November
+2019) calls the alignment of the roll lines at the neck "the most crucial point of the entire process, you want to make
+sure that the roll line of the forepart and the collar align exactly", and has the collar's roll line curved near the
+notch, "at about the half way point, the curve of the roll line straightens out". A roll line straight from the break to
+the neck point meets the collar's curving roll line at an angle, and the lapel takes that angle as strain at the gorge's
+roll end. Mechanics: the turned lapel is the cloth mirrored over the line, so a line bowed toward the V near the neck
+shortens the mirrored distance there.
+
+Change: foldfront's `belly_top`, a second swing near the neck on the otherwise straight line, `belly_top * 6.75 t (1-t)^2`
+(peak at a third of the way down; positive swings out from the V like `belly`). Every build: `joined_lapel` with the
+notch-30 collar, the same join gauge and objective as phase 2. **This change is experimental**: no tailoring text gives
+the swing's size; it is the solver's.
+
+| Round | belly_top | Gorge cv | Lapel peak / mean | Lapel 95% | Tip fold | Objective | Verdict |
+|---|---|---|---|---|---|---|---|
+| (joined) | 0 | 0.63 | 2.45 / 2.63 | 10.8% | 14.5° | 3.00 | |
+| 1 | +0.06 | 0.61 | 2.63 / 2.59 | 12.8% | 17.7° | 3.21 | infeasible (tip) |
+| 1 | +0.12 | 0.51 | 2.10 / 2.14 | 14.9% | 13.3° | 2.69 | gives back phase 1's strain (rejection 120) |
+| 1 | -0.06 | 0.51 | 1.95 / 2.15 | 8.9% | 20.7° | 3.26 | infeasible (tip); collar retuned in round 2: notch at 0.65 cleared the tip but laid 6.5° off |
+| 2 | -0.03 | 0.55 | 2.13 / 2.28 | 9.9% | 12.7° | 2.72 | |
+| 2 | -0.10 | 0.47 | 1.70 / 1.83 | 8.4% | 15.2° | 2.79 | |
+| 3 | -0.08 | 0.46 | 1.76 / 1.87 | 8.5% | 14.5° | 2.71 | |
+| 3 | **-0.14** | **0.42** | **1.60 / 1.70** | 8.9% | 13.3° | **2.57** | chosen |
+| 4 | -0.18 | 0.38 | 1.34 / 1.39 | 9.8% | 15.5° | 2.65 | worse: stopped |
+| 4 | -0.22 | 0.37 | 1.29 / 1.34 | 10.9% | 22.0° | 3.10 | infeasible (tip) |
+
+The gorge evens out steadily the further the top swings in; past -0.14 the lapel strain climbs back (8.9 to 10.9%) and the
+collar tip pinches. Round 4 scored worse, so the rounds stopped there, per the iteration rules. A longer collar point
+(0.85) tried at -0.08, -0.10 and -0.14 was slightly worse each time (2.65 to 2.82).
+
+## Before and after (her right / her left)
+
+| Measure | Approved | Joined (phase 2) | Roll top eased (phase 3) |
+|---|---|---|---|
+| lapel edge strain, mean | 4.3 / 4.7% | 3.1 / 3.6% | 3.2 / 3.7% |
+| lapel edge strain, 95th pct | 14.3 / 15.0% | 9.5 / 10.8% | **7.8 / 8.9%** |
+| worst visible edge (her right) | +39% | +26.0% | +26.6% |
+| gorge load evenness (cv) | 0.51 / 0.54 | 0.62 / 0.63 | **0.43 / 0.42** |
+| lapel side of the gorge: cv | 0.41 / 0.45 | 0.65 / 0.72 | 0.27 / 0.31 |
+| lapel's worst stretch over its mean | 1.76 / 1.83 | 2.45 / 2.63 | 1.60 / 1.70 |
+| lapel / collar load at the gorge | 2.85 / 0.52% | 2.63 / 0.58% | 3.90 / 0.56% |
+| turn across the gorge, 90th pct | 52.9 / 53.8° | 38.6 / 39.0° | 40.1 / 41.5° |
+| seam kink, 90th pct | 39.0 / 38.3° | 37.4 / 37.1° | 37.7 / 37.6° |
+| collar tip fold | 13.6 / 13.6° | 11.3 / 14.5° | 13.3 / 12.4° |
+| collar flat cut, 95th pct | 2.12% | 2.16% | 2.13% |
+| notch as laid (30 asked; approved 40) | 40.9 / 41.0° | 30.2 / 30.1° | 29.8 / 30.8° |
+| refmeasure lapel point reach / drop | | 0.561 / 0.418 | 0.545 / 0.413 (sides equal to 0.001) |
+
+The gorge now carries its load more evenly than the approved build's, and the lapel's edge strain is the lowest of any
+build. The lapel's strain along the gorge band is higher on average (3.9% against 2.6%) because it is no longer piled at
+the roll end: spread along the seam instead of peaking there. The lapel point sits 3% closer to the centre (0.545 of
+the half shoulder against 0.561), back to phase 1's 0.550. Her left lapel's hidden cusp (the under lapel's last fifth,
+behind the upper front) reads +90% worst against +74% joined and +60% approved: it is pressed flat under the top front
+and does not show in any view.
+
+Checks: the recipe `eased_top_lapel` reproduces the swept lapel byte for byte; the contour sheet against the joined build
+moves only the lapel's top edge, by about 0.1 unit (2.6 mm), the same on both sides; clay close-ups of both roll tops and both
+3/4 neck views show no new marks (the grey along the collar's end rim is in the approved build too).

@@ -52,7 +52,8 @@ python3 blender/tension/sweep.py CUT.blend SWEEP w42_p24 '{"recipe":"joined_lape
 python3 -I blender/tension/feasible.py SWEEP OUT [--field preL.jsonl]     # OUT/feasible.png, OUT/sweep.json, best feasible joins
 ```
 
-The chosen pair of 2026-11-23: `{"recipe":"joined_lapel"}` with notchcollar `{"notch_angle":30}`.
+The chosen pair of 2026-11-23: `{"recipe":"eased_top_lapel"}` (phase 3: `joined_lapel` with the roll line's top eased,
+`belly_top` -0.14) with notchcollar `{"notch_angle":30}`.
 
 Run Blender-module scripts with `python3 -I` when the working directory holds a file named like a standard module.
 

@@ -434,3 +434,11 @@ and notchcollar `{"notch_angle": 30}`. The collar meets the lapel at 39 degrees 
 against 50 to 54; lapel strain stays at the derived 9.5 / 10.8% (95th pct). A 0.09 point fillet scored a little
 better and tore the right lapel's edge; the stand's settings do not reach the gorge. Numbers and rounds:
 docs/clothing-solvers/lapel-tension-solver.md, phase 2.
+
+## The roll line's top eased (2026-11-23)
+
+John: "Fix the roll line". `{"recipe": "eased_top_lapel"}` is `joined_lapel` with `belly_top` -0.14: the line stays
+straight over the bust and swings 3.7 mm toward the V near the neck, so it runs into the collar's roll line. With
+the notch-30 collar the gorge carries its load more evenly than the approved build (cv 0.42 against 0.51) and the
+lapel's edge strain drops to 7.8 / 8.9% (95th pct). Swinging it out instead (+0.12) evens the load but puts the strain
+back to 14.9%. Rounds and numbers: docs/clothing-solvers/lapel-tension-solver.md, phase 3.

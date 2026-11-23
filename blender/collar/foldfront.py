@@ -69,6 +69,12 @@ RECIPES['derived_lapel'] = dict(RECIPES['notch_lapel'], belly=0.001, outline=[[0
 # 39 degrees across the gorge (90th percentile) instead of 50; worn with the notch collar at notch_angle 30. A 0.09
 # point fillet scored better and tore the right lapel's edge (rejection 119). See docs/clothing-solvers/lapel-tension-solver.md.
 RECIPES['joined_lapel'] = dict(RECIPES['derived_lapel'], outline=[[0.04, 0.0], [0.24, 0.42], [1.0, 0.0]])
+# the roll line's top eased toward the V (John, 2026-11-23: "fix the roll line"): the straight line kept below, with a
+# second swing near the neck, belly_top * 6.75 t (1-t)^2 (3.7 mm at a third of the way down), so the lapel's roll line
+# runs into the collar's instead of meeting it at an angle (the historical tailors: "make sure that the roll line of
+# the forepart and the collar align exactly"). Gorge load evenness cv 0.63 to 0.42 (approved 0.51), lapel edge strain
+# 95% 10.8 to 8.9%. Swung the other way (+0.12) it evened the load and put the strain back to 14.9% (rejection 120).
+RECIPES['eased_top_lapel'] = dict(RECIPES['joined_lapel'], belly_top=-0.14)
 if opt.get('recipe'):
     opt = dict(RECIPES[opt['recipe']], **{k: v for k, v in opt.items() if k != 'recipe'})
 # the softened cusp is part of the traced lapel (not of the saved stand collar recipe, which carries 'bow'); the shape
@@ -99,6 +105,9 @@ bow = opt.get('bow', 0.0 if belly else None)           # (the earlier way: the c
 # wider there, as a tailor draws the lapel onto the front's pattern.
 outline = opt.get('outline', None if 'bow' in opt else [[0.04, 0.0], [0.27, 0.40], [1.0, 0.0]])
 if outline and not belly: belly = 1e-6
+belly_top = opt.get('belly_top', 0.0)    # a second swing near the neck, 6.75 t (1-t)^2 (peak 1 at a third of the way down): out from the V if positive
+def swing(t):
+    return belly * 6.75 * t * t * (1 - t) + belly_top * 6.75 * t * (1 - t) ** 2
 def bowdev(t):
     t = np.clip(t, 0, 1); return bow * 6.75 * t * t * (1 - t)
 def ss01(a_, b_, x_):
@@ -147,7 +156,7 @@ for layer, sg in ((1, -1.0), (2, 1.0)):               # (the right front's neck 
     # A curve is cut as K short straight cuts, each through its own stretch of the cloth.
     K = opt.get('cut_segments', 16) if belly else 1
     ts = np.linspace(0, 1, K + 1)
-    Cp = N[None] + (ts * ln)[:, None] * u[None] - (belly * 6.75 * ts * ts * (1 - ts))[:, None] * n[None]
+    Cp = N[None] + (ts * ln)[:, None] * u[None] - swing(ts)[:, None] * n[None]
     sides[-1]['Cp'] = Cp
     for k in range(K):
         lo, hi = (-9.0 if k == 0 else ts[k]), (9.0 if k == K - 1 else ts[k + 1])
@@ -179,7 +188,7 @@ for s in sides:
     sd = (q - s['N']) @ s['n']; tl = ((q - s['N']) @ s['u']) / s['ln']
     if belly:                                         # distance past the CURVE, and where along it
         td = np.linspace(0, 1, 1200)
-        Cd = s['N'][None] + (td * s['ln'])[:, None] * s['u'][None] - (belly * 6.75 * td * td * (1 - td))[:, None] * s['n'][None]
+        Cd = s['N'][None] + (td * s['ln'])[:, None] * s['u'][None] - swing(td)[:, None] * s['n'][None]
         tg = np.gradient(Cd, axis=0); nd = np.column_stack([-tg[:, 1], tg[:, 0]]); nd /= np.linalg.norm(nd, axis=1)[:, None]
         nd = np.where(((nd @ s['n']) > 0)[:, None], nd, -nd)
         _, jn = cKDTree(Cd).query(q)
