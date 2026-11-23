@@ -22,6 +22,7 @@ the Gaussian curvature map only (`derive.field_png`).
 | `collar_gauge.py` | numpy, scipy | The collar's ARAP flat cut and its stretches (join.py reads it). |
 | `gauge_fold.py` | blender/zipboot/gauge.py | The sharpest dihedral of a patch. |
 | `sweep.py` | foldfront, notchcollar | Builds one lapel and a grid of collars on it, each gauged; the coupled sweep's builder. |
+| `rollcrease.py` | numpy | The angle between the collar's fall and its roll turn over the fronts: the crease a roll-top change leaves when the collar is not re-solved. |
 | `feasible.py` | matplotlib | Stage 1 and 2 of the coupled solve: the limits (the approved build's own numbers), the feasible map, the join objective. |
 
 ## Run
@@ -53,7 +54,8 @@ python3 -I blender/tension/feasible.py SWEEP OUT [--field preL.jsonl]     # OUT/
 ```
 
 The chosen pair of 2026-11-23: `{"recipe":"eased_top_lapel"}` (phase 3: `joined_lapel` with the roll line's top eased,
-`belly_top` -0.14) with notchcollar `{"notch_angle":30}`.
+`belly_top` -0.14) with notchcollar `{"notch_angle":30,"rise_gain":1.6}` (phase 4: the collar's stand re-solved with
+the roll line; see the retrospective).
 
 Run Blender-module scripts with `python3 -I` when the working directory holds a file named like a standard module.
 

@@ -442,3 +442,12 @@ straight over the bust and swings 3.7 mm toward the V near the neck, so it runs 
 the notch-30 collar the gorge carries its load more evenly than the approved build (cv 0.42 against 0.51) and the
 lapel's edge strain drops to 7.8 / 8.9% (95th pct). Swinging it out instead (+0.12) evens the load but puts the strain
 back to 14.9%. Rounds and numbers: docs/clothing-solvers/lapel-tension-solver.md, phase 3.
+
+## The roll line and the collar solved together (2026-11-23)
+
+John: "Can't solve independently the roll and collar the roll change add distortions to the collar you can see".
+The eased roll top turns the lapel crease's top tangent, and notchcollar's stand, which rises off each roll top at the
+crease's slope, rose at 0.71 instead of 1.13: the fall creased where it meets the roll turn at the side front of the
+neck. Worn together: `{"recipe": "eased_top_lapel"}` with notchcollar `{"notch_angle": 30, "rise_gain": 1.6}`, which
+restores the rise (1.14) and takes the crease out; every lapel number is phase 3's. Rounds: docs/clothing-solvers/
+lapel-tension-solver.md, phase 4.

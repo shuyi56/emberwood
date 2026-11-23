@@ -137,7 +137,7 @@ def _rise(k0, k1, crease):
     for a_ in np.linspace(0, 4.0, 400):
         v = tE + a_ * upE[k0]; ang = math.degrees(math.acos(np.clip(v @ c_ / np.linalg.norm(v), -1, 1)))
         if ang < best[0] or best[0] == 9: best = (ang, a_) if ang < best[0] or best[0] == 9 else best
-    a_ = best[1]
+    a_ = best[1] * opt.get('rise_gain', 1.0)      # (rise_gain: the stand rises off the roll top this much steeper than the crease asks)
     # (a rise with that slope at N that levels out smoothly to the full stand by the side neck point)
     ss_ = np.abs(eL - eL[k0]); k_ = max(a_ / stand, 3.0 / S)
     h = stand * (1 - np.exp(-k_ * ss_)) / (1 - np.exp(-k_ * S)); h = np.where(ss_ <= S, np.minimum(h, stand), stand)
@@ -147,6 +147,7 @@ if opt.get('from_neck', True):
     hB, angB, angB0, aB, SB = _rise(0, ks['B'], LP['crease2'])
     hA, angA, angA0, aA, SA = _rise(len(E) - 1, ks['A'], LP['crease1'])
     st = np.minimum(hA, hB)
+    print('notchcollar: the stand rises off the roll tops at slope %.2f and %.2f' % (aA, aB))
     print('notchcollar: the stand drafted from the neckline: it rises off each roll top at the lapel crease\'s slope (the roll turns %.0f and %.0f degrees off the crease, was %.0f and %.0f), full at the side neck points %.1f and %.1f cm round'
           % (angA, angB, angA0, angB0, 2.62 * SA, 2.62 * SB))
 print('notchcollar: the neckline round the back %.1f cm, from z %.2f at the roll lines to %.2f at the back' % (2.62 * eL[-1], NA[2], E[:, 2].max()))

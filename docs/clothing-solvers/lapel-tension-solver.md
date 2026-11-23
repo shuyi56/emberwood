@@ -257,3 +257,63 @@ and does not show in any view.
 Checks: the recipe `eased_top_lapel` reproduces the swept lapel byte for byte; the contour sheet against the joined build
 moves only the lapel's top edge, by about 0.1 unit (2.6 mm), the same on both sides; clay close-ups of both roll tops and both
 3/4 neck views show no new marks (the grey along the collar's end rim is in the approved build too).
+
+# Phase 4: the roll line and the collar solved together (2026-11-23)
+
+John, on phase 3: "Can't solve independently the roll and collar the roll change add distortions to the collar you can
+see" (rejection 121). The eased roll top was solved with the collar's settings held, and the collar creased: a short
+dark crease on the fall where it meets the roll turn, at the side front of the neck (clearest on her right, about
+(-2.86, -1.65, 51.75)). None of the phase 2 gauges saw it: the gorge numbers, the fall's dihedrals, its fairness (a
+quadric fit within 0.3, under 0.25 mm everywhere in every build) and the stand's clearance were all unchanged.
+
+## The coupling
+
+notchcollar drafts the stand from the neckline so that it rises off each lapel's roll top at the slope that carries the
+lapel's crease straight on round the neck. Easing the roll top toward the V turns the crease's top tangent, and the
+stand's rise there flattened from 1.13 to 0.71 (printed by notchcollar now). With the stand lower at the side front,
+the fall turns over a lower, tighter roll and creases where it meets the turn. The roll line and the collar's stand are
+one line, so they have to be solved as one.
+
+## The gauge
+
+The crease is the angle between the fall and the roll turn across the edges they share, over the fronts (|x| > 2.0):
+approved 36.5 (90th percentile), joined 36.1, eased with the collar held 41.1. It is added to the objective as a fourth
+term over the approved value (so the approved build scores 4.0).
+
+## Rounds (roll top -0.14 unless given; notch 30)
+
+| Round | Varied | Fall/turn crease, fronts p90 | Seen in close-up | Verdict |
+|---|---|---|---|---|
+| 1 | roll top 0 / -0.08 / -0.14 × roll radius 0.08 / 0.12 / 0.16 × stand run 3.2 / 4.2 | 41.1 to 28.5 with the roll radius at -0.14 | | stand run changes nothing (the rise from the roll top sets the stand while `from_neck` is on) |
+| 2 | roll top -0.10 / -0.14 / -0.18 × roll radius 0.16 / 0.20 / 0.24 | down to 23.4 at 0.24 | the crease still shows at 0.16 and 0.24 | a larger roll lowers the number without removing the cause; it also rounds the roll at the back |
+| 3 | the stand's rise off the roll top: `rise_gain` 1.0 / 1.3 / 1.6 (new notchcollar option) | 36.3 at 1.6 with the approved roll radius 0.08 (joined 36.1) | gone on both sides | **chosen**: the rise slope back to 1.14 (joined 1.13) |
+
+Round 3 is the fix of the cause, so the rounds stop there. The joint solution: `{"recipe": "eased_top_lapel"}` with
+notchcollar `{"notch_angle": 30, "rise_gain": 1.6}`, everything else in the collar as approved. **Experimental:** the
+1.6 is the solver's number, set to restore the straight top's rise; no tailoring text gives it.
+
+## Before and after (her right / her left)
+
+| Measure | Approved | Joined (2) | Eased, collar held (3, rejected) | Solved together (4) |
+|---|---|---|---|---|
+| lapel edge strain, 95th pct | 14.3 / 15.0% | 9.5 / 10.8% | 7.8 / 8.9% | 7.8 / 8.9% |
+| gorge load evenness (cv) | 0.51 / 0.54 | 0.62 / 0.63 | 0.43 / 0.42 | 0.43 / 0.43 |
+| lapel's worst gorge stretch over its mean | 1.76 / 1.83 | 2.45 / 2.63 | 1.60 / 1.70 | 1.60 / 1.70 |
+| turn across the gorge, 90th pct | 52.9 / 53.8° | 38.6 / 39.0° | 40.1 / 41.5° | 39.7 / 41.2° |
+| stand's rise off the roll top | | 1.13 | 0.71 | 1.14 |
+| fall/turn crease, fronts p90 | 36.5° | 36.1° | 41.1° | 36.3° |
+| collar tip fold | 13.6 / 13.6° | 11.3 / 14.5° | 13.3 / 12.4° | 13.3 / 12.4° |
+| collar flat cut, 95th pct | 2.12% | 2.16% | 2.13% | 2.13% |
+| notch as laid (30 asked) | 40.9 / 41.0° (40 asked) | 30.2 / 30.1° | 29.8 / 30.8° | 29.8 / 30.8° |
+| refmeasure lapel point reach / drop, collar point reach | | 0.561 / 0.418, 0.526 | 0.545 / 0.413, 0.512 | 0.545 / 0.413, 0.512 (sides equal) |
+
+## What the phase taught
+
+- **Missed:** every geometric gauge on the collar. The crease is a change in where the fall meets the turn, a few faces
+  along the roll; the fall/turn angle found it only once the render pointed at the spot. Phase 2's rejection 118
+  ("the stand does not touch the gorge") was right about the gorge and wrong to imply the stand settings were idle:
+  they shape the roll, which no phase 2 gauge measured.
+- **Caught:** John's eye in the 3/4 neck views; then a ray cast from the close-up camera put the crease on the fall at
+  the roll, and the stand's rise printed per build gave the cause.
+- **Do differently:** solve any change at the lapel's roll top with the collar's stand free, and print the stand's rise
+  for every build.
