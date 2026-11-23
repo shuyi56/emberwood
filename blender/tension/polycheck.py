@@ -10,7 +10,8 @@ Reference (photo px of collar-reference.jpeg, her left side, traced by John's li
   and lower edges run level, so it is a rectangle with a triangle on its end ("a combination of a rectangle and a
   triangle", John 2026-11-23, and his markup of trace-overlay.png)
   collar front, 4 sides: notch G, top of the front at the neck T, the shoulder corner K, the rounded corner C: the
-  front edge up the neck, the outer edge down, the end edge, and the bottom edge lying almost level on the lapel
+  scarf's edge over the collar's front (G-T: the scarf lies over the collar's front end, John 2026-11-23), the outer
+  edge down, the end edge, and the bottom edge lying almost level on the lapel
   (John's markup draws it as a tilted rectangle with a rounded bottom corner)
 
 The model's pieces, from the same ortho camera (az 30, toward her left):
@@ -36,7 +37,7 @@ REF = {
                   sides=['roll line', 'top edge', 'end edge', 'lower edge']),
     'collar front': dict(closed=True, names=['G', 'T', 'K', 'C'],
                          pts=[(670, 264), (687, 206), (722, 254), (707, 273)],
-                         sides=['front edge up the neck', 'outer edge', 'end edge', 'bottom edge on the lapel']),
+                         sides=['scarf edge over the front', 'outer edge', 'end edge', 'bottom edge on the lapel']),
 }
 SPAN = (588, 693)          # the photo's L0 and P, across: the unit
 TOL = dict(dir=12.0, share=1 / 3, corner=15.0)
@@ -122,8 +123,9 @@ PHOTO = os.path.expanduser('~/.claude/uploads/b11c8793-1872-50e5-b6c9-17f5ea11d4
 # measured on the photo with photo_collar() below (the dark collar against the scarf and the sky; its end and bottom
 # edges lie on the dark coat and cannot be measured): the front edge straight, the outer edge one long S-curve, a sharp
 # top corner T and a rounded shoulder corner K
-PHOTO_CURVE = {'front edge up the neck': dict(bow=(0.060, -0.025)), 'outer edge': dict(bow=(0.041, -0.074)),
-               'T': dict(radius=0.037), 'K': dict(radius=0.115)}      # (polycheck.py --photo, 2026-11-23)
+PHOTO_CURVE = {'outer edge': dict(bow=(0.041, -0.074)), 'K': dict(radius=0.115)}
+# (the front edge G-T bows +0.060 / -0.025 and T turns on radius 0.037, but both are the scarf's edge, not the
+# collar's: John, 2026-11-23, the scarf lies over the collar's front end; the model's cover there is a straight line)      # (polycheck.py --photo, 2026-11-23)
 
 
 def resample_curve(P, step):
@@ -227,7 +229,7 @@ def zbuffer(parts, az, box, res):
     return ids
 
 
-def collar_outline(B, az, unit):
+def collar_outline(B, az, unit, scarf=True):
     """The outline of the visible collar patch that holds the notch, projected (x right, y up)."""
     import re
     from scipy import ndimage
@@ -246,7 +248,18 @@ def collar_outline(B, az, unit):
     CX, CT = M['collar_X'], M['collar_T']; far = CX[CT].mean(1)[:, 0] < xcut
     ids = zbuffer([(M['body_X'], M['body_T']), (CX, CT[~far]), (CX, CT[far])], az, box, res)
     H, W = ids.shape
-    lab, n = ndimage.label(ids == 1)
+    # the scarf (John, 2026-11-23, "Yes treat it like that"): on the photo the cream scarf lies over the collar's
+    # front end, so the collar's edge from the notch G up to T is the scarf's edge, not the collar's. The same cover
+    # is laid over the model, in lapel spans as the photo: left of the line G-T and above the lapel's top edge R-G
+    vis = ids == 1
+    if scarf:
+        jj, ii = np.mgrid[0:H, 0:W]
+        U_ = to_unit(np.column_stack([box[0] + (ii.ravel() + 0.5) / W * (box[1] - box[0]), box[3] - (jj.ravel() + 0.5) / H * (box[3] - box[2])]), unit)
+        g, t_ = photo_norm(REF['collar front']['pts'][0]), photo_norm(REF['collar front']['pts'][1]); r_ = photo_norm(REF['lapel']['pts'][1])
+        side = lambda a, b, q: (b[0] - a[0]) * (q[:, 1] - a[1]) - (b[1] - a[1]) * (q[:, 0] - a[0])
+        under = (side(g, t_, U_) > 0) & (side(r_, g, U_) > 0)          # (left of G->T going up, above R->G going right)
+        vis &= ~under.reshape(H, W)
+    lab, n = ndimage.label(vis)
     gi = (G2[0] - box[0]) / (box[1] - box[0]) * W; gj = (box[3] - G2[1]) / (box[3] - box[2]) * H
     # the patch nearest the notch (the notch lies on its edge)
     yy, xx = np.nonzero(lab > 0)
@@ -385,7 +398,7 @@ if __name__ == '__main__':
         bows, radii = curve_measure(P, [iK, iT, iG])        # (the outline runs K, T, G: the sides K-T and T-G)
         bo = (-bows[0][1], -bows[0][0])                      # (the outer edge walked T to K, as the check walks it)
         bf = (-bows[1][1], -bows[1][0])
-        print('photo collar: front edge G-T bow %+.3f / %+.3f, outer edge T-K bow %+.3f / %+.3f; radius at T %.3f, at K %.3f span'
+        print('photo collar: front (scarf) edge G-T bow %+.3f / %+.3f, outer edge T-K bow %+.3f / %+.3f; radius at T %.3f, at K %.3f span'
               % (*bf, *bo, radii[1], radii[0])); sys.exit(0)
     allres = []
     for B in args:
