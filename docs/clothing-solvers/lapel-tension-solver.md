@@ -590,3 +590,53 @@ Two more changes went in:
 
 **Still open.** A row of spikes stays along the lapel's top edge near the roll top. The strain map shows edges there
 stretched up to 3.4 times, at t -0.4 to -0.8. They were already there before the rounding.
+
+## Phase 9: the collar as a folded rectangle
+
+John, 2026-11-24: "Begin with a rectangle and deform", "Rounded corners on the rectangle as well", "draw only the collar
+and get that correct", "Research how this type of collar is done with the sharp triangular bend".
+
+**What the collar-only render showed.** Both earlier collars (notchcollar's drafted fall, and its `rect` band) are a
+rolled tube round the neck with ends added on. Neither has a crease, so neither can make the photo's triangular peak.
+
+**Sources.**
+- A one-piece collar is drafted as a rectangle 2.5 to 4 in wide and the neckline long, its neck edge straight or
+  slightly convex (dresspatternmaking.com, basic collar).
+- The roll line lies about 1 in up from the neck edge (thecreativecurator.com/collars).
+- The back collar is 2 3/4 in (blog.fabrics-store.com/?p=13206).
+- The crease is set by pad stitching, a bias undercollar and a drawn-up tape (minervapatterns.com).
+
+No source explains the triangle. My reading of the geometry: the roll line runs parallel to the neck edge at the back
+and must come down to the neck edge's end at the front, so it crosses the band's end at an angle. A rectangle folded on
+a crossing line shows its turned part as a triangle.
+
+**`blender/collar/foldcollar.py`.** Steps:
+1. The band is meshed flat (rounded rectangle, the roll line an edge of the mesh).
+2. The stand is laid up the neck from the neckline.
+3. The fall is mirrored across the roll line on the flat (every length kept) and opened off the stand.
+4. The fall is pushed off the coat along the band's own normal by an evened amount.
+5. The cloth is relaxed with bending.
+
+Two failures on the way:
+- A relaxation with no bending crumpled the ends.
+- A push along the coat's nearest normals crumpled them again over the lapels' layers.
+
+`foldcollar_blend.py` puts the result in the scene.
+
+**The fit (`blender/tension/foldcollar_fit.py`).** A coordinate search on the outline gap to the photo's collar-front
+polygon, from the photo's camera with the scarf's cover:
+
+| Collar | Outline gap (lapel spans) |
+|---|---|
+| Drafted collar | 0.078 |
+| `rect` band | 0.072 |
+| Folded rectangle, first try (width 2.2, stand 0.9, fold 45°, open 25°) | 0.112 |
+| **Folded rectangle, fitted** | **0.038** |
+
+The fitted collar: width 1.9 (5.0 cm), stand 0.7 (1.8 cm), fold angle 21°, open 5°, corner 0.2, and the seam started 16
+steps (0.3 units) further front than the lapel's corner. It reads 4 sides of 4. Its ends rest on the lapels.
+
+**Experimental, not approved.** Open problems:
+- The laid cloth is stretched 34% at the 95th percentile, where the roll line turns from parallel to diagonal. A real
+  collar takes that up with a curved neck edge.
+- `open` ended at its lower limit (5°) and the fold angle near its limit (20°).
