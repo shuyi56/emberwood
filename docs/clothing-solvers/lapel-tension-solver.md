@@ -565,3 +565,28 @@ covers the whole top edge from the roll top, so the patch's corner sits at the r
 fold at the gorge's top is 149-178°, a hairpin. Changing stand, fall_over, point_len and notch_angle (four builds) did
 not change the side count. Open question to John: is the collar's front edge against the scarf the collar's own rolled
 edge, or the scarf lying over the collar?
+
+**The corners rounded** (John, 2026-11-24: "Round the inside edge of the trapezoid so it distributes load on two
+sides", then circling the lapel's point and the collar's shoulder: "Here as well").
+
+New foldfront option `outline_fillet` {"N": r, "G": r, "P": r}:
+- Each named corner becomes a circular arc tangent to both of its edges, with r in fold lengths.
+- N is where the top edge leaves the roll line. Rounding it starts the top edge 0.124 down the roll line, on a curve.
+
+TZ48 uses N 0.3, G 0.08, P 0.09 on the TZ41 lapel, with the same collar (notch 40, point 0.9):
+
+| Gauge | Sharp (TZ41) | Rounded (TZ48) |
+|---|---|---|
+| Collar's tip fold, her left | 149° | 22° |
+| Collar's tip fold, her right | 14° | 13° |
+
+The hairpin at the gorge's top is gone. The collar lies on the lapel's top edge without the crimp, and the fall rises to
+the back. The polycheck now counts 7 sides on the collar front: the patch stands up from the notch, narrower than the
+photo's, and does not reach out to K. The default lapel is unchanged (classical_lapel byte for byte).
+
+Two more changes went in:
+- The top edge is faired along itself after the solve (`top_fair`), which took out a 1.3 mm average ripple.
+- The cut is snapped along the roll line carried on past its top.
+
+**Still open.** A row of spikes stays along the lapel's top edge near the roll top. The strain map shows edges there
+stretched up to 3.4 times, at t -0.4 to -0.8. They were already there before the rounding.

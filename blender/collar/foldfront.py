@@ -190,6 +190,7 @@ zx = top['N'][1] + top['u'][1] * (0 - top['N'][0]) / top['u'][0]
 # 2. what turns back: each front's own points past its line
 q = W[:, [0, 2]]
 from scipy.spatial import cKDTree
+import math
 for s in sides:
     sd = (q - s['N']) @ s['n']; tl = ((q - s['N']) @ s['u']) / s['ln']
     if belly:                                         # distance past the CURVE, and where along it
@@ -200,7 +201,11 @@ for s in sides:
         _, jn = cKDTree(Cd).query(q)
         sdc = ((q - Cd[jn]) * nd[jn]).sum(1)
         mine = (L_ == s['layer']) & (W[:, 1] < yc) & (W[:, 2] > foot - 0.5)
-        snap = mine & (np.abs(sdc) < opt.get('snap', 0.012)) & (tl > -0.02) & (tl < 1.02)
+        # (with a four-sided lapel the front is cut along the roll line carried on past its top as well, out to the top
+        # edge's corner: snapped there too, or the cut left a sawtooth of whole triangles along it, showing above the
+        # lapel's level top edge as a row of spikes)
+        tsn = (min(p_[0] for p_ in outline_inner) - 0.05) if outline_inner else -0.02
+        snap = mine & (np.abs(sdc) < opt.get('snap', 0.012)) & (tl > tsn) & (tl < 1.02)
         q[snap] -= sdc[snap][:, None] * nd[jn][snap]; W[snap, 0], W[snap, 2] = q[snap, 0], q[snap, 1]; sdc[snap] = 0.0
         chord = tl.copy(); sd, tl = sdc, td[jn]
         f = mine & (sd > 1e-6) & (W[:, 2] > foot - 1e-3) & (chord > (min(p_[0] for p_ in outline_inner) - 0.1 if outline_inner else -0.15))
@@ -227,6 +232,41 @@ if outline:
         OT = np.vstack([A_[None], bez(q1, P_ + 0.15 * rf * (e1 + t2), q2, 10), long_])
         OT = OT[np.concatenate([[True], np.diff(OT[:, 0]) > 1e-5])]  # (one width for each place along the fold)
         OT[:, 1] *= P_[1] / OT[:, 1].max(); OT[-1] = B_
+    OIf = np.array(sorted(outline_inner), float) if outline_inner else None
+    fil = opt.get('outline_fillet') if outline_inner else None
+    if fil:
+        # the four-sided lapel's corners rounded (John, 2026-11-24: "Round the inside edge of the trapezoid so it
+        # distributes load on two sides", and the lapel's point and the collar's shoulder: "Here as well"). Each corner
+        # named in outline_fillet {"N": r, "G": r, "P": r} (N the roll top, where the top edge leaves the roll line; G the
+        # top edge's outer corner; P the point; r in fold lengths) becomes a circular arc tangent to both its edges, so
+        # the pull that met at a point is shared along both edges. Rounding N moves the top edge's start down the roll
+        # line by r tan(half the corner's turn): the cut leaves the fold on a curve.
+        Ng, Gg, Pg, Lg = np.zeros(2), OIf[0].copy(), OT[1].copy(), OT[-1].copy()
+        poly = [('N', Ng), ('G', Gg), ('P', Pg), ('L', Lg)]
+        def arc(A_, B_, C_, r_):
+            u_ = (A_ - B_) / np.linalg.norm(A_ - B_); v_ = (C_ - B_) / np.linalg.norm(C_ - B_)
+            th = math.acos(np.clip(u_ @ v_, -1, 1)) / 2; dt_ = r_ / math.tan(th)
+            dt_ = min(dt_, 0.45 * np.linalg.norm(A_ - B_), 0.45 * np.linalg.norm(C_ - B_)); r_ = dt_ * math.tan(th)
+            bis = (u_ + v_) / np.linalg.norm(u_ + v_); cen = B_ + bis * r_ / math.sin(th)
+            p0, p1 = B_ + u_ * dt_, B_ + v_ * dt_
+            a0, a1 = math.atan2(*(p0 - cen)[::-1]), math.atan2(*(p1 - cen)[::-1])
+            da = (a1 - a0 + math.pi) % (2 * math.pi) - math.pi
+            return np.array([cen + r_ * np.array([math.cos(a0 + da * k_ / 16), math.sin(a0 + da * k_ / 16)]) for k_ in range(17)])
+        chain = []
+        for k_, (nm_, B_) in enumerate(poly):
+            A_, C_ = poly[k_ - 1][1], poly[(k_ + 1) % 4][1]
+            if nm_ == 'N':
+                if fil.get('N'): chain.append(arc(np.array([1.0, 0.0]), B_, C_, fil['N']))   # (from the roll line, below, to the top edge)
+                else: chain.append(B_[None])
+            elif nm_ in fil and fil[nm_]: chain.append(arc(A_, B_, C_, fil[nm_]))
+            else: chain.append(B_[None])
+        ch_ = np.vstack(chain)                       # N (on the roll line) .. G .. P .. L0
+        kmin = int(np.argmin(ch_[:, 0]))             # (the top edge runs to the point furthest past the roll top; the outline on from it)
+        OIf = ch_[:kmin + 1]; OIf = OIf[np.argsort(OIf[:, 0])]
+        OT = ch_[kmin:]; OT = OT[np.concatenate([[True], np.diff(OT[:, 0]) > 1e-5])]
+        print('foldfront: the lapel\'s corners rounded: %s; the top edge now leaves the roll line %.3f down the fold'
+              % (', '.join('%s %.2f' % kv for kv in fil.items()), OIf[:, 0].max()))
+    tI = float(OIf[:, 0].max()) if outline_inner else 0.0     # (the top edge reaches down to here: 0 unless N is rounded)
     kpt = int(np.argmax(OT[:, 1]))
     rec = []
     for s in sides:
@@ -239,7 +279,7 @@ if outline:
     for si, s in enumerate(sides):
         cv, ct, cy = rec[si]; Lc = s['ln']
         Dfun = lambda t_, Lc=Lc: np.interp(t_, OT[:, 0], OT[:, 1] * Lc, left=0.0, right=0.0)
-        OI = np.array(sorted(outline_inner), float) if outline_inner else None
+        OI = OIf
         Dlo = (lambda t_, Lc=Lc: np.interp(t_, OI[:, 0], OI[:, 1] * Lc, left=0.0, right=0.0)) if outline_inner else (lambda t_: 0.0 * np.asarray(t_, float))
         if opt.get('outline_round'):
             # a curved edge: its points are set evenly along the edge itself and the rows stop short of it, so no thin
@@ -256,7 +296,7 @@ if outline:
             pts = [(OT[k_, 0], OT[k_, 1] * Lc) for k_ in range(0 if outline_inner else 1, len(OT) - 1)]      # (every corner of the outline is a point of the mesh)
             for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
                 D = float(Dfun(t_)); Dl = float(Dlo(t_)); n_ = int(np.ceil((D - Dl) / hm))
-                if outline_inner and t_ < 0: pts += [(t_, Dl + (D - Dl) * j / max(n_, 1)) for j in range(0, n_ + 1)]
+                if outline_inner and t_ < tI: pts += [(t_, Dl + (D - Dl) * j / max(n_, 1)) for j in range(1, n_ + 1)]     # (the top edge itself gets its own even points below: a second row on it left slivers that crumpled into spikes)
                 else: pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
             if outline_inner:       # (the top edge's own points, evenly along it)
                 for a_, b_ in zip(OI[:-1], OI[1:]):
@@ -279,7 +319,7 @@ if outline:
             if max(a_, b_, c_) < nc: continue
             if outline_inner:       # (Delaunay fills the hull: the wedge between the top edge and the roll line carried on is not cloth)
                 tc_, dc_ = (tt[a_] + tt[b_] + tt[c_]) / 3, (dd[a_] + dd[b_] + dd[c_]) / 3
-                if tc_ < 0 and dc_ < float(Dlo(tc_)) - 1e-6: continue
+                if tc_ < tI and dc_ < float(Dlo(tc_)) - 1e-6: continue
             e1, e2 = flat[b_] - flat[a_], flat[c_] - flat[a_]; ny = e1[1] * e2[0] - e1[0] * e2[1]
             if abs(ny) < 1e-9: continue
             if opt.get('outline_round') and abs(ny) < 0.02 * hm * hm: continue
@@ -607,13 +647,29 @@ for s in (und, top):                                  # the under front first: t
     print('foldfront: front %d: strain over %d edges: mean |%.1f%%|, 95%% under |%.1f%%|, worst %+.1f%% / %+.1f%%; at the cusp (the last fifth of the fold) mean |%.1f%%|, worst %+.1f%% / %+.1f%%'
           % (s['layer'], len(st), 100 * np.abs(st).mean(), 100 * np.percentile(np.abs(st), 95), 100 * st.min(), 100 * st.max(),
              100 * np.abs(st[cusp]).mean(), 100 * st[cusp].min(), 100 * st[cusp].max()))
+    if outline_inner and opt.get('top_fair', 2.5):
+        # the top edge faired along itself. It runs level along the neckline, over the front's own neckline, and the solve
+        # left it rippled in depth from point to point (4 mm, every other point): under the cloth's thickness a row of
+        # spikes. The ripple is smoothed out of the edge, and the rows just inside it follow, fading over two mesh steps.
+        from scipy.ndimage import gaussian_filter1d
+        tr_ = s['tl'][ii]; gap_ = d - s['Dlo'](tr_); e_ = (tr_ < tI) & (gap_ <= 0.02)
+        if e_.sum() > 4:
+            idx_ = ii[e_][np.argsort(d[e_])]; Pe = W[idx_].copy()
+            Sm = gaussian_filter1d(Pe, opt.get('top_fair', 2.5), axis=0, mode='nearest'); Sm[0], Sm[-1] = Pe[0], Pe[-1]
+            dl_ = Sm - Pe; near = (tr_ < tI + 0.1) & (gap_ <= 3 * hm) & ~e_
+            if near.any():
+                fl_ = np.column_stack([tr_ * s['ln'], d]); fe_ = fl_[e_][np.argsort(d[e_])]
+                _, jn_ = cKDTree(fe_).query(fl_[near]); W[ii[near]] += dl_[jn_] * np.exp(-gap_[near] / hm)[:, None]
+            W[idx_] = Sm
+            print('foldfront: front %d: the top edge faired: %d points, ripple %.1f mm on average, %.1f at most'
+                  % (s['layer'], len(idx_), 26.2 * np.linalg.norm(dl_, axis=1).mean(), 26.2 * np.linalg.norm(dl_, axis=1).max()))
     s['lapel_pts'] = W[ii].copy(); s['lapel_t'] = t.copy()
-    s['lapel_d'] = d.copy(); ck_ = np.nonzero(s['crease'])[0]; ck_ = ck_[np.argsort(s['tl'][ck_])]; s['crease_pts'] = W[ck_].copy(); s['crease_t'] = s['tl'][ck_].copy()
+    s['lapel_d'] = d.copy(); ck_ = np.nonzero(s['crease'])[0]; ck_ = ck_[np.argsort(s['tl'][ck_])]; ck_ = ck_[s['tl'][ck_] > -0.02]; s['crease_pts'] = W[ck_].copy(); s['crease_t'] = s['tl'][ck_].copy()
     if outline: s['lapel_edge'] = d >= s['Dfun'](t) - 0.02     # (the points on the lapel's cut edge)
     if outline_inner:
         tr_ = s['tl'][ii]; s['lapel_t'] = tr_.copy()              # (where along the roll line carried on: below 0 past its top)
         s['lapel_edge'] = d >= s['Dfun'](tr_) - 0.02
-        s['lapel_inner'] = (tr_ < 0) & (d <= s['Dlo'](tr_) + 0.02)   # (the top edge, from the roll top out to the corner)
+        s['lapel_inner'] = (tr_ < tI) & (d <= s['Dlo'](tr_) + 0.02)   # (the top edge, from the roll top out to the corner)
     # the lapel against the body, as ratios (John: "get better at ground truth measuring ratios from photos like lapel
     # to shoulder or lapel to neck"): the same numbers are read off a reference photo on a pixel grid and compared.
     # Widths are taken against the half shoulder (middle to shoulder point), heights against neck pit to waist.
