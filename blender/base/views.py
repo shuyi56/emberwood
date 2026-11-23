@@ -11,8 +11,8 @@
 --head     the head and shoulders from the same five angles (DIR/head.png)
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
-           show (DIR/turn-clay.png, DIR/head-clay.png)
---clay-only  the clay views alone, without the full look (a first look at new forms: no materials rendered)
+           show (DIR/turn-clay.png, DIR/head-clay.png). --clay-only: those alone, the look not rendered (a cheap
+           draft of the forms).
 --angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
            comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
