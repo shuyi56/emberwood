@@ -375,3 +375,34 @@ Contour sections at z 44.3 to 50.9 and x ±1.4 / ±2.6 lie on phase 4's: the cha
 - **Caught:** the fall/turn crease gauge from phase 4 flagged the taper at once; the close-ups caught the cupped end
   at -0.4 that the gauges passed.
 - **Do differently:** a gauge pass next to a failing neighbour is no margin; pick inside the passing region.
+
+# Phase 6: the high (classical) lapel (2026-11-23)
+
+John: "Run the solver now with the harder problem of a high lapel", "The classic one": `classical_lapel`, cut to the
+1890s riding habit's ratios (break 0.12 under the neck pit, roll line meeting the neck 3.0 out, small lapel), with the
+phase 5 collar.
+
+## Rounds
+
+| Round | What | Best | Result |
+|---|---|---|---|
+| 0 | `classical_lapel` + phase 5 collar | objective 17.1 | the roll line runs nearly flat into the neck; the stand turns 94° off it and both collar ends knot (tip fold 175°) (rejection 124) |
+| 1 | feasible map: `neck_x` 2.2 / 2.4 × break 48.25 / 49.0 × notch 15-30, notch_at 0.4 / 0.6, point 0.5 / 0.7 (64 builds) | 0 feasible | at 2.2-2.4 the stand follows the roll line (2-13°); notch_at 0.6 beats 0.4 everywhere (tip 20-30° against 27-40°); the classical lapel's own edge strain sits at its limit (14.4-16.4%, 95th pct) |
+| 2 | phase 1's straight roll line (`belly` 0.001) on the classical lapel | lap95 10.9%, worst +22% | edge strain down a third; tip fold 18.0° (limit 15.6) |
+| 3 | collar tip: point 0.35, tip_round 0.3, end_bow -0.2, rise_gain 1.3, notch 15, roll_r 0.16 | objective 4.38 (roll_r 0.16) | the tip fold reads 18.0° in every build: the lapel's tight roll at the top sets it; roll_r 0.16 lowers the fall/turn crease 60.7 -> 43.9° |
+| 4 | the lapel's roll kept full at the top (`top_out`) | worse | lapel worst edge +57 to +137%, tip fold 152-169° (rejection 125) |
+
+Stopped after round 4 got worse. The best build, `{"recipe":"classical_lapel","neck_x":2.4,"foot":48.25,"belly":0.001}`
+with notchcollar `{"notch_angle":20,"notch_at":0.6,"point_len":0.5,"roll_r":0.16}`, fails the tip limit (18.0°) and
+shows two defects in the close-ups: each collar front end stands up as a rolled knob at the side neck, and a crease
+runs across the fall from the roll (rejection 126). Notch as laid 22.3 / 20.0° (20 asked); gorge 3.6 cm; fall 3.9 cm
+at the points.
+
+## What the phase taught
+
+- **Caught:** the stand's turn off the crease (printed per build) found the cause of the knot at once; the
+  insensitivity of the tip fold to every collar setting located its cause in the lapel.
+- **Carried over:** phase 1's straight roll line works on any lapel: it cut the classical lapel's strain by a third.
+- **Missed:** notchcollar assumes the gorge runs well below the roll top. On a high lapel the whole lapel is roll, the
+  collar end sits on the turn, and the stand-from-the-neckline construction stands the end up at the side neck. The
+  habit itself solves this with a separate standing collar. Fixing it needs a change of construction, not settings.
