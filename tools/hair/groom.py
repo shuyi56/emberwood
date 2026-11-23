@@ -219,14 +219,16 @@ def selftest(out):
 
 # ---------------------------------------------------------------------------------------------------- the style
 # The Ranger's length line: the creator's hairEdge (main.js), the end height by angle round the head, as approved.
+RANGER_LEN_Z = -1.2      # HH: the Ranger's one length, sides and back: the creator's back length (creator_cut, z -1.2).
+                         # STYLE: John, 2026-11-23, "get rid of side cut": the sides (cut at -0.5 to -0.75, the
+                         # approved line) now fall to the back's length, past the shoulders, where ends that stop on the
+                         # shoulder flip out [CC2][BRIT]. Overrides the creator's shorter, layered sides.
+
+
 def ranger_cut_z(th):
     a = np.abs(th)
-    side = -0.5 - 0.25 * SF.sm(1.0, 1.5, a)
     front = -0.5                                   # the face-framing front locks (the bangs come last: no fringe yet)
-    e = front + (side - front) * SF.sm(0.86, 1.08, a)
-    u = np.clip((a - 1.7) / (np.pi - 1.7), 0, 1)
-    back = -1.42 - 0.1 * u ** 1.5
-    return e + (back - e) * SF.sm(1.5, 2.1, a)
+    return front + (RANGER_LEN_Z - front) * SF.sm(0.86, 1.3, a)
 
 
 PART_BACK_Z = 0.97        # STYLE: the centre part runs from the trichion back to the top of the head
@@ -1185,7 +1187,6 @@ def relax_kinks(X, col, cap=None, keep=None, iters=RELAX_ITERS):
     return X
 
 
-BACK_CUT_TH = (2.0, 2.4)   # rad round the head: the creator's back length takes over between these
 CLIMB_HH = 0.05        # HH: a guide that climbs this far back up after it has fallen is cut where it turns (hair
                        # under gravity does not climb: a few framing guides combed onto the cape's steep shoulder looped
                        # back up over the head)
@@ -1373,7 +1374,7 @@ def creator_front(X, style_path, col=None, keep=None):
 STYLES = {
     #            frame_z: the face frame's shortest piece (HH); frame_th: |theta| over which it steps to the perimeter;
     #            layer_k: end rise per HH of root height above layer_z0; roll_deg: the ends' roll (0: none)
-    'ranger': dict(frame_z=0.25, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=15.0, tuck=(1.0,)),   # CALIBRATED:
+    'ranger': dict(frame_z=0.25, frame_th=(0.4, 1.0), layer_k=1.2, layer_z0=0.72, roll_deg=15.0, tuck=(1.0,)),   # CALIBRATED:
               # creator Ranger front ends 0.26 (roots |th| .6-1), crown vs mid roots 1.2 HH per HH (sector 1.5-2.2)
     'warden': dict(frame_z=-0.2, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=0.0, tuck=(1.0, -1.0)),   # CALIBRATED:
               # creator Warden front ends -0.2 to -0.3; layer_k kept at the Ranger's (its crown's 2.4 is a top
@@ -1386,6 +1387,7 @@ TUCK_PAST = 0.32        # rad: tucked hair lies this far behind the ear's |theta
 TUCK_FROM_Z = 0.72      # HH: the tuck takes hold from the temple, over 0.12 HH, STYLE
 SIDE_TH = (0.9, 2.2)    # |theta| of the side hair laid in to the creator's width
 SIDE_CLEAR_MM = 2.0     # mm: the side hair's width over the creator's (its 95th percentile per 0.05 HH of height), CALIBRATED
+SIDE_OPEN = 1.5         # HH of width per HH of drop below the creator's side hair (wider than the shoulder's slope)
 SIDE_ROLL_DEG = 20.0    # the side ends rolled under after the tuck, STYLE (the stylists' smooth finish [RZ])
 CUT_FALL = 1.5          # the plumb's weight against the line above, for a cut end
 CUT_TAIL = 5            # nodes (5 cm): a cut end straightened onto the line above it
@@ -1589,7 +1591,10 @@ def side_debulk(X, keep, style_path):
         if m.sum() > 10:
             W[i] = np.percentile(np.abs(C[m, 0]), 95)
     k = np.where(~np.isnan(W))[0]
-    W[k[-1]:] = W[k[-1]]
+    # below the creator's own side hair there is nothing to match: the limit opens out (SIDE_OPEN HH per HH of drop)
+    # so hair longer than the creator's lies out over the shoulder instead of being pulled in against the neck
+    W[k[-1]:] = W[k[-1]] + SIDE_OPEN * (zb[k[-1]] - zb[k[-1]:])
+    k = np.where(~np.isnan(W))[0]
     W = np.interp(np.arange(len(zb)), k, W[k]) + SIDE_CLEAR_MM / SF.HH_MM
     lim = np.interp(-np.nan_to_num(X[..., 2]), -zb, W)
     ease = np.clip((0.6 - X[..., 2]) / 0.1, 0, 1)
@@ -1598,6 +1603,57 @@ def side_debulk(X, keep, style_path):
     over[:, 0] = 0
     X = X.copy()
     X[..., 0] -= np.sign(X[..., 0]) * over
+    return X
+
+
+# ------------------------------------------------------------------------------------------- hair over the shoulder
+# [CC2] curlcentric.com, "Why does my hair flick out at the ends": ends that reach the shoulder are pushed up by it
+#       ("Your shoulders push the ends up every time you move"): grow past the shoulders or cut above them; roll the
+#       round brush under at the ends; weight keeps ends down.
+# [BRIT] brit.co, "How to stop your lob from flipping out": "A flip at the ends can be the result of your hair hitting
+#       your shoulders"; a blunt line, rounded under with a 1.25 inch round brush.
+# [HF]  hairfinder.com, "Inverse layering": bulk underneath pushes the hair out along the curve of the neck; the under
+#       layers cut shorter so the top layer lies in (side_debulk lays the sides in to the creator's width).
+# [MAYA] Autodesk Maya nHair styling tips: passive colliders used as grooming tools (here the body is the comb's bed).
+# The hair that passes over the shoulder lies on it: it follows the shoulder's curve without a bend where it meets it,
+# and falls on in front of or behind it; the ends hang past it and turn under (SIDE_ROLL_DEG).
+SHOULDER_TH = (0.8, 2.6)     # |theta| of the roots whose hair can pass over a shoulder (the sides, not the back's middle)
+SHOULDER_TOP_Z = 0.15        # HH: the smoothing takes hold below the jaw, over 0.15 HH (the shoulder starts at z ~0)
+SHOULDER_ITERS = 80
+SHOULDER_K = 0.35            # the Laplacian step's weight (the strand's own curve, toward the mean of its neighbours)
+SHOULDER_G = 0.004           # HH per step: gravity on each node, so the smoothing settles the strand down onto the
+                             # shoulder instead of pulling it taut over it, CALIBRATED (no lift off the cape at 0.004)
+
+
+def shoulder_flow(X, roots, keep, col, keep_shape=False):
+    """Each side strand laid over the shoulder as a comb lays it: below the jaw, its nodes moved toward the mean of
+    their neighbours and a little down, set back to their segment lengths from the root, and pushed out of the body
+    and the head, SHOULDER_ITERS times. The strand bends where the body bends it, smoothly, and nowhere else.
+    keep_shape (the Warden's waves): the smoothing acts on each node's move from where it was, not on the strand's
+    curve, so the push off the shoulder spreads along the strand and the waves stay."""
+    X = X.copy()
+    th = np.abs(SF.theta(roots))
+    g = np.where((th > SHOULDER_TH[0]) & (th < SHOULDER_TH[1]) & ~keep)[0]
+    if not len(g):
+        return X
+    Y = X[g]
+    ok = ~np.isnan(Y[..., 0])
+    L0 = np.linalg.norm(np.diff(Y, axis=1), axis=-1)
+    Y0 = Y.copy()
+    for _ in range(SHOULDER_ITERS):
+        w = np.clip((SHOULDER_TOP_Z - Y[..., 2]) / 0.15, 0, 1) * ok
+        w[:, :2] = 0
+        D = Y - Y0 if keep_shape else Y
+        lap = np.zeros_like(Y)
+        lap[:, 1:-1] = 0.5 * (D[:, :-2] + D[:, 2:]) - D[:, 1:-1]
+        lap = np.nan_to_num(lap)                           # (a strand's last node: no neighbour below, no step)
+        Y = Y + (SHOULDER_K * lap + np.array([0, 0, -SHOULDER_G])) * w[..., None]
+        for j in range(1, Y.shape[1]):                     # (the chain set back to its lengths, from the root)
+            d = Y[:, j] - Y[:, j - 1]
+            n = np.linalg.norm(d, axis=-1, keepdims=True)
+            Y[:, j] = np.where(ok[:, j, None], Y[:, j - 1] + d / np.maximum(n, 1e-12) * np.nan_to_num(L0[:, j - 1, None]), np.nan)
+        Y = push_valid(col, Y, mask=w > 0)
+    X[g] = push_valid(col, Y, steps=8)
     return X
 
 
@@ -1848,17 +1904,19 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X2 = side_tuck(X2, roots, bang, st['tuck'])
         X2 = side_debulk(X2, bang, trace)
         X2 = push_valid(col, X2)
+        # the sides combed and laid over the shoulder (see SHOULDER_*): a light comb, then each side strand smoothed
+        # along the body as it passes over the shoulder, then the ends turned under
+        X2 = comb_pass(X2, lk * 1000 + clump, col, cap, passes=2)
+        X2 = shoulder_flow(X2, roots, bang, col, keep_shape=wavy)
         X2 = relax_kinks(X2, col, cap, keep=bang)
         X2 = end_roll(X2, roots, bang, SIDE_ROLL_DEG, col)
+        # (relax ends on the cap, which runs down through her shoulders and cape: the last word is the body's, and a
+        # relax without the cap takes out the bends that push leaves)
+        X2 = push_valid(col, X2)
+        X2 = relax_kinks(X2, col, None, keep=bang)
     if trace and not wavy:
-        # the back cut on the creator's own length line where it is shorter: the creator's back ends at z -1.2, the
-        # approved line's at -1.52 (CLAUDE.md: the creator overrides the measurement); the sides keep the approved line
-        cz = creator_cut(trace)
-
-        def back_cut(th):
-            w = SF.sm(BACK_CUT_TH[0], BACK_CUT_TH[1], np.abs(th))
-            return ranger_cut_z(th) + w * np.maximum(cz(th) - ranger_cut_z(th), 0.0)
-        X2, lengths = recut(X2, lengths, back_cut, keep=bang)
+        # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
+        X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
     elif trace:
         X2, lengths = recut(X2, lengths)
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
