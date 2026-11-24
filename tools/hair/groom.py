@@ -1892,9 +1892,10 @@ def frame_locks(X, roots, sel_from, seg_hh, col, n_locks=FRAME_LOCKS):
     return X, fl
 
 
-BANG_OUT_Z = (0.85, 0.3)     # HH: the band (brow to cheekbone) over which the bangs are brushed out to the creator's
-BANG_OUT_PCT = (25, 50)      # the bangs' spread matched at these percentiles of |x| per height (inner and middle)
+BANG_OUT_Z = (0.9, 0.3)      # HH: the band (brow to cheekbone) over which the bangs are brushed out to the creator's
+BANG_OUT_PCT = (10, 50)      # the bangs' spread matched at these percentiles of |x| per height (inner edge and middle)
 BANG_OUT_GAIN = 1.0          # CALIBRATED: the full gap to the creator's sweep
+BANG_OUT_ITERS = 3           # (the forehead and the rebuilt length take back part of each move)
 
 
 def bang_out(X, bang, style_path, seg_hh, col):
@@ -1914,7 +1915,7 @@ def bang_out(X, bang, style_path, seg_hh, col):
         mo = (np.abs(P[:, 2] - z) < 0.025) & (P[:, 1] < SF.AXIS[1])
         if mc.sum() > 10 and mo.sum() > 10:
             ac, ao = np.abs(C[mc, 0] - SF.AXIS[0]), np.abs(P[mo, 0] - SF.AXIS[0])
-            gap[i] = max(0.0, max(np.percentile(ac, q) - np.percentile(ao, q) for q in BANG_OUT_PCT))
+            gap[i] = np.mean([np.percentile(ac, q) - np.percentile(ao, q) for q in BANG_OUT_PCT])   # (in or out)
     for _ in range(2):
         gap[1:-1] = 0.25 * gap[:-2] + 0.5 * gap[1:-1] + 0.25 * gap[2:]
     X = X.copy()
@@ -2017,6 +2018,85 @@ def face_edge(X, sel, style_path, col):
         sw = np.where(g, dth * w * fall, 0.0)
         Y = np.where(g[..., None], _from_polar(X, th - sd * sw, r), Y)
     return push_valid(col, Y)
+
+
+# Side-swept / curtain bangs as stylists finish them (John, 2026-11-24: "read more about side swept bangs"):
+# [KENRA] kenraprofessional.com, "Fringe 101": the centre shortest, the sides "longer as they feed into the hair", a
+#         vertical slide cut; "the deeper the cut, the more piecey it will be".
+# [BTC-RW] behindthechair.com, "The cheekbone guide for cutting soft custom curtain bangs": slide cut, then softened
+#         "creating no lines".
+# [DAV] davines.com, "How to style curtain bangs": the fringe blends "gradually into the rest of the hair"; a round
+#         brush under the bangs at the root, "curving the ends away from your face".
+# Ours read stringy: the ends staggered 4.4 cm (p90, against the bangs beside them) as a deep point cut leaves them,
+# and the strands drawn finer at the front showed the forehead between them.
+BANG_LINE_K = 10             # bangs a guide's cut line is read from (its nearest by root)
+BANG_LINE_TOL = 0.025        # HH (5 mm): a slide-cut line's own unevenness; a bang longer than its line by more is cut
+BANG_FAN_SIGMA = 0.035       # HH (8 mm, in x): each bang's shape blended with the bangs rooted around it, so the fan opens
+                             # evenly from the part instead of in two groups with the forehead between (the inner
+                             # bangs fell to the brow, the outer swept off to the temple)
+BANG_FAN_PASSES = 1
+BANG_SHEET_PASSES = 3        # comb passes run through each side's bangs alone, so the side lies as one sheet [BTC-RW]
+BANG_EDGE_HH = 0.08          # HH (1.8 cm): the hair rooted this close outside the bangs' section is combed with them,
+                             # so the section blends into the hair beside it [DAV] (the forehead showed in a wedge at
+                             # each side of the section, where the bangs swept out and the hair beside them went back)
+
+
+def bang_finish(X, lengths, bang, roots, col, free=None, comb=True, cut=True):
+    """The bangs finished as one swept sheet (comb): each side's fan evened out from the part and combed through, with
+    the hair rooted just outside the section (free: the guides that may be combed with them); then (cut) slide-cut on
+    one smooth line, a bang hanging past the line its neighbours make cut back to it. Returns X and lengths."""
+    from scipy.spatial import cKDTree
+    side = np.where(roots[:, 0] < SF.AXIS[0], 1, 2)
+    d, _ = cKDTree(roots[bang]).query(roots)
+    edge = ~bang & (d < BANG_EDGE_HH) & (roots[:, 1] < SF.AXIS[1])
+    if free is not None:
+        edge &= free
+    group = np.where(bang | edge, side, -np.arange(len(roots)) - 10)
+    # the fan evened out in root space: each guide takes the Gaussian-weighted mean shape (from its root) of the
+    # guides of its side rooted round it
+    ok = ~np.isnan(X[..., 0])
+    for _ in range(BANG_FAN_PASSES if comb else 0):
+        Y = X.copy()
+        for sd in (1, 2):
+            gi = np.where(bang & (side == sd))[0]          # (the bangs only: the hair beside them goes back)
+            if len(gi) < 3:
+                continue
+            F = X[gi] - roots[gi][:, None]
+            last = ok[gi].sum(1) - 1
+            for j in range(len(gi)):                       # (each carried on past its end, to blend over any length)
+                F[j, last[j] + 1:] = F[j, last[j]]
+            D2 = (roots[gi][:, None, 0] - roots[gi][None, :, 0]) ** 2   # (across the fan only: its x)
+            W = np.exp(-D2 / (2 * BANG_FAN_SIGMA ** 2))
+            W /= W.sum(1, keepdims=True)
+            M = np.einsum('ij,jsk->isk', W, F)
+            for j, g in enumerate(gi):
+                Y[g, :last[j] + 1] = roots[g] + M[j, :last[j] + 1]
+                d = np.diff(Y[g, :last[j] + 1], axis=0)    # (back to the rod's segment length)
+                L = np.linalg.norm(np.diff(X[g, :last[j] + 1], axis=0), axis=1, keepdims=True)
+                d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+                Y[g, 1:last[j] + 1] = X[g, 0] + np.cumsum(d, 0)
+        X = push_valid(col, Y)
+    if comb:
+        X = comb_pass(X, group, col, passes=BANG_SHEET_PASSES)
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    lengths = lengths.copy()
+    if not cut:
+        return X, lengths
+    for sd in (1, 2):
+        gi = np.where(bang & (side == sd) & (n > 4))[0]
+        if len(gi) <= BANG_LINE_K:
+            continue
+        E = X[gi, n[gi] - 1, 2]
+        _, nn = cKDTree(roots[gi]).query(roots[gi], BANG_LINE_K + 1)
+        line = np.median(E[nn], 1)
+        for j, g in enumerate(gi):
+            if E[j] < line[j] - BANG_LINE_TOL:
+                below = np.where(ok[g] & (X[g, :, 2] < line[j]))[0]
+                k = max(4, below[0])
+                X[g, k + 1:] = np.nan
+                lengths[g] = min(lengths[g], k)
+    return X, lengths
 
 
 def recut(X, lengths, cut_z=None, keep=None):
@@ -2294,10 +2374,15 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             # the side of the face filled to the creator's edge under the bangs (no gap at the temple and cheek)
             X2 = face_edge(X2, ~bang & (np.abs(SF.theta(roots)) < SIDE_SOLVE_TH), trace, col)
             X2 = relax_kinks(X2, col, None, keep=bang & (fl < 0))
-            # the bangs brushed out to the creator's sweep, off the eyes
-            X2 = bang_out(X2, bang & (fl < 0), trace, seg_hh, col)
+            # the bangs combed into one fan with the hair beside them (see bang_finish), then brushed to the creator's
+            # sweep, off the eyes and over the brow
+            X2, _ = bang_finish(X2, lengths, bang & (fl < 0), roots, col, free=fl < 0, cut=False)
+            for _ in range(BANG_OUT_ITERS):
+                X2 = bang_out(X2, bang & (fl < 0), trace, seg_hh, col)
             # and the bangs' ends carried on into the side hair, so the fringe flows into the sides
             X2 = bang_blend(X2, bang & (fl < 0), col)
+            # and finished as one sheet on a smooth slide-cut line (see bang_finish)
+            X2, lengths = bang_finish(X2, lengths, bang & (fl < 0), roots, col, comb=False)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)

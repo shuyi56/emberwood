@@ -45,6 +45,9 @@ CARD_LIFT_MM = 2.0                 # DRAFT: cards lie at least this far over the
 FRAME_CLUMP0 = 900                 # groom.py frame_locks: clump ids from here are the face-framing locks
 
 
+BANG_CARD0 = 10000                 # the bangs' card groups (fixed ids from here)
+
+
 def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0]), fixed=None):
     """fixed: a group id per guide (-1: none); each group is one card of its own (the face-framing locks, gathered
     in the groom: split among k-means cards or mixed with the hair beside them, they drew as loose wisps), the rest
@@ -260,6 +263,19 @@ def main():
     surf = SF.Surface(SF.load_head(a[a.index('--head') + 1])) if '--head' in a else None
     for k in lods:
         fixed = np.where(G['clump'] >= FRAME_CLUMP0, G['clump'], -1) if 'clump' in G else None
+        if 'bang' in G and G['bang'].any():
+            # the bangs carded among themselves (their share of the cards): mixed with the hair beside them, a
+            # card averaged the fan and the side hair and stood off the forehead as a see-through veil
+            fixed = np.full(len(X), -1) if fixed is None else fixed.copy()
+            bi = np.where(G['bang'].astype(bool) & (fixed < 0))[0]
+            kb = max(2, int(round(k * len(bi) / len(X))))
+            Xb = X[bi].copy()
+            last = (~np.isnan(Xb[..., 0])).sum(1) - 1
+            for j in range(len(bi)):
+                Xb[j, last[j] + 1:] = Xb[j, last[j]]
+            S1 = Xb.shape[1]
+            fb = np.c_[Xb[:, 0], Xb[:, min(5, S1 - 1)], Xb[:, min(10, S1 - 1)], Xb[:, min(20, S1 - 1)]]
+            fixed[bi] = BANG_CARD0 + kmeans(fb, kb)
         cards = bake(X, k, spacing, steps.get(k, 3), centre, fixed)
         nv, nf = write_obj(cards, os.path.join(out, 'cards-lod%d.obj' % k), surf)
         P = card_points(cards)
