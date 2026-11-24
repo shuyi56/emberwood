@@ -1,0 +1,354 @@
+{
+ "version": 1,
+ "image": "ref.png",
+ "size": [
+  1244,
+  1561
+ ],
+ "camera": {
+  "view": "front",
+  "projection": "photo",
+  "note": ""
+ },
+ "unit": {
+  "name": "ipd",
+  "a": "pupil_l",
+  "b": "pupil_r",
+  "axis": "len"
+ },
+ "plumb": "sn",
+ "landmarks": {
+  "pupil_l": [
+   418.0,
+   508.0
+  ],
+  "pupil_r": [
+   786.0,
+   472.0
+  ],
+  "en_l": [
+   480.0,
+   522.0
+  ],
+  "en_r": [
+   708.0,
+   500.0
+  ],
+  "ex_l": [
+   322.0,
+   512.0
+  ],
+  "ex_r": [
+   900.0,
+   470.0
+  ],
+  "limbus_med_l": [
+   456.0,
+   508.0
+  ],
+  "limbus_med_r": [
+   750.0,
+   474.0
+  ],
+  "al_l": [
+   510.0,
+   728.0
+  ],
+  "al_r": [
+   712.0,
+   720.0
+  ],
+  "sn": [
+   600.0,
+   752.0
+  ],
+  "tdp_l": [
+   578.0,
+   690.0
+  ],
+  "tdp_r": [
+   624.0,
+   690.0
+  ],
+  "peak_l": [
+   573.0,
+   841.0
+  ],
+  "peak_r": [
+   642.0,
+   838.0
+  ],
+  "ls": [
+   600.0,
+   848.0
+  ],
+  "sto": [
+   602.0,
+   896.0
+  ],
+  "ch_l": [
+   485.0,
+   905.0
+  ],
+  "ch_r": [
+   771.0,
+   892.0
+  ],
+  "li": [
+   605.0,
+   976.0
+  ],
+  "me": [
+   609.0,
+   1122.0
+  ]
+ },
+ "segments": {
+  "en_en": {
+   "a": "en_l",
+   "b": "en_r",
+   "axis": "len"
+  },
+  "ex_en_l": {
+   "a": "ex_l",
+   "b": "en_l",
+   "axis": "len"
+  },
+  "ex_en_r": {
+   "a": "en_r",
+   "b": "ex_r",
+   "axis": "len"
+  },
+  "al_al": {
+   "a": "al_l",
+   "b": "al_r",
+   "axis": "len"
+  },
+  "ch_ch": {
+   "a": "ch_l",
+   "b": "ch_r",
+   "axis": "len"
+  },
+  "tdp": {
+   "a": "tdp_l",
+   "b": "tdp_r",
+   "axis": "len"
+  },
+  "peaks": {
+   "a": "peak_l",
+   "b": "peak_r",
+   "axis": "len"
+  },
+  "medlimb": {
+   "a": "limbus_med_l",
+   "b": "limbus_med_r",
+   "axis": "len"
+  },
+  "sn_sto": {
+   "a": "sn",
+   "b": "sto",
+   "axis": "len"
+  },
+  "sto_me": {
+   "a": "sto",
+   "b": "me",
+   "axis": "len"
+  }
+ },
+ "ratios": {
+  "al_vs_enen": [
+   "al_al",
+   "en_en"
+  ],
+  "mouth_vs_alar": [
+   "ch_ch",
+   "al_al"
+  ],
+  "mouth_vs_medlimb": [
+   "ch_ch",
+   "medlimb"
+  ]
+ },
+ "computed": {
+  "unit_px": 369.76,
+  "unit": {
+   "name": "ipd",
+   "a": "pupil_l",
+   "b": "pupil_r",
+   "axis": "len"
+  },
+  "origin": "sn",
+  "segments": {
+   "en_en": {
+    "units": 0.6195,
+    "px": 229.1,
+    "axis": "len",
+    "deg_from_vertical": -84.49
+   },
+   "ex_en_l": {
+    "units": 0.4282,
+    "px": 158.3,
+    "axis": "len",
+    "deg_from_vertical": 86.38
+   },
+   "ex_en_r": {
+    "units": 0.5256,
+    "px": 194.3,
+    "axis": "len",
+    "deg_from_vertical": -81.12
+   },
+   "al_al": {
+    "units": 0.5467,
+    "px": 202.2,
+    "axis": "len",
+    "deg_from_vertical": -87.73
+   },
+   "ch_ch": {
+    "units": 0.7743,
+    "px": 286.3,
+    "axis": "len",
+    "deg_from_vertical": -87.4
+   },
+   "tdp": {
+    "units": 0.1244,
+    "px": 46.0,
+    "axis": "len",
+    "deg_from_vertical": 90.0
+   },
+   "peaks": {
+    "units": 0.1868,
+    "px": 69.1,
+    "axis": "len",
+    "deg_from_vertical": -87.51
+   },
+   "medlimb": {
+    "units": 0.8004,
+    "px": 296.0,
+    "axis": "len",
+    "deg_from_vertical": -83.4
+   },
+   "sn_sto": {
+    "units": 0.3895,
+    "px": 144.0,
+    "axis": "len",
+    "deg_from_vertical": 0.8
+   },
+   "sto_me": {
+    "units": 0.6115,
+    "px": 226.1,
+    "axis": "len",
+    "deg_from_vertical": 1.77
+   }
+  },
+  "ratios": {
+   "al_vs_enen": {
+    "value": 0.8826,
+    "of": [
+     "al_al",
+     "en_en"
+    ]
+   },
+   "mouth_vs_alar": {
+    "value": 1.4159,
+    "of": [
+     "ch_ch",
+     "al_al"
+    ]
+   },
+   "mouth_vs_medlimb": {
+    "value": 0.9672,
+    "of": [
+     "ch_ch",
+     "medlimb"
+    ]
+   }
+  },
+  "positions": {
+   "pupil_l": {
+    "x": -0.4922,
+    "y": -0.6599
+   },
+   "pupil_r": {
+    "x": 0.503,
+    "y": -0.7573
+   },
+   "en_l": {
+    "x": -0.3245,
+    "y": -0.622
+   },
+   "en_r": {
+    "x": 0.2921,
+    "y": -0.6815
+   },
+   "ex_l": {
+    "x": -0.7518,
+    "y": -0.6491
+   },
+   "ex_r": {
+    "x": 0.8113,
+    "y": -0.7627
+   },
+   "limbus_med_l": {
+    "x": -0.3894,
+    "y": -0.6599
+   },
+   "limbus_med_r": {
+    "x": 0.4057,
+    "y": -0.7518
+   },
+   "al_l": {
+    "x": -0.2434,
+    "y": -0.0649
+   },
+   "al_r": {
+    "x": 0.3029,
+    "y": -0.0865
+   },
+   "sn": {
+    "x": 0.0,
+    "y": 0.0
+   },
+   "tdp_l": {
+    "x": -0.0595,
+    "y": -0.1677
+   },
+   "tdp_r": {
+    "x": 0.0649,
+    "y": -0.1677
+   },
+   "peak_l": {
+    "x": -0.073,
+    "y": 0.2407
+   },
+   "peak_r": {
+    "x": 0.1136,
+    "y": 0.2326
+   },
+   "ls": {
+    "x": 0.0,
+    "y": 0.2596
+   },
+   "sto": {
+    "x": 0.0054,
+    "y": 0.3894
+   },
+   "ch_l": {
+    "x": -0.311,
+    "y": 0.4138
+   },
+   "ch_r": {
+    "x": 0.4625,
+    "y": 0.3786
+   },
+   "li": {
+    "x": 0.0135,
+    "y": 0.6058
+   },
+   "me": {
+    "x": 0.0243,
+    "y": 1.0007
+   }
+  },
+  "whole_height_units": 1.763
+ }
+}
