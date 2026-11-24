@@ -2771,6 +2771,58 @@ SWEEP_ROOT_SLOPE = 0.15      # STYLE: down per unit back where the hair leaves t
 SWEEP_C_SLOPE = 0.6          # STYLE: down per unit back where it passes behind the ear (gravity takes over)
 
 
+# No pull to the back at the neck (John, 2026-11-25, the hair behind the ear outlined in profile: "the flow should not
+# be pulled back to the back like this"). The hair rooted over and behind the ear is solved to hang behind the
+# shoulder, and it moved there all at once: plumb from the ear to the lobe, then 5 cm straight back along the neck in
+# 4 cm of fall (a hook), then plumb again. From the ear down, no segment of the side hair now runs back faster than
+# FALL_BACK_MAX per unit of fall: it reaches the back over the whole neck, as hair falling over a shoulder does.
+FALL_BACK_MAX = 0.45         # STYLE: back per unit down, the steepest the side hair leaves the ear for the back
+FALL_BACK_Z = (0.4, 0.3, -0.3)   # HH: eased in from the ear's middle to the lobe, held to below the shoulder's top;
+                             # under that the hair lies on the back and follows it
+FALL_BACK_TH = (1.9, 2.4)    # |theta| of the roots: in full to behind the ear, none at the back (already there)
+
+
+def limit_back(X, sel, roots, seg_hh, col):
+    """Each guide in sel marched from where it passes FALL_BACK_Z[0]: a segment that runs back faster than
+    FALL_BACK_MAX per unit down is turned down to it (its sideways part kept); the rest of the guide keeps its own
+    directions, so its shape below is carried with it. Each node pushed out of the head and body, at its length."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    wt = 1 - SF.sm(FALL_BACK_TH[0], FALL_BACK_TH[1], np.abs(SF.theta(roots)))
+    D0 = np.diff(X, axis=1)
+    for g in np.where(sel & (wt > 0))[0]:
+        b = np.where(ok[g] & (X[g, :, 2] < FALL_BACK_Z[0]))[0]
+        if not len(b) or b[0] < 2:
+            continue
+        moved = False
+        for k in range(b[0], n[g]):
+            d = D0[g, k - 1].copy()
+            z = X[g, k - 1, 2]
+            if z > FALL_BACK_Z[2] and d[2] < 0:
+                w = wt[g] * SF.sm(FALL_BACK_Z[0], FALL_BACK_Z[1], z)
+                lim = FALL_BACK_MAX * -d[2]
+                if d[1] > lim and w > 0:
+                    # (turned down, not shortened: the length it no longer spends going back goes into the fall)
+                    L = np.linalg.norm(d)
+                    t = np.array([d[0], 0.0, 0.0])
+                    rem = max(L * L - d[0] ** 2, 1e-12) ** 0.5
+                    dn = rem / (1 + FALL_BACK_MAX ** 2) ** 0.5
+                    d2 = t + np.array([0.0, FALL_BACK_MAX * dn, -dn])
+                    d = d + w * (d2 - d)
+                    d *= L / max(np.linalg.norm(d), 1e-12)
+                    moved = True
+            if not moved:
+                continue
+            X[g, k] = X[g, k - 1] + d
+            m = np.zeros(X.shape[:2], bool)
+            m[g, k] = True
+            X = push_valid(col, X, mask=m)
+            v = X[g, k] - X[g, k - 1]
+            X[g, k] = X[g, k - 1] + v / max(np.linalg.norm(v), 1e-12) * seg_hh
+    return X
+
+
 def _skin_radius(col, th, z):
     """The head's radius from its axis (incl. the ears) at angle th and height z, by bisection on the collider."""
     import torch
@@ -2919,6 +2971,10 @@ SIDE_PIECE_TH = (0.97, 1.75) # STYLE: |theta| of the side piece at the jaw: from
 # 1.0: 0.25 rad, 1.8 cm, of cheek between. The front lock is turned back from the temple to hang against the piece's
 # front edge, keeping its own wave.)
 FIRST_LOCK_BAND = (0.8, 0.97)  # STYLE: |theta| of the front lock at the jaw: against the side piece
+FIRST_LOCK_OFF_MM = 10.0     # STYLE: the front lock lies within this of the face from the temple to the jaw. (John,
+                             # 2026-11-25: "fix that lock crossing eye". It bowed 3 to 4 cm forward off the cheek, so
+                             # in profile it hung across the eye; on the cheek it sits behind the outer canthus)
+FIRST_LOCK_OFF_Z = (0.85, 0.7, 0.1, -0.05)   # HH: eased in below the root's lift, in full to the jaw, free below the chin
 SIDE_PIECE_Z = (0.72, 0.5)   # HH: the hair turns into the piece from the temple to the ear's middle
 # Filling it: the curtain alone is 450 hairs a side (side_fill.py: 13% and 31% of the piece's cells covered); a piece
 # 2.7 cm wide wants a few thousand. The hair that grows there fills it: the temple and sideburn hair, rooted in front
@@ -2938,7 +2994,7 @@ CURTAIN_END_Z = 0.2          # HH: the bangs ending below this are the curtain's
 CURTAIN_ID = 960             # the curtain locks' clump ids from here (above the framing locks' 900s)
 
 
-def curtain_locks(X, roots, sel, col, band=None, wave=True):
+def curtain_locks(X, roots, sel, col, band=None, wave=True, off=None):
     """The curtain's long side (sel) kept as one sheet and fanned back (CURTAIN_FAN_*): each side's guides, in their
     order round the head at the jaw, turned round the head's axis so the sheet runs from where its front edge hangs
     back to CURTAIN_FAN_TH, over the ear, from the temple down; then the side's S laid on it (SET_*: one pattern, so
@@ -2965,7 +3021,13 @@ def curtain_locks(X, roots, sel, col, band=None, wave=True):
             m = n[g]
             th, r = _polar(X[g:g + 1, :m])
             w = SF.sm(SIDE_PIECE_Z[0], SIDE_PIECE_Z[1], X[g, :m, 2])
-            Pg = _from_polar(X[g:g + 1, :m], th + np.sign(th) * a * w[None], r)[0]
+            th2 = th + np.sign(th) * a * w[None]
+            if off is not None:       # (laid in against the face: no further off the skin than `off`, see FIRST_LOCK_OFF_MM)
+                wo = SF.sm(FIRST_LOCK_OFF_Z[0], FIRST_LOCK_OFF_Z[1], X[g, :m, 2]) \
+                    * (1 - SF.sm(FIRST_LOCK_OFF_Z[2], FIRST_LOCK_OFF_Z[3], X[g, :m, 2]))
+                rs = _skin_radius(col, th2[0], np.maximum(X[g, :m, 2], 0.12)) + off
+                r = r - wo[None] * np.maximum(r - rs[None], 0)
+            Pg = _from_polar(X[g:g + 1, :m], th2, r)[0]
             d = np.diff(Pg, axis=0)
             L = np.linalg.norm(np.diff(X[g, :m], axis=0), axis=1, keepdims=True)
             d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
@@ -3407,11 +3469,17 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             X2 = sweep_back(X2, bf_, roots, col, seg_hh)
             X2 = relax_kinks(X2, col, None, keep=~bf_)
             lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
+            # the side hair, from the ear down: no hook straight back along the neck (see FALL_BACK_*)
+            fb_ = ~bang & ~first_ & ~bf_
+            X2 = limit_back(X2, fb_, roots, seg_hh, col)
+            X2 = relax_kinks(X2, col, None, keep=~fb_)
+            lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
             # the curtain's long side gathered into locks and waved with the side (see CURTAIN_*)
             okc_ = ~np.isnan(X2[..., 2])
             endc_ = X2[np.arange(len(X2)), okc_.sum(1) - 1, 2]
             X2, cid_ = curtain_locks(X2, roots, (bang & ~first_ & (endc_ < CURTAIN_END_Z)) | piece_, col)
-            X2, fid_ = curtain_locks(X2, roots, first_, col, band=FIRST_LOCK_BAND, wave=False)
+            X2, fid_ = curtain_locks(X2, roots, first_, col, band=FIRST_LOCK_BAND, wave=False,
+                                     off=FIRST_LOCK_OFF_MM / SF.HH_MM)
             X2 = relax_kinks(X2, col, None, keep=(cid_ < 0) & (fid_ < 0))
             lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
