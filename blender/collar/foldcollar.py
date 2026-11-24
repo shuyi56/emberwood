@@ -190,6 +190,94 @@ def relax(R, B, opt):
     return X, st
 
 
+def end_trim(R, opt):
+    """The stand's wedge cut off at each end (`end_trim` R: where the stand is narrower than R, in model units).
+
+    John, 2026-11-24: "Fix the imperfections of the join". At each end the roll line comes down to the neck edge, so the
+    stand runs out in a wedge thinner than the cloth under the fall. Drawn a cloth thick, the wedge and the fall crossed,
+    and the pocket between them showed end on beside the lapel's roll top as a dark slit. The stand there is no stand
+    at all: its faces within R of each end are cut away, and the fall's end makes the collar's end by itself. (Laying
+    the wedge up under the fall instead tore the end; tried and removed.)"""
+    UV = R['uv']; tri = R['tri']; F = R['fold']; Rr = float(opt['end_trim'])
+    # (by where each face lies: under the roll line, where the stand is narrower than R. Choosing faces by how many of
+    # their points are stand points left a saw edge along the roll line, as its points count as the fall's.)
+    c = UV[tri].mean(1); o = np.argsort(F[:, 0]); hc = np.interp(c[:, 0], F[o, 0], F[o, 1])
+    cut = (c[:, 1] < hc) & (hc < Rr)
+    tri = tri[~cut]; used = np.zeros(len(UV), bool); used[tri.ravel()] = True
+    idx = -np.ones(len(UV), int); idx[used] = np.arange(used.sum())
+    for k in ('uv', 'pts', 'fall', 'uv_rect'):
+        if k in R: R[k] = R[k][used]
+    R['tri'] = idx[tri]
+    ed = np.unique(np.sort(np.vstack([R['tri'][:, [0, 1]], R['tri'][:, [1, 2]], R['tri'][:, [2, 0]]]), 1), axis=0)
+    l0 = np.linalg.norm(R['uv'][ed[:, 0]] - R['uv'][ed[:, 1]], axis=1); l1 = np.linalg.norm(R['pts'][ed[:, 0]] - R['pts'][ed[:, 1]], axis=1)
+    R['edges'] = ed; R['strain'] = l1 / np.maximum(l0, 1e-9) - 1
+    return dict(end_trimmed_faces=int(cut.sum()), end_trimmed_points=int((~used).sum()))
+
+
+def no_poke(R, B, opt):
+    """The coat kept under the collar, measured from the coat's side (`no_poke` M, the margin in model units).
+
+    John, 2026-11-24: "Fix the imperfections of the join". A small fin showed on each end's face at |x| 3.3, z 51.5: the
+    coat's neck edge stood 1 mm through the collar. The push off the coat measures each collar point's height over the
+    nearest coat point along that point's normal; beside the coat's neck edge the nearest point is an edge point with a
+    tilted normal, and a ridge between two collar points is never seen. Here each point of the coat's outer face
+    (the mesh plus its Solidify thickness) is measured against the collar's inner face instead, and the collar is
+    lifted by what the deepest coat point under it needs, the lift spread and evened over the cloth as the push is.
+    The lapels are left out: beside their top edges the collar is let down level on purpose (`gorge_flush`)."""
+    X = R['pts']; tri = R['tri']; fall = R['fall']; nA = len(X)
+    M = np.load(B + '/build.npz', allow_pickle=True); BX, BT = M['body_X'], M['body_T']
+    L = np.load(B + '/lapel.blend.lapels.npz')
+    th = float(opt.get('coat_th', 0.1669)); mg = float(opt['no_poke'])
+    fn = np.cross(BX[BT[:, 1]] - BX[BT[:, 0]], BX[BT[:, 2]] - BX[BT[:, 0]]); vn = np.zeros_like(BX)
+    for k in range(3): np.add.at(vn, BT[:, k], fn)
+    vn /= np.maximum(np.linalg.norm(vn, axis=1), 1e-12)[:, None]
+    lp = np.vstack([L['pts' + s_] for s_ in '12'])
+    keep = cKDTree(lp).query(BX)[0] > float(opt.get('no_poke_lapel', 0.6))       # (nor the coat under and round them)
+    near = cKDTree(X[fall]).query(BX, distance_upper_bound=0.6)[0] < 0.6
+    CO = (BX + th * vn)[keep & near]
+    ed_ = np.unique(np.sort(np.vstack([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]), 1), axis=0)
+    from scipy.sparse import coo_matrix
+    Adj = coo_matrix((np.ones(2 * len(ed_)), (np.concatenate([ed_[:, 0], ed_[:, 1]]), np.concatenate([ed_[:, 1], ed_[:, 0]]))), shape=(nA, nA)).tocsr()
+    dg = np.maximum(np.asarray(Adj.sum(1)).ravel(), 1)
+    from collections import Counter
+    cnt = Counter(map(tuple, ed_.tolist())); ec = Counter()
+    for t in tri:
+        for i in range(3): ec[tuple(sorted((int(t[i]), int(t[(i + 1) % 3]))))] += 1
+    bd = np.zeros(nA, bool)
+    for e, c in ec.items():
+        if c == 1: bd[list(e)] = True
+    fi = np.nonzero(fall)[0]; first = None
+    u_ = np.clip((cKDTree(lp).query(X)[0] - 0.4) / 0.6, 0, 1); hold = u_ * u_ * (3 - 2 * u_)     # (the collar by the lapels stays where the join put it)
+    for rd in range(int(opt.get('no_poke_rounds', 4))):
+        cn = np.cross(X[tri[:, 1]] - X[tri[:, 0]], X[tri[:, 2]] - X[tri[:, 0]]); n = np.zeros_like(X)
+        for k in range(3): np.add.at(n, tri[:, k], cn)
+        n /= np.maximum(np.linalg.norm(n, axis=1), 1e-12)[:, None]
+        dB, jB = cKDTree(BX).query(X); sg = np.sign(((X - BX[jB]) * n).sum(1)); n *= np.where(sg == 0, 1, sg)[:, None]
+        dd, jj = cKDTree(X[fi]).query(CO); j3 = fi[jj]
+        sd = ((CO - X[j3]) * n[j3]).sum(1); lat = np.sqrt(np.maximum(dd ** 2 - sd ** 2, 0))
+        # (the collar may lie half in the coat's cloth, as wool compresses under wool: only what reaches past the
+        # collar's own middle, and so shows through its face, is lifted)
+        bad = (sd > -mg) & (lat < 0.1) & ~bd[j3]
+        if first is None: first = int((sd[bad] > 0.5 * th).sum())
+        if not bad.any(): break
+        need = np.zeros(nA); np.maximum.at(need, j3[bad], np.minimum(sd[bad] + mg, 0.2))
+        for _s in range(opt.get('push_grow', 6)):
+            nb = np.zeros(nA); np.maximum.at(nb, ed_[:, 0], need[ed_[:, 1]]); np.maximum.at(nb, ed_[:, 1], need[ed_[:, 0]])
+            need = np.maximum(need, 0.9 * nb) * fall
+        for _s in range(opt.get('no_poke_even', 15)): need = np.maximum((0.5 * need + 0.5 * (Adj @ need) / dg) * fall, 0)
+        X = X + (need * hold)[:, None] * n
+    dd, jj = cKDTree(X[fi]).query(CO); j3 = fi[jj]
+    cn = np.cross(X[tri[:, 1]] - X[tri[:, 0]], X[tri[:, 2]] - X[tri[:, 0]]); n = np.zeros_like(X)
+    for k in range(3): np.add.at(n, tri[:, k], cn)
+    n /= np.maximum(np.linalg.norm(n, axis=1), 1e-12)[:, None]
+    dB, jB = cKDTree(BX).query(X); sg = np.sign(((X - BX[jB]) * n).sum(1)); n *= np.where(sg == 0, 1, sg)[:, None]
+    sd = ((CO - X[j3]) * n[j3]).sum(1); lat = np.sqrt(np.maximum(dd ** 2 - sd ** 2, 0))
+    last = int(((sd > 0.5 * th) & (lat < 0.1) & ~bd[j3]).sum())
+    mv = np.linalg.norm(X - R['pts'], axis=1)
+    R['pts'] = X
+    return dict(poke_before=first or 0, poke_after=last, poke_moved_max_mm=float(26.2 * mv.max()), poke_moved_n=int((mv > 1e-4).sum()))
+
+
 def shape_cut(R, opt):
     """The cut shaped to the neck: the flat pattern whose lengths are the laid collar's own.
 
@@ -234,6 +322,10 @@ if __name__ == '__main__':
     if opt.get('relax', True):
         X, st = relax(R, B, opt); info['strain_mean_relaxed'] = float(np.abs(st).mean()); info['strain_p95_relaxed'] = float(np.percentile(np.abs(st), 95))
         info['moved_mean'] = float(np.linalg.norm(X - R['pts'], axis=1).mean()); R['pts'] = X; R['strain'] = st
+    if opt.get('no_poke'):
+        info.update(no_poke(R, B, opt))
+    if opt.get('end_trim'):
+        info.update(end_trim(R, opt))
     if opt.get('shape_cut'):
         Q, st, ci = shape_cut(R, opt); info.update(ci); R['uv_rect'] = R['uv']; R['uv'] = Q; R['strain'] = st
     np.savez(out, **R); json.dump(dict(opt=opt, info=info), open(out + '.json', 'w'), indent=1)

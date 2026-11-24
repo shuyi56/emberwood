@@ -864,3 +864,27 @@ triangle between the two roll lines below their crossing (an `UNDER` argument of
 left lapel 95% strain 14.6% to 11.9%, foot mean 18.4% to 18.1%. Two cloths: back to 14.6% and 18.4%, and the right
 lapel worse (95% 10.1% to 12.2%). The crush is set by foldfront's press rule for the under lapel, not by the room the
 bodice leaves. Stopped after two rounds.
+
+## Phase 14: the join's flaws (John, 2026-11-24: "Fix the imperfections of the join then render in color")
+
+Found on tight clay close-ups of both ends, each traced by hiding one object at a time and by sections through the
+join (`~/work/FC/section.py`: vertical cuts at fixed x through the coat, the lapel, its top edge and the collar).
+
+| Flaw | Cause | Fix | Result |
+|---|---|---|---|
+| A small fin on each collar end's face, \|x\| 3.3, z 51.5 | The coat's neck edge stood 1 mm through the collar. The push off the coat measures from the collar's side, against the nearest coat point's normal; beside the coat's neck edge that normal tilts, and a ridge between two collar points is never seen | `no_poke` 0.02: each point of the coat's outer face measured against the collar, and the collar lifted where the coat reaches past its middle; spread over the cloth, held still within 0.4 to 1.0 of the lapels | 13 points through the face to 0; gone in the close-ups; join gauges unchanged |
+| A dark slit where each collar end meets the neck | The roll line comes down to the neck edge, so the stand runs out in a wedge thinner than the cloth; drawn a cloth thick, the wedge and the fall crossed | `end_trim` 0.19: the stand's faces under the roll line where it is narrower than 0.19 are cut away | Mostly gone in context; join gauges unchanged |
+| A dark wedge across each collar end at the lapel's top edge | The collar's end is laid on the coat, but the turned lapel stands two cloths off it: the collar lies 6 mm behind the lapel's face and runs 3 to 9 mm on under its top edge | Not fixed | See below |
+
+**Tried and removed (rejection #137):**
+
+- `flush_rounds`, `lift_min` 0.17 (the folded layers kept a cloth apart at the crease): scallops along the roll line
+  and a larger slit. `end_close` (the stand's wedge laid up under the fall): tore the end into spikes. `end_trim` by
+  counting stand points per face: a saw edge along the roll line (the centroid rule replaced it).
+- `gorge_match` in two forms (the collar's end raised to the lapel's face at the top edge; then the hidden strip
+  taken in to the edge first): both tore the collar's end, a cliff where the lapel's edge ends and teeth by the neck.
+  Stopped per the stop rule.
+
+**What the third flaw needs:** the collar's end and the lapel at the gorge have to be built as one surface, the
+collar's end edge laid along the lapel's top edge at the lapel's own face, rather than a collar laid on the coat and
+moved afterwards. Any after-the-fact move of part of the end tears it.
