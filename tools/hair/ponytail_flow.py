@@ -170,6 +170,39 @@ def file_key(path):
     return (os.path.basename(path), st.st_size, int(st.st_mtime))
 
 
+class Memo:
+    """A content-addressed memo kept in the cache folder: results stored under a hash of their inputs, so a rerun
+    recomputes only the inputs that changed (the lock's lines, not the fourteen hundred blue ones). The whole memo
+    is dropped when `key` changes (the head or the code the results come from)."""
+    def __init__(self, name, key):
+        import pickle, hashlib
+        self.d, self.new, self.p = {}, False, None
+        if CACHE is None:
+            return
+        self.p = os.path.join(CACHE, '%s-%s.pkl' % (name, hashlib.sha1(repr(key).encode()).hexdigest()[:16]))
+        self.name = name
+        if os.path.exists(self.p):
+            self.d = pickle.load(open(self.p, 'rb'))
+
+    @staticmethod
+    def h(*arrays):
+        import hashlib
+        m = hashlib.blake2b(digest_size=10)
+        for a in arrays:
+            m.update(np.ascontiguousarray(a, dtype=float).tobytes())
+        return m.digest()
+
+    def save(self):
+        import pickle
+        if self.p is None or not self.new:
+            return
+        for old in os.listdir(CACHE):
+            if old.startswith(self.name + '-'):
+                os.remove(os.path.join(CACHE, old))
+        pickle.dump(self.d, open(self.p, 'wb'), protocol=4)
+        self.new = False
+
+
 def scalp(head):
     """Stage 1: the skin and the scalp field (depends on the head and scalp_field.py only)."""
     def solve():
@@ -740,13 +773,23 @@ def camera(az_deg, el_deg=0.0):
     return right, up, fwd
 
 
+HIDDEN = None                   # the Memo of visibility results, one entry per (line, camera), set in main
+
+
 def hidden(surf, P, fwd, steps=14, reach=1.2):
     """True where the head lies between the point and the camera."""
+    if HIDDEN is not None:
+        key = Memo.h(P, fwd)
+        if key in HIDDEN.d:
+            return HIDDEN.d[key]
     t = np.linspace(0.02, reach, steps)[None, :, None]
     Q = (P[:, None] + fwd[None, None] * t).reshape(-1, 3)
     neck = (Q[:, 2] < 0.25) & (Q[:, 2] > -0.3) & (np.hypot(Q[:, 0], Q[:, 1] - 0.08) < 0.2)     # (a plain neck)
     ins = ((surf.depth(Q) > 0.004) & (Q[:, 2] > 0.2)) | (ear_depth(Q) > 0) | neck
-    return ins.reshape(len(P), steps).any(1)
+    out = ins.reshape(len(P), steps).any(1)
+    if HIDDEN is not None:
+        HIDDEN.d[key] = out; HIDDEN.new = True
+    return out
 
 
 def draw_view(ax, B, FF, lines, extra, az, el, title, body=None):
@@ -770,10 +813,12 @@ def draw_view(ax, B, FF, lines, extra, az, el, title, body=None):
     def add(pts, col, lw):
         hid = hidden(surf, pts, fwd)
         x, y = pts @ right, pts @ up
-        for j in range(len(pts) - 1):
-            if not (hid[j] or hid[j + 1]):
-                segs.append([(x[j], y[j]), (x[j + 1], y[j + 1])]); cols.append(col); lws.append(lw)
-                zs.append(0.5 * (pts[j] + pts[j + 1]) @ fwd)
+        ok = np.where(~(hid[:-1] | hid[1:]))[0]
+        if not len(ok):
+            return
+        segs.extend(np.stack([np.c_[x[ok], y[ok]], np.c_[x[ok + 1], y[ok + 1]]], axis=1))
+        cols.extend([col] * len(ok)); lws.extend([lw] * len(ok))
+        zs.extend(0.5 * (pts[ok] + pts[ok + 1]) @ fwd)
     for q, (i, (pts, part, rl)) in enumerate(lines.items()):
         for p_, nm in ((0, 'tie'), (1, 'handover'), (2, 'bundle')):
             k = np.where(part == p_)[0]
@@ -814,6 +859,8 @@ def main():
         os.makedirs(CACHE, exist_ok=True)
     import time, inspect
     t_all = time.time()
+    global HIDDEN
+    HIDDEN = Memo('hidden', (file_key(HEAD), file_key(SF.__file__), inspect.getsource(hidden), inspect.getsource(ear_depth)))
     B = build(HEAD)
     print('time: %-16s %.1f s' % ('field', time.time() - t_all), file=sys.stderr)
     FF = free_fall(B)
@@ -857,7 +904,9 @@ def main():
         li = np.where(B['basin'] == 2 + k)[0]
         paths += [loose_line(B, i, c['len'], k=30) for i in li]; w += list(B['hairs'][li])
     keep = [j for j, p in enumerate(paths) if len(p) >= 2]
-    Hc, Wc = HG.measure(B['F'], B['surf'], [paths[j] for j in keep], np.array(w)[keep])
+    HLM = Memo('hairline', (file_key(HEAD), file_key(SF.__file__), file_key(HG.__file__)))
+    Hc, Wc = HG.measure(B['F'], B['surf'], [paths[j] for j in keep], np.array(w)[keep], memo=HLM)
+    HLM.save()
     hl = HG.report(Hc, Wc)
     HG.draw(Hc, Wc, os.path.join(out, 'hairline-gauge.png'))
     G['hairline'] = {k: dict(cells=v['cells'], bare=len(v['bare']), longest_gap_mm=v['longest_gap_mm'],
@@ -893,6 +942,7 @@ def main():
     fig.savefig(os.path.join(out, 'flow-field-side.png'), dpi=130, bbox_inches='tight')
     plt.close(fig)
 
+    HIDDEN.save()
     print('time: %-16s %.1f s' % ('views', time.time() - t_all), file=sys.stderr)
     # ---- the flat F map and the balance sheet
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(19, 7.5), facecolor='white', gridspec_kw=dict(width_ratios=[1.5, 1]))

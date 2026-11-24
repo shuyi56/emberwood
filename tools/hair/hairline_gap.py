@@ -25,8 +25,10 @@ HL_COVER = 4.0           # DRAFT: hairs per mm of a cell's width for it to read 
 HL_SUB = 4               # each 1 cm segment of a path is read at this many points
 
 
-def measure(F, surf, paths, hairs):
-    """(H, width_mm): hairs over each cell [side, angle bin, band] and each cell's width along the hairline."""
+def measure(F, surf, paths, hairs, memo=None):
+    """(H, width_mm): hairs over each cell [side, angle bin, band] and each cell's width along the hairline.
+    memo: an optional object with .d (dict), .new and .h(array): the cells each path touches are kept by the path's
+    content, so a rerun reads only the paths that changed."""
     from scipy.spatial import cKDTree
     nb, nd = int(round(HL_TH / HL_CELL_RAD)), int(round(HL_DEPTH_MM / HL_BAND_MM))
     P, th, ins = F['P'], F['theta'], F['inside'] / SF.MM
@@ -45,12 +47,19 @@ def measure(F, surf, paths, hairs):
         p = p[~np.isnan(p[:, 0])]
         if len(p) < 2:
             continue
+        mk = memo.h(p) if memo is not None else None
+        if mk is not None and mk in memo.d:
+            H[memo.d[mk]] += h
+            continue
         q = (p[:-1, None] + (p[1:] - p[:-1])[:, None] * t).reshape(-1, 3)
         q = q[(q[:, 2] > 0.3) & (-surf.depth(q) < HL_OFF_MM * SF.MM)]
-        if not len(q):
-            continue
-        k = tree.query(SF.unit(q - SF.CENTRE))[1]
-        H[np.unique(cell[k[k < len(sp)]])] += h
+        cells = np.zeros(0, int)
+        if len(q):
+            k = tree.query(SF.unit(q - SF.CENTRE))[1]
+            cells = np.unique(cell[k[k < len(sp)]])
+        if mk is not None:
+            memo.d[mk] = cells; memo.new = True
+        H[cells] += h
     # each cell's width along the hairline: its angle bin's arc at the skin's distance from the axis
     r = np.hypot(P[sp, 0] - SF.AXIS[0], P[sp, 1] - SF.AXIS[1])
     W = np.zeros(2 * nb * nd); N = np.zeros(2 * nb * nd)
