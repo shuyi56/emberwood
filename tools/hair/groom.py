@@ -2127,6 +2127,42 @@ def top_smooth(X, sel, col):
     return push_valid(col, X, mask=sel[:, None] & ok)
 
 
+LAY_IN_Z = (0.95, -0.4)      # HH: the heights laid in to the creator's front-view width (crown to below the shoulder)
+LAY_IN_PCT = 99              # the width: this percentile of |x| per height
+LAY_IN_CLEAR_MM = 2.0        # mm over the creator's width, CALIBRATED as SIDE_CLEAR_MM
+
+
+def lay_in(X, keep, style_path, col):
+    """The whole head of hair laid in to the creator's width seen from the front, temples to shoulders: after the
+    styling passes our hair stood 15 to 26 mm wider than the creator's from the temple (z 0.8) to the jaw, a ledge at
+    eye level (John, 2026-11-24, front view). Each node past the width at its height is moved in, the push smoothed
+    along the strand; then kept out of the head."""
+    import gzip
+    d = json.load(gzip.open(style_path))
+    C = np.concatenate([np.array(s['p']).reshape(-1, 3) for s in d['strands']])
+    zb = np.arange(LAY_IN_Z[0] + 0.1, -1.6, -0.025)
+    W = np.full(len(zb), np.nan)
+    for i, z in enumerate(zb):
+        m = np.abs(C[:, 2] - z) < 0.025
+        if m.sum() > 20:
+            W[i] = np.percentile(np.abs(C[m, 0] - SF.AXIS[0]), LAY_IN_PCT)
+    k = np.where(~np.isnan(W))[0]
+    W[k[-1]:] = W[k[-1]] + SIDE_OPEN * (zb[k[-1]] - zb[k[-1]:])
+    k = np.where(~np.isnan(W))[0]
+    W = np.interp(np.arange(len(zb)), k, W[k]) + LAY_IN_CLEAR_MM / SF.HH_MM
+    ok = ~np.isnan(X[..., 0])
+    z = np.nan_to_num(X[..., 2])
+    lim = np.interp(-z, -zb, W)
+    ease = SF.sm(LAY_IN_Z[0], LAY_IN_Z[0] - 0.1, z) * (1 - SF.sm(LAY_IN_Z[1] + 0.1, LAY_IN_Z[1], z))
+    ax = np.abs(np.nan_to_num(X[..., 0]) - SF.AXIS[0])
+    over = np.where(ok & ~keep[:, None], np.maximum(ax - lim, 0) * ease, 0.0)
+    over = _smooth_along(over)
+    over[:, 0] = 0
+    X = X.copy()
+    X[..., 0] -= np.sign(X[..., 0] - SF.AXIS[0]) * over
+    return push_valid(col, X)
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2413,6 +2449,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             X2, lengths = bang_finish(X2, lengths, bang & (fl < 0), roots, col, comb=False)
             # the tops smoothed: no waves over the temples, they start at the jaw (see TOP_SMOOTH_Z)
             X2 = top_smooth(X2, ~bang & (np.abs(SF.theta(roots)) > 0.6) & (np.abs(SF.theta(roots)) < SIDE_SOLVE_TH), col)
+            # and the whole head of hair laid in to the creator's width from the front, the bangs too: their outer
+            # ends swept out past the temples to |x| 0.58 at eye level (the creator's 0.47), the ledge John saw
+            X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
+            X2 = relax_kinks(X2, col, None, keep=bang)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
