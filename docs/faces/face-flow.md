@@ -523,3 +523,19 @@ skin render from the brow's head to the wing. Depth 1.8 mm and width 2.0 made th
 Five faces: bony base 0.65-0.75 (was 0.64-0.71, norm 0.70-0.80; the groove is now the sharpest concave bend the gauge
 finds, so it moves into the norm on three), dorsal lines / TDP 1.04-1.21 (unchanged), shade line at the inner corner
 0.127-0.16 on four faces (photo 0.135).
+
+## 14. Wings: a rounder lobule
+
+John's marks on the clay front: the nose's sides ran straight, the wing swelled out, and the outline then turned back in
+at the base, so the wing read as a bulge with a corner and not as a round lobule.
+
+Fix (`apply-brow-arc.py`, default `W4X`): the wing ball is fuller and rounder (`blg` 5.0 mm, `blc` 0.45, `blw` 0.6), the
+crescent that cups the nostril starts lower (`ctp` 0.3), and the crescent's flare is eased (`chf` 0.9, `chb` 2.2) so the
+outline curves into the base and out round the lobule without a step.
+
+Rejected: running the wing's round all the way to the tip (`chf` 1.0, and the crescent's first width at 0.9 and 1.0).
+Those widened the Ranger's tip-defining points: dorsal lines / TDP 0.74, 0.63 and 0.98, waist / TDP about 0.46-0.52.
+
+Five faces after the change: bony base 0.64-0.74, dorsal lines / TDP 1.04-1.21 (Warden 1.21, a little over the 1.15 norm),
+waist / TDP 0.735-0.80 except the Ranger at 0.67. The nose's own outline has no gauge yet; the shade line reads the shadow
+under the wing and moves less than the shape.
