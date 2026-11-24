@@ -1289,6 +1289,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
   zPrn = nSmin(zPrn, zSn + rT + 2.0 * mm + 0.11 * aH0 * (Tp - rT) / clamp(Tp - rEnv, 0.55 * Tp, 0.75 * Tp), 1.0 * mm);
   // the bridge's line in profile, the radix to the supratip (his with a hump over the rhinion)
   var zRad = zN, yRad = yN - NL.radix * np * mm, zSup = zPrn + 0.14 * L, ySup = yPrn + 1.3 * mm;
+  /* brow arc (apply-brow-arc.py): head */ var uHB = -0.6 * 1.1 / RX, aHB = browArcMM(uHB), xHB = P.eyeSpacing * HH + uHB * RX, zHB = 0.525 * HH + EYE_LIFT + (aHB[0] - aHB[1]) * mm + P.browHeight - 0.06 * sx;      // (the brow's head: its lower inner corner, where the dorsal line runs into it)
   var hump = (1.4 * sx - 0.25) * mm * (0.7 + 0.3 * np);
   // the base, from below: the lobule and the wings' floor, wide at the wings, narrowing to the tip, its floor rising forward
   var alarHalf = 0.5 * NL.alar * P.eyeSpacing * HH * nw;
@@ -1355,10 +1356,11 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     // bridge running into it, and the middle of the bridge is never wider than that)
     var wLo = CT.wr * (0.433 ? 0.433 * alarHalf : rEnv), wMid = Math.min(NL.ridge[1] * nw * mm, CT.wm * wLo);
     w = lerp(lerp(wLo, wMid, sm(0, 0.5, tc)), NL.ridge[0] * nw * mm, sm(0.5, 1, tc));
+    /* brow arc (apply-brow-arc.py): flare */ w *= 1 * (1 - 0.15 * sx); var qF = clamp((z - zRad) / Math.max(1e-6, zHB - zRad), 0, 1), wF = 0 * Math.max(0, xHB - w) * (1 - Math.sqrt(Math.max(0, 1 - qF * qF))); w += wF;      // (above the radix the dorsal lines part and curve out into the brows' heads, a quarter ellipse: upright at the radix, level at the brow)
     var sl = lerp(lerp(NL.side[2], NL.side[1], sm(0, 0.5, tc)), NL.side[0], sm(0.5, 1, tc)) / (0.85 + 0.15 * nw);
     // (past the wings' inner edge the side wall turns back faster, so it meets the cheek instead of running on across it)
     var bk = Math.max(0, ax - lerp(0.6 * alarHalf, 8 * mm, sm(0.2, 0.9, tc)));
-    var dD = (yl + sl * (Math.sqrt(w * w + ax * ax) - w) + 0.09 * bk * bk / mm - y) / Math.sqrt(1 + sl * sl);
+    var dD = (yl + browChisel(ax, w, sl, mm) + 0.09 * Math.pow(Math.max(0, bk - wF), 2) / mm - y) / Math.sqrt(1 + sl * sl);      /* brow arc (apply-brow-arc.py): the chisel */
     dD = -nSmin(-dD, -((zPrn - 0.5 * mm) - z), 5.5 * mm);      // (the bridge ends in the tip)
     // ---- the lower nose as a sculptor blocks it: one wedge (its bottom plane tilted up toward the tip, its sides leaning in
     // as they rise, its front the lobule falling from the tip to the columella's break), the ball as the wedge's rounded end,
@@ -2526,7 +2528,10 @@ function lipFamily() {
 
 /* ---- the brows (brow_image): Poisson-disk roots, hairs that follow the brow's growth, a powder under them ---- */
 /* brow arc (apply-brow-arc.py) */
-var BROW_ARC = { t: [0, 0.03, 0.25, 0.47, 0.63, 0.8, 1], top: [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], bot: [17.6, 17.2, 20.6, 22.2, 22.0, 21.0, 20.2] };      // (mm over the inner corners' line: the upper margin Park 2017's, the lower parallel to the eye's arc; apply-brow-arc.py)
+var BROW_ARC = { t: [0, 0.03, 0.25, 0.47, 0.63, 0.8, 1], top: [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], thick: [8.4, 9.6, 0.5, 1.4] };      // (mm over the inner corners' line: the upper margin Park 2017's; the height eased out along the brow, apply-brow-arc.py)
+/* the brow's height (mm) along it: full through the head and body, then easing out on a cosine to a fine tail with no
+   slope left at the end, so it thins softly instead of ending in a blunt rod (John: "soft easeout in thickness") */
+function browThickMM(t) { var T = BROW_ARC.thick; return (T[2] + (T[1] - T[2]) * (0.5 + 0.5 * Math.cos(Math.PI * Math.pow(t, T[3])))) * lerp(T[0] / T[1], 1, sm(0, 0.08, t)); }      // (T: the head's height, the body's, the tail's, the ease's power)
 function browTab(tab, t) {      // (a cubic through the table's points)
   var T = BROW_ARC.t, n = T.length, i = 0; t = clamp(t, 0, 1);
   while (i < n - 2 && t > T[i + 1]) i++;
@@ -2538,7 +2543,7 @@ function browTab(tab, t) {      // (a cubic through the table's points)
    applied, before browHeight and browThick */
 function browArcMM(u) {
   var Kb = RX / 1.1, us0 = -0.6, us1 = 1.1 * P.browLen, t = (clamp(u * Kb, us0, us1) - us0) / (us1 - us0), sxb = P.sex || 0;
-  var top = browTab(BROW_ARC.top, t), bot = browTab(BROW_ARC.bot, t), c0 = 0.5 * (BROW_ARC.top[0] + BROW_ARC.bot[0]);
+  var top = browTab(BROW_ARC.top, t), bot = top - browThickMM(t), c0 = BROW_ARC.top[0] - 0.5 * browThickMM(0);
   return [c0 + P.browArch * (1 - 0.6 * sxb) * (0.5 * (top + bot) - c0), 0.5 * (top - bot)];
 }
 function browCentre(u) {
@@ -2551,6 +2556,13 @@ function browRidgeArc(x, z, es) {
   var u = (x - P.eyeSpacing) * HH / RX, dz = 0.8 * (browArcMM(u)[0] - 22.0) / 219;
   return gauss(x, z, 0.15 * es, 0.62 + dz, x < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge) - gauss(x, z, 0.15 * es, 0.62, x < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
 }
+/* the bridge chiselled (apply-brow-arc.py): a front plane, barely rounded (radius 4 crest half-widths), turning into the
+   side wall over a 0.7 mm shoulder, instead of one hyperbola from the middle to the wall. The shoulder is the dorsal
+   line, the light's edge on the nose. Depth back from the crest at ax out (model units) */
+function browChisel(ax, w, sl, mm) {
+  var Rf = 4 * w, k = 0.7 * mm, v = ax - w, fs = w / Rf, front = ax <= w ? ax * ax / (2 * Rf) : w * w / (2 * Rf) + fs * v;
+  return front + Math.max(0, sl - fs) * (0.5 * (v + Math.sqrt(v * v + k * k)) - 0.5 * k);
+}
 /* the socket carved under the brow's arc (S.carve, the skin field's span): a hollow inside the orbit's rim, deepest in its
    upper inner quarter where the socket's wall runs into the nose's side. xl, zl from the pupil (model units, x lateral);
    returns depth (y back) */
@@ -2558,10 +2570,10 @@ function socketCarve(S) {
   var mm = S.mm, sx = P.sex || 0, aMed = (S.cx - 8 * mm) / 1.05, aLat = 20 * mm, bLo = 15 * mm, gap = 2.5 * (1 - sx) * mm;
   return function (xl, zl) {
     var u = xl / RX, a = browArcMM(u), bUp = Math.max(8 * mm, (a[0] - a[1]) * mm + (P.browHeight - 0.06 * sx) - gap - (S.cz - (0.525 * HH + EYE_LIFT)));
-    var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, rho = Math.sqrt(xl * xl / (ax * ax) + zl * zl / (bz * bz));
+    var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, pw = xl < 0 && zl > 0 ? 2 : 2, rho = Math.pow(Math.pow(Math.abs(xl / ax), pw) + Math.pow(Math.abs(zl / bz), pw), 1 / pw);      // (squarer in the upper inner quarter: the rim runs on under the brow's head, then turns down the nose's side)
     if (rho > 1.12) return 0;
     var th = Math.atan2(zl / bz, -xl / ax) * 180 / Math.PI, w = Math.max(0.25 + 0.75 * Math.exp(-Math.pow((th - 45) / 50, 2)), 0.7 * Math.exp(-Math.pow((th + 35) / 35, 2)));      // (and in its lower inner quarter, down the nose's side past the inner corner)
-    return 3 * mm * P.sockets * w * osm(1.1, 0.75, rho);
+    return 3.6 * mm * P.sockets * w * osm(1.1, 0.75, rho);
   };
 }
 function paintBrows(eyes) {
@@ -2578,20 +2590,20 @@ function paintBrows(eyes) {
     for (var yy = y0; yy < y1; yy++) for (var xx = x0; xx < x1; xx++) {
       var xm = (xx + 0.5) / PXU - HH / 2, zm = (TPX - (yy + 0.5)) / PXU, u = (xm - E.x) * s / RX, dz = zm - E.ez - u * RX * P.tilt;
       var cr = browCentre(u), sd = (dz - cr[0]) / Math.max(cr[1], 1e-3), ub = u * Kb;
-      var shape = sm(-1.15, -0.8, sd) * sm(1.2, 0.6, sd) * sm(-0.68, -0.35, ub - 0.18 * sd * sd) * sm(1.1 * P.browLen + 0.05, 1.1 * P.browLen - 0.25, ub);
+      var eT = 0.3 * fbm2(u * 4.5, 3 + s, 131, 3), eB = 0.13 * fbm2(u * 6, 9 + s, 137, 2), shape = sm(-1.3, -0.65, sd - eB) * sm(1.3, 0.25, sd + eT) * sm(-0.68, -0.35, ub - 0.18 * sd * sd) * sm(1.1 * P.browLen + 0.05, 1.1 * P.browLen - 0.25, ub);
       if (shape <= 0) continue;
-      var powder = shape * (0.5 + 0.15 * warpedFbm(u * 3, dz * 3, 111, 2)) * sm(-0.85, -0.55, ub - 0.12 * Math.pow(Math.max(0, sd), 2)) * (0.6 + 0.4 * sm(-0.75, -0.3, ub));
+      var powder = shape * lerp(1, 0.3, sm(-0.3, 1.0, sd)) * (0.42 + 0.28 * warpedFbm(u * 7, dz * 7, 113, 2)) * sm(-0.85, -0.55, ub - 0.12 * Math.pow(Math.max(0, sd), 2)) * (0.6 + 0.4 * sm(-0.75, -0.3, ub));
       var o = ((yy - y0) * Wd + (xx - x0)) * 4;
-      d[o] = POWDER[0]; d[o + 1] = POWDER[1]; d[o + 2] = POWDER[2]; d[o + 3] = clamp(powder * 255 * 0.9, 0, 255);
+      d[o] = POWDER[0]; d[o + 1] = POWDER[1]; d[o + 2] = POWDER[2]; d[o + 3] = clamp(powder * 255 * 0.8, 0, 255);
     }
     c2.putImageData(im, x0, y0);
     // the hairs
     var r = rng(17 + (s > 0 ? 1 : 0)), dmin = 0.022 / Math.sqrt(P.browDensity), cell = dmin / Math.SQRT2, grid = {}, roots = [], tries = 0;
     while (tries < 60000 && roots.length < 2000 * P.browDensity) {
       tries++;
-      var u = UIN - 0.05 + (UOUT - UIN + 0.05) * r(), cr = browCentre(u), dz = cr[0] + (r() * 2 - 1) * cr[1] * 1.05, ub = u * Kb, side0 = (dz - cr[0]) / Math.max(cr[1], 1e-3);
+      var u = UIN - 0.05 + (UOUT - UIN + 0.05) * r(), cr = browCentre(u), dz = cr[0] + (r() * 2 - 1) * cr[1] * 1.4, ub = u * Kb, side0 = (dz - cr[0]) / Math.max(cr[1], 1e-3) + 0.3 * fbm2(u * 4.5, 3 + s, 131, 3);
       var keep = (0.3 + 0.7 * sm(-0.72, -0.3, ub)) * sm(-0.74, -0.55, ub - 0.12 * Math.pow(Math.max(0, side0), 2));
-      keep *= 1 - 0.5 * sm(0.75 * P.browLen, 1.08 * P.browLen, ub);
+      keep *= 1 - 0.5 * sm(0.75 * P.browLen, 1.08 * P.browLen, ub); keep *= side0 > 0 ? 1 - 0.93 * sm(0.35, 1.4, side0) : 1 - 0.85 * sm(-0.55, -1.4, side0);
       if (r() > keep) continue;
       var gi = Math.floor(u / cell), gj = Math.floor(dz / cell), ok = true;
       for (var di = -2; di <= 2 && ok; di++) for (var dj = -2; dj <= 2; dj++) { var q = grid[(gi + di) + ',' + (gj + dj)]; if (q && (q[0] - u) * (q[0] - u) + (q[1] - dz) * (q[1] - dz) < dmin * dmin) { ok = false; break; } }
@@ -2609,10 +2621,10 @@ function paintBrows(eyes) {
     roots.forEach(function (rt) {
       var u0 = rt[0], z0 = rt[1], cr = browCentre(u0), ub = u0 * Kb, side = (z0 - cr[0]) / Math.max(cr[1], 1e-3);
       var lenN = fbm2(u0 * 4, z0 * 4, 71, 3), angN = fbm2(u0 * 3, z0 * 3 + 7, 81, 3), tone = 0.5 + 0.5 * noise2(u0 * 11, z0 * 11, 91);
-      var length = (0.11 + 0.05 * sm(-0.6, 0.3, ub) - 0.05 * sm(0.65, 1.08, ub / P.browLen)) * (1 + 0.3 * lenN) * (0.85 + 0.3 * r()) * (ub < -0.35 ? 0.8 : 1);
+      var length = (0.14 + 0.05 * sm(-0.6, 0.3, ub) - 0.06 * sm(0.65, 1.08, ub / P.browLen)) * (1 + 0.35 * sm(0, 1, side)) * (1 + 0.3 * lenN) * (0.85 + 0.3 * r()) * (ub < -0.35 ? 0.8 : 1);
       var wid = 0.0078 * (1 - 0.35 * sm(0.65, 1.08, ub / P.browLen)) * RX * PXU * 1.25;
       var val = (0.7 + 0.3 * sm(0.8, -0.4, side)) * (0.55 + 0.45 * sm(-0.75, -0.35, ub));
-      var steps = 8, u = u0, z = z0, p = px(u, z), jit = 0.18 * angN + 0.08 * (r() - 0.5);
+      var steps = 8, u = u0, z = z0, p = px(u, z), jit = 0.18 * angN + 0.24 * (r() - 0.5);
       for (var k = 0; k < steps; k++) {
         var t = (k + 1) / steps, a = flow(u, z) + jit, e = 0.01;
         var pu = (noise2(u * 6, (z + e) * 6, 101) - noise2(u * 6, (z - e) * 6, 101)) / (2 * e), pz = -(noise2((u + e) * 6, z * 6, 101) - noise2((u - e) * 6, z * 6, 101)) / (2 * e);

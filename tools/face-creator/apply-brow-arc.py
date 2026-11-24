@@ -38,15 +38,18 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'LO_B': 15.0, 'CARVE': 3.0, 'CARVE_UP': 45.0,
-            'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'BOT': [17.6, 17.2, 20.6, 22.2, 22.0, 21.0, 20.2],
+DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+            'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
             'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
 
 MARK = '/* brow arc (apply-brow-arc.py) */'
 
 BROW_FN = r'''%(mark)s
-var BROW_ARC = { t: [0, 0.03, 0.25, 0.47, 0.63, 0.8, 1], top: %(top)s, bot: %(bot)s };      // (mm over the inner corners' line: the upper margin Park 2017's, the lower parallel to the eye's arc; apply-brow-arc.py)
+var BROW_ARC = { t: [0, 0.03, 0.25, 0.47, 0.63, 0.8, 1], top: %(top)s, thick: %(thick)s };      // (mm over the inner corners' line: the upper margin Park 2017's; the height eased out along the brow, apply-brow-arc.py)
+/* the brow's height (mm) along it: full through the head and body, then easing out on a cosine to a fine tail with no
+   slope left at the end, so it thins softly instead of ending in a blunt rod (John: "soft easeout in thickness") */
+function browThickMM(t) { var T = BROW_ARC.thick; return (T[2] + (T[1] - T[2]) * (0.5 + 0.5 * Math.cos(Math.PI * Math.pow(t, T[3])))) * lerp(T[0] / T[1], 1, sm(0, 0.08, t)); }      // (T: the head's height, the body's, the tail's, the ease's power)
 function browTab(tab, t) {      // (a cubic through the table's points)
   var T = BROW_ARC.t, n = T.length, i = 0; t = clamp(t, 0, 1);
   while (i < n - 2 && t > T[i + 1]) i++;
@@ -58,7 +61,7 @@ function browTab(tab, t) {      // (a cubic through the table's points)
    applied, before browHeight and browThick */
 function browArcMM(u) {
   var Kb = RX / 1.1, us0 = -0.6, us1 = 1.1 * P.browLen, t = (clamp(u * Kb, us0, us1) - us0) / (us1 - us0), sxb = P.sex || 0;
-  var top = browTab(BROW_ARC.top, t), bot = browTab(BROW_ARC.bot, t), c0 = 0.5 * (BROW_ARC.top[0] + BROW_ARC.bot[0]);
+  var top = browTab(BROW_ARC.top, t), bot = top - browThickMM(t), c0 = BROW_ARC.top[0] - 0.5 * browThickMM(0);
   return [c0 + P.browArch * (1 - 0.6 * sxb) * (0.5 * (top + bot) - c0), 0.5 * (top - bot)];
 }
 function browCentre(u) {
@@ -71,6 +74,13 @@ function browRidgeArc(x, z, es) {
   var u = (x - P.eyeSpacing) * HH / RX, dz = %(ridgek)g * (browArcMM(u)[0] - 22.0) / 219;
   return gauss(x, z, 0.15 * es, 0.62 + dz, x < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge) - gauss(x, z, 0.15 * es, 0.62, x < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
 }
+/* the bridge chiselled (apply-brow-arc.py): a front plane, barely rounded (radius %(chrf)g crest half-widths), turning into the
+   side wall over a %(chk)g mm shoulder, instead of one hyperbola from the middle to the wall. The shoulder is the dorsal
+   line, the light's edge on the nose. Depth back from the crest at ax out (model units) */
+function browChisel(ax, w, sl, mm) {
+  var Rf = %(chrf)g * w, k = %(chk)g * mm, v = ax - w, fs = w / Rf, front = ax <= w ? ax * ax / (2 * Rf) : w * w / (2 * Rf) + fs * v;
+  return front + Math.max(0, sl - fs) * (0.5 * (v + Math.sqrt(v * v + k * k)) - 0.5 * k);
+}
 /* the socket carved under the brow's arc (S.carve, the skin field's span): a hollow inside the orbit's rim, deepest in its
    upper inner quarter where the socket's wall runs into the nose's side. xl, zl from the pupil (model units, x lateral);
    returns depth (y back) */
@@ -78,13 +88,36 @@ function socketCarve(S) {
   var mm = S.mm, sx = P.sex || 0, aMed = (S.cx - %(medx)g * mm) / 1.05, aLat = 20 * mm, bLo = %(lob)g * mm, gap = %(gap)g * (1 - sx) * mm;
   return function (xl, zl) {
     var u = xl / RX, a = browArcMM(u), bUp = Math.max(8 * mm, (a[0] - a[1]) * mm + (P.browHeight - 0.06 * sx) - gap - (S.cz - (0.525 * HH + EYE_LIFT)));
-    var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, rho = Math.sqrt(xl * xl / (ax * ax) + zl * zl / (bz * bz));
+    var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, pw = xl < 0 && zl > 0 ? %(medp)g : 2, rho = Math.pow(Math.pow(Math.abs(xl / ax), pw) + Math.pow(Math.abs(zl / bz), pw), 1 / pw);      // (squarer in the upper inner quarter: the rim runs on under the brow's head, then turns down the nose's side)
     if (rho > 1.12) return 0;
     var th = Math.atan2(zl / bz, -xl / ax) * 180 / Math.PI, w = Math.max(0.25 + 0.75 * Math.exp(-Math.pow((th - %(up)g) / 50, 2)), %(low)g * Math.exp(-Math.pow((th + 35) / 35, 2)));      // (and in its lower inner quarter, down the nose's side past the inner corner)
     return %(carve)g * mm * P.sockets * w * osm(1.1, 0.75, rho);
   };
 }
 '''
+
+# 4. the brow's edges (old line, new line). A brow is not a band with two clean margins: its hairs thin out toward the
+# margins, the upper margin most (the hairs there lie over it and the skin shows through), single hairs stray past it,
+# the margins wander, and the powder (the skin's own shade under the hairs) is densest along the lower body and patchy.
+EDGES = [
+    # the outline: each margin wanders along the brow (low-frequency noise on the side coordinate), the upper one twice
+    # as far, and both edges ease over a wider band
+    ("var shape = sm(-1.15, -0.8, sd) * sm(1.2, 0.6, sd) * sm(-0.68, -0.35, ub - 0.18 * sd * sd) *",
+     "var eT = 0.3 * fbm2(u * 4.5, 3 + s, 131, 3), eB = 0.13 * fbm2(u * 6, 9 + s, 137, 2), shape = sm(-1.3, -0.65, sd - eB) * sm(1.3, 0.25, sd + eT) * sm(-0.68, -0.35, ub - 0.18 * sd * sd) *"),
+    # the powder: densest along the lower body, thinning toward the top, patchy
+    ("var powder = shape * (0.5 + 0.15 * warpedFbm(u * 3, dz * 3, 111, 2)) *",
+     "var powder = shape * lerp(1, 0.3, sm(-0.3, 1.0, sd)) * (0.42 + 0.28 * warpedFbm(u * 7, dz * 7, 113, 2)) *"),
+    ("d[o + 3] = clamp(powder * 255 * 0.9, 0, 255);", "d[o + 3] = clamp(powder * 255 * 0.8, 0, 255);"),
+    # the roots: spread past the margins, fewer toward them (the top fades out further), so the edge is hairs, not a line
+    ("dz = cr[0] + (r() * 2 - 1) * cr[1] * 1.05, ub = u * Kb, side0 = (dz - cr[0]) / Math.max(cr[1], 1e-3);",
+     "dz = cr[0] + (r() * 2 - 1) * cr[1] * 1.4, ub = u * Kb, side0 = (dz - cr[0]) / Math.max(cr[1], 1e-3) + 0.3 * fbm2(u * 4.5, 3 + s, 131, 3);"),
+    ("keep *= 1 - 0.5 * sm(0.75 * P.browLen, 1.08 * P.browLen, ub);\n",
+     "keep *= 1 - 0.5 * sm(0.75 * P.browLen, 1.08 * P.browLen, ub); keep *= side0 > 0 ? 1 - 0.93 * sm(0.35, 1.4, side0) : 1 - 0.85 * sm(-0.55, -1.4, side0);\n"),
+    # the hairs longer, those of the upper half longest (they lie over the margin), each with its own lean
+    ("var length = (0.11 + 0.05 * sm(-0.6, 0.3, ub) - 0.05 * sm(0.65, 1.08, ub / P.browLen))",
+     "var length = (0.14 + 0.05 * sm(-0.6, 0.3, ub) - 0.06 * sm(0.65, 1.08, ub / P.browLen)) * (1 + 0.35 * sm(0, 1, side))"),
+    ("jit = 0.18 * angN + 0.08 * (r() - 0.5);", "jit = 0.18 * angN + 0.24 * (r() - 0.5);"),
+]
 
 
 def patch(src, P):
@@ -94,8 +127,8 @@ def patch(src, P):
     else:
         old = re.search(r'function browCentre\(u\) \{\n.*?\n\}\n(?=function paintBrows)', src, flags=re.S)
     assert old, 'browCentre not found'
-    blk = BROW_FN % {'mark': MARK, 'top': json.dumps(P['TOP']), 'bot': json.dumps(P['BOT']), 'ridgek': P['RIDGE_K'],
-                     'medx': P['MED_X'], 'lob': P['LO_B'], 'gap': P['RIM_GAP'], 'up': P['CARVE_UP'], 'carve': P['CARVE'], 'low': P['LO_W'], 'mth': P['MALE_THICK']}
+    blk = BROW_FN % {'mark': MARK, 'top': json.dumps(P['TOP']), 'thick': json.dumps(P['THICK']), 'ridgek': P['RIDGE_K'],
+                     'medx': P['MED_X'], 'lob': P['LO_B'], 'gap': P['RIM_GAP'], 'up': P['CARVE_UP'], 'carve': P['CARVE'], 'medp': P['MED_P'], 'low': P['LO_W'], 'mth': P['MALE_THICK'], 'chrf': P['CH_RF'], 'chk': P['CH_K']}
     src = src[:old.start()] + blk.lstrip('\n') + src[old.end():]
     src = re.sub(r'roots\.length < [0-9]+ \* P\.browDensity', 'roots.length < %d * P.browDensity' % P['ROOTS'], src, count=1)
     # (the head of the brow rounded at its top and bottom corners instead of cut square)
@@ -116,6 +149,25 @@ def patch(src, P):
     src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': spec \*/[^\n]*', '', src)
     d = re.search(r'\n  var px = P\.eyeSpacing \* HH, S = orbitSpec\(HH[^\n]*', src)
     src = src[:d.end()] + '\n  %s: spec */ S.carve = socketCarve(S);' % MARK[:-3] + src[d.end():]
+    # 5. the nose chiselled, and its dorsal lines run up into the brows' heads (the brow-tip aesthetic line)
+    f = '  var zRad = zN, yRad = yN - NL.radix * np * mm, zSup = zPrn + 0.14 * L, ySup = yPrn + 1.3 * mm;'
+    assert f in src, 'radix line not found'
+    src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': head \*/[^\n]*', '', src)
+    src = src.replace(f, f + '\n  %s: head */ var uHB = -0.6 * 1.1 / RX, aHB = browArcMM(uHB), xHB = P.eyeSpacing * HH + uHB * RX, zHB = 0.525 * HH + EYE_LIFT + (aHB[0] - aHB[1]) * mm + P.browHeight - 0.06 * sx;      // (the brow\'s head: its lower inner corner, where the dorsal line runs into it)' % MARK[:-3], 1)
+    g = '    w = lerp(lerp(wLo, wMid, sm(0, 0.5, tc)), NL.ridge[0] * nw * mm, sm(0.5, 1, tc));'
+    assert g in src, 'crest width line not found'
+    src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': flare \*/[^\n]*', '', src)
+    src = src.replace(g, g + '\n    %s: flare */ w *= %g * (1 - %g * sx); var qF = clamp((z - zRad) / Math.max(1e-6, zHB - zRad), 0, 1), wF = %g * Math.max(0, xHB - w) * (1 - Math.sqrt(Math.max(0, 1 - qF * qF))); w += wF;      // (above the radix the dorsal lines part and curve out into the brows\' heads, a quarter ellipse: upright at the radix, level at the brow)' % (MARK[:-3], P['CH_W'], P['MALE_W'], P['FLARE']), 1)
+    h0 = 'var dD = (yl + sl * (Math.sqrt(w * w + ax * ax) - w) + 0.09 * bk * bk / mm - y) / Math.sqrt(1 + sl * sl);'
+    h1 = 'var dD = (yl + browChisel(ax, w, sl, mm) + 0.09 * Math.pow(Math.max(0, bk - wF), 2) / mm - y) / Math.sqrt(1 + sl * sl);      /* brow arc (apply-brow-arc.py): the chisel */'
+    if h0 in src:
+        src = src.replace(h0, h1, 1)
+    assert h1 in src, 'bridge section line not found'
+    # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
+    for a, b in EDGES:
+        if a in src:
+            src = src.replace(a, b, 1)
+        assert b in src, 'brow edge line not found: ' + a[:60]
     return src
 
 

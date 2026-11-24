@@ -223,3 +223,61 @@ The gauges, all five faces (`docs/faces/face-flow-data/brow-arc-flow-gaps.md`):
 
 Renders are in the project files (`face-flow/`): `brows-before-after.png`, `render-brow-arc-before-after.png` and
 `clay-brow-arc-before-after.png`.
+
+## 8. Brow edges, and the nose chiselled along the brow-to-nose line (same script)
+
+John: "Improve the edges of the brows too rod like", then "Chisel the nose even more, figure out the connection between
+eye brow line and nose shape".
+
+**Brow edges.** A real brow is not a band between two clean margins. The changes:
+
+- **Margins:** they wander along the brow on low-frequency noise. The upper margin wanders about twice as far as the
+  lower and fades over a wider band.
+- **Hair roots:** they spread to 1.4 half-heights instead of 1.05. They thin out toward both margins, the upper more,
+  so single hairs stray past the edge.
+- **Hairs:** they are longer (0.14 instead of 0.11 of the eye's units), longest in the upper half, where they lie over
+  the margin. Each has more lean of its own.
+- **Powder:** it is densest along the lower body, thins toward the top, and is patchy.
+- **Height:** it is full through the head and body, then eases out on a cosine to a 0.5 mm tail with no slope left at
+  the end, instead of the table's blunt end.
+
+**The connection.** The brow-tip aesthetic line runs from the brow's head down the edge of the bridge to the tip. It
+is the bridge's shoulder continued up into the lower edge of the brow's head. In the creator that line is made of two
+things:
+
+- The bridge's shoulder, the dorsal line.
+- The socket's rim under the brow's arc (section 7). It curves down past the inner corner and into the nose's side.
+
+What we tried and kept:
+
+- **The bridge chiselled (`browChisel`).** The crest used to be one hyperbola from the middle to the wall. It is now
+  a nearly flat front plane (radius 4 crest half-widths) that turns into the side wall over a 0.7 mm shoulder. That
+  shoulder is the dorsal line, a crisp edge of light that runs up into the socket's rim and the brow's head.
+- **The socket's corner deeper.** The carve goes from 3.0 to 3.6 mm.
+- **His crest 15% narrower.** On the Knight's wider bridge the flat front read too broad: dorsal lines / TDP was 1.33,
+  against a norm of 0.85-1.15.
+
+What we tried and dropped:
+
+- **The rim brought in to 6 mm from the midline and squared under the brow's head.** The brow came loose from the
+  nose again: the join gap went from 0.04 to 0.10.
+- **The dorsal lines flared out above the radix into the brows' heads.** No effect, because above the radix the bridge
+  sinks into the glabella. These are left in the script as MED_X, MED_P and FLARE, set off.
+
+The gauges, all five faces (`docs/faces/face-flow-data/brow-arc-flow-gaps.md`):
+
+| Face | Waist / tip-defining points, before → after (ref 0.92, Rohrich about 1) | Join gap | Bony base / alar | Dorsal lines / TDP |
+|---|---|---|---|---|
+| Ranger | 0.66 → 0.73 | 0.058 → 0.043 | 0.70 → 0.65 | 1.06 → 1.10 |
+| Rogue | 0.70 → 0.77 | 0.044 → 0.044 | 0.75 → 0.62 | 1.07 → 1.09 |
+| Warden | 0.72 → 0.80 | 0.044 → 0.043 | 0.74 → 0.74 | 1.11 → 1.14 |
+| Sorceress | 0.69 → 0.79 | 0.045 → 0.042 | 0.72 → 0.69 | 1.09 → 1.09 |
+| Knight | 0.73 → 0.76 | 0.209 → 0.211 | 0.77 → 0.76 | 1.19 → 1.15 |
+
+- The bridge's waist moved toward the reference on every face.
+- The join held.
+- The bony base slipped under the 0.70-0.80 norm on the Ranger, the Rogue and the Sorceress. The flat front plane
+  puts more of the width into the front, so the walls reach the cheek a little further in.
+
+Renders are in the project files (`face-flow/`): `brows2-before-after.png`, `render-chisel-before-after.png` and
+`clay-chisel-before-after.png`.
