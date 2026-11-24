@@ -881,6 +881,7 @@ def comb_ranger(F, roots_idx):
     # tuck behind the ear: hair rooted between the face-framing front and the ear is combed back and down over it
     th = SF.theta(P)
     tuck = SF.sm(SPLIT - 0.1, SPLIT + 0.1, np.abs(th)) * (1 - SF.sm(1.55, 1.8, np.abs(th))) * (1 - SF.sm(0.75, 0.9, P[:, 2]))
+    tuck = tuck * COMB_TUCK
     back = np.c_[np.zeros(len(P)), np.ones(len(P)), -0.5 * np.ones(len(P))]
     back -= N * (N * back).sum(1, keepdims=True)
     back /= np.linalg.norm(back, axis=1, keepdims=True)
@@ -975,6 +976,10 @@ RANGER_SPLIT = 1.0                        # STYLE (Ranger): hair rooted in front
 WARDEN_SPLIT = 1.25                # rad: the creator's Warden: its strands that fall in front of the shoulder are rooted
                                    # up to 1.21 rad round (90th percentile), so more of her hair frames the face
 SPLIT = RANGER_SPLIT
+COMB_TUCK = 1.0                    # the comb's tuck behind the ear (1: the Ranger). The Warden: 0, set in groom(). Combed
+                                   # back and down from the root, the hair rooted over and in front of her ear (|theta|
+                                   # 1.25 to 1.8) lay 0.5 rad further back by the neck (at 2.15), leaving nothing under the
+                                   # ear: the gap between the sides and the back. Combed down, it falls over the ear.
                                    # of the shoulder; the rest is tucked behind the ears (the creator's Ranger)
 
 
@@ -1312,12 +1317,16 @@ def relax_spikes(X, col, keep=None, iters=SPIKE_ITERS):
 # front of the ear is draped over the front of the shoulder, as it falls when it is combed forward of the shoulder
 # line (and as the creator's front locks lie), so the face frame's slide-cut line (style_cut) is the cut it gets.
 DRAPE_TH = (0.5, 1.3)        # |theta| of the roots draped to the front: the face frame back to the front of the ear
+DRAPE_BACK = -0.35           # STYLE: back per unit down for the roots behind the ear (negative: toward the back)
+DRAPE_FAN_TH = (0.8, 1.9)    # |theta| of the roots over which the drape turns from forward to back
+DRAPE_BACK_TH = 2.0          # and the roots from there to this |theta| (over and behind the ear) draped down the back of
+                             # the shoulder: untucked they fall onto its top, where hair does not stay
 DRAPE_Z = 0.05               # HH: from where a guide passes this height (the jaw: just above the shoulder's top)
 DRAPE_FWD = 0.7              # STYLE: forward per unit down as it leaves the neck for the front of the shoulder
 DRAPE_KEEP = 0.4             # the share of its last direction a segment keeps (a smooth turn, no corner)
 
 
-def drape_front(X, sel, seg_hh, col):
+def drape_front(X, sel, seg_hh, col, fwd=DRAPE_FWD):
     """Each guide in sel laid down the front of the shoulder from DRAPE_Z: marched node by node, each segment down
     and forward (blended with the segment before), each node pushed out of the body, at the segment length."""
     X = X.copy()
@@ -1328,15 +1337,16 @@ def drape_front(X, sel, seg_hh, col):
         b = np.where(ok[g] & (X[g, :, 2] < DRAPE_Z))[0]
         if len(b) and b[0] >= 2:
             k0[g] = b[0]
-    aim = np.array([0.0, -DRAPE_FWD, -1.0])
-    aim /= np.linalg.norm(aim)
+    fwd = np.broadcast_to(np.asarray(fwd, float), (len(X),))
+    aim_all = np.c_[np.zeros(len(X)), -fwd, -np.ones(len(X))]
+    aim_all /= np.linalg.norm(aim_all, axis=1, keepdims=True)
     for k in range(2, X.shape[1]):
         gi = np.where((k0 >= 0) & (k >= k0) & (k < n))[0]
         if not len(gi):
             continue
         prev = X[gi, k - 1] - X[gi, k - 2]
         prev /= np.maximum(np.linalg.norm(prev, axis=1, keepdims=True), 1e-12)
-        d = DRAPE_KEEP * prev + (1 - DRAPE_KEEP) * aim
+        d = DRAPE_KEEP * prev + (1 - DRAPE_KEEP) * aim_all[gi]
         d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
         X[gi, k] = X[gi, k - 1] + d * seg_hh
         m = np.zeros(X.shape[:2], bool)
@@ -1536,7 +1546,13 @@ STYLES = {
     #            layer_k: end rise per HH of root height above layer_z0; roll_deg: the ends' roll (0: none)
     'ranger': dict(frame_z=0.25, frame_th=(0.4, 1.0), layer_k=1.2, layer_z0=0.72, roll_deg=15.0, tuck=(1.0,)),   # CALIBRATED:
               # creator Ranger front ends 0.26 (roots |th| .6-1), crown vs mid roots 1.2 HH per HH (sector 1.5-2.2)
-    'warden': dict(frame_z=-0.2, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=0.0, tuck=(1.0, -1.0)),   # CALIBRATED:
+    'warden': dict(frame_z=-0.2, frame_th=(0.4, 1.4), layer_k=1.2, layer_z0=0.72, roll_deg=0.0, tuck=()),   # CALIBRATED:
+              # tuck: none. STYLE (John, 2026-11-24, "what causes this discontinuity between sides and back", "fix
+              # it"): tucked, all the hair rooted in front of the ear (|theta| 0.9 to 1.35) lay behind it at 1.9 and
+              # beyond, so below the jaw the side (|theta| 1.0 to 1.6) carried 9 to 22 thousand hairs per 0.3 rad
+              # against the back's 230 to 260 thousand: a thin curtain, then a solid mass, with a seam between.
+              # Untucked the hair falls where it grows and covers the ear, as the creator's does. Overrides the
+              # 2026-11-22 pick (both sides tucked).
               # creator Warden front ends -0.2 to -0.3; layer_k kept at the Ranger's (its crown's 2.4 is a top
               # layer of short strands over its shell); the waves are their own finish (no roll)
 }
@@ -2298,6 +2314,7 @@ def shape_blend(X, roots, sel, group, sigma, col):
 WAVE_RESTORE = 1.45          # CALIBRATED: the side waves' depth brought back to the creator's after the combing (the
                              # smoothing, lay-in and comb passes took the front/side wave from 7.3 to 5.5 mm median,
                              # the creator's 8.2)
+WAVE_FADE_TH = (1.9, 2.5)    # |theta| of the roots over which the sides' deeper wave fades to the back's own
 WAVE_ALT = True              # alternate sections curled the other way [TYMO2][MC2]: a wave lock's offset from its
                              # middle line flipped (half a wavelength) against the locks beside it
 WAVE_SECTION = 'lock'        # the section curled one way: a whole wave lock ('lock') or half of one ('half').
@@ -2350,7 +2367,7 @@ def wave_restore(X, sel, gain, col, sign=None):
     Y = X.copy()
     for g in np.where(sel)[0]:
         k = n[g]
-        f = gain * (1.0 if sign is None else sign[g])
+        f = (gain[g] if np.ndim(gain) else gain) * (1.0 if sign is None else sign[g])
         P = C[g, :k] + f * (X[g, :k] - C[g, :k])
         d = np.diff(P, axis=0)
         L = np.linalg.norm(np.diff(X[g, :k], axis=0), axis=1, keepdims=True)
@@ -2536,8 +2553,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     function of the roots), so a guide with the same root and the same style as in that groom settles to the same
     place: it is copied, and only the rest (here the bangs, while they are being styled) are solved."""
     wavy = style == "warden"
-    global SPLIT
+    global SPLIT, COMB_TUCK
     SPLIT = WARDEN_SPLIT if wavy else RANGER_SPLIT
+    COMB_TUCK = 0.0 if wavy else 1.0
     if wavy:
         assert trace, "the Warden is cut on the creator's length line: pass --trace"
     cut_z = creator_cut(trace) if wavy else ranger_cut_z
@@ -2600,6 +2618,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             hit = dist < 1e-9
             if 'combed' in P0.files:      # (a guide combed in that groom was placed, not settled: never copy it)
                 hit &= P0['combed'][j] == 0
+            if 'd0' in P0.files:          # (and one whose root direction has changed since, a comb change, is solved)
+                hit &= np.abs(P0['d0'][j] - d0).max(1) < 1e-6
             solve = bang | ~hit
             P = {k: np.zeros((len(idx),) + P0[k].shape[1:], P0[k].dtype) for k in ('X_uncut', 'X', 'lengths')}
             for k in P:
@@ -2730,7 +2750,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         if wavy:
             # natural fall first: the hair in front of the ear draped down the front of the shoulder (see DRAPE_*)
             thd_ = np.abs(SF.theta(roots))
-            X2 = drape_front(X2, ~bang & (thd_ > DRAPE_TH[0]) & (thd_ < DRAPE_TH[1]), seg_hh, col)
+            # (one fan over the shoulder: forward at the face, straight down over the ear, back behind it; all to the
+            # front, then all to the back, left the shoulder bare between them, a V in profile)
+            fan_ = DRAPE_FWD + (DRAPE_BACK - DRAPE_FWD) * SF.sm(DRAPE_FAN_TH[0], DRAPE_FAN_TH[1], thd_)
+            X2 = drape_front(X2, ~bang & (thd_ > DRAPE_TH[0]) & (thd_ < DRAPE_BACK_TH), seg_hh, col, fwd=fan_)
         X2 = relax_kinks(X2, col, cap, keep=bang)
         # the comb: strays back into their lock, crossing neighbours laid parallel, roots along the scalp
         fl = np.full(len(roots), -1)                 # (the face-framing locks: frame_locks, the Warden)
@@ -2809,7 +2832,11 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             if WAVE_ALT:                                   # (the back left as John approved it)
                 sgn, g2 = wave_signs(roots, sd_sel, lk * 1000 + clump, fl >= 0, X2)
                 clump = np.where(sgn < 0, clump + WAVE_ALT_ID, clump)
-            X2 = wave_restore(X2, sd_sel, WAVE_RESTORE, col, sgn)
+            # (the deepening faded out toward the back over WAVE_FADE_TH instead of stopping on a line at 2.2: the
+            # sides' finish met the back's on a hard edge)
+            thw_ = np.abs(SF.theta(roots))
+            gain_ = 1 + (WAVE_RESTORE - 1) * (1 - SF.sm(WAVE_FADE_TH[0], WAVE_FADE_TH[1], thw_))
+            X2 = wave_restore(X2, ~bang & (thw_ > 0.6) & (thw_ < WAVE_FADE_TH[1]), gain_, col, sgn)
             # then finger-combed: each section a soft ribbon, the curl loosened, the last inch looser (see FC_*)
             X2 = finger_comb(X2, roots, sd_sel & (fl < 0), lk * 1000 + clump, col)
             # the front of the sides swung in one S from the side bangs down (see LAT_S_*), then laid in: the S shows

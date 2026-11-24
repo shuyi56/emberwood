@@ -42,6 +42,7 @@ ROOT_ROWS = 6                      # DRAFT: guide segments over which the root's
 CARD_LIFT_MM = 2.0                 # DRAFT: cards lie at least this far over the skin (the cap lies at 1 mm)
 
 
+CARD_W_MAX = 0.2                   # HH (4.4 cm): the widest a card is drawn below its root rows
 CARD_BEND_DEG = 35.0               # a card's mean line turns at most this much per guide segment
 FRAME_CLUMP0 = 900                 # groom.py frame_locks: clump ids from here are the face-framing locks
 
@@ -128,7 +129,14 @@ def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0]), fixed=None):
         B = np.cross(T, out)
         B /= np.linalg.norm(B, axis=1, keepdims=True)
         spread = np.array([np.std(((Xf[m, i] - C[i]) * B[i]).sum(1)) if len(m) > 1 else 0 for i in range(L + 1)])
-        w = np.maximum(2.5 * spread, 2 * spacing)
+        # the spread read smooth along the card (a median of three rows, then a mean of five) and held to CARD_W_MAX:
+        # row by row it jumped (a framing lock's members wave in and out of step: 0.05, 0.19, 0.06 HH), and the card's
+        # edges drew as a staircase
+        p = np.pad(spread, 1, mode='edge')
+        spread = np.median(np.stack([p[:-2], p[1:-1], p[2:]]), 0)
+        p = np.pad(spread, 2, mode='edge')
+        spread = np.mean(np.stack([p[i:i + len(spread)] for i in range(5)]), 0)
+        w = np.minimum(np.maximum(2.5 * spread, 2 * spacing), CARD_W_MAX)
         # at the root the card covers the members' roots across the hair, with a guide's spacing to spare on each
         # side, so neighbouring cards meet over the scalp (the part and the crown otherwise showed the cap)
         rspan = np.ptp(((Xf[m, 0] - C[0]) * B[0]).sum(1)) + 2 * spacing
@@ -169,8 +177,21 @@ def write_obj(cards, path, surf=None):
         q = V - SF.CENTRE
         r = np.linalg.norm(q, axis=1)
         need = surf.radius(q / r[:, None]) + CARD_LIFT_MM / SF.HH_MM
-        lift = (r < need) & (V[:, 2] > 0.2)
-        V[lift] = SF.CENTRE + q[lift] * (need[lift] / r[lift])[:, None]
+        d = np.where(V[:, 2] > 0.2, np.maximum(need - r, 0.0), 0.0)
+        # the lift eased along each card (the largest of a row and its neighbours, then a mean over three rows, both
+        # edges alike): lifted vertex by vertex, a card passing over the ear had some rows out and some not, a
+        # staircase (the Warden's sides once they fell over her ears)
+        o = 0
+        for c in cards:
+            n = len(c['C'])
+            e = d[o:o + 2 * n].reshape(n, 2).max(1)
+            p = np.pad(e, 1, mode='edge')
+            e = np.maximum.reduce([p[:-2], p[1:-1], p[2:]])
+            p = np.pad(e, 1, mode='edge')
+            e = np.maximum((p[:-2] + p[1:-1] + p[2:]) / 3, d[o:o + 2 * n].reshape(n, 2).max(1))
+            d[o:o + 2 * n] = np.repeat(e, 2)
+            o += 2 * n
+        V = SF.CENTRE + q * ((r + d) / r)[:, None]
     with open(path, 'w') as f:
         f.write('# hair cards baked from the settled groom (tools/hair/cards.py); units: head heights, z up\n')
         for v in V:
