@@ -954,3 +954,21 @@ stand as well (no change, and a dark tick at the roll top). Stopped per the stop
 **What is left:** the dent by the roll top sits where the gorge turns into the roll line, the same corner that crumpled
 the folded collar in phase 15. It wants the fall's chart laid to the flush gorge from the start, not the fall moved
 after it is laid.
+
+### The collar's front as a rod and a panel (John, 2026-11-24, from a made-up notch collar on a stand: "they do it in parts, the rod which transfers the loads and the trapezoid that moves load sideways")
+
+The reading: the roll line is a rod carrying the pull along it up the neck; below it the collar's end is a flat
+trapezoid (rod, gorge, notch's end, outer edge) that takes the load across to the gorge seam. Tried as a pass on the
+flush build (rejections #143 to #145, removed):
+
+- Each meridian of the chart laid straight from its top edge to its bottom edge: seen from F the gorge, the notch and
+  the collar's point all lie *behind* each roll top in azimuth, and the gorge bows on the chart, so a meridian crosses
+  the outline twice. 1784 to 2692 folds.
+- The same, stopped short of the notch: the dent lies outside the ruled band, unchanged.
+- The front laid as a membrane held on all four edges: the three creases by the roll top went (3 to 0), the gorge
+  stayed flush, but the panel sank onto the stand, which then showed through as a hard ridge along the roll with a
+  groove beside the gorge. Worse in clay. Five rounds: stopped.
+
+**What it shows:** the rod and the panel cannot be got by moving one laid sheet. The rod needs its own round turn with
+the cloth's thickness, the panel its own flat lay in the lapel's plane, and the two sewn along the roll: two pieces in
+the draft, as the made-up collar is.
