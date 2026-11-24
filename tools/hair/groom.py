@@ -2099,6 +2099,34 @@ def bang_finish(X, lengths, bang, roots, col, free=None, comb=True, cut=True):
     return X, lengths
 
 
+TOP_SMOOTH_Z = (0.1, 0.35)   # HH: the side hair smoothed in full above 0.35 (the cheekbone), none below 0.1: the waves
+                             # start at the jaw, as the creator's do (its bends above z 0.2 are 1.9 to 2.6 mm, ours
+                             # were 4 to 6; John, 2026-11-24: "reduce curl at the tops, too bumpy at the temples")
+TOP_SMOOTH_ITERS = 30
+TOP_SMOOTH_K = 0.3
+
+
+def top_smooth(X, sel, col):
+    """The bumps taken out of the side hair over the temples and down to the cheekbone: Laplacian smoothing along
+    each strand in sel, weighted by height (TOP_SMOOTH_Z), the root held; then rebuilt at the rod's length from the
+    root and kept out of the head."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    for g in np.where(sel)[0]:
+        n = ok[g].sum()
+        if n < 5:
+            continue
+        P = X[g, :n].copy()
+        L = np.linalg.norm(np.diff(P, axis=0), axis=1, keepdims=True)
+        w = SF.sm(TOP_SMOOTH_Z[0], TOP_SMOOTH_Z[1], P[:, 2])[1:-1, None]
+        for _ in range(TOP_SMOOTH_ITERS):
+            P[1:-1] += TOP_SMOOTH_K * w * (P[:-2] + P[2:] - 2 * P[1:-1])
+        d = np.diff(P, axis=0)
+        d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        X[g, 1:n] = X[g, 0] + np.cumsum(d, 0)
+    return push_valid(col, X, mask=sel[:, None] & ok)
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2383,6 +2411,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             X2 = bang_blend(X2, bang & (fl < 0), col)
             # and finished as one sheet on a smooth slide-cut line (see bang_finish)
             X2, lengths = bang_finish(X2, lengths, bang & (fl < 0), roots, col, comb=False)
+            # the tops smoothed: no waves over the temples, they start at the jaw (see TOP_SMOOTH_Z)
+            X2 = top_smooth(X2, ~bang & (np.abs(SF.theta(roots)) > 0.6) & (np.abs(SF.theta(roots)) < SIDE_SOLVE_TH), col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
