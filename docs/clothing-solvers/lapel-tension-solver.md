@@ -1085,3 +1085,21 @@ linings, belt, panel, lace and necklace hidden *from the camera* (visible_camera
 settings; `show.py` switches them on. Front, three-quarter and a bust close-up. Two things in the full figure belong to
 the gown, not to the collar: (1) the skirt has a hole at her left hip beside the hand (skin shows through); (2) skin
 shows between the bodice's hem and the belt at the sides (the hem ends about 1 unit above the belt).
+
+### The show render on the riding coat, not the gown (John, 2026-11-24: "With the riding coat not the dress")
+
+The earlier show render dressed the saved bench scene, whose skirt and sleeves are the gown's. The riding coat's own skirt
+and sleeves are in the riding-habit branch (`blender/skirt`, `blender/sleeves`, `blender/redingote_bodice`), assembled by
+`blender/habit_all`. Built here from a worktree of `claude/pr-cleanup/redingote-riding-habit` with this branch's files, and:
+
+- the habit's wool is **0.0884 (2.3 mm)**, its sleeves 0.0432 (1.1 mm): the 4.4 mm of the shared cut was never the
+  habit's. The lapel and collar were rebuilt at 0.0884 (`draft_top_lift` 0.128 = the cloth and the gap).
+- the riding-habit branch carries the hose thread's cloth solver (`shared/fabric.py`), which the petticoat (from main)
+  cannot run on (`mesh(rest_pos=...)`): main's `fabric.py` and `folds.py`, a superset, were copied into the worktree. The
+  Python module `triangle` is needed (`pip install triangle`). The build takes 15 minutes (the petticoat and the skirt).
+- `blender/tension/habit_combine.py` puts the coat's bodice, buttons and collar into the habit's saved scene (the armature
+  modifier re-pointed at the habit's rig, the habit's own bodice taken out, the wool material the habit's).
+- the saved scene shows the skirt in a lighter blue than the coat (their materials differ); for the render the skirt takes
+  the coat's wool, as `habit_all` intends ("one wool for the whole habit").
+- skirt, sleeves and the coat meet at the shoulders and the waist without gaps; the sleeves are fitted to the habit's own
+  bodice, whose V stands about 0.6 units forward of this cut's: that sits under the lapels and shows nowhere.
