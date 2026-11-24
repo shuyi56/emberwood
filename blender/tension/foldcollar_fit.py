@@ -49,6 +49,7 @@ def evaluate(args):
     B, x, fixed = args; opt = dict(fixed); opt.update({k: float(v) for (k, *_), v in zip(CTRL, x)})
     try:
         R, info = fc.build(B, opt); X, st = fc.relax(R, B, opt)
+        if opt.get('shape_cut'): R['pts'] = X; _, st, _ = fc.shape_cut(R, opt)        # (the stretch against the shaped cut, when that is the cut)
         O = outline(B, X, R['tri'])
         if O is None: return dict(score=9.0, opt=opt)
         Rs = ref_samples(); gap = 0.5 * (cKDTree(O).query(Rs)[0].mean() + cKDTree(Rs).query(O)[0].mean())

@@ -142,7 +142,10 @@ def build(B, opt):
                 if q.sum() > 5: xs_.append(lo + 0.25); dz_.append(bz(lo + 0.25) + opt.get('bone_off', 0.15) - X3[q, 2].min())
             if len(xs_) >= 2:
                 dz = np.interp(ax, xs_, dz_) * float(opt['bone']) * wgt
-                X3[:, 2] += np.where(m | (fall & side), dz, 0.0)
+                # (taken up over a short run past the roll line: moved whole, the fall tore off the stand's narrow end
+                # in teeth along the neck edge)
+                r_ = np.clip((UV[:, 1] - hx) / float(opt.get('bone_run', 0.6)), 0, 1); r_ = r_ * r_ * (3 - 2 * r_)
+                X3[:, 2] += np.where(m | (fall & side), dz * r_, 0.0)
     # the strain the laying left (each edge against its length on the flat)
     ed = np.unique(np.sort(np.vstack([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]), 1), axis=0)
     l0 = np.linalg.norm(UV[ed[:, 0]] - UV[ed[:, 1]], axis=1); l1 = np.linalg.norm(X3[ed[:, 0]] - X3[ed[:, 1]], axis=1); st = l1 / l0 - 1

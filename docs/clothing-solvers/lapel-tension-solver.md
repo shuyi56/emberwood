@@ -705,3 +705,13 @@ flatter, closer collar. Nothing measured body, crease or sinking. `blender/tensi
 **Worse, and stopped on it (stop rule):** the outline gap to the photo went from 0.036 to 0.055 and the outline reads 5
 sides. The lifted, thicker end is rounded where the photo's is a flat triangle, and the end's edge is ragged beside the
 seam in the collar-alone view. The remaining 20% sunk is in the first 5 cm of each end.
+
+**Rejected, same day: dragging the laid end onto the lapel (`gorge`, removed).** John: "How should the join with lapel be
+done to flatten this". Measured first: the collar does not lie on the lapel (1% of its fall is over the turned lapel);
+its end edge runs beside the lapel's top edge for about 2 cm, 0.28 to 0.31 units (8 mm) off it, then on past the lapel's
+corner. With the cloth lifted, `join.py` finds no seam at all. I moved the end-edge points onto the lapel's top edge and
+faded the shift into the cloth over 1.5 units. Result: the inner end was pulled down into a pleat (tip fold 90 degrees,
+seam 0.4 to 0.5 cm, gap 5.2 mm, outline gap 0.056). Worse, so stopped. The seam has to be right in the build: the band's
+end laid along the lapel's top edge from the start (the seam taken from that edge, not from the neckline 0.3 off it),
+not a laid collar dragged there afterwards. Also fixed: the collarbone shift is taken up over 0.6 past the roll line
+(`bone_run`), which removes the teeth it tore along the neck edge.
