@@ -308,3 +308,51 @@ spikes at the nostrils' corners, and the Ranger's tip-defining points (TDP) jump
 The bony base and the join are unchanged.
 
 Renders are in the project files (`face-flow/`): `render-tip-before-after.png` and `clay-tip-before-after.png`.
+
+## 10. The shade from the eye to the nose, and the nose's side chiselled (`shadow_trace.py`; same script, steps 7 and the valley)
+
+John: "Trace the shadows from eye to nose and why are ours don't have that smooth wave like curve", "Our shadow ends
+before the grooves", and, circling the side of the Rogue's nose from the inner corner to the wing, "This entire
+sections needs to be chiselled".
+
+**The trace (`tools/gauges/face/shadow_trace.py`).** It follows the shade's darkest line from under the brow's head
+to the wing:
+
+- On his photo, with the yellow marks painted out.
+- On ours, lit by a soft frontal key, from the same camera and in the same unit, with the same opening masked round
+  each eye.
+
+On the photo the line comes straight down beside the bridge from the brow's head. It sits 0.18 pupil distances out at
+the brow's head, 0.135 at the inner corner and 0.115 on the bridge's side, then swings out to 0.18 round the wing. It
+is one smooth wave: three bends, the sharpest 27 degrees per 0.05.
+
+On all five of ours the line started out at 0.37-0.40 under the brow, in the socket's roof. It came in past the eye
+to 0.20-0.22 at the inner corner, and only then did it reach the nose's side. So the side of the bridge was lit from
+the brow down to the eyes (the shadow "ends before" it reaches the bridge's side), and the line kinked where the
+socket's shade handed over to the nose's: 33-49 degrees per 0.05. Below the eyes it runs along the nose's side and
+round the wing, as the photo's does.
+
+**The changes:**
+
+- **A valley beside the bridge (in the socket's carve).** It runs along the photo's line, 10.9 mm out at the brow's
+  head and 8.3 mm at the eyes, 2 mm deep and 3.5 mm wide, from 26 mm above the eye line to 16 mm below it. The shade
+  now comes down the bridge's side from the inner corner on four faces: 0.12-0.15 there, against the photo's 0.135.
+  The Ranger stays at 0.23.
+- **The nose's side chiselled.** The nose blends into the cheek over the middle of the nose across 1.6 mm, down from
+  5 mm (`KF_MID`). The side plane ends in a line, the nasofacial groove, instead of a smear. This also brought the
+  bony base back inside the norm on all five faces: 0.71-0.74, where it had been 0.62-0.69 since section 8.
+
+**What is still open:**
+
+- **The shade above the eye.** It still sits in the socket under the brow (0.37-0.40 against the photo's 0.18). The
+  nose's solid ends about 9-12 mm above the nasion (its box, `zN + 9 mm`, and `D()`'s `zN + 12 mm`), so above that
+  the bridge's sides are the plain face. Carrying the sinking of the bridge into the glabella higher changed nothing,
+  so the limit is the solid's box. The next step is to carry the bridge's side planes up to the brow's head inside
+  `noseSolid`.
+- **The brow-to-nose join gauge.** It went from 0.04 to 0.13-0.16 with the valley. The gauge follows the lit front
+  plane's edge, and the valley beside the bridge now separates that edge from the brow ridge. Read it with the shadow
+  trace, which is what John asked about.
+
+Before and after tables: `face-flow-data/shadow-gaps-before.md` and `face-flow-data/shadow-gaps-after.md`. Renders are
+in the project files (`face-flow/`): `shadow-trace-before-after.png`, `render-nose-side-before-after.png` and
+`clay-nose-side-before-after.png`.

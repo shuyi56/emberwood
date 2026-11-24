@@ -40,7 +40,7 @@ import re
 
 DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
-            'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
+            'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 1.6, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
 
 MARK = '/* brow arc (apply-brow-arc.py) */'
@@ -89,9 +89,14 @@ function socketCarve(S) {
   return function (xl, zl) {
     var u = xl / RX, a = browArcMM(u), bUp = Math.max(8 * mm, (a[0] - a[1]) * mm + (P.browHeight - 0.06 * sx) - gap - (S.cz - (0.525 * HH + EYE_LIFT)));
     var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, pw = xl < 0 && zl > 0 ? %(medp)g : 2, rho = Math.pow(Math.pow(Math.abs(xl / ax), pw) + Math.pow(Math.abs(zl / bz), pw), 1 / pw);      // (squarer in the upper inner quarter: the rim runs on under the brow's head, then turns down the nose's side)
-    if (rho > 1.12) return 0;
+    // (the valley beside the bridge, from under the brow's head down to the inner corner, where the nose's side takes
+    // the shade on: the photo's shade line runs there, 10.9 mm out at the brow's head, 8.3 at the eyes; ours ran out
+    // into the socket instead: shadow_trace.py)
+    var xm = S.cx + xl, zm = zl / mm, xc = (8.3 + 0.087 * zm + 0.003 * zm * zm) * mm;
+    var vl = %(valley)g * mm * Math.exp(-Math.pow((xm - xc) / (%(valw)g * mm), 2)) * osm(%(vtop)g, %(vtop)g - 6, zm) * osm(-16, -8, zm);
+    if (rho > 1.12) return vl;
     var th = Math.atan2(zl / bz, -xl / ax) * 180 / Math.PI, w = Math.max(0.25 + 0.75 * Math.exp(-Math.pow((th - %(up)g) / 50, 2)), %(low)g * Math.exp(-Math.pow((th + 35) / 35, 2)));      // (and in its lower inner quarter, down the nose's side past the inner corner)
-    return %(carve)g * mm * P.sockets * w * osm(1.1, 0.75, rho);
+    return %(carve)g * mm * P.sockets * w * osm(1.1, 0.75, rho) + vl;
   };
 }
 '''
@@ -128,7 +133,7 @@ def patch(src, P):
         old = re.search(r'function browCentre\(u\) \{\n.*?\n\}\n(?=function paintBrows)', src, flags=re.S)
     assert old, 'browCentre not found'
     blk = BROW_FN % {'mark': MARK, 'top': json.dumps(P['TOP']), 'thick': json.dumps(P['THICK']), 'ridgek': P['RIDGE_K'],
-                     'medx': P['MED_X'], 'lob': P['LO_B'], 'gap': P['RIM_GAP'], 'up': P['CARVE_UP'], 'carve': P['CARVE'], 'medp': P['MED_P'], 'low': P['LO_W'], 'mth': P['MALE_THICK'], 'chrf': P['CH_RF'], 'chk': P['CH_K']}
+                     'medx': P['MED_X'], 'lob': P['LO_B'], 'gap': P['RIM_GAP'], 'up': P['CARVE_UP'], 'carve': P['CARVE'], 'medp': P['MED_P'], 'low': P['LO_W'], 'mth': P['MALE_THICK'], 'valley': P['VALLEY'], 'vtop': P['VALLEY_TOP'], 'valw': P['VALLEY_W'], 'chrf': P['CH_RF'], 'chk': P['CH_K']}
     src = src[:old.start()] + blk.lstrip('\n') + src[old.end():]
     src = re.sub(r'roots\.length < [0-9]+ \* P\.browDensity', 'roots.length < %d * P.browDensity' % P['ROOTS'], src, count=1)
     # (the head of the brow rounded at its top and bottom corners instead of cut square)
@@ -170,6 +175,9 @@ def patch(src, P):
     src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': tip \*/[^\n]*', '', src)
     m6 = re.search(r'\n  var W4 = \{"off": 1\.0[^\n]*', src)
     src = src[:m6.end()] + '\n  %s: tip */ Object.assign(W4, {"kball": %g, "kjoin": %g});      // (the tip in planes, carrying on the bridge\'s chisel: apply-brow-arc.py)' % (MARK[:-3], P['TIP_KBALL'], P['TIP_KJOIN']) + src[m6.end():]
+    # 7. the nose's side met by the cheek along a crisp junction (the blend of the nose into the face over the middle of
+    # the nose, 5 mm, to KF_MID): the side plane ends in a line, the nasofacial groove, instead of a smear
+    src = re.sub(r'lerp\(3\.2 \* mm, [0-9.]+ \* mm, sm\(zSn \+ 4 \* mm, zSn \+ 12 \* mm, z\)\)', 'lerp(3.2 * mm, %g * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z))' % P['KF_MID'], src, count=1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:

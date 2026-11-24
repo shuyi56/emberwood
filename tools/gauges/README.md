@@ -324,6 +324,50 @@ the mouth's corners off the medial limbus, the wings off the inner corners.
 **Use it when.** Any change between the brow and the mouth, before and after, with `face_lines.py` for the profile
 angles a front view cannot see.
 
+### Shadow trace: `face/shadow_trace.py`
+
+**What it is for.** It finds the shade's darkest line from under the brow's head, past the inner corner of the eye,
+down the side of the nose and round its wing. It traces this on a reference photo and on Face Creator heads lit the
+same way, from the same front camera, in the same unit as `face_flow.py`. It shows whether our shade runs where the
+photo's does, as one smooth wave.
+
+How each side is made:
+
+- **The photo:** John's yellow marks are painted out (biharmonic inpainting), the image is levelled on the pupils,
+  and its luminance is taken.
+- **The heads:** a z-buffer of the head and eyes, with normals from it, lit by a soft frontal key from a little above
+  (Lambert's law with a wrap).
+- **On both:** the same opening is masked round each eye. The line is the darkest smooth path on each side: dynamic
+  programming over rows 0.01 apart, with a penalty for bending.
+
+**In and out.** `ref <photo> <refmeasure sheet>`, `model <dump.json>` and `compare <ref.shadow.json> <model.shadow.json>...`.
+They write `shadow-gaps.md` and `shadow-sheet.png`. The sheet shows the photo's line in red, ours in blue, and the photo's
+laid over ours in yellow. The measures are the line's x out from the midline at four heights:
+
+- the brow's head (y -0.25);
+- the inner corner (0);
+- the bridge's side (0.25);
+- round the wing (0.5).
+
+From those come the wave (inset and outset against its narrowest point), its curvature's sign changes and its
+sharpest turn.
+
+**Run.**
+```
+python3 tools/gauges/face/shadow_trace.py ref ref.png ref.measure.json --out sh
+python3 tools/gauges/face/shadow_trace.py model dump/Ranger.json --out sh
+python3 tools/gauges/face/shadow_trace.py compare sh/ref.shadow.json sh/Ranger.shadow.json --out sh
+```
+
+**Trouble looks like.**
+
+- The line out at 0.3-0.4 at the brow's head: the shade sits in the socket under the brow, not beside the bridge.
+- The line out past 0.2 at the inner corner: the side of the bridge is lit down to the eyes.
+- A sharp turn per 0.05 well above the photo's 27 degrees: a kink where one shade hands over to another.
+
+**Use it when.** Any change to the nose's side, the socket's inner corner or the brow's head. Use it together with
+`face_flow.py`.
+
 **Grounded in.** Park 2011 (doi 10.3342/ceo.2011.4.2.55); Brito, Avashia and Rohrich 2020 (PMC7159929); Cangello and
 Hilinski nasal analysis; plasticsurgerykey, Nasal analysis and anatomy; Bridgman, Constructive Anatomy; Proko, Planes
 and forms of the head; Anatomy for Sculptors, Forming the head. The 35 degree edge of the lit plane is this gauge's own

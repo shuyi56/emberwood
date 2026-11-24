@@ -1446,7 +1446,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     // (onto the face: softly over the bridge, softer still where the columella and the floor meet the lip, crisply in the
     // wing's crease above and behind it)
     var wa = sm(2.5 * mm, -0.5 * mm, PT[1] - PT[0]) * sm(zSn + 0.5 * mm, zSn + 3.0 * mm, z) * 1;
-    var kf = lerp(lerp(3.2 * mm, 5.0 * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z)) * lerp(1, 0.5, sm(zSn + 0.5 * L, zSn + 0.85 * L, z)), 4.2 * mm, wa);      // (and tighter up between the eyes, clear of the inner corners)
+    var kf = lerp(lerp(3.2 * mm, 1.6 * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z)) * lerp(1, 0.5, sm(zSn + 0.5 * L, zSn + 0.85 * L, z)), 4.2 * mm, wa);      // (and tighter up between the eyes, clear of the inner corners)
     var d = nSmin(dF, dN, kf);
     return -nSmin(-d, PT[2], kNos);
   }
@@ -2572,9 +2572,14 @@ function socketCarve(S) {
   return function (xl, zl) {
     var u = xl / RX, a = browArcMM(u), bUp = Math.max(8 * mm, (a[0] - a[1]) * mm + (P.browHeight - 0.06 * sx) - gap - (S.cz - (0.525 * HH + EYE_LIFT)));
     var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, pw = xl < 0 && zl > 0 ? 2 : 2, rho = Math.pow(Math.pow(Math.abs(xl / ax), pw) + Math.pow(Math.abs(zl / bz), pw), 1 / pw);      // (squarer in the upper inner quarter: the rim runs on under the brow's head, then turns down the nose's side)
-    if (rho > 1.12) return 0;
+    // (the valley beside the bridge, from under the brow's head down to the inner corner, where the nose's side takes
+    // the shade on: the photo's shade line runs there, 10.9 mm out at the brow's head, 8.3 at the eyes; ours ran out
+    // into the socket instead: shadow_trace.py)
+    var xm = S.cx + xl, zm = zl / mm, xc = (8.3 + 0.087 * zm + 0.003 * zm * zm) * mm;
+    var vl = 2 * mm * Math.exp(-Math.pow((xm - xc) / (3.5 * mm), 2)) * osm(26, 26 - 6, zm) * osm(-16, -8, zm);
+    if (rho > 1.12) return vl;
     var th = Math.atan2(zl / bz, -xl / ax) * 180 / Math.PI, w = Math.max(0.25 + 0.75 * Math.exp(-Math.pow((th - 45) / 50, 2)), 0.7 * Math.exp(-Math.pow((th + 35) / 35, 2)));      // (and in its lower inner quarter, down the nose's side past the inner corner)
-    return 3.6 * mm * P.sockets * w * osm(1.1, 0.75, rho);
+    return 3.6 * mm * P.sockets * w * osm(1.1, 0.75, rho) + vl;
   };
 }
 function paintBrows(eyes) {
