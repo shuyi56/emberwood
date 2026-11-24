@@ -1801,6 +1801,13 @@ FRAME_TH = 1.15              # |theta| at FRAME_Z0 in front of which hair is fra
 FRAME_A_MM = 12.0            # mm: the lock's wave, STYLE (the creator's side waves 8 median, 14 at the 90th pct: the
                              # front pieces curled more defined than the mass)
 FRAME_LAM = 0.45             # HH (10 cm): two or three bends over the lock's fall to the collar [FF-DAV][FF-GLAM]
+FRAME_IN = 0.05             # HH (1 cm): the lock eases in toward the neck by its end, to lie on the collar, STYLE
+FRAME_BACK = 0.08           # HH (1.8 cm): and back by its end: framing pieces fall back over the collar, STYLE
+FRAME_TWIST = 0.7           # the curl's turn round the lock against its bend out (0: a flat S, 1: a round spiral)
+                            # [FF-GHD] ghdhair.com: twist "the hair as you wrap"
+FRAME_VARY = 0.15           # each lock's wavelength and height within +-15% [WS-GOOP]: alternate sizes "so the waves
+                            # look less uniform"
+FRAME_PHASE_JIT = 0.6       # rad: each lock's phase within +-0.6 (the creator's own lock jitter, WAVE_LOOSE)
 FRAME_CLUMP = (0.35, 0.9)    # the pull of a guide to its lock's shape: at the cheekbone, and from mid-length on [FF-XG]
 
 
@@ -1848,10 +1855,25 @@ def frame_locks(X, roots, sel_from, seg_hh, col, n_locks=FRAME_LOCKS):
             # waved away from the face [FF-MS][FF-GLAM]: out from the head's axis, then back in by the cheek, out at
             # the jaw; grown in over the first quarter wave, the last inch left looser [WS-TYMO]
             sarc = np.arange(L) * seg_hh
-            out = Cl - np.array([SF.AXIS[0], SF.AXIS[1], 0.0]); out[:, 2] = 0
-            out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
-            amp = FRAME_A_MM / SF.HH_MM * SF.sm(0.0, FRAME_LAM / 4, sarc) * np.clip((L - 1 - np.arange(L)) / 2.5, 0.4, 1)
-            Cl = Cl + out * (amp * np.sin(2 * np.pi * sarc / FRAME_LAM))[:, None]
+            u = sarc / max(sarc[-1], 1e-9)
+            # it drapes: from the cheekbone the lock eases in toward the neck and back, so it lies on the collar and
+            # falls behind the collarbone line instead of hanging plumb off the jaw (stiff, in profile)
+            inw = Cl - np.array([SF.AXIS[0], SF.AXIS[1], 0.0]); inw[:, 2] = 0
+            inw /= -np.maximum(np.linalg.norm(inw, axis=1, keepdims=True), 1e-9)
+            Cl = Cl + (inw * FRAME_IN + np.array([0.0, FRAME_BACK, 0.0])) * SF.sm(0.0, 1.0, u)[:, None]
+            out = -inw
+            side = np.cross(np.array([0.0, 0.0, 1.0]), out)
+            # each lock its own: its wavelength, height and phase a little apart, so the locks are not three copies
+            rng = np.random.default_rng(31 + nxt)
+            lam = FRAME_LAM * (1 + FRAME_VARY * (2 * rng.random() - 1))
+            a_mm = FRAME_A_MM * (1 + FRAME_VARY * (2 * rng.random() - 1))
+            ph = FRAME_PHASE_JIT * (2 * rng.random() - 1)
+            amp = a_mm / SF.HH_MM * SF.sm(0.0, lam / 4, sarc) * np.clip((L - 1 - np.arange(L)) / 2.5, 0.4, 1)
+            phi = 2 * np.pi * sarc / lam + ph
+            # twisted as it is curled [FF-MBG][FF-GHD]: the bend turns round the lock (out, then round toward the
+            # back), a loose spiral that reads from the side as well as from the front
+            Cl = Cl + amp[:, None] * (np.sin(phi)[:, None] * out + FRAME_TWIST * (1 - np.cos(phi))[:, None] * side
+                                      * np.sign(Cl[:1, 0] - SF.AXIS[0]) * -1)
             for j, g in enumerate(m):
                 Lg = n[g] - k0[g]
                 t = np.arange(Lg) / max(Lg - 1, 1)
