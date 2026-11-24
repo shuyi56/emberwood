@@ -292,6 +292,46 @@ which also reads painted strand textures and runs inside `smoke.py`); take that 
 
 ## Faces, heads, measuring
 
+### Face flow: `face/face_flow.py`, `face/render_clay.cjs`
+
+**What it is for.** The brow-to-mouth lines a sculptor reads, traced on a reference photo and on a Face Creator head
+from the same front orthographic camera, in one unit (the pupils' distance), with every gap listed: the brow-tip line
+(the lit front plane's edge from the brow's underside down the bridge's side to the tip-defining point), the outer line
+(the lid crease, the nasofacial groove, the wing's crease), the philtrum's columns and the upper lip's line; and the
+landmarks between them (inner and outer eye corners, wings, tip-defining points, bow peaks, mouth corners).
+
+**In and out.** `ref <photo> <refmeasure sheet>`: the photo's yellow strokes traced automatically (John marks his
+references in yellow) and levelled on the pupils. `model <dump.json>`: a head dumped by `tools/face-check/dump-heads.cjs`
+(PR #75). `compare <ref.flow.json> <model.flow.json>...`: `flow-gaps.md`, `flow-gaps.json` and `flow-sheet.png` (the
+photo with both sets of lines, and each head's clay front with ours in cyan and the photo's in yellow).
+`render_clay.cjs <creator.html> <out> [faces]` renders the cheap clay and raking-key matcap views (front, 3/4, side,
+back, and close-ups of the brow-to-mouth region from the front and 3/4) with the hair hidden.
+
+**Run.**
+```
+python3 tools/gauges/face/face_flow.py ref ref.png ref.measure.json --out flow
+node tools/face-check/dump-heads.cjs face-creator.html dump Ranger,Rogue      (PR #75)
+python3 tools/gauges/face/face_flow.py model dump/Ranger.json --out flow
+python3 tools/gauges/face/face_flow.py compare flow/ref.flow.json flow/Ranger.flow.json --out flow
+node tools/gauges/face/render_clay.cjs face-creator.html clay Ranger
+```
+
+**Trouble looks like.** The brow-tip line's waist far narrower than the tip-defining points (a fin of a bridge); the
+outer line close in at mid-bridge (the side walls do not run out into the cheek); a large brow-to-nose join gap (the
+brow's line and the nose's do not meet); many polygon sides at 1 mm or a sharp turn on a line (a step, not a flow);
+the mouth's corners off the medial limbus, the wings off the inner corners.
+
+**Use it when.** Any change between the brow and the mouth, before and after, with `face_lines.py` for the profile
+angles a front view cannot see.
+
+**Grounded in.** Park 2011 (doi 10.3342/ceo.2011.4.2.55); Brito, Avashia and Rohrich 2020 (PMC7159929); Cangello and
+Hilinski nasal analysis; plasticsurgerykey, Nasal analysis and anatomy; Bridgman, Constructive Anatomy; Proko, Planes
+and forms of the head; Anatomy for Sculptors, Forming the head. The 35 degree edge of the lit plane is this gauge's own
+choice (EXPERIMENTAL), between face_lines' 30 (tip-defining points) and 45 (dorsal lines). The numbers and the first
+use: `docs/faces/face-flow.md`.
+
+### On open PRs
+
 All on open PRs; they land here under `gauges/face/` and `gauges/measuring/`.
 
 - `tools/refmeasure/` (PR #89): comparative measurement of a reference image and of a render against it, the
