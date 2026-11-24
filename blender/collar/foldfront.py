@@ -287,9 +287,21 @@ if outline:
             xy = OT * np.array([Lc, Lc]); sl = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(xy, axis=0), axis=1))])
             sq = np.linspace(0, sl[-1], int(np.ceil(sl[-1] / hm)) + 1)[1:-1]
             pts = [(float(np.interp(q_, sl, OT[:, 0])), float(np.interp(q_, sl, xy[:, 1]))) for q_ in sq]
+            if outline_inner:
+                # (the top edge the same way: found 2026-11-24 by dumping the cut, this branch gave the top edge no
+                # points of its own and ran its rows from the roll line carried on, so the edge was whatever the wedge
+                # filter left of the rows, a staircase 0.04 either side of the line: the ragged top edge)
+                xyI = OI * np.array([Lc, Lc]); slI = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(xyI, axis=0), axis=1))])
+                sqI = np.linspace(0, slI[-1], int(np.ceil(slI[-1] / hm)) + 1)[1:-1]
+                pts += [(float(np.interp(q_, slI, OI[:, 0])), float(np.interp(q_, slI, xyI[:, 1]))) for q_ in sqI]
             for t_ in np.arange(OT[0, 0], 1.0 + 1e-9, hm / Lc):
                 D = float(Dfun(t_)) - 0.6 * hm
-                if D > 0.3 * hm:
+                if outline_inner and t_ < tI:
+                    Dl = float(Dlo(t_)) + 0.6 * hm
+                    if D - Dl > 0.3 * hm:
+                        n_ = int(np.ceil((D - Dl) / hm)); pts += [(t_, Dl + (D - Dl) * j / n_) for j in range(0, n_ + 1)]
+                    elif D - Dl > -0.3 * hm: pts += [(t_, 0.5 * (D + Dl))]
+                elif D > 0.3 * hm:
                     n_ = int(np.ceil(D / hm)); pts += [(t_, D * j / n_) for j in range(1, n_ + 1)]
             pts = np.array(pts)
         else:

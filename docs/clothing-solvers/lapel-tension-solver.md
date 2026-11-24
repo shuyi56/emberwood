@@ -782,3 +782,19 @@ On it: polycheck passes (lapel 4 of 4, no mismatch), the collar's outline gap is
 0.8 cm, step 3.6 / 6.9 mm, tip fold 7 / 8 degrees. In the close-ups the spike through the collar is gone but for a small
 bump, and the top edge is smoother, not yet clean: a few teeth remain near the roll top, and her left side's step at the
 seam is still above a cloth's thickness.
+
+**The top edge's own points (foldfront, `outline_round` with `outline_inner`).** The teeth that were left were not the
+solve: dumping the flat cut showed no point on the top edge at all. The `outline_round` branch (which `classical_lapel`
+uses) ran its rows from the roll line carried on and gave the top edge no points, so the edge was what the wedge filter
+left of the rows, a staircase 0.04 either side of the line, turning 80 to 110 degrees at every step. The branch now sets
+points evenly along the top edge and starts the rows 0.6 of a mesh step inside it, as it does for the outline. In the
+close-ups the top edge is a clean line on both sides.
+
+**The join's asymmetry (John: "left side is almost perfect while right sticks out"), measured, not solved.** Picture
+right is her left. `join.py`: her right seam 1.7 cm, step 4.1 mm; her left 0.6 cm, 6.5 mm. Her left front lies over her
+right, and the collar's left end sits 0.17 (4.5 mm) further forward than its right and reaches 0.13 over its lapel's
+edge against 0.07. The collar is laid as a mirror image on fronts that are not one. Rejected: bringing each end both
+ways to its clearance (`settle`, removed): `join.py` lost the seam on both sides and the spread of heights did not
+fall, because the height read off the nearest mesh point is not reliable beside a cut edge. John's direction: the next
+step is to design the bodice with the lapel, so the front carries the lapel's load and makes the flap; the asymmetry
+belongs to that.
