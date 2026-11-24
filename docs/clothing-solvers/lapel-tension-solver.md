@@ -972,3 +972,35 @@ flush build (rejections #143 to #145, removed):
 **What it shows:** the rod and the panel cannot be got by moving one laid sheet. The rod needs its own round turn with
 the cloth's thickness, the panel its own flat lay in the lapel's plane, and the two sewn along the roll: two pieces in
 the draft, as the made-up collar is.
+
+### Reading: how a tailored notch collar is made (John, 2026-11-24: "Read more on notch collars")
+
+Sources: Strickland, *A Tailoring Manual* (Cornell, the Collar chapter, figs. 69 and 70); Univ. of Kentucky Extension
+CT-LMH.171 (terms) and CT-LMH.176 (custom tailoring); *Every Woman's Encyclopaedia*, Practical Lessons in Tailoring 8
+and 9 (the bridle).
+
+1. **Two collars, two gorge seams.** The under collar (bias, a seam at the centre back, canvas pad stitched to it) is
+   sewn to the *coat's* neck from collar end to collar end. The upper collar (length grain) is sewn to the *facing*.
+   Both seams are steamed wide open and laid one on the other. "If collar is correctly stitched, the notch will form a
+   sharp V, and the stitching seams appear to be continuous from lapel through collar" (Manual). So the gorge is a
+   butt seam in one surface: the flush gorge of phase 16 is right, the collar laid on the lapel was wrong.
+2. **The stand is a separate zone, and it ends on the lapel's break line.** The stand is the part from the fold to the
+   neck edge. It is marked on the figure from the centre back "toward front where fold touches front break line"
+   (Manual, fig. 69e): the collar's fold runs into the lapel's fold as one line, and the stand ends at that point.
+3. **Stand and fall are shaped differently** (the rod and the panel). The stand is pad stitched in arcs parallel to
+   the fold, close rows (1/8 in. apart), "shaping collar back to an inside curve to fit back neck". The fall is pad
+   stitched loosely (1/2 in.) with the canvas eased over it, most ease at the fold "because of the sharp turn". Then
+   the whole is steamed over a roll bent to the neck's size.
+4. **The fold lines are drawn in.** The lapel's roll line carries a bridle, a straight tape 1/2 to 3/4 in. shorter
+   than the line (Kentucky), which the crease is eased onto: it stops the bias fold stretching. The collar's roll line
+   gets a drawing-in stitch. The roll line is the one edge held to length: the rod.
+5. **Ease at the join.** Round the neck the coat is eased onto the collar; for 1/2 in. either side of where the stand
+   meets the break line the collar is eased onto the coat instead; the collar end is matched "tightly into the lapel
+   notch" and tacked 1/8 in. behind it.
+6. **Turn of cloth.** The upper collar is cut about 1/4 in. larger than the under collar and eased onto it along the
+   outer edge and the ends; its edge sits 1/16 to 1/8 in. past the under collar's.
+
+**For the build:** (a) keep the flush gorge; (b) draw the collar's roll line as the continuation of the lapel's
+crease, held to its length, with the stand ending where the two meet; (c) build stand and fall as two zones on that
+line, the stand curved in to the neck, the fall a flat panel from the roll line to the outer edge and the gorge; (d)
+put the join's ease in the last 1.3 cm each side of the roll top, where the dent is now.
