@@ -29,6 +29,8 @@ the Gaussian curvature map only (`derive.field_png`).
 | `flatview.py` | matplotlib | The flat cut beside the outline from the photo's camera, each side marked as a cut edge or an edge made by the fold or the view. |
 | `feasible.py` | matplotlib | Stage 1 and 2 of the coupled solve: the limits (the approved build's own numbers), the feasible map, the join objective. |
 | `flush.py` | bpy, scipy | The gorge join on the solidified meshes: rays straight at the lapel's face just inside its top edge and just past it, so a collar laid on the lapel (proud) or sewn flush to it reads directly. Replaces `join.py`'s step and turn for a flush gorge (phase 16). |
+| `waist.py` | bpy, mathutils | The waist's layers on a saved habit: rays at each height and angle round the body's axis give each solid's outer and back face (corset, petticoat, riding skirt, coat). Reports skirt against petticoat and coat against skirt (the basque lies over the band only where coat minus skirt is 0 or more). Phase 17. |
+| `waist_layer.py` | bpy, scipy, waist.py | EXPERIMENTAL. Layers the waist as a tailor does: the skirt fitted to the petticoat at the band, the coat's basque lifted as one stack over it, seam allowances under the hem dropped. Phase 17. |
 
 ## Run
 
