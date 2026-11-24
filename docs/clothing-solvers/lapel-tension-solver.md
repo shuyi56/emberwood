@@ -798,3 +798,51 @@ ways to its clearance (`settle`, removed): `join.py` lost the seam on both sides
 fall, because the height read off the nearest mesh point is not reliable beside a cut edge. John's direction: the next
 step is to design the bodice with the lapel, so the front carries the lapel's load and makes the flap; the asymmetry
 belongs to that.
+
+## Phase 13: the bodice cut with the fold in mind (both neck corners level)
+
+John, 2026-11-24: "Join did not account for asymmetry left side is almost perfect while right sticks out next step is
+co design the bodice so it can take load from the lapel".
+
+**Measured first** (`~/work/FC/asym.py`, mirror test of each piece against the other side):
+
+| Piece | Her right forward of her left |
+|---|---|
+| Roll line, whole length | 4.5 mm (one cloth, 4.4 mm) |
+| Lapel top edge | 1.3 mm on average, 3.7 mm by the roll top |
+| Coat past 2.5 units from the middle | 0.0 mm |
+
+The fronts cross only below z 49.82, where the two folds meet. Above it they stand apart in the V, yet the cut kept the
+right front a cloth forward all the way to the neck. One collar, laid as a mirror image, cannot sit level on two neck
+corners 4.5 mm apart. The load the lapel puts on the front is not the cause: foldfront's log gives a pull on the
+button pins of 0.001 and the front moving 0.02 to 0.05 mm.
+
+**Change** (source: the fold's own numbers in foldfront's log; experimental): `BODICE_OVER_TOP=49.82,50.36` in
+`bodice_cut.py` fades the right front's lift out between the folds' crossing and the roll lines' top.
+`blender/bodice_cut/over_top.py CUT.blend OUT.blend 49.82,50.36` applies the same change to a saved cut (351 points,
+4.4 mm at most).
+
+| Gauge | Before, her right / her left | After |
+|---|---|---|
+| Roll top, depth | −3.42 / −3.26 | −3.26 / −3.26 |
+| Lapel top edge, right forward of left | 1.3 mm | 0.2 mm |
+| Join: seam length | 1.71 / 0.62 cm | 1.45 / 1.04 cm |
+| Join: step | 4.1 / 6.5 mm | 5.7 / 5.7 mm |
+| Join: turn | 29.6 / 26.4° | 27.8 / 28.0° |
+
+Both ends now make the same join. The right's lower step before came from its lapel standing a cloth forward, so the
+level cut brings it to the left's value; the step itself is the next thing to take out, on both sides at once.
+
+**Tried on the collar and rejected:**
+
+- `flush_rounds` 3 and 6 (the let-down repeated): the two ends kept their 2 mm difference and the turn rose from 30°
+  to 39°. Removed. The difference was in the fronts, not in the collar.
+- `gorge_level` 0.0 on the level fronts: step 4.6 / 4.3 mm, but a thin spike appears on the collar's face beside
+  each lapel in the clay close-ups.
+- `gorge_level` 0.0 with `gorge_flush` 2.2: step 3.2 / 2.5 mm, seams 1.76 / 1.78 cm, but a folded wedge and a tab at
+  the shoulder on the collar's face. Kept at 0.12 and 1.6.
+
+**Not reproducible:** the shared `cut.blend` holds the bodice 0.6 units further off the chest in the V than a fresh
+build from `origin/claude/pr-cleanup/redingote-riding-habit` (front depth −3.73 against −3.13, same skin). On the
+fresh build the same change gives seams 1.36 / 1.37 cm and steps 3.3 / 3.1 mm. The study above uses the shared cut
+with `over_top.py`, so it compares with every earlier phase.
