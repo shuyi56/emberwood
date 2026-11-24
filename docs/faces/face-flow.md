@@ -586,3 +586,16 @@ into the side wall and there was no junction to see, and its groove was 0.3 mm a
 Fix: `W4X.chb` 1.4 (wing top about 11 mm at the back, 7 at the front) and step 12 `AG_BACK` 3 (groove 0.9 mm at the
 cheek end easing to 0.3 by the tip). Also tried: the lower top alone (the junction shows less), and the deep groove on
 the tall wing (it sits too high on the side wall). All five faces' gauges are unchanged from section 15.
+
+## 17. The wing's foot arches down
+
+John (2026-11-25): "Wings need to arch down they are floating at the moment."
+
+Seen in the clay close-ups: the wing's lower rim ran level with the nose's floor from front to back, so its back end stood off the
+cheek on a shelf and left a dark pocket under it in the 3/4 view (Proko: the wings "hook around and under", and the alar
+groove "deepens as it extends posteriorly", Bloom, Ransom & Miller 2011).
+
+Fix (`apply-brow-arc.py` step 13, `WG_DN` 3.5, `WG_FR` 0.5): the wing's lower rim is lowered by 3.5 mm at its back end, easing
+to nothing half way along, so the rim is an arch: down where the wing is fixed to the cheek, up over the nostril. 2.5 mm at
+a fifth of the way along left the pocket; 4.5 mm made a knob at the corner. Gauges on five faces unchanged from section 16.
+Open: the outer corner still reads as a small tick from the front; the next step is to blend the lowered rim into the cheek.
