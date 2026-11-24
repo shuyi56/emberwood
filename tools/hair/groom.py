@@ -2364,7 +2364,7 @@ WAVE_RESTORE = 1.45          # CALIBRATED: the side waves' depth brought back to
                              # smoothing, lay-in and comb passes took the front/side wave from 7.3 to 5.5 mm median,
                              # the creator's 8.2)
 WAVE_FADE_TH = (1.9, 2.5)    # |theta| of the roots over which the sides' deeper wave fades to the back's own
-WAVE_ALT = True              # alternate sections curled the other way [TYMO2][MC2]: a wave lock's offset from its
+WAVE_ALT = False             # (off: see hollywood_set. Was True, 2026-11-24:) alternate sections curled the other way [TYMO2][MC2]: a wave lock's offset from its
                              # middle line flipped (half a wavelength) against the locks beside it
 WAVE_SECTION = 'lock'        # the section curled one way: a whole wave lock ('lock') or half of one ('half').
                              # [SV3] samvilla.com, sectioning: "never take a section that's wider than your brush",
@@ -2562,6 +2562,49 @@ def lateral_s(X, roots, bang, col):
         d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
         X[g, 1:n] = P[0] + np.cumsum(d, 0)
     return push_valid(col, X, mask=sel[:, None] & ok)
+
+
+# The set: one S pattern across the whole side (John, 2026-11-24, with a drawn reference: "the hair needs a cut to
+# form curves, right now the hair is all over the place"). SOURCED: Hollywood waves: every section the same size and
+# curled the same direction, set, then brushed so "neighbouring" sections merge into one S (behindthechair.com,
+# Hollywood waves, 5 tips; ghdhair.com, how to create Hollywood waves: "always turning the same way", brushed
+# "following the S pattern"); drawn hair: neighbouring waves keep one rhythm (design.tutsplus.com, how to draw hair),
+# big shapes before strands (proko.com). Each lock had its own phase (the creator's 5 sections plus 0.6 rad of
+# jitter) and alternate locks were curled the other way: in profile the bends cancelled and crossed. Here the phase
+# is read from where the hair lies (its height, turning slowly round the head), so hair side by side bends together.
+# Overrides the creator's per-section phases on the sides and WAVE_ALT (the 2026-11-24 alternate curl). The amounts
+# are STYLE: no source gives the count of crests or the wave's depth.
+SET_A_MM = 14.0              # STYLE: the S's swing along the head's side (seen in profile); the creator's own 8 median
+SET_LAM = 0.7                # STYLE: HH (15 cm) between crests: three bends from the jaw to the ends, as the reference
+SET_RADIAL = 0.4             # STYLE: the swing out from the head against the swing along it (lay_in holds the width)
+SET_Z = (0.45, 0.1)          # HH: grown in from the cheekbone to the jaw (the face frame's shortest piece sits there)
+SET_TURN = 0.6               # STYLE: rad of phase per rad round the head: the crests run on a slow diagonal
+SET_TH = (0.9, 1.2)          # |theta| of the roots: none on the face frame's own locks, in full from the temple back
+SET_OWN = 0.25              # the share of a strand's own wave left on top (each hair a little off the pattern)
+
+
+def hollywood_set(X, roots, sel, seg_hh, col):
+    """One wave pattern laid on the side hair (sel): each strand's middle line plus an S whose phase comes from the
+    node's height and angle round the head, so neighbours bend together; faded in over SET_TH and out to the back
+    over WAVE_FADE_TH. Rebuilt at its segment lengths from the root, kept out of the head and body."""
+    C, ok, n = middle_line(X)
+    T, r, b = wave_frame(C)
+    thr = np.abs(SF.theta(roots))
+    w = SF.sm(SET_TH[0], SET_TH[1], thr) * (1 - SF.sm(WAVE_FADE_TH[0], WAVE_FADE_TH[1], thr)) * sel
+    side = np.where(roots[:, 0] >= SF.AXIS[0], 1.0, -1.0)[:, None]
+    tn = np.abs(SF.theta(C.reshape(-1, 3))).reshape(C.shape[:2])
+    phi = 2 * np.pi * (SET_Z[0] - C[..., 2]) / SET_LAM + SET_TURN * tn
+    A = SET_A_MM / SF.HH_MM * SF.sm(SET_Z[0], SET_Z[1], C[..., 2])
+    off = A[..., None] * (side[..., None] * np.sin(phi)[..., None] * b + SET_RADIAL * np.cos(phi)[..., None] * r)
+    Y = X.copy()
+    for g in np.where(w > 0)[0]:
+        k = n[g]
+        P = C[g, :k] + (1 - w[g] * (1 - SET_OWN)) * (X[g, :k] - C[g, :k]) + w[g] * off[g, :k]
+        d = np.diff(P, axis=0)
+        L = np.linalg.norm(np.diff(X[g, :k], axis=0), axis=1, keepdims=True)
+        d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        Y[g, 1:k] = X[g, 0] + np.cumsum(d, 0)
+    return push_valid(col, Y, mask=(w > 0)[:, None] & ok)
 
 
 # The ends: each lock a ribbon that closes to a point (John, 2026-11-24, with a drawn reference of long wavy hair:
@@ -2931,10 +2974,13 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             thw_ = np.abs(SF.theta(roots))
             gain_ = 1 + (WAVE_RESTORE - 1) * (1 - SF.sm(WAVE_FADE_TH[0], WAVE_FADE_TH[1], thw_))
             X2 = wave_restore(X2, ~bang & (thw_ > 0.6) & (thw_ < WAVE_FADE_TH[1]), gain_, col, sgn)
+            sd_sel_w = ~bang & (thw_ > 0.6) & (thw_ < WAVE_FADE_TH[1])
             # then finger-combed: each section a soft ribbon, the curl loosened, the last inch looser (see FC_*)
             X2 = finger_comb(X2, roots, sd_sel & (fl < 0), lk * 1000 + clump, col)
             # the front of the sides swung in one S from the side bangs down (see LAT_S_*), then laid in: the S shows
             # on the face edge and the outer outline keeps the creator's width
+            # the set: the whole side in one S pattern (see SET_*)
+            X2 = hollywood_set(X2, roots, sd_sel_w & (fl < 0), seg_hh, col)
             X2 = lateral_s(X2, roots, bang & (fl < 0), col)
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
             # the ears covered from the front: the face frame in to the creator's inner edge (see EAR_COVER_*)
