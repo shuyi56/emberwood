@@ -42,6 +42,7 @@ ROOT_ROWS = 6                      # DRAFT: guide segments over which the root's
 CARD_LIFT_MM = 2.0                 # DRAFT: cards lie at least this far over the skin (the cap lies at 1 mm)
 
 
+CARD_BEND_DEG = 35.0               # a card's mean line turns at most this much per guide segment
 FRAME_CLUMP0 = 900                 # groom.py frame_locks: clump ids from here are the face-framing locks
 
 
@@ -75,7 +76,28 @@ def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0]), fixed=None):
         L = int(np.median(last[m]))
         if L < 2:
             continue
-        C = Xf[m, :L + 1].mean(0)
+        # a member shorter than the card carries on with the others' mean step, not parked at its own end: parked,
+        # each member's end pulled the mean back toward it, and a card of mixed lengths (the face frame's graded cut)
+        # zigzagged where they ended
+        M = Xf[m, :L + 1].copy()
+        for i in range(1, L + 1):
+            alive = last[m] >= i
+            if alive.any() and not alive.all():
+                M[~alive, i] = M[~alive, i - 1] + (X[m[alive], i] - X[m[alive], i - 1]).mean(0)
+        C = M.mean(0)
+        # a sharp corner in the mean line (members parting ways over the shoulder) eased: hair does not corner
+        for _ in range(20):
+            d = np.diff(C, axis=0)
+            u = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+            sharp = np.where((u[:-1] * u[1:]).sum(1) < np.cos(np.radians(CARD_BEND_DEG)))[0] + 1
+            if not len(sharp):
+                break
+            C2 = C.copy()
+            for i in sharp:
+                for j in (i - 1, i, i + 1):
+                    if 0 < j < len(C) - 1:
+                        C2[j] = 0.5 * C[j] + 0.25 * (C[j - 1] + C[j + 1])
+            C = C2
         # the mean of hairs lying over a curved scalp lies inside the curve (a lock 4 cm wide over the crown dips
         # about 1.5 mm into the skull): set each point back out to the members' mean distance from the head's centre
         rc = np.linalg.norm(C - centre, axis=1)
@@ -88,7 +110,20 @@ def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0]), fixed=None):
         out = C - np.asarray(centre)
         if centre[2] == 0.0:
             out[:, 2] = 0
+        r0 = np.maximum(np.linalg.norm(out, axis=1), 1e-9)
         out = out - T * (out * T).sum(1, keepdims=True)
+        # far below the head, or where hair lies out along the shoulder, the card runs nearly along "out from the
+        # head's centre": that direction has little or no part across the card, and its remainder swings round or
+        # reverses from row to row, so the strip crossed itself (a bowtie, drawn as a zigzag of strands). There a row
+        # keeps the row before's facing, carried along the card
+        nrm = np.linalg.norm(out, axis=1)
+        for i in range(1, len(out)):
+            v = out[i - 1] - T[i] * (out[i - 1] @ T[i])
+            nv = np.linalg.norm(v)
+            if nv < 1e-6:
+                continue
+            if nrm[i] < 0.35 * r0[i] or (out[i] @ v) < 0.5 * nrm[i] * nv:
+                out[i] = v / nv * max(nrm[i], 1e-6)
         out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
         B = np.cross(T, out)
         B /= np.linalg.norm(B, axis=1, keepdims=True)

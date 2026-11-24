@@ -1259,6 +1259,94 @@ def relax_kinks(X, col, cap=None, keep=None, iters=RELAX_ITERS):
     return X
 
 
+SPIKE_DEG = 14.0       # degrees: two neighbouring bends over this, turning opposite ways, are a jag (the stress test
+                       # flags them from 20): the full-length side hair jagged where it lies over the shoulder's ridge
+SPIKE_ITERS = 12
+
+
+def relax_spikes(X, col, keep=None, iters=SPIKE_ITERS):
+    """Jags taken out: where two neighbouring nodes bend opposite ways by more than SPIKE_DEG each, they and their
+    neighbours move halfway to the mean of theirs; the chain is set back to its segment lengths from the root and
+    those nodes pushed out of the head and the body. A wave (bends of one sign over several nodes) is left."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    for _ in range(iters):
+        d = np.diff(X, axis=1)
+        L = np.linalg.norm(d, axis=-1, keepdims=True)
+        u = d / np.maximum(L, 1e-12)
+        ax = np.cross(u[:, :-1], u[:, 1:])                                        # at nodes 1 .. S-2
+        ang = np.degrees(np.arcsin(np.clip(np.nan_to_num(np.linalg.norm(ax, axis=-1)), 0, 1)))
+        opp = np.nan_to_num((ax[:, :-1] * ax[:, 1:]).sum(-1)) < 0
+        zig = opp & (ang[:, :-1] > SPIKE_DEG) & (ang[:, 1:] > SPIKE_DEG)          # between nodes k+1 and k+2
+        bad = np.zeros(X.shape[:2], bool)
+        bad[:, 1:-2] |= zig
+        bad[:, 2:-1] |= zig
+        if keep is not None:
+            bad[keep] = False
+        if not bad.any():
+            break
+        sm = bad.copy()
+        sm[:, 1:] |= bad[:, :-1]
+        sm[:, :-1] |= bad[:, 1:]
+        sm[:, :2] = False
+        M = X.copy()
+        M[:, 1:-1] = 0.5 * (X[:, :-2] + X[:, 2:])
+        X = np.where(sm[..., None] & ~np.isnan(M), 0.5 * X + 0.5 * M, X)
+        for k in range(2, X.shape[1]):
+            v = X[:, k] - X[:, k - 1]
+            X[:, k] = X[:, k - 1] + v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12) * L[:, k - 1]
+        X = push_valid(col, X, mask=sm & ok)
+    return X
+
+
+# The cut is made in natural fall (John, 2026-11-24: "research proper sides from first principles, get all the steps
+# right"). [SV2] samvilla.com, "Long layering and face framing": the face frame is cut first, its shortest point
+# "between the cheekbone and the jawline", then connected "from short to long away from the face"; [AS]
+# americansalon.com: "comb the hair back in to natural fall and check"; [BTC-FF] behindthechair.com, "3 dry-cutting
+# techniques for face-framing layers": slide cut from point A to point B, "where no length is removed", "maintain
+# natural fall".
+# Ours had no natural fall to cut in at the sides: every guide rooted in front of the ear (|theta| 0.6 to 1.2, 300 of
+# them) hung down the side of the neck, landed on top of the shoulder and lay along it outward, folding; relax_kinks
+# ends a guide where it folds, so they were all cut there, 23 cm short. From the face back the lengths ran 30, 25,
+# 46 cm: a hole at the temple, the stub ending under the jaw behind the ear. Now, before anything is cut, the hair in
+# front of the ear is draped over the front of the shoulder, as it falls when it is combed forward of the shoulder
+# line (and as the creator's front locks lie), so the face frame's slide-cut line (style_cut) is the cut it gets.
+DRAPE_TH = (0.5, 1.3)        # |theta| of the roots draped to the front: the face frame back to the front of the ear
+DRAPE_Z = 0.05               # HH: from where a guide passes this height (the jaw: just above the shoulder's top)
+DRAPE_FWD = 0.7              # STYLE: forward per unit down as it leaves the neck for the front of the shoulder
+DRAPE_KEEP = 0.4             # the share of its last direction a segment keeps (a smooth turn, no corner)
+
+
+def drape_front(X, sel, seg_hh, col):
+    """Each guide in sel laid down the front of the shoulder from DRAPE_Z: marched node by node, each segment down
+    and forward (blended with the segment before), each node pushed out of the body, at the segment length."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    k0 = np.full(len(X), -1)
+    for g in np.where(sel)[0]:
+        b = np.where(ok[g] & (X[g, :, 2] < DRAPE_Z))[0]
+        if len(b) and b[0] >= 2:
+            k0[g] = b[0]
+    aim = np.array([0.0, -DRAPE_FWD, -1.0])
+    aim /= np.linalg.norm(aim)
+    for k in range(2, X.shape[1]):
+        gi = np.where((k0 >= 0) & (k >= k0) & (k < n))[0]
+        if not len(gi):
+            continue
+        prev = X[gi, k - 1] - X[gi, k - 2]
+        prev /= np.maximum(np.linalg.norm(prev, axis=1, keepdims=True), 1e-12)
+        d = DRAPE_KEEP * prev + (1 - DRAPE_KEEP) * aim
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        X[gi, k] = X[gi, k - 1] + d * seg_hh
+        m = np.zeros(X.shape[:2], bool)
+        m[gi, k] = True
+        X = push_valid(col, X, mask=m)
+        v = X[gi, k] - X[gi, k - 1]
+        X[gi, k] = X[gi, k - 1] + v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12) * seg_hh
+    return X
+
+
 CLIMB_HH = 0.05        # HH: a guide that climbs this far back up after it has fallen is cut where it turns (hair
                        # under gravity does not climb: a few framing guides combed onto the cape's steep shoulder looped
                        # back up over the head)
@@ -2212,6 +2300,9 @@ WAVE_RESTORE = 1.45          # CALIBRATED: the side waves' depth brought back to
                              # the creator's 8.2)
 WAVE_ALT = True              # alternate sections curled the other way [TYMO2][MC2]: a wave lock's offset from its
                              # middle line flipped (half a wavelength) against the locks beside it
+WAVE_SECTION = 'lock'        # the section curled one way: a whole wave lock ('lock') or half of one ('half').
+                             # [SV3] samvilla.com, sectioning: "never take a section that's wider than your brush",
+                             # 1 to 1.5 inches deep; modernsalon.com S wave: 1.5 inch sections; ghd: 2 inch
 WAVE_SPLIT_Z = 0.3           # HH: the height a side lock is split across at (the jaw, where its curl starts)
 WAVE_ALT_ID = 400            # the flipped half-locks' clump ids from here (under FRAME_CLUMP0's 900)
 
@@ -2231,6 +2322,17 @@ def wave_signs(roots, sel, group, keep, X=None):
         zz = np.where(ok, X[..., 2], np.inf)
         k = np.argmin(np.abs(zz - WAVE_SPLIT_Z), axis=1)
         th = SF.theta(X[np.arange(len(X)), k])
+    if WAVE_SECTION == 'lock':
+        # whole locks alternate, in their order round each side of the head: sections about 3 cm (1.2 inches) wide,
+        # the stylists' size [SV3][TYMO2]; split in two (below) they were 1.5 cm, ribbons half as wide as an iron takes
+        qs = np.unique(group[sel & ~keep])
+        for sd in (-1, 1):
+            mine = [q for q in qs if np.sign(np.median(th[sel & ~keep & (group == q)])) == sd]
+            mine.sort(key=lambda q: np.median(np.abs(th[sel & ~keep & (group == q)])))
+            for i, q in enumerate(mine):
+                if i % 2:
+                    sg[sel & ~keep & (group == q)] = -1.0
+        return sg, group
     for q in np.unique(group[sel & ~keep]):
         gi = np.where(sel & ~keep & (group == q))[0]
         if len(gi) < 4:
@@ -2625,6 +2727,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # the stress test's faults: off the creator's cap, then no sharp bends (the combed bangs keep their shape)
         cap = CreatorCap(trace)
         X2 = onto_cap(X2, cap)
+        if wavy:
+            # natural fall first: the hair in front of the ear draped down the front of the shoulder (see DRAPE_*)
+            thd_ = np.abs(SF.theta(roots))
+            X2 = drape_front(X2, ~bang & (thd_ > DRAPE_TH[0]) & (thd_ < DRAPE_TH[1]), seg_hh, col)
         X2 = relax_kinks(X2, col, cap, keep=bang)
         # the comb: strays back into their lock, crossing neighbours laid parallel, roots along the scalp
         fl = np.full(len(roots), -1)                 # (the face-framing locks: frame_locks, the Warden)
@@ -2710,6 +2816,7 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             # on the face edge and the outer outline keeps the creator's width
             X2 = lateral_s(X2, roots, bang & (fl < 0), col)
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
+            X2 = relax_spikes(X2, col, keep=bang)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
