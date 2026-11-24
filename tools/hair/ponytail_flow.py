@@ -90,8 +90,19 @@ BANG_DEPTH_MM = 60.0            # the section's depth behind the hairline: the c
 BANG_EDGE_Z = PH['bang_edge_h'] * (1 + PH['head_top_hair'])   # MEASURED: the fringe's edge, HH above the chin
 LOOSE = {                       # DRAFT sizes (no source gives a thickness); places from [LO][BIO] and the photo
     'temple lock': dict(th=(0.75, 0.95), depth_mm=22.0, z=(0.6, 1.0), len=0.62),
-    'ear wisp': dict(th=(1.05, 1.5), depth_mm=16.0, z=(0.0, 0.66), len=PH['ear_wisp']),
-    'nape wisps': dict(th=(2.3, 3.2), depth_mm=13.0, z=(0.0, 1.0), len=0.22),
+}
+# (John, 2026-11-25, lines drawn on the overlay from the temple over the ear's top to the tie: "the green and purple
+# should follow those lines". The ear wisp and the nape wisps are gone: those roots go to the tie, see SAG.)
+# What the first field lacked: gravity along the scalp. Every hair took the shortest way to the tie, which is the
+# line of a hair pulled taut. A hair with slack hangs between its root and the tie: on the side of the head, where
+# the skin is steep, it sags below the shortest way, over the ear's top, and comes up into the tie from under it.
+SAG_G = 0.9                     # CALIBRATED to John's drawn lines: gravity's pull across the hair's line against the
+                                # pull toward the tie, where the skin is vertical (the dip it gives is in the gauges)
+SAG_FADE = (0.15, 0.55)         # rad from the tie (12 to 45 mm of skin): the pull fades, and the hair turns up into it
+RESOLVE = {                     # the roots re-solved to the tie along John's lines (the first field's ear wisp and
+                                # nape wisps, same patches): drawn in their old colours so they can be followed
+    'ear wisp': dict(th=(1.05, 1.5), depth_mm=16.0, z=(0.0, 0.66)),
+    'nape wisps': dict(th=(2.3, 3.2), depth_mm=13.0, z=(0.0, 1.0)),
 }
 LOOSE_FRACTION = (0.01, 0.05)   # John's bound on the loose locks' share of all hair
 CUTS_MM = (150, 120, 90, 60, 40, 25)     # the cuts the balance sheet is taken on (mm of skin from the tie)
@@ -127,9 +138,50 @@ def slerp(U0, U1, t):
 
 
 # --------------------------------------------------------------------------------------------- the field
+CACHE = None                    # the cache folder, set in main
+
+
+def cached(name, key, fn):
+    """fn()'s result, stored under name and reused while key (anything hashable to text) is the same. Each stage
+    names what it depends on, so changing a constant redoes that stage and the ones after it, not the ones before."""
+    import pickle, hashlib, time
+    if CACHE is None:
+        return fn()
+    hk = hashlib.sha1(repr(key).encode()).hexdigest()[:16]
+    p = os.path.join(CACHE, '%s-%s.pkl' % (name, hk))
+    t0 = time.time()
+    if os.path.exists(p):
+        out = pickle.load(open(p, 'rb'))
+        print('cache: %-12s reused (%.1f s)' % (name, time.time() - t0), file=sys.stderr)
+        return out
+    out = fn()
+    for old in os.listdir(CACHE):
+        if old.startswith(name + '-'):
+            os.remove(os.path.join(CACHE, old))
+    pickle.dump(out, open(p, 'wb'), protocol=4)
+    print('cache: %-12s solved (%.1f s)' % (name, time.time() - t0), file=sys.stderr)
+    return out
+
+
+def file_key(path):
+    st = os.stat(path)
+    return (os.path.basename(path), st.st_size, int(st.st_mtime))
+
+
+def scalp(head):
+    """Stage 1: the skin and the scalp field (depends on the head and scalp_field.py only)."""
+    def solve():
+        surf = SF.Surface(SF.load_head(head))
+        return surf.u, surf.r, SF.build(surf)
+    u, r, F = cached('scalp', (file_key(head), file_key(SF.__file__)), solve)
+    from scipy.spatial import cKDTree
+    surf = SF.Surface.__new__(SF.Surface)
+    surf.u, surf.r, surf.tree = u, r, cKDTree(u)
+    return surf, F
+
+
 def build(head):
-    surf = SF.Surface(SF.load_head(head))
-    F = SF.build(surf)
+    surf, F = scalp(head)
     hl, _ = SF.make_hairline(F['landmarks'])
     m = F['mask'] & (F['density'] > 0)
     P, N, th = F['P'][m], F['N'][m], F['theta'][m]
@@ -149,6 +201,12 @@ def build(head):
         basin[sel] = 2 + k
         names.append(nm)
 
+    resolve = np.zeros(n, int)                                # 0: as first solved (blue); 1, 2: re-solved sets
+    for k, (nm, c) in enumerate(RESOLVE.items()):
+        a = np.abs(th)
+        resolve[(basin == 0) & (a > c['th'][0]) & (a < c['th'][1]) & (inside_mm < c['depth_mm'])
+                & (P[:, 2] > c['z'][0]) & (P[:, 2] < c['z'][1])] = 1 + k
+
     # --- the tie: its foot on the skin, its axis, its middle
     el = np.linspace(-0.6, 0.9, 3000)
     Pm = surf.point(np.c_[np.zeros_like(el), np.cos(el), np.sin(el)])
@@ -165,9 +223,35 @@ def build(head):
     U0 = unit(P - SF.CENTRE)
     K = 120
     t = np.linspace(0, 1, K)
-    U = slerp(U0, UT, t)
-    S = surf.point(U.reshape(-1, 3)).reshape(n, K, 3)
+    # Stage: the blue lines, the shortest way over the skull to the tie (great arcs). Cached: they depend on the
+    # head and the tie's place only, and are not solved again when the other lines change.
+    def blue():
+        Ub = slerp(U0, UT, t)
+        return (Ub.astype(np.float32), surf.point(Ub.reshape(-1, 3)).reshape(n, K, 3),
+                surf.normals(Ub.reshape(-1, 3)).reshape(n, K, 3).astype(np.float32))
+    U, S, NL = cached('blue-lines', (file_key(head), file_key(SF.__file__), TIE_Z, K, n, 'with normals'), blue)
+    U, S, NL = U.astype(float), S.copy(), NL.astype(float)
+    # Stage: the re-solved lines only. Their direction is toward the tie along the skin plus gravity's pull across
+    # that line (SAG_G), so they sag below the shortest way, over the ear's top, and come up into the tie from under
+    # it. Each step closes the same share of the angle left to the tie, so every line arrives.
+    ri = np.where(resolve > 0)[0]
+    if len(ri):
+        Uc = U0[ri].copy()
+        U[ri, 0] = Uc
+        for k in range(1, K):
+            om = np.arccos(np.clip(Uc @ UT, -1, 1))
+            d = unit(UT[None] - (Uc @ UT)[:, None] * Uc)
+            g = np.array([0, 0, -1.0])[None] - (-Uc[:, 2:3]) * Uc
+            gp = g - (g * d).sum(1, keepdims=True) * d
+            v = d + SAG_G * sm(SAG_FADE[0], SAG_FADE[1], om)[:, None] * gp
+            h = om / (K - k) * np.linalg.norm(v, axis=1)
+            Uc = unit(Uc + unit(v) * h[:, None])
+            U[ri, k] = Uc
+        U[ri, -1] = UT
+        S[ri] = surf.point(U[ri].reshape(-1, 3)).reshape(len(ri), K, 3)
+        NL[ri] = surf.normals(U[ri].reshape(-1, 3)).reshape(len(ri), K, 3)
     S[:, 0] = P
+    dist = np.arccos(np.clip(U @ UT, -1, 1)) * (float(np.mean(np.linalg.norm(P - SF.CENTRE, axis=1))) / MM)
     seg = np.linalg.norm(np.diff(S, axis=1), axis=2)
     rho = np.c_[seg[:, ::-1].cumsum(1)[:, ::-1], np.zeros(n)] / MM           # mm of skin left to the tie
     rho0 = rho[:, 0]
@@ -214,7 +298,7 @@ def build(head):
     for _ in range(6):                                                       # (the stack is read in bins: eased along)
         lift[:, 1:-1] = 0.25 * lift[:, :-2] + 0.5 * lift[:, 1:-1] + 0.25 * lift[:, 2:]
     lift_mm = lift * sm(0.0, 12.0, (rho0[:, None] - rho)) + 0.5
-    X = S + (surf.normals(U.reshape(-1, 3)).reshape(n, K, 3)) * (lift_mm * MM)[..., None]
+    X = S + NL * (lift_mm * MM)[..., None]
     ed = ear_depth(X.reshape(-1, 3)).reshape(n, K)
     over_ear = (ed > -EAR_DELTA_MM * MM)
     side = np.sign(X[..., 0])[..., None] * np.array([1.0, 0, 0])
@@ -240,11 +324,10 @@ def build(head):
     amp = (2 / np.pi) * np.sqrt(need) * skin
     uu = np.clip((rho0[:, None] - rho) / np.maximum(rho0 - (r_tie / MM + RING_MM), 1.0)[:, None], 0, 1)
     bump = amp[:, None] * np.sin(np.pi * uu) ** 2
-    Nn = surf.normals(U.reshape(-1, 3)).reshape(n, K, 3)
-    X = X + Nn * bump[..., None]
+    X = X + NL * bump[..., None]
     lift_mm = lift_mm + bump / MM
     return dict(surf=surf, F=F, P=P, N=N, th=th, hairs=hairs, basin=basin, names=names, T=T, nT=nT, axis=axis, C=C,
-                r_tie=r_tie, X=X, S=S, Ss=Ss, rho=rho, rho0=rho0, alpha=alpha, ab=ab, na=na, rho_ax=rho_ax, Fmap=Fmap,
+                r_tie=r_tie, X=X, S=S, Ss=Ss, resolve=resolve, dist=dist, rho=rho, rho0=rho0, alpha=alpha, ab=ab, na=na, rho_ax=rho_ax, Fmap=Fmap,
                 reach=reach, flux=flux, lift_mm=lift_mm, over_ear=over_ear, grow=grow, e_up=e_up, e_sd=e_sd,
                 inside_mm=inside_mm, hl=hl, Rs=Rs, width=width)
 
@@ -285,6 +368,12 @@ def envelope(L_mm, Rc_mm, n=400):
 
 
 def free_fall(B):
+    L0 = round(float((HAIR_LEN - B['rho0'][B['basin'] == 0].min() * MM) / MM), 2)
+    key = (L0, PH, LAUNCH_MAX_DEG, B['r_tie'], tuple(B['C']), BEND_L_MM, PI0, RSTAR_MM, WAVE_A, WAVE_LEN, WAVE_ON, 'v2')
+    return cached('free-fall', key, lambda: _free_fall(B))
+
+
+def _free_fall(B):
     """The bundle: the middle line, the envelope, and each tie strand's place in it."""
     L = (HAIR_LEN - B['rho0'][B['basin'] == 0].min() * MM) / MM          # the longest tail, mm
     # the middle line's bending length CALIBRATED so the arc rises as the photo's does (a tied, curled bundle is
@@ -443,10 +532,10 @@ def gauges(B, FF, psi, rr, lines):
     sheet = []
     prev = None
     for r in CUTS_MM:
-        beyond = float(B['hairs'][tie & (B['rho0'] > r)].sum())
+        beyond = float(B['hairs'][tie & (B['dist'][:, 0] > r)].sum())
         crossing = 0.0
         for i, (pts, part, rho_line) in lines.items():
-            if B['rho0'][i] > r and (rho_line[:-1] > r).any() and (rho_line <= r).any():
+            if B['dist'][i, 0] > r and (rho_line[:-1] > r).any() and (rho_line <= r).any():
                 crossing += lines_w[i]
         row = dict(cut_mm=r, roots_beyond=round(beyond), crossing_built=round(crossing),
                    source_since_last=None if prev is None else round(beyond - prev))
@@ -542,8 +631,8 @@ def gauges(B, FF, psi, rr, lines):
         ang = {}
         for i in ids:
             pts, part, rho_line = lines[i]
-            if B['rho0'][i] > r + 5:
-                j = int(np.argmin(np.abs(rho_line - r)))
+            if B['dist'][i, 0] > r + 5:
+                j = int(np.argmin(np.abs(np.where(rho_line >= 0, rho_line, 1e9) - r)))
                 d = pts[j] - B['T']
                 ang[i] = math.atan2(d @ B['e_sd'], d @ B['e_up'])
         stations.append(ang)
@@ -604,6 +693,7 @@ lines_w = {}
 
 
 # --------------------------------------------------------------------------------------------- the drawings
+RES_COL = {1: '#2c9c5a', 2: '#7a4fc9'}
 COL = {'tie': '#2f6fb3', 'bangs': '#d98a1f', 'temple lock': '#c2337a', 'ear wisp': '#2c9c5a', 'nape wisps': '#7a4fc9',
        'handover': '#111111', 'bundle': '#2f6fb3'}
 
@@ -653,9 +743,13 @@ def draw_view(ax, B, FF, lines, extra, az, el, title, body=None):
     for q, (i, (pts, part, rl)) in enumerate(lines.items()):
         for p_, nm in ((0, 'tie'), (1, 'handover'), (2, 'bundle')):
             k = np.where(part == p_)[0]
-            if len(k) > 1 and (p_ == 0 or q % 4 == 0):                   # (every 4th line through the tie and tail)
+            if len(k) > 1 and (p_ == 0 or q % 4 == 0 or B['resolve'][i]):                   # (every 4th line through the tie and tail)
                 k = np.r_[max(k[0] - 1, 0), k]
-                add(pts[k], COL[nm] if p_ != 2 else ('#2f6fb3', '#1d4a80', '#6fa3d8')[(q // 4) % 3], 0.55 if p_ != 1 else 0.6)
+                rs_ = int(B['resolve'][i])
+                if rs_ and p_ == 0:
+                    add(pts[k], RES_COL[rs_], 1.3)
+                else:
+                    add(pts[k], COL[nm] if p_ != 2 else ('#2f6fb3', '#1d4a80', '#6fa3d8')[(q // 4) % 3], 0.55 if p_ != 1 else 0.6)
     for nm, pl in extra:
         for pts in pl:
             add(pts, COL[nm], 0.8 if nm == 'bangs' else 1.3)
@@ -678,34 +772,53 @@ def main():
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    global CACHE
+    CACHE = os.path.join(os.path.dirname(os.path.abspath(out)), 'cache')
+    if '--no-cache' in a:
+        CACHE = None
+    else:
+        os.makedirs(CACHE, exist_ok=True)
+    import time, inspect
+    t_all = time.time()
     B = build(HEAD)
+    print('time: %-16s %.1f s' % ('field', time.time() - t_all), file=sys.stderr)
     FF = free_fall(B)
     psi, rr = bundle_places(B)
     rng = np.random.default_rng(3)
     tie = np.where(B['basin'] == 0)[0]
     # the drawn lines: an even sample of the tie basin by flux, each standing for an equal share
     pick = rng.choice(tie, size=1400, replace=False, p=B['hairs'][tie] / B['hairs'][tie].sum())
+    for rs_ in (1, 2):                                          # (and 60 of each re-solved set, so they can be seen)
+        rr_ = np.where(B['resolve'] == rs_)[0]
+        pick = np.r_[pick, rng.choice(rr_, size=min(60, len(rr_)), replace=False)]
+    pick = np.unique(pick)
+    w_blue = B['hairs'][tie].sum() / len(pick)
     lines = {}
     for i in pick:
         pts, part = strand(B, FF, psi, rr, i)
         nsc = int((part == 0).sum())
-        rl = np.r_[B['rho'][i][:nsc], np.full(len(pts) - nsc, -1.0)]
+        rl = np.r_[B['dist'][i][:nsc], np.full(len(pts) - nsc, -1.0)]
         lines[int(i)] = (pts, part, rl)
-        lines_w[int(i)] = B['hairs'][tie].sum() / len(pick)
+        cls = B['resolve'][pick] == B['resolve'][i]
+        lines_w[int(i)] = B['hairs'][tie][B['resolve'][tie] == B['resolve'][i]].sum() / cls.sum()
     extra = []
     bi = np.where(B['basin'] == 1)[0]
-    extra.append(('bangs', [bang_line(B, i) for i in rng.choice(bi, size=min(260, len(bi)), replace=False)]))
+    # stage: the fringe's lines (depends on the head, the fringe's constants and bang_line itself)
+    bkey = (file_key(HEAD), BANG_TH, BANG_DEPTH_MM, BANG_EDGE_Z, len(bi), inspect.getsource(bang_line))
+    bang_all = cached('bangs', bkey, lambda: [bang_line(B, i, k=32) for i in bi])
+    extra.append(('bangs', [bang_all[j] for j in rng.choice(len(bi), size=min(260, len(bi)), replace=False)]))
     for k, (nm, c) in enumerate(LOOSE.items()):
         li = np.where(B['basin'] == 2 + k)[0]
         extra.append((nm, [loose_line(B, i, c['len'] * (0.8 + 0.2 * rng.random())) for i in
                            rng.choice(li, size=min(40, len(li)), replace=False)]))
+    print('time: %-16s %.1f s' % ('lines', time.time() - t_all), file=sys.stderr)
     G = gauges(B, FF, psi, rr, lines)
     # the hairline, by hairline_gap.py's own coverage rule, on every root's line (not the drawn sample)
     import hairline_gap as HG
     ring = B['r_tie'] / MM + RING_MM
     paths = [B['X'][i][B['rho'][i] >= ring] for i in tie]
     w = list(B['hairs'][tie])
-    paths += [bang_line(B, i, k=24) for i in bi]; w += list(B['hairs'][bi])
+    paths += bang_all; w += list(B['hairs'][bi])
     for k, (nm, c) in enumerate(LOOSE.items()):
         li = np.where(B['basin'] == 2 + k)[0]
         paths += [loose_line(B, i, c['len'], k=30) for i in li]; w += list(B['hairs'][li])
@@ -725,6 +838,7 @@ def main():
                         hairs=B['hairs'], psi=psi, rr=rr, Fmap=B['Fmap'], rho_ax=B['rho_ax'], centre=FF['cl'], R=FF['R'],
                         tie=B['C'], axis=B['axis'])
 
+    print('time: %-16s %.1f s' % ('gauges+hairline', time.time() - t_all), file=sys.stderr)
     # ---- the four views
     fig, axs = plt.subplots(1, 4, figsize=(26, 9.6), facecolor='white')
     for ax, (az, el, t) in zip(axs, ((90, 0, "side (the photo's camera)"), (0, 0, 'front'), (180, 0, 'back'),
@@ -733,8 +847,8 @@ def main():
     from matplotlib.lines import Line2D
     hs = [Line2D([0], [0], color=COL[k], lw=3, label=l) for k, l in (
         ('tie', 'to the tie (funnel, then free fall)'), ('handover', 'handover into the bundle'),
-        ('bangs', 'bangs (own outlet)'), ('temple lock', 'loose: temple lock'), ('ear wisp', 'loose: ear wisp'),
-        ('nape wisps', 'loose: nape wisps'))] + [Line2D([0], [0], color='#e02020', lw=3, label='the tie')]
+        ('bangs', 'bangs (own outlet)'), ('temple lock', 'loose: temple lock'), ('ear wisp', 're-solved to the tie: ear roots'),
+        ('nape wisps', 're-solved to the tie: nape roots'))] + [Line2D([0], [0], color='#e02020', lw=3, label='the tie')]
     fig.legend(handles=hs, loc='lower center', ncol=7, fontsize=11, frameon=False)
     fig.suptitle('Ponytail flow field (draft): streamlines only, colours mark design elements', fontsize=14)
     fig.subplots_adjust(left=0.01, right=0.99, top=0.92, bottom=0.07, wspace=0.02)
@@ -745,6 +859,7 @@ def main():
     fig.savefig(os.path.join(out, 'flow-field-side.png'), dpi=130, bbox_inches='tight')
     plt.close(fig)
 
+    print('time: %-16s %.1f s' % ('views', time.time() - t_all), file=sys.stderr)
     # ---- the flat F map and the balance sheet
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(19, 7.5), facecolor='white', gridspec_kw=dict(width_ratios=[1.5, 1]))
     Fm = np.where(B['reach'], B['Fmap'], np.nan)
@@ -797,10 +912,13 @@ def main():
         fig, ax = plt.subplots(figsize=(11, 14.6), facecolor='white')
         ax.imshow(img)
         fwd = camera(90)[2]
-        for i, (pts, part, rl) in list(lines.items())[::3]:
+        for i, (pts, part, rl) in [kv for q_, kv in enumerate(lines.items()) if q_ % 2 == 0 or B['resolve'][kv[0]]]:
             if pts[0, 0] < -0.02:
                 continue
             q = to_px(pts)
+            if B['resolve'][i]:
+                ks = part == 0
+                ax.plot(q[ks, 0], q[ks, 1], color=RES_COL[int(B['resolve'][i])], lw=1.3)
             ax.plot(q[:, 0], q[:, 1], color='#35c8ff', lw=0.5, alpha=0.75)
         for nm, pl in extra:
             for pts in pl[::2]:
@@ -849,7 +967,9 @@ def main():
         fig.savefig(os.path.join(out, 'flow-over-photo.png'), dpi=110, bbox_inches='tight')
         plt.close(fig)
         json.dump(G, open(os.path.join(out, 'gauges.json'), 'w'), indent=1)
+    print('time: %-16s %.1f s' % ('map+overlay', time.time() - t_all), file=sys.stderr)
     print(json.dumps(G, indent=1))
+    print('total %.1f s' % (time.time() - t_all), file=sys.stderr)
 
 
 if __name__ == '__main__':
