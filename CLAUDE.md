@@ -74,5 +74,8 @@ or a measurement alone.
    in truth.json. Fix the largest magenta area first: a hole in the creator's coverage is the worst fault.
 4. Where a cited measurement and the creator disagree, follow the creator and note the measurement it overrides.
    Example: the bang section's depth is 60 mm from the creator, not the guides' 32 mm.
-5. Then render (`render.py`, `--size 750` keeps it inside memory), bake the cards (`cards.py`), and log each
+5. The hairline has no gaps: from ear to ear, no bare scalp behind it. `groom.py` gauges every groom it writes
+   (`tools/hair/hairline_gap.py HEAD GROOM --map OUT.png`) and fails the build on a bare cell. Fix the hair, not the
+   threshold.
+6. Then render (`render.py`, `--size 750` keeps it inside memory), bake the cards (`cards.py`), and log each
    rejected look with `rq_reject.py`.

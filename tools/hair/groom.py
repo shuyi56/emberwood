@@ -2930,6 +2930,9 @@ SIDE_PIECE_ROOT_TH = (0.9, 1.6)    # |theta| of the roots that feed the piece: t
 SIDE_PIECE_ROOT_Z = 0.88     # STYLE: HH: and below this height (the lowest rows of the side hairline); the hair
                              # rooted above still sweeps back over the ear
 SIDE_PIECE_END_Z = -0.2      # STYLE: HH: the piece's point: the base of the neck, as the reference's
+TEMPLE_FEED_TH = (0.55, 0.9) # |theta| of the roots: the temple's hairline, from the bangs' section back to the piece's roots
+TEMPLE_FEED_MM = 28.0        # CALIBRATED: and within this of the hairline (the transition zone's 2 cm [W25] and the row
+                             # behind it): the hair that has to lie over the hairline's edge for hairline_gap.py to pass
 CURTAIN_Z = (0.45, 0.25)     # HH: gathered and waved from the cheekbone, in full by the jaw (the fringe keeps its line)
 CURTAIN_END_Z = 0.2          # HH: the bangs ending below this are the curtain's long side
 CURTAIN_ID = 960             # the curtain locks' clump ids from here (above the framing locks' 900s)
@@ -3382,6 +3385,12 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             thp_ = np.abs(SF.theta(roots))
             piece_ = (~bang & ~first_ & (thp_ > SIDE_PIECE_ROOT_TH[0]) & (thp_ < SIDE_PIECE_ROOT_TH[1])
                       & (roots[:, 2] < SIDE_PIECE_ROOT_Z))           # (the hair that fills the side piece)
+            # (John, 2026-11-25: "hairline ... cannot have any gaps ... a slight gap in the front still remains". The
+            # temple's hairline hair was swept level and back, so nothing lay over the hairline's own edge there:
+            # hairline_gap.py read 2-3 hairs per mm at |theta| 0.6-0.9 against 40-80 beside it. It now falls over the
+            # edge and into the side piece, see TEMPLE_FEED_*)
+            piece_ |= (~bang & ~first_ & (thp_ > TEMPLE_FEED_TH[0]) & (thp_ <= SIDE_PIECE_ROOT_TH[0])
+                       & (F['inside'][idx] < TEMPLE_FEED_MM * SF.MM))
             X2, lengths = ear_line_cut(X2, lengths, roots, bang | piece_, first=first_)
             X2, lengths = recut(X2, lengths, lambda t: np.full(len(t), SIDE_PIECE_END_Z), keep=~piece_)
             # and what remains in front of the ear combed back into the back's flow (see BACK_FLOW_*)
@@ -3446,8 +3455,21 @@ def main():
                elastogravity_cm=round(ELASTOGRAVITY_M * 100, 2), layer_max_mm=round(Gm['layer_max_mm'], 2),
                mean_length_cm=round(float(np.mean(Gm['lengths']) * SEG_M * 100), 1), solve_s=[round(x, 1) for x in Gm['times']],
                energy=log)
+    # the hairline invariant (John, 2026-11-25): no bare scalp behind the hairline from ear to ear. Gauged on every
+    # groom as it is written (hairline_gap.py); a groom with a gap is saved, so it can be looked at, but the build
+    # fails, and whatever is chained after it (the bake, the stress test) does not run.
+    import hairline_gap as HG
+    Hc, Wc, hl = HG.gauge(head, out)
+    rep['hairline'] = {k: dict(bare=len(v['bare']), longest_gap_mm=v['longest_gap_mm'], thinnest_per_mm=v['thinnest'])
+                       for k, v in hl.items()}
     json.dump(rep, open(os.path.join(out, 'groom.json'), 'w'), indent=1)
     print(json.dumps(rep))
+    if any(v['bare'] for v in hl.values()) and '--allow-hairline-gap' not in a:
+        HG.draw(Hc, Wc, os.path.join(out, 'hairline_gap.png'))
+        print('HAIRLINE INVARIANT BROKEN: bare scalp behind the hairline, see %s' % os.path.join(out, 'hairline_gap.png'))
+        for k, v in hl.items():
+            print(' ', k, 'longest gap %.1f mm, bare at (|theta|, band):' % v['longest_gap_mm'], v['bare'])
+        sys.exit(1)
 
 
 if __name__ == '__main__':
