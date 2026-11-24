@@ -42,14 +42,28 @@ ROOT_ROWS = 6                      # DRAFT: guide segments over which the root's
 CARD_LIFT_MM = 2.0                 # DRAFT: cards lie at least this far over the skin (the cap lies at 1 mm)
 
 
-def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0])):
+FRAME_CLUMP0 = 900                 # groom.py frame_locks: clump ids from here are the face-framing locks
+
+
+def bake(X, k, spacing, step=3, centre=np.array([0.0, 0.04, 0.0]), fixed=None):
+    """fixed: a group id per guide (-1: none); each group is one card of its own (the face-framing locks, gathered
+    in the groom: split among k-means cards or mixed with the hair beside them, they drew as loose wisps), the rest
+    k-means clustered into the remaining cards."""
     G, S1 = X.shape[:2]
     last = np.array([np.max(np.where(~np.isnan(X[g, :, 0]))[0]) for g in range(G)])
     Xf = X.copy()
     for g in range(G):
         Xf[g, last[g] + 1:] = X[g, last[g]]
     feat = np.c_[Xf[:, 0], Xf[:, min(10, S1 - 1)], Xf[:, min(25, S1 - 1)], Xf[:, min(45, S1 - 1)]]
-    lab = kmeans(feat, k)
+    if fixed is not None and (fixed >= 0).any():
+        ids = np.unique(fixed[fixed >= 0])
+        rest = np.where(fixed < 0)[0]
+        lab = np.empty(G, int)
+        lab[rest] = kmeans(feat[rest], k - len(ids))
+        for i, f in enumerate(ids):
+            lab[fixed == f] = k - len(ids) + i
+    else:
+        lab = kmeans(feat, k)
     cards = []
     for j in range(k):
         m = np.where(lab == j)[0]
@@ -245,7 +259,8 @@ def main():
     centre = SF.CENTRE
     surf = SF.Surface(SF.load_head(a[a.index('--head') + 1])) if '--head' in a else None
     for k in lods:
-        cards = bake(X, k, spacing, steps.get(k, 3), centre)
+        fixed = np.where(G['clump'] >= FRAME_CLUMP0, G['clump'], -1) if 'clump' in G else None
+        cards = bake(X, k, spacing, steps.get(k, 3), centre, fixed)
         nv, nf = write_obj(cards, os.path.join(out, 'cards-lod%d.obj' % k), surf)
         P = card_points(cards)
         d, _ = cKDTree(P).query(S)            # how far each strand point is from the nearest card

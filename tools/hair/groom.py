@@ -1782,6 +1782,94 @@ def side_form(X, roots, group, keep, col):
     return out
 
 
+# ------------------------------------------------------------------------------------------- the face-framing locks
+# [FF-MS] modernsalon.com, "The S-wave step by steps": the front in its own sections, each wave worked "away from the
+#         cheekbone to frame the face". [FF-MBG] mindbodygreen.com, clip-and-twist waves: "the two front sections",
+#         twisted "away from your face", for "extra definition in the front pieces". [FF-DAV] davines.com, face-framing
+#         layers: "two or three curls facing away from each side of your face". [FF-GLAM] glam.com, three-wrap
+#         face-framing: away from the eyes, back in round the cheeks, out again round the jaw. [FF-BOU] boucleme.co.uk:
+#         broken groupings read as "frizz, flyaways, and ... stringiness"; hair that holds together reads as a curl.
+#         [FF-XG] Autodesk XGen Clump: clumping scaled along the hair from the root (a ramp), pulling the hairs to
+#         the clump's centre; sub-clumps inside the primary ones.
+# Her framing hair (the guides that pass in front of the ear at the cheekbone) hung as about 27 loose, straight guides
+# a side: see-through wisps. Now each side's framing hair is gathered into FRAME_LOCKS locks: each lock one shape (the
+# mean of its guides, waved away from the face from the cheekbone down), its guides drawn in to it from the cheekbone
+# (loose there, a ribbon from mid-length), so the lock reads as one defined curl.
+FRAME_LOCKS = 3              # locks a side [FF-DAV][FF-MBG]: 2-3 front sections
+FRAME_Z0 = 0.4               # HH: where a lock is gathered and its wave starts: the cheekbone [FF-MS] (the eyes ~0.5)
+FRAME_TH = 1.15              # |theta| at FRAME_Z0 in front of which hair is framing hair (the ear's front ~1.3)
+FRAME_A_MM = 12.0            # mm: the lock's wave, STYLE (the creator's side waves 8 median, 14 at the 90th pct: the
+                             # front pieces curled more defined than the mass)
+FRAME_LAM = 0.45             # HH (10 cm): two or three bends over the lock's fall to the collar [FF-DAV][FF-GLAM]
+FRAME_CLUMP = (0.35, 0.9)    # the pull of a guide to its lock's shape: at the cheekbone, and from mid-length on [FF-XG]
+
+
+def frame_locks(X, roots, sel_from, seg_hh, col, n_locks=FRAME_LOCKS):
+    """Gather the face-framing hair into defined locks (see FRAME_*). sel_from: the guides that may be framing hair.
+    Returns the new X and a lock id per guide (-1: not framing hair)."""
+    from scipy.cluster.vq import kmeans2
+    X = X.copy()
+    G, S1 = X.shape[:2]
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    k0 = np.full(G, -1)
+    for g in np.where(sel_from)[0]:
+        below = np.where(ok[g] & (X[g, :, 2] < FRAME_Z0))[0]
+        if len(below) and below[0] >= 2 and n[g] - below[0] >= 4:
+            k0[g] = below[0]
+    P0 = np.full((G, 3), np.nan)
+    has = k0 >= 0
+    P0[has] = X[has, k0[has]]
+    fr = has & (np.abs(SF.theta(P0)) < FRAME_TH)
+    fl = np.full(G, -1)
+    nxt = 0
+    for sd in (-1, 1):
+        gi = np.where(fr & (np.sign(P0[:, 0] - SF.AXIS[0]) == sd))[0]
+        if len(gi) < n_locks:
+            continue
+        _, lab = kmeans2(P0[gi][:, :2], n_locks, minit='++', seed=7)
+        for k in range(n_locks):
+            m = gi[lab == k]
+            if not len(m):
+                continue
+            fl[m] = nxt
+            # the lock's shape: its guides' falls from the cheekbone, averaged node by node, carried on past each end
+            L = int(np.median(n[m] - k0[m]))
+            F = np.zeros((len(m), L, 3))
+            for j, g in enumerate(m):
+                seg = X[g, k0[g]:n[g]]
+                if len(seg) < L:
+                    seg = np.vstack([seg, seg[-1] + (seg[-1] - seg[-2]) * np.arange(1, L - len(seg) + 1)[:, None]])
+                F[j] = seg[:L] - seg[0]
+            c0 = P0[m].mean(0)
+            Cl = c0 + F.mean(0)
+            for _ in range(30):                              # (its own wiggles smoothed out of it)
+                Cl[1:-1] += 0.25 * (Cl[:-2] + Cl[2:] - 2 * Cl[1:-1])
+            # waved away from the face [FF-MS][FF-GLAM]: out from the head's axis, then back in by the cheek, out at
+            # the jaw; grown in over the first quarter wave, the last inch left looser [WS-TYMO]
+            sarc = np.arange(L) * seg_hh
+            out = Cl - np.array([SF.AXIS[0], SF.AXIS[1], 0.0]); out[:, 2] = 0
+            out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
+            amp = FRAME_A_MM / SF.HH_MM * SF.sm(0.0, FRAME_LAM / 4, sarc) * np.clip((L - 1 - np.arange(L)) / 2.5, 0.4, 1)
+            Cl = Cl + out * (amp * np.sin(2 * np.pi * sarc / FRAME_LAM))[:, None]
+            for j, g in enumerate(m):
+                Lg = n[g] - k0[g]
+                t = np.arange(Lg) / max(Lg - 1, 1)
+                pull = FRAME_CLUMP[0] + (FRAME_CLUMP[1] - FRAME_CLUMP[0]) * SF.sm(0.0, 0.5, t)
+                tgt = Cl[np.minimum(np.arange(Lg), L - 1)]
+                if Lg > L:                                    # (a guide longer than its lock: it carries on its line)
+                    tgt[L:] = Cl[-1] + (Cl[-1] - Cl[-2]) * np.arange(1, Lg - L + 1)[:, None]
+                own = X[g, k0[g]:n[g]]
+                Y = own + (tgt + (P0[g] - c0) * (1 - pull)[:, None] - own) * pull[:, None]
+                # (back to the rod's segment length, from the cheekbone node)
+                d = np.diff(np.vstack([X[g, k0[g] - 1], Y]), axis=0)
+                d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+                X[g, k0[g]:n[g]] = X[g, k0[g] - 1] + np.cumsum(d * seg_hh, 0)
+            nxt += 1
+    X = push_valid(col, X)
+    return X, fl
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2013,6 +2101,7 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X2 = onto_cap(X2, cap)
         X2 = relax_kinks(X2, col, cap, keep=bang)
         # the comb: strays back into their lock, crossing neighbours laid parallel, roots along the scalp
+        fl = np.full(len(roots), -1)                 # (the face-framing locks: frame_locks, the Warden)
         lk = np.where(bang, np.where(roots[:, 0] < SF.AXIS[0], 3, 4), lock)      # (the bangs combed among themselves)
         X2 = comb_pass(X2, lk * 1000 + clump, col, cap)
         # the front of the side hair held back to the creator's (combed forward over the shoulders, it hid the jaw)
@@ -2048,6 +2137,11 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             # fingers [WS-AS] (re-solved, neighbouring side strands sat 6.6 degrees apart 30 cm down, the back 4.4,
             # and read as messy; combed 4 passes: 3.9, crossings 114 to 92, the creator's 90)
             X2 = side_form(X2, roots, lk * 1000 + clump, bang, col)
+            # the face-framing hair gathered into a few defined locks, waved away from the face (see FRAME_*); its
+            # children blend within their lock
+            X2, fl = frame_locks(X2, roots, np.abs(SF.theta(roots)) < SIDE_SOLVE_TH, seg_hh, col)
+            X2 = relax_kinks(X2, col, None, keep=bang & (fl < 0))
+            clump = np.where(fl >= 0, 900 + fl, clump)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
@@ -2056,6 +2150,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
+    if trace:
+        # (a framing lock blends its children within itself, its bang and framing guides alike)
+        lock = np.where(fl >= 0, np.where(roots[:, 0] < SF.AXIS[0], 1, 2), lock)
     return dict(roots=roots, idx=idx, X=X2, lock=lock, clump=clump, combed=(bang | frame).astype(np.int8), bang=bang.astype(np.int8), X_uncut=X, lengths=lengths, n_hairs=n_hairs, total=total,
                 layer_max_mm=layer.max_mm(), seg_hh=seg_hh, d0=d0, comb=comb, times=(t1 - t0, t2 - t1))
 
