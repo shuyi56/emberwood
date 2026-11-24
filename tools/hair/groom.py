@@ -2564,6 +2564,51 @@ def lateral_s(X, roots, bang, col):
     return push_valid(col, X, mask=sel[:, None] & ok)
 
 
+# The ends: each lock a ribbon that closes to a point (John, 2026-11-24, with a drawn reference of long wavy hair:
+# "the hair needs a cut to form curves, right now the hair is all over the place"). SOURCED: the cut is point cut
+# throughout, ends bevelled, never blunt (behindthechair.com, TONI&GUY bouncy long layers; hairfinder.com, the pyramid
+# effect: blunt ends on long wavy hair build a triangle); a drawn lock is "a ribbon with some thickness" that "becomes
+# thinner as it approaches the tip" (proko.com, how to draw hair; clipstudio.net/how-to-draw/archives/159719), each
+# wave closed "to a pointed tip" (design.tutsplus.com, how to draw hair). No source gives a length: the amounts are STYLE.
+TAPER_NODES = 9              # STYLE: nodes (9 cm): the length over which a lock closes to its point
+TAPER_W = 0.85               # STYLE: how far the tip is drawn onto the lock's middle (1: every hair on one point)
+TAPER_CUT = 4                # STYLE: nodes (4 cm): the lock's outermost hair cut this much shorter than its middle
+
+
+def lock_taper(X, lengths, sel, group, col):
+    """Each lock (group, in sel) closed to a point: over its last TAPER_NODES every guide is drawn toward the lock's
+    mean path, and the guides furthest from the middle are cut up to TAPER_CUT shorter, so the middle hangs longest.
+    Rebuilt at its segment lengths from the root. Returns X, lengths."""
+    X = X.copy()
+    lengths = lengths.copy()
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    for gr in np.unique(group[sel]):
+        gi = np.where(sel & (group == gr))[0]
+        if len(gi) < 3:
+            continue
+        cnt = ok[gi].sum(0)
+        M = np.nansum(np.where(ok[gi][..., None], X[gi], 0.0), 0) / np.maximum(cnt, 1)[:, None]
+        # how far from the lock's middle each guide runs, read where the taper starts
+        k0 = np.maximum(n[gi] - 1 - TAPER_NODES, 1)
+        off = np.linalg.norm(X[gi, k0] - M[k0], axis=1)
+        rank = np.argsort(np.argsort(off)) / max(len(gi) - 1, 1)
+        for j, g in enumerate(gi):
+            m = int(max(4, n[g] - round(TAPER_CUT * rank[j])))
+            if m < n[g]:
+                X[g, m:] = np.nan
+                lengths[g] = min(lengths[g], m - 1)
+            e = np.clip((np.arange(m) - (m - 1 - TAPER_NODES)) / TAPER_NODES, 0, 1)
+            w = (TAPER_W * e * e * (3 - 2 * e))[:, None]
+            P = X[g, :m] + w * (M[:m] - X[g, :m])
+            d = np.diff(P, axis=0)
+            L = np.linalg.norm(np.diff(X[g, :m], axis=0), axis=1, keepdims=True)
+            d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+            X[g, 1:m] = X[g, 0] + np.cumsum(d, 0)
+    ok = ~np.isnan(X[..., 0])
+    return push_valid(col, X, mask=sel[:, None] & ok), lengths
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2900,6 +2945,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
     elif trace:
         X2, lengths = recut(X2, lengths)
+        if wavy:
+            # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
+            X2, lengths = lock_taper(X2, lengths, ~bang & (np.abs(SF.theta(roots)) < WAVE_FADE_TH[1]),
+                                     lk * 1000 + clump, col)
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
     lock[bang] = np.where(roots[bang, 0] < SF.AXIS[0], 3, 4)
