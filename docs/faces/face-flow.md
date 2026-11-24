@@ -434,3 +434,43 @@ The shade now climbs back onto the cheek instead of stopping in a crease, and th
 comes in from 0.23 to the photo's place. The climb is still a third of the photo's. The rest needs a rounder meeting,
 and past `KF_MID` 4 the bony base leaves its norm. The Ranger's bony base sits 0.02 under the norm. Further rounds gave
 only small gains, so the stopping rule ends it here.
+
+### 11c. The side wall's real shape (John: "Study more how you get the correct shape for this part of the nose")
+
+Sources and what they give:
+
+- **The bony pyramid.** On axial CT the two nasal bones meet at 105-112 degrees (the pyramidal angle: root M 110.8 / F
+  111.9, mid nasal bone 105.6 / 104.8; Alharethy 2017, Saudi adults, n 160; Moon 2013, Korean adults, root M 112.9 /
+  F 103.3). Each wall therefore turns about 34-38 degrees from facing forward.
+- **The box.** Proko builds the nose as a top plane and two side planes; the bridge has "a thin, sharp ridge as it
+  transitions to the side plane and then connects to the maxilla", and the bone-to-cartilage junction "is usually the
+  widest part of the bridge".
+- **The photo.** Its side turns 32-39 degrees by its tone (section 11), the same as the bones, and its shade is darkest
+  7 mm out, then lightens into the cheek.
+
+Ours, from cross-sections of the heads: the wall turned 55-64 degrees and held that for 10-12 mm, down to a cheek that
+lay flat 15-17 mm behind the bridge's front. The wall was steep because the cheek beside the nose sat too far back.
+
+Tried (same gauges, five faces):
+
+- **A roof at the bones' angle** (`ROOF_S` 0.75 for 6 or 9 mm, then steeper). Rejected: the dorsal lines ran to 1.2-1.9
+  times the tip-defining points and the shade line moved out to 0.17-0.19 (photo 0.115). Left off (`ROOF_S` 0).
+- **The flare again** (`CH_FA`), on the softened meeting. Rejected: the cross-section barely changed and the bony base
+  fell to 0.59-0.63.
+- **The cheek beside the nose brought forward** (`PN_D` negative). At 3 mm the wall shortens to 6-8 mm and the bony-base
+  gauge reads 0.40-0.43, a nose too slim. At 1.5 mm, kept clear of the lower lid (`PN_ZT` 0.47), it holds.
+
+Kept: `PN_D` -1.5, `PN_ZT` 0.47 (this replaces 11b's trough, which went the wrong way; `KF_MID` 4 stays). The wall is
+now steep for about 10 mm and then runs on at 15-24 degrees into the cheek instead of stopping on a flat.
+
+| | Photo | 11b | Now |
+|---|---|---|---|
+| Side's tone at mid-bridge (y 0.25, front = 1) | 0.88 | 0.72-0.73 | 0.76-0.79 |
+| Corner width, lower bridge (y 0.35) | 4.1 mm | 7.1-8.4 | 3.8-4.4 |
+| Shade line at the wing | 0.182 | 0.185-0.215 | 0.168-0.192 |
+| Shade line at the inner corner | 0.135 | 0.117-0.128 | 0.187-0.233 |
+| Bony base / alar (norm 0.70-0.80) | | 0.676-0.796 | 0.644-0.710 |
+| Dorsal lines / TDP (norm 0.85-1.15) | | 1.04-1.15 | 1.06-1.17 |
+
+Open: the bony base reads 0.03-0.06 under its norm on four faces, and the shade line beside the inner corner moved out
+again. Both come from the same place, the wall's top end by the eyes, which is the open item of section 10.

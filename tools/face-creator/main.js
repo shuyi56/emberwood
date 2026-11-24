@@ -174,7 +174,7 @@ function faceRelief(x, z) {
     // bridge as a shelf threw a band of shade between the eyes)
     d += gauss(x, z, s * 0.15 * es, 0.62, x * s < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
     /* brow arc (apply-brow-arc.py): ridge */ d += browRidgeArc(x * s, z, es);      // (the ridge curves with the brow: apply-brow-arc.py)
-    /* brow arc (apply-brow-arc.py): paranasal */ if (x * s > 0) d -= 1.5 / 219 * sm(24 / 219, 11 / 219, x * s) * sm(4 / 219, 8 / 219, x * s) * sm(0.37, 0.40, z) * sm(0.50, 0.47, z);      // (the cheek beside the nose falls toward it: apply-brow-arc.py)
+    /* brow arc (apply-brow-arc.py): paranasal */ if (x * s > 0) d -= -1.5 / 219 * sm(24 / 219, 11 / 219, x * s) * sm(4 / 219, 8 / 219, x * s) * sm(0.37, 0.40, z) * sm(0.47, 0.44, z);      // (the cheek beside the nose, toward it (+) or brought forward (-): apply-brow-arc.py)
     d += gauss(x, z, s * 0.14 * es, 0.525, 0.08, 0.05, -0.06 * P.sockets);
     d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * P.cheekbones);
     d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * P.apples);
@@ -2126,6 +2126,10 @@ function browChisel(ax, w, sl, mm) {
   // (the side wall in a concave flare when fa > 0: steeper just after the dorsal line, flatter out toward the cheek, at
   // the same depth fj out, so its base stays put. plane_breaks.py: the photo's side is darkest just past the corner)
   if (fa > 0) sr = (1 - fa * fv * (1 - Math.exp(-fj / fv)) / fj) * sr + fa * fv * (1 - Math.exp(-sr / fv));
+  // (the roof: the nasal bones meet at 105-112 degrees (pyramidal angle, CT: Alharethy 2017, Moon 2013), so the wall first
+  // falls at about 36 degrees for the bones' width, then steepens down the maxilla's frontal process)
+  var rs = 0, rw = 6 * mm, rk = 3 * mm;
+  if (rs > 0 && sl > rs) { var v2 = v - rw; return front + Math.max(0, rs - fs) * sr + (sl - rs) * (0.5 * (v2 + Math.sqrt(v2 * v2 + rk * rk)) - 0.5 * (-rw + Math.sqrt(rw * rw + rk * rk))); }
   return front + Math.max(0, sl - fs) * sr;
 }
 /* the socket carved under the brow's arc (S.carve, the skin field's span): a hollow inside the orbit's rim, deepest in its
