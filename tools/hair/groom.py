@@ -1892,6 +1892,44 @@ def frame_locks(X, roots, sel_from, seg_hh, col, n_locks=FRAME_LOCKS):
     return X, fl
 
 
+BANG_OUT_Z = (0.85, 0.3)     # HH: the band (brow to cheekbone) over which the bangs are brushed out to the creator's
+BANG_OUT_PCT = (25, 50)      # the bangs' spread matched at these percentiles of |x| per height (inner and middle)
+BANG_OUT_GAIN = 1.0          # CALIBRATED: the full gap to the creator's sweep
+
+
+def bang_out(X, bang, style_path, seg_hh, col):
+    """The bangs brushed further out to the sides, off the eyes: at the eyes ours hung 1 to 1.5 cm in from the
+    creator's sweep (|x| median 0.27 against 0.34 HH at z 0.6) and the tips covered the outer half of the eye, with
+    the face showing between them (John, 2026-11-24: "brush more to the side so less gaps"). Each bang node is moved
+    out by the gap at its height (the larger of the gaps at BANG_OUT_PCT), and the strand rebuilt at the rod's
+    length from its root."""
+    B = creator_bangs(style_path)
+    C = np.concatenate([q for sd in B for q in B[sd]])
+    ok = ~np.isnan(X[..., 0])
+    P = X[bang][ok[bang]]
+    zb = np.arange(BANG_OUT_Z[0], BANG_OUT_Z[1] - 0.01, -0.05)
+    gap = np.zeros(len(zb))
+    for i, z in enumerate(zb):
+        mc = (np.abs(C[:, 2] - z) < 0.025) & (C[:, 1] < SF.AXIS[1])
+        mo = (np.abs(P[:, 2] - z) < 0.025) & (P[:, 1] < SF.AXIS[1])
+        if mc.sum() > 10 and mo.sum() > 10:
+            ac, ao = np.abs(C[mc, 0] - SF.AXIS[0]), np.abs(P[mo, 0] - SF.AXIS[0])
+            gap[i] = max(0.0, max(np.percentile(ac, q) - np.percentile(ao, q) for q in BANG_OUT_PCT))
+    for _ in range(2):
+        gap[1:-1] = 0.25 * gap[:-2] + 0.5 * gap[1:-1] + 0.25 * gap[2:]
+    X = X.copy()
+    for g in np.where(bang)[0]:
+        n = ok[g].sum()
+        z = X[g, :n, 2]
+        lo = np.minimum.accumulate(z)                         # (held at its lowest so far: no swing back in)
+        dx = BANG_OUT_GAIN * np.interp(-lo, -zb, gap) * np.sign(X[g, :n, 0] - SF.AXIS[0])
+        dx = np.where(lo < zb[-1], np.interp(-zb[-1], -zb, gap) * np.sign(X[g, :n, 0] - SF.AXIS[0]), dx)
+        Y = X[g, :n].copy(); Y[:, 0] += dx
+        d = np.diff(Y, axis=0); d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        X[g, 1:n] = X[g, 0] + np.cumsum(d * seg_hh, 0)
+    return push_valid(col, X, mask=bang[:, None] & ok)
+
+
 BANG_BLEND_NODES = 6         # nodes (6 cm): the bang's end turned into the side hair's flow over this length
 BANG_BLEND_W = 0.85          # how far the tip's direction turns to the side hair's (0 at the start of the blend), STYLE
 BANG_BLEND_R = 0.12          # HH (2.6 cm): the side hair the bang's end is read against
@@ -2256,6 +2294,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             # the side of the face filled to the creator's edge under the bangs (no gap at the temple and cheek)
             X2 = face_edge(X2, ~bang & (np.abs(SF.theta(roots)) < SIDE_SOLVE_TH), trace, col)
             X2 = relax_kinks(X2, col, None, keep=bang & (fl < 0))
+            # the bangs brushed out to the creator's sweep, off the eyes
+            X2 = bang_out(X2, bang & (fl < 0), trace, seg_hh, col)
             # and the bangs' ends carried on into the side hair, so the fringe flows into the sides
             X2 = bang_blend(X2, bang & (fl < 0), col)
     if trace and not wavy:
