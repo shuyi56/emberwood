@@ -615,6 +615,7 @@ function faceRelief(x, z) {
     // bridge as a shelf threw a band of shade between the eyes)
     d += gauss(x, z, s * 0.15 * es, 0.62, x * s < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
     /* brow arc (apply-brow-arc.py): ridge */ d += browRidgeArc(x * s, z, es);      // (the ridge curves with the brow: apply-brow-arc.py)
+    /* brow arc (apply-brow-arc.py): groove */ if (x * s > 0) { var gy = (0.525 - z) * 219 / 63, gx = (8.5 - 15.8 * gy + 42.4 * gy * gy + 1.6) / 219; d -= 1 / 219 * Math.exp(-Math.pow((x * s - gx) / (1.6 / 219), 2)) * sm(-0.05, 0.05, gy) * sm(0.58, 0.48, gy); }      // (the nasofacial groove along the photo's line: apply-brow-arc.py)
     /* brow arc (apply-brow-arc.py): paranasal */ if (x * s > 0) d -= -1.5 / 219 * sm(24 / 219, 11 / 219, x * s) * sm(4 / 219, 8 / 219, x * s) * sm(0.37, 0.40, z) * sm(0.47, 0.44, z);      // (the cheek beside the nose, toward it (+) or brought forward (-): apply-brow-arc.py)
     d += gauss(x, z, s * 0.14 * es, 0.525, 0.08, 0.05, -0.06 * P.sockets);
     d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * P.cheekbones);

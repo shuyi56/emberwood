@@ -501,3 +501,25 @@ Result: the clay front shows the sides rounding in under the wings. The shade li
 at 0.6-0.65. Dorsal lines / TDP 1.02-1.21 (Warden 1.21, norm 1.15), bony base 0.64-0.71 unchanged. The shade-line gauge
 reads the shadow under the wing, not the outline, so it moves less than the shape does. A gauge on the nose's outline
 itself is the next step if this needs closer measuring.
+
+## 13. The grooves beside the nose (John: "The grooves are not visible why")
+
+Measured with the creator's own baked cavity shade (the vertex colour, `cavityWorld`) on the front view: along the
+photo's groove line it darkened the skin by 4-7% (multiplier 0.93-0.96). The photo's grooves are 12-23% darker than the
+front of the nose (section 11, `core`). Two causes:
+
+- **No trough.** The nose's side flared smoothly into the cheek and the cheek never rose again on the far side: a
+  monotone profile, so the cavity measure (how far a point lies below its neighbours) has almost nothing to see, and
+  neither does the creator's soft wrapped key.
+- **My softening made it worse.** The cheek-meeting blend (`KF_MID` 4, section 11b) and the cheek brought forward (`PN_D`
+  -1.5, 11c) removed the little concavity the earlier rounds had: 0.93 at y 0.4 before them, 0.96 after.
+
+Fix (`apply-brow-arc.py` step 10, `GR_D`, `GR_W`, `GR_OFF`): a nasofacial groove carved in the plain face just outside
+the nose's side, 1.6 mm out from the photo's shade line (x 8.5 mm at the eyes' line, 7.2 at 0.25 pupil distances below,
+11.2 at 0.5), 1.0 mm deep, 1.6 mm wide (a gaussian), fading in at the eyes' line and out by the wing. It reads in the
+skin render from the brow's head to the wing. Depth 1.8 mm and width 2.0 made the shade line at the inner corner run out
+(0.21 against the photo's 0.135), and 1.3 mm at 1.8 wide did the same on three faces, so 1.0 and 1.6 stay.
+
+Five faces: bony base 0.65-0.75 (was 0.64-0.71, norm 0.70-0.80; the groove is now the sharpest concave bend the gauge
+finds, so it moves into the norm on three), dorsal lines / TDP 1.04-1.21 (unchanged), shade line at the inner corner
+0.127-0.16 on four faces (photo 0.135).
