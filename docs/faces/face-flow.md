@@ -474,3 +474,30 @@ now steep for about 10 mm and then runs on at 15-24 degrees into the cheek inste
 
 Open: the bony base reads 0.03-0.06 under its norm on four faces, and the shade line beside the inner corner moved out
 again. Both come from the same place, the wall's top end by the eyes, which is the open item of section 10.
+
+## 12. The base of the nose curves in (John: "The current nose does not curve in at the base of the nose")
+
+John's black line on the photo: the nose's sides run narrow down the bridge, the wing swells out, then the outline
+curves back in under the wing toward the tip. Shade-line measure, pupil distances from the midline, photo against ours
+(`shadow_trace.py` run to y 0.8):
+
+| y (below the pupils) | 0.5 | 0.55 | 0.6 | 0.65 | 0.7 |
+|---|---|---|---|---|---|
+| Photo | 0.178 | 0.153 | 0.128 | 0.112 | 0.047 |
+| Ours before (Rogue, Knight) | 0.17-0.19 | 0.18-0.20 | 0.19-0.23 | 0.12-0.15 | 0.06-0.08 |
+
+Ours holds its full width through y 0.6 and falls at 0.65: a straight cone ending on a flat base with sharp bottom
+corners (clay front view: straight sides, wings as thin hooks at the base's corners). The wedge's sides lean out
+steadily to the bottom plane and meet it over a 3 mm blend (`W4.kbase`), and the crescent wing is widest at its flat
+bottom edge.
+
+Changed (`apply-brow-arc.py`, step 9 and the tip step): `kbase` 3 to 6.5 mm so the sides round under the base, and the
+wing's foot narrowed (`WB_K` 0.35 over `WB_R` 0.5 of the wing's height) so the wing is widest above its bottom edge.
+Tried and not kept: `lean` 0.3 and `kbase` 8.5 (the Ranger's dorsal lines fell to 0.73 of the tip-defining points,
+norm 0.85-1.15), and the foot narrowing alone (it moved the shade line out, not in).
+
+Result: the clay front shows the sides rounding in under the wings. The shade line at y 0.65-0.7 comes in a little
+(Warden 0.09 at 0.6, Sorceress 0.113 at 0.65; the photo's 0.128 and 0.112) but Rogue and Ranger still hold 0.14-0.155
+at 0.6-0.65. Dorsal lines / TDP 1.02-1.21 (Warden 1.21, norm 1.15), bony base 0.64-0.71 unchanged. The shade-line gauge
+reads the shadow under the wing, not the outline, so it moves less than the shape does. A gauge on the nose's outline
+itself is the next step if this needs closer measuring.

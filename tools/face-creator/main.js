@@ -903,7 +903,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     return Math.max(d, v - (CT.vf * Tp - CT.rec * Math.max(0, s - CT.s0 * L)), s - cHs);
   }
   var W4 = {"off": 1.0, "tilt": 3.0, "show": 0.17, "colw": 0.2, "wback": 0.68, "wfront": 1.1, "lean": 0.4, "pf": 1.8, "kball": 0.9, "kbase": 3.0, "top": 0.5, "kjoin": 5.0, "wc": 0.32, "wl": 0.5, "wh": 0.5, "wp": 0.5, "arch": 0.06, "kw": 2.0, "wall": 0.32, "ncol": 0.5, "nb": 0.12, "nh": 1.3, "kwb": 3.0, "nf": 1.0, "goode": 0.55, "showmm": 3.0, "knos": 2.2, "archf": 1, "tear": 0.5, "tback": 1.15, "kcr": 4.2, "wasw": 1, "kflo": 3.2, "tipb": 0, "cbox": 1, "blg": 2.0, "blc": 0.3, "blw": 0.35, "cres": 1, "cf0": 0.0, "cf1": 0.75, "ctp": 0.5, "cwp": 1.2, "chb": 1.8, "chf": 0.6, "cgr": 0.3};
-  /* brow arc (apply-brow-arc.py): tip */ Object.assign(W4, {"kball": 0.5, "kjoin": 3.5});      // (the tip in planes, carrying on the bridge's chisel: apply-brow-arc.py)
+  /* brow arc (apply-brow-arc.py): tip */ Object.assign(W4, {"kball": 0.5, "kjoin": 3.5, "kbase": 6.5, "lean": 0.4});      // (the tip in planes, carrying on the bridge's chisel: apply-brow-arc.py)
   var hP = zPrn - zSn, tanB = Math.tan(Math.atan2(Math.max(0, hP - rT - 2.0 * mm - W4.off * mm), Tp0 - rT) + W4.tilt * Math.PI / 180);
   var fBr = vBr, uBr = W4.off * mm + fBr * tanB;
   var wC = W4.wc * alarHalf, wRf = W4.wl * alarHalf, wRu = W4.wh * alarHalf, wT = alarHalf - lerp(W4.wback * alarHalf, W4.wfront * rEnv, sm(0, Tp, wC));
@@ -955,7 +955,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
       Tt = (alarHalf - Wbc0) * Math.pow(1 - tc, W4.ctp) * sm(cf0 - 0.4 * alarHalf, cf0, f);
       Tt += W4.blg * mm * Math.exp(-Math.pow((tc - W4.blc) / W4.blw, 2)) * sm(cf0 - 0.4 * alarHalf, cf0, f);   // (the alar lobule: the widest point, al)
       var Hc = wRu * lerp(W4.chb, W4.chf, tc), vc = Math.max(0, u - uBw) / Hc;
-      var gv = Math.pow(Math.max(0, 1 - vc * vc), W4.cwp);
+      var gv = Math.pow(Math.max(0, 1 - vc * vc), W4.cwp) * lerp(0.65, 1, sm(0, 0.5, vc));
       var gr = W4.cgr * mm * Math.exp(-Math.pow((vc - 1) / 0.22, 2)) * (1 - sm(0.6, 1.0, tc)) * sm(cf0 - 0.4 * alarHalf, cf0, f);
       X = W + Tt * gv - gr;
       dW = -nSmin(-(ax - X) * 0.7, -(W - 0.5 * mm - ax), 1.0 * mm);   // (only the shell outside the wedge's side)

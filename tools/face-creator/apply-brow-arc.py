@@ -38,7 +38,7 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'BASE_K': 6.5, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
             'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 4.0, 'KF_TOPF': 0.4, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
@@ -183,7 +183,7 @@ def patch(src, P):
     assert m6, 'W4 line not found'
     src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': tip \*/[^\n]*', '', src)
     m6 = re.search(r'\n  var W4 = \{"off": 1\.0[^\n]*', src)
-    src = src[:m6.end()] + '\n  %s: tip */ Object.assign(W4, {"kball": %g, "kjoin": %g});      // (the tip in planes, carrying on the bridge\'s chisel: apply-brow-arc.py)' % (MARK[:-3], P['TIP_KBALL'], P['TIP_KJOIN']) + src[m6.end():]
+    src = src[:m6.end()] + '\n  %s: tip */ Object.assign(W4, {"kball": %g, "kjoin": %g, "kbase": %g, "lean": %g});      // (the tip in planes, carrying on the bridge\'s chisel: apply-brow-arc.py)' % (MARK[:-3], P['TIP_KBALL'], P['TIP_KJOIN'], P['BASE_K'], P['LEAN']) + src[m6.end():]
     # 7. the nose's side met by the cheek along a crisp junction (the blend of the nose into the face over the middle of
     # the nose, 5 mm, to KF_MID): the side plane ends in a line, the nasofacial groove, instead of a smear
     src = re.sub(r'lerp\(3\.2 \* mm, [0-9.]+ \* mm, sm\(zSn \+ 4 \* mm, zSn \+ 12 \* mm, z\)\)', 'lerp(3.2 * mm, %g * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z))' % P['KF_MID'], src, count=1)
@@ -198,6 +198,11 @@ def patch(src, P):
     if P['PN_D'] != 0:
         i8 = src.index(r8); j8 = src.index('\n', i8)
         src = src[:j8] + '\n    %s: paranasal */ if (x * s > 0) d -= %g / 219 * sm(%g / 219, %g / 219, x * s) * sm(4 / 219, 8 / 219, x * s) * sm(0.37, 0.40, z) * sm(%g, %g, z);      // (the cheek beside the nose, toward it (+) or brought forward (-): apply-brow-arc.py)' % (MARK[:-3], P['PN_D'], P['PN_X1'], P['PN_X0'], P['PN_ZT'], P['PN_ZT'] - 0.03) + src[j8:]
+    # 9. the wing's underside curved in toward the tip: the crescent is widest at its bottom edge and ends flat, so the
+    # nose's outline holds its full width and then drops (John: "does not curve in at the base"); the photo's line comes
+    # in from its widest point over 0.5-0.7 pupil distances. WB_K narrows the wing's foot, which rounds the bottom in.
+    gv0 = 'var gv = Math.pow(Math.max(0, 1 - vc * vc), W4.cwp)'
+    src = re.sub(r'var gv = Math\.pow\(Math\.max\(0, 1 - vc \* vc\), W4\.cwp\)[^;]*;', gv0 + ('' if P['WB_K'] == 0 else ' * lerp(%g, 1, sm(0, %g, vc))' % (1 - P['WB_K'], P['WB_R'])) + ';', src, count=1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:
