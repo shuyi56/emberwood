@@ -1059,3 +1059,29 @@ crisper. Colour-coded renders of the 2 mm build show no coat through the collar.
 at the buttons the fronts now stand 0.18 apart against a cloth of 0.08 (2.6 mm of air). That is set in `bodice_cut.py`
 with the redingote modules, which are not in this branch: the cut needs rebuilding there at the new thickness. The
 bodice's Bevel (0.075) is now as wide as the cloth is thick.
+
+### Smoothing the join, and the show render (John, 2026-11-24: "Smooth the join, the show render with full front skirt and sleeves"; EXPERIMENTAL)
+
+Close-ups at both roll tops and both notch ends on the 2 mm build (`blender/tension/clay.py`, scale 1.8): the roll tops
+were already smooth, and both sides agree to 0.02 mm (the collar's boundary near the notch, mirrored). What read rough
+was the collar's end leaving the gorge: the end was laid straight from the notch and pushed out to its clearance, so
+right at the notch it jumped from the flush depth (the gorge) to the clearance (the end): 0.7 mm. `"draft_end_fade":
+0.35` (with `gorge_draft`) lets the end leave the notch at the flush depth and come up to its clearance along its
+first 35%; it has to be applied in the settle pass that lays the end straight again as well as where it is first laid
+(the first attempt changed nothing, as the settle pass overrode it).
+
+| her left (her right the same within 0.1 mm) | before | `draft_end_fade` 0.35 |
+|---|---|---|
+| gorge's last half cm: collar proud of lapel | 0.6 mm | 0.1 mm |
+| seam kink at the notch end | 10° | 2° |
+| creases over 40° at the join | 0 | 0 |
+
+The seam's one corner (kink 57°, 0.3 cm from the roll top) is the collar's roll line turning into the gorge: the
+outline's own corner, not roughness. `draft_fade` 1.2 (a longer ride over the lapel's fold) left it at 53° and
+opened the gorge 3 mm at the roll top: kept at 0.6.
+
+**The show render** (`FC/show.py`, `FC/colour.py`, Cycles 40 samples, denoised): the file has the skirt, sleeves, sleeve
+linings, belt, panel, lace and necklace hidden *from the camera* (visible_camera off) as well as in the render
+settings; `show.py` switches them on. Front, three-quarter and a bust close-up. Two things in the full figure belong to
+the gown, not to the collar: (1) the skirt has a hole at her left hip beside the hand (skin shows through); (2) skin
+shows between the bodice's hem and the belt at the sides (the hem ends about 1 unit above the belt).
