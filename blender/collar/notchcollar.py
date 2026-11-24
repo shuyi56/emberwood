@@ -540,7 +540,9 @@ for Nt in (NtA, NtB):
     evs = Nt['ev'] * SC; de, ie = cKDTree(evs).query(UV)
     m = onb & (de < 0.4 * hm) & (ie <= int(0.8 * (len(evs) - 1))) & ~on_gorge & ~on_roll
     for i in np.nonzero(m)[0]:
-        t_ = ie[i] / (len(evs) - 1.0); P3[i] = push_g(Nt['G3'] + t_ * (Nt['C3'] - Nt['G3']))
+        t_ = ie[i] / (len(evs) - 1.0); raw_ = Nt['G3'] + t_ * (Nt['C3'] - Nt['G3']); P3[i] = push_g(raw_)
+        if opt.get('gorge_draft') and opt.get('draft_end_fade', 0.0) > 0:       # (the end leaves the flush gorge at the flush depth, and comes up to its clearance along its first part: no jog at the notch)
+            w_ = 1 - ss(0.0, opt['draft_end_fade'], t_); P3[i] = (1 - w_) * P3[i] + w_ * raw_
     on_end |= m; Nt['end_idx'] = np.nonzero(m)[0]; Nt['end_t'] = ie[m] / (len(evs) - 1.0)
 fixed = on_roll | on_gorge | on_end
 def push_n(p):
@@ -655,7 +657,10 @@ if settle:
             ix, tt = Nt['end_idx'], Nt['end_t']
             if len(ix) > 2:
                 o_ = np.argsort(tt); a0, a1 = P3[ix[o_[0]]].copy(), P3[ix[o_[-1]]].copy(); u_ = (tt[o_] - tt[o_[0]]) / max(tt[o_[-1]] - tt[o_[0]], 1e-9)
-                for q_, uu in zip(ix[o_], u_): P3[q_] = push_n(a0 + uu * (a1 - a0))
+                fe_ = opt.get('draft_end_fade', 0.0) if opt.get('gorge_draft') else 0.0
+                for q_, uu, t1_ in zip(ix[o_], u_, tt[o_]):
+                    raw_ = a0 + uu * (a1 - a0); P3[q_] = push_n(raw_)
+                    if fe_ > 0: w_ = 1 - ss(0.0, fe_, t1_); P3[q_] = (1 - w_) * P3[q_] + w_ * raw_
         for k_ in range(8):
             A_ = (Wm @ P3) / deg[:, None]
             P3[zone] += 0.5 * (A_[zone] - P3[zone])
