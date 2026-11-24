@@ -1019,7 +1019,7 @@ and settled to that seam instead of being moved onto it afterwards.
 | creases over 40° | 0 | 3 (53°) | 9 (66°), all at the roll top |
 | the roll top (clay) | clean | clean | torn into small teeth |
 
-Five rounds (rejections #146, #147): the lapel's own normal is not defined at the roll top, where the cloth turns over
+Five rounds (rejections #147, #148): the lapel's own normal is not defined at the roll top, where the cloth turns over
 its fold (the seam zigzagged, 176°); with the top's normals taken from further along, a collar a cloth behind the
 lapel's face at the roll top lies inside the lapel's fold and is pushed out (149°); faded up to the lapel's surface
 over the first 0.6 it still tears (66°). Stopped at five.
