@@ -2635,21 +2635,48 @@ def hollywood_set(X, roots, sel, seg_hh, col):
 # STYLE (John's line); overrides the creator's long side hair over the chest.
 EAR_CUT_Z = 0.28             # HH: the cut's height: under the ear lobe (0.365), read off John's line
 EAR_CUT_TH = (1.3, 1.6)      # |theta| of the roots: cut in full in front of the ear's front, none from behind the ear
+EAR_CUT_JIT = 0.1            # STYLE: HH (2 cm): the point cut's stagger below the line (cut level, it read as a shelf)
 EAR_CUT_FIRST = (0.8, 0.9)   # |theta|: the first lock (in front of this) is left long
 
 
-def ear_line_cut(X, lengths, roots, keep):
-    """Each guide rooted between the first lock and the ear cut where it passes its line's height (EAR_CUT_*).
-    keep: left alone (the bangs). Returns X, lengths."""
+def first_locks(X, clump):
+    """The first face-framing lock each side: of the framing locks (clump >= FRAME_CLUMP0), the one lying furthest
+    forward round the face where it hangs at the jaw (z 0.3). Returns a mask."""
+    ok = ~np.isnan(X[..., 0])
+    zz = np.where(ok, X[..., 2], np.inf)
+    k = np.argmin(np.abs(zz - 0.3), axis=1)
+    P = X[np.arange(len(X)), k]
+    th = SF.theta(P)
+    first = np.zeros(len(X), bool)
+    for sd in (-1, 1):
+        best, bc = 9.0, None
+        for c in np.unique(clump[clump >= 900]):
+            m = (clump == c) & (np.sign(th) == sd)
+            if m.sum() >= 3 and np.median(np.abs(th[m])) < best:
+                best, bc = np.median(np.abs(th[m])), c
+        if bc is not None:
+            first |= clump == bc
+    return first
+
+
+def ear_line_cut(X, lengths, roots, keep, first=None):
+    """Each guide rooted in front of the ear cut where it passes its line's height (EAR_CUT_*), but the first lock
+    (first: a mask; without it, the roots in front of EAR_CUT_FIRST). keep: left alone (the bangs).
+    Returns X, lengths."""
     X = X.copy()
     lengths = lengths.copy()
     th = np.abs(SF.theta(roots))
     ok = ~np.isnan(X[..., 0])
     n = ok.sum(1)
-    for g in np.where(~keep & (th > EAR_CUT_FIRST[0]) & (th < EAR_CUT_TH[1]))[0]:
+    jit = np.random.default_rng(29).random(len(X))
+    for g in np.where(~keep & (th < EAR_CUT_TH[1]))[0]:
+        if first is not None and first[g]:
+            continue
         end = X[g, n[g] - 1, 2]
-        w = SF.sm(EAR_CUT_FIRST[0], EAR_CUT_FIRST[1], th[g]) * (1 - SF.sm(EAR_CUT_TH[0], EAR_CUT_TH[1], th[g]))
-        target = end + w * (EAR_CUT_Z - end)
+        w = (1.0 if first is not None else SF.sm(EAR_CUT_FIRST[0], EAR_CUT_FIRST[1], th[g])) \
+            * (1 - SF.sm(EAR_CUT_TH[0], EAR_CUT_TH[1], th[g]))
+        # point cut [SV]: the line staggered up to EAR_CUT_JIT, so it does not end on a shelf in profile
+        target = end + w * (EAR_CUT_Z - EAR_CUT_JIT * jit[g] - end)
         below = np.where(X[g, 1:n[g], 2] < target)[0]
         if target > end + 1e-6 and len(below):
             m = max(4, below[0] + 1)
@@ -3045,7 +3072,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     elif trace:
         X2, lengths = recut(X2, lengths)
         if wavy:
-            X2, lengths = ear_line_cut(X2, lengths, roots, bang)
+            # (John, 2026-11-24, the second framing lock circled: "that second lock needs to be cut". Only the first
+            # framing lock stays long; the others, and all the side hair in front of the ear, are cut on the line)
+            X2, lengths = ear_line_cut(X2, lengths, roots, bang, first=first_locks(X2, clump))
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
             X2, lengths = lock_taper(X2, lengths, ~bang & (np.abs(SF.theta(roots)) < WAVE_FADE_TH[1]),
                                      lk * 1000 + clump, col)
