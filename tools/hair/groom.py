@@ -2889,6 +2889,77 @@ def sweep_back(X, sel, roots, col, seg_hh):
     X = push_valid(col, X, mask=sel[:, None] & ok)
     return X
 
+# The curtain styled (John, 2026-11-25, the profile's middle section circled, from the temple to the collar behind the
+# first lock: "this middle section needs to be styled"). It is the long side of the curtain bangs: rooted at the front
+# hairline, they hung straight from the cheekbone to the collar as a loose sheet, with the cheek showing between
+# strands. Styled as the rest of the side is (the 2026-11-24 rules): gathered into a few ribbon locks, each set in the
+# same S as the side (SET_*: one pattern, so the curtain and the hair beside it bend together), ends closed to points
+# (lock_taper). SOURCED: ribbons first, then strands (proko.com; clipstudio.net 159719); Hollywood waves, every section
+# curled the same way (behindthechair.com; ghdhair.com). STYLE: the counts and amounts.
+CURTAIN_LOCKS = 3            # STYLE: locks a side (sections about an inch wide across the curtain's 7 cm)
+CURTAIN_PULL = 0.65          # STYLE: how far each guide is drawn onto its lock's mean, in full below CURTAIN_Z[1]
+CURTAIN_Z = (0.45, 0.25)     # HH: gathered and waved from the cheekbone, in full by the jaw (the fringe keeps its line)
+CURTAIN_END_Z = 0.2          # HH: the bangs ending below this are the curtain's long side
+CURTAIN_ID = 960             # the curtain locks' clump ids from here (above the framing locks' 900s)
+
+
+def curtain_locks(X, roots, sel, col):
+    """The curtain's long side (sel) gathered into CURTAIN_LOCKS locks a side (k-means on where each guide hangs at the
+    jaw), each guide drawn toward its lock's mean path from the cheekbone down, then the side's S laid on it (SET_*).
+    Rebuilt at its segment lengths from the root, kept out of the head and body. Returns X and a lock id per guide
+    (-1: not curtain)."""
+    from scipy.cluster.vq import kmeans2
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    zz = np.where(ok, X[..., 2], np.inf)
+    k = np.argmin(np.abs(zz - CURTAIN_Z[1]), axis=1)
+    P = X[np.arange(len(X)), k]
+    ids = np.full(len(X), -1)
+    nxt = 0
+    for sd in (-1, 1):
+        gi = np.where(sel & (np.sign(P[:, 0] - SF.AXIS[0]) == sd))[0]
+        if len(gi) < 2 * CURTAIN_LOCKS:
+            continue
+        _, lab = kmeans2(P[gi], CURTAIN_LOCKS, minit='++', seed=11)
+        for q in range(CURTAIN_LOCKS):
+            if (lab == q).any():
+                ids[gi[lab == q]] = nxt
+                nxt += 1
+    Y = X.copy()
+    Xf = X.copy()
+    for g in range(len(X)):                              # (each cut tail carried on in its last direction)
+        if n[g] < X.shape[1] and n[g] >= 2:
+            Xf[g, n[g]:] = X[g, n[g] - 1] + (X[g, n[g] - 1] - X[g, n[g] - 2]) * np.arange(1, X.shape[1] - n[g] + 1)[:, None]
+    for q in range(nxt):
+        gi = np.where(ids == q)[0]
+        M = Xf[gi].mean(0)
+        for g in gi:
+            w = (CURTAIN_PULL * SF.sm(CURTAIN_Z[0], CURTAIN_Z[1], X[g, :n[g], 2]))[:, None]
+            Pg = X[g, :n[g]] + w * (M[:n[g]] - X[g, :n[g]])
+            d = np.diff(Pg, axis=0)
+            L = np.linalg.norm(np.diff(X[g, :n[g]], axis=0), axis=1, keepdims=True)
+            d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+            Y[g, 1:n[g]] = X[g, 0] + np.cumsum(d, 0)
+    Y = push_valid(col, Y, mask=(ids >= 0)[:, None] & ok)
+    # the side's S, laid on the gathered locks (as hollywood_set lays it, in full: no fade by root angle)
+    C, ok2, n2 = middle_line(Y)
+    T, r, b = wave_frame(C)
+    side = np.where(roots[:, 0] >= SF.AXIS[0], 1.0, -1.0)[:, None]
+    tn = np.abs(SF.theta(C.reshape(-1, 3))).reshape(C.shape[:2])
+    phi = 2 * np.pi * (SET_Z[0] - C[..., 2]) / SET_LAM + SET_TURN * tn
+    A = SET_A_MM / SF.HH_MM * SF.sm(CURTAIN_Z[0], CURTAIN_Z[1], C[..., 2])
+    off = A[..., None] * (side[..., None] * np.sin(phi)[..., None] * b + SET_RADIAL * np.cos(phi)[..., None] * r)
+    Z = Y.copy()
+    for g in np.where(ids >= 0)[0]:
+        kk = n2[g]
+        Pg = C[g, :kk] + SET_OWN * (Y[g, :kk] - C[g, :kk]) + off[g, :kk]
+        d = np.diff(Pg, axis=0)
+        L = np.linalg.norm(np.diff(Y[g, :kk], axis=0), axis=1, keepdims=True)
+        d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        Z[g, 1:kk] = Y[g, 0] + np.cumsum(d, 0)
+    return push_valid(col, Z, mask=(ids >= 0)[:, None] & ok2), ids
+
+
 # The ends: each lock a ribbon that closes to a point (John, 2026-11-24, with a drawn reference of long wavy hair:
 # "the hair needs a cut to form curves, right now the hair is all over the place"). SOURCED: the cut is point cut
 # throughout, ends bevelled, never blunt (behindthechair.com, TONI&GUY bouncy long layers; hairfinder.com, the pyramid
@@ -3293,8 +3364,15 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             X2 = sweep_back(X2, bf_, roots, col, seg_hh)
             X2 = relax_kinks(X2, col, None, keep=~bf_)
             lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
+            # the curtain's long side gathered into locks and waved with the side (see CURTAIN_*)
+            okc_ = ~np.isnan(X2[..., 2])
+            endc_ = X2[np.arange(len(X2)), okc_.sum(1) - 1, 2]
+            X2, cid_ = curtain_locks(X2, roots, bang & ~first_ & (endc_ < CURTAIN_END_Z), col)
+            X2 = relax_kinks(X2, col, None, keep=cid_ < 0)
+            clump = np.where(cid_ >= 0, CURTAIN_ID + cid_, clump)
+            lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
-            X2, lengths = lock_taper(X2, lengths, ~bang & (np.abs(SF.theta(roots)) < WAVE_FADE_TH[1]),
+            X2, lengths = lock_taper(X2, lengths, (~bang | (cid_ >= 0)) & (np.abs(SF.theta(roots)) < WAVE_FADE_TH[1]),
                                      lk * 1000 + clump, col)
     # the locks the children blend within: 0 the tucked back, 1 / 2 the face-framing hair right / left of the part,
     # 3 / 4 the bangs right / left
