@@ -2909,14 +2909,25 @@ def sweep_back(X, sel, roots, col, seg_hh):
 # The curtain is the hair that fills the side piece: laid into SIDE_PIECE_TH (it was spread over the whole cheek,
 # 0.9 to 1.6, too thin to cover it), one lock a side, so lock_taper closes it to a point. tools/hair/side_fill.py
 # measures how much of the shape the drawn hair fills.)
-SIDE_PIECE_TH = (1.05, 1.42) # STYLE: |theta| of the side piece at the jaw: 2.7 cm wide, its back edge at the ear's front
+SIDE_PIECE_TH = (0.97, 1.75) # STYLE: |theta| of the side piece at the jaw: from the front lock back over the ear to the
+                             # back hair. (To 1.42, the ear's front, at first, the ear bare as in the drawn reference;
+                             # John, 2026-11-25, the ear and the neck under it marked: "fix discontinuity there as
+                             # well": the piece runs over the ear and into the hair behind it.)
+                             # (from 1.05 at first; brought forward with the front lock moved back, below)
+# (John, 2026-11-25, the bare strip of cheek between the front lock and the side piece marked in profile: "fill that
+# gap by moving the front lock". Measured at the jaw: the front lock hung at |theta| 0.60 to 0.75, the piece from
+# 1.0: 0.25 rad, 1.8 cm, of cheek between. The front lock is turned back from the temple to hang against the piece's
+# front edge, keeping its own wave.)
+FIRST_LOCK_BAND = (0.8, 0.97)  # STYLE: |theta| of the front lock at the jaw: against the side piece
 SIDE_PIECE_Z = (0.72, 0.5)   # HH: the hair turns into the piece from the temple to the ear's middle
 # Filling it: the curtain alone is 450 hairs a side (side_fill.py: 13% and 31% of the piece's cells covered); a piece
 # 2.7 cm wide wants a few thousand. The hair that grows there fills it: the temple and sideburn hair, rooted in front
 # of the ear below SIDE_PIECE_ROOT_Z (2,400 hairs a side), falls into the piece at length instead of being cut on the
 # ear line and swept back. Overrides the 2026-11-24 ear-line cut for those roots (John's solid shape, 2026-11-25).
-SIDE_PIECE_ROOT_TH = (0.9, 1.45)   # |theta| of the roots that feed the piece: the temple back to the ear's front
-SIDE_PIECE_ROOT_Z = 0.78     # STYLE: HH: and below this height (the lowest rows of the side hairline); the hair
+SIDE_PIECE_ROOT_TH = (0.9, 1.6)    # |theta| of the roots that feed the piece: the temple back to over the ear
+                             # (to 1.45 and below z 0.78 while the piece stopped at the ear's front: twice as wide, it
+                             # takes the hair of a deeper strip)
+SIDE_PIECE_ROOT_Z = 0.88     # STYLE: HH: and below this height (the lowest rows of the side hairline); the hair
                              # rooted above still sweeps back over the ear
 SIDE_PIECE_END_Z = -0.2      # STYLE: HH: the piece's point: the base of the neck, as the reference's
 CURTAIN_Z = (0.45, 0.25)     # HH: gathered and waved from the cheekbone, in full by the jaw (the fringe keeps its line)
@@ -2924,7 +2935,7 @@ CURTAIN_END_Z = 0.2          # HH: the bangs ending below this are the curtain's
 CURTAIN_ID = 960             # the curtain locks' clump ids from here (above the framing locks' 900s)
 
 
-def curtain_locks(X, roots, sel, col):
+def curtain_locks(X, roots, sel, col, band=None, wave=True):
     """The curtain's long side (sel) kept as one sheet and fanned back (CURTAIN_FAN_*): each side's guides, in their
     order round the head at the jaw, turned round the head's axis so the sheet runs from where its front edge hangs
     back to CURTAIN_FAN_TH, over the ear, from the temple down; then the side's S laid on it (SET_*: one pattern, so
@@ -2944,7 +2955,8 @@ def curtain_locks(X, roots, sel, col):
             continue
         lo, hi = np.percentile(thj[gi], [5, 95])
         u = np.clip((thj[gi] - lo) / max(hi - lo, 1e-6), 0, 1)
-        dth = SIDE_PIECE_TH[0] + u * (SIDE_PIECE_TH[1] - SIDE_PIECE_TH[0]) - thj[gi]    # (into the shape)
+        bd = SIDE_PIECE_TH if band is None else band
+        dth = bd[0] + u * (bd[1] - bd[0]) - thj[gi]    # (into the shape)
         ids[gi] = 0 if sd < 0 else 1
         for g, a in zip(gi, dth):
             m = n[g]
@@ -2956,6 +2968,8 @@ def curtain_locks(X, roots, sel, col):
             d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
             Y[g, 1:m] = X[g, 0] + np.cumsum(d, 0)
     Y = push_valid(col, Y, mask=(ids >= 0)[:, None] & ok)
+    if not wave:
+        return Y, ids
     # the side's S, laid on the gathered locks (as hollywood_set lays it, in full: no fade by root angle)
     C, ok2, n2 = middle_line(Y)
     T, r, b = wave_frame(C)
@@ -3388,7 +3402,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             okc_ = ~np.isnan(X2[..., 2])
             endc_ = X2[np.arange(len(X2)), okc_.sum(1) - 1, 2]
             X2, cid_ = curtain_locks(X2, roots, (bang & ~first_ & (endc_ < CURTAIN_END_Z)) | piece_, col)
-            X2 = relax_kinks(X2, col, None, keep=cid_ < 0)
+            X2, fid_ = curtain_locks(X2, roots, first_, col, band=FIRST_LOCK_BAND, wave=False)
+            X2 = relax_kinks(X2, col, None, keep=(cid_ < 0) & (fid_ < 0))
             lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
             clump = np.where(cid_ >= 0, CURTAIN_ID + cid_, clump)
