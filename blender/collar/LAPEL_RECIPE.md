@@ -476,3 +476,12 @@ rather than by hand. Set the roll line (foot, neck_x) to the photo's roll angle 
 `blender/tension/polycheck.py` on every build: the side count must match before anything else is compared. Fitted
 lapel: `{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.0,1.0],[-0.8,2.0],[1.0,0.0]],"outline_inner":[[-1.0,1.0],[0.0,0.0]]}`
 (the collar on it is not fitted yet).
+
+## The four-sided lapel recut for the folded collar (2026-11-24, experimental)
+
+The top edge lies on the neckline, so the folded collar (`foldcollar_build.sh`) is sewn beside it:
+`{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.3,1.0],[-1.1,2.0],[1.0,0.0]],"outline_inner":[[-1.3,1.0],[0.0,0.0]],"outline_fillet":{"N":0.3,"G":0.08,"P":0.09}}`
+
+`top_ground` (0.06, on with `outline_inner`; 0 turns it off) carries the ground on above the roll top, where the lapel
+stands above the coat's neckline and a ray would read the neck behind it. See phase 12 of
+`docs/clothing-solvers/lapel-tension-solver.md`.

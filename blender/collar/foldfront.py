@@ -454,6 +454,23 @@ for s in (und, top):                                  # the under front first: t
     yc_t = np.interp(t, tl[ci][np.argsort(tl[ci])], W[ci, 1][np.argsort(tl[ci])]) if len(ci) > 1 else np.nanmedian(gy)
     gy = np.where(np.isfinite(gy), gy, yc_t)
     gy = np.where((gy > yc_t + opt.get('fell', 0.15)) & (d < arc + 0.2), yc_t, gy)       # (a ray that fell past the line into the V: the lapel lies on its own front, at the line's depth)
+    if outline_inner and opt.get('top_ground', 0.06) and len(ci) > 1:
+        # the lapel's top stands above the coat's neckline: there a ray misses the front and reads the neck or the
+        # shoulder 0.7 behind it, point by point (one row finds the front, the next falls past its edge), and the cloth
+        # took those steps as edges stretched to three and four times their length: the ragged top edge and the spike
+        # that came through the collar. Above the roll top the ground is carried on from where the front still is: no
+        # point's ground may lie further back than its neighbours' by more than `top_ground` an edge.
+        io_ = {int(i_): k_ for k_, i_ in enumerate(ii)}
+        nbt = [[io_[e_.other_vert(bm.verts[int(i_)]).index] for e_ in bm.verts[int(i_)].link_edges if e_.other_vert(bm.verts[int(i_)]).index in io_] for i_ in ii]
+        hi_ = X[:, 1] > float(np.max(W[ci, 2])) - 0.3; sl_ = float(opt.get('top_ground', 0.06)); fixed_ = 0
+        for it_ in range(80):
+            g2 = gy.copy()
+            for k_ in np.nonzero(hi_)[0]:
+                if nbt[k_]: g2[k_] = min(gy[k_], min(gy[j_] for j_ in nbt[k_]) + sl_)
+            ch_ = int((g2 < gy - 1e-9).sum()); gy = g2
+            if it_ == 0: fixed_ = ch_
+            if ch_ == 0: break
+        print('foldfront: front %d: the ground carried on above the roll top (%d points had fallen past the front)' % (s['layer'], fixed_))
     if opt.get('cusp'):
         # at the cusp the two lapels cross and the tail of one lies over the roll of the other: read point by point
         # that ground is a row of steps (a ray hits the other lapel's edge, the next one misses it), and the tail took

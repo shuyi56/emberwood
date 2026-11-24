@@ -765,3 +765,20 @@ again (no seam found) and the outline gap went to 0.040.
 **Open, and now the thing in the way:** the lapel's top edge is ragged (the stretched edges at t -0.4 to -0.8 found in
 phase 8), and one of its spikes comes through the collar's face as a fin in the 3/4 close-ups. It is there with and
 without `gorge_flush`. The join cannot read clean until that edge does.
+
+**The ragged top edge, found and fixed (`top_ground`, foldfront, on for `outline_inner` lapels).** Open since phase 8.
+Traced by dumping the ground each lapel point is laid on: above the coat's neckline the ray that reads the ground
+misses the front and hits the neck or the shoulder 0.7 behind it, and it does so row by row (one row finds the front,
+the next falls past its edge). 184 and 219 points per side had fallen. The cloth took the steps as stretched edges.
+Now, above the roll top, no point's ground may lie further back than its neighbours' by more than 0.06 an edge, so the
+ground is carried on from where the front still is.
+
+| Lapel (recut) | Edges stretched over 2x (her right / left) | Worst edge | 95th percentile |
+|---|---|---|---|
+| Before | 35 / 24 | 3.7x / 3.8x | 17% / 21% |
+| **`top_ground`** | **0 / 0** | 1.55x / 1.87x | 10% / 14% |
+
+On it: polycheck passes (lapel 4 of 4, no mismatch), the collar's outline gap is 0.027 with 4 sides. Join: seam 1.5 /
+0.8 cm, step 3.6 / 6.9 mm, tip fold 7 / 8 degrees. In the close-ups the spike through the collar is gone but for a small
+bump, and the top edge is smoother, not yet clean: a few teeth remain near the roll top, and her left side's step at the
+seam is still above a cloth's thickness.
