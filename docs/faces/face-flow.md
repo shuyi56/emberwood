@@ -161,9 +161,65 @@ this work; it needs its own fix and is listed below.
 
 ## 6. What to do next
 
-1. The brow's edge and its run into the nose, built inside the socket's carve (orbit.js and orbit.py together),
-   measured with the join gap and the brow line's heights (ref 0.21, 0.31, 0.38).
+1. ~~The brow's edge and its run into the nose, built inside the socket's carve~~: done in section 7 (the join gap
+   0.22-0.26 to 0.04-0.06 on the four women). The Knight's join stays at 0.21 with item 5.
 2. The mouth's width, if John wants it: the reference and the norms put the corners under the inner edge of the iris.
 3. The nasofrontal angle (140 against 115-125): the glabella's swell and the radix's depth in the profile.
 4. The horizontal banding in raking light (the ring grid), before any of the above is judged in a full render.
 5. The Knight's radix under his brow torus (the grid's projection onto the nose solid under an overhang).
+
+## 7. Brows round the eye, the socket and the nose's side carved to them (`tools/face-creator/apply-brow-arc.py`)
+
+John 2026-11-24: "Give the brows more defined curves and shape the face accordingly. Thicker more curved that follow the
+contours of the eyes. Carve the nose by following the contours of eye curves so it looks less conic like it does now".
+
+What was wrong, measured in the creator's own units:
+
+- The painted brow sat about 5 mm too high and was thin. Its middle ran 26.8 mm over the inner corners' line at the
+  head and 32 mm at the peak, so its upper margin was 30-35 mm up, and it was 6 mm tall at the head and 8 mm at its
+  widest. Its peak lay past the outer corner and its tail fell only 2 mm.
+- Inside each socket's block the skin is a Coons patch spanned over the plain face (`orbitSkinField`). Between the
+  brow, the eye and the nose that left one flat plane, so the nose's straight side wall met it along a straight line.
+  That straight line is the cone.
+
+The sources:
+
+| Source | What it gives | Used for |
+|---|---|---|
+| Park, Yun and Son 2017, Arch Plast Surg 44:65 (20 women aged 20-30, gaze ahead) | Upper brow margin over the inner corners' line: 26.9 mm over the inner corner, 30.9 mm over the lateral limbus (always the peak), 28.2 mm over the outer corner, 21.8 mm at the tail's end | The upper margin's table |
+| Rajabi et al. 2017, Clin Ophthalmol 11:1333 (60 women) | Medial brow height 7.5 +- 1.9 mm (4-13) | Brow thickness: about 10 mm at the head ("thicker", inside the range) |
+| Yalcinkaya et al. 2016, Eur Arch Otorhinolaryngol | Head over the inner corner, tail on the line from the wing through the outer corner, peak over the lateral limbus; her brow several mm above the rim, his on it | Where the brow ends; the rim's gap |
+| Proko (planes of the head); Bridgman | Sockets "angled up from the outside to the keystone"; the plane from the nose bridge to the eye | The carve deepest in the upper inner quarter, where the socket runs into the nose |
+
+The changes:
+
+1. **The brow's margins come from tables.** The upper margin follows Park's numbers. The lower margin runs parallel
+   to the eye's arc, 10 mm under the upper at the head, 8.7 mm at the peak, and tapers to the tail. The head is rounded
+   at its corners instead of cut square. Arch, height and thickness still work as before. His brow is flatter and
+   lower, and heavier by 0.15. The old 0.35 on a 10 mm brow made a 15 mm bar.
+2. **The brow ridge follows the arc.** Its crest rises and falls with the brow's middle line, at 0.8 of its movement.
+3. **The socket is carved under the arc (`S.carve`, added to the skin field's span).** The hollow has these edges:
+   - Top: 2.5 mm under the brow's lower margin for her, and on it for him.
+   - Inner side: 8 mm from the midline.
+   - Bottom: 15 mm under the pupil.
+
+   It is deepest in the upper inner quarter, 3 mm times the socket slider. It is 0.7 of that down the nose's side
+   past the inner corner, and a quarter of it elsewhere. The nose is added onto the span after the carve, so its side
+   wall runs on down into the hollow. The foot of the wall now follows the eye's curve instead of a straight line.
+
+The gauges, all five faces (`docs/faces/face-flow-data/brow-arc-flow-gaps.md`):
+
+| Face | Brow-to-nose join gap, before → after (ref 0.003) | Bony base / alar | Dorsal lines / TDP |
+|---|---|---|---|
+| Ranger | 0.224 → 0.058 | 0.70 → 0.70 | 1.06 → 1.06 |
+| Rogue | 0.249 → 0.044 | 0.64 → 0.75 | 1.07 → 1.07 |
+| Warden | 0.237 → 0.044 | 0.74 → 0.74 | 1.11 → 1.11 |
+| Sorceress | 0.256 → 0.045 | 0.72 → 0.72 | 1.09 → 1.09 |
+| Knight | 0.249 → 0.209 | 0.78 → 0.77 | 1.19 → 1.19 |
+
+- The nose's ratios held.
+- The brow now runs into the nose on the four women.
+- The Knight's join is still open. His radix under the torus is broken in the grid (section 6, item 5).
+
+Renders are in the project files (`face-flow/`): `brows-before-after.png`, `render-brow-arc-before-after.png` and
+`clay-brow-arc-before-after.png`.

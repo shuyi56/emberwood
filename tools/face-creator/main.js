@@ -173,6 +173,7 @@ function faceRelief(x, z) {
     // (the brow ridge falls away toward the middle and eases down into the sockets: a ridge that ran on across the
     // bridge as a shelf threw a band of shade between the eyes)
     d += gauss(x, z, s * 0.15 * es, 0.62, x * s < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
+    /* brow arc (apply-brow-arc.py): ridge */ d += browRidgeArc(x * s, z, es);      // (the ridge curves with the brow: apply-brow-arc.py)
     d += gauss(x, z, s * 0.14 * es, 0.525, 0.08, 0.05, -0.06 * P.sockets);
     d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * P.cheekbones);
     d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * P.apples);
@@ -539,6 +540,7 @@ function orbitSkinField(S, headY, box, M, nh) {
   var nb25 = Math.max(2, Math.round(2.5 * e / h));
   span = oBlur(span, ny, nx, nb25);
   for (k = 0; k < N; k++) Hh[k] = Hh[k] + (span[k] - Hh[k]) * osm(0, 6 * e, edge[k]) + (Hn ? Hn[k] : 0);
+  /* brow arc (apply-brow-arc.py): carve */ if (S.carve) for (k = 0; k < N; k++) Hh[k] += S.carve(X[k] - S.cx, Z[k] - S.cz) * osm(0, 6 * e, edge[k]);      // (the socket under the brow's arc, the nose's side running into it: apply-brow-arc.py)
   var wu = oBlur(nearUp, ny, nx, Math.max(2, Math.round(2.0 * e / h)));
   var reach = new Float64Array(N), fixed = new Uint8Array(N), core = new Uint8Array(N), Dl = new Float64Array(N), Dm = new Float64Array(N);
   for (k = 0; k < N; k++) {
@@ -1174,6 +1176,7 @@ function buildSockets(pos, eyes, plain) {
   if (R0) headY.base = function (x, z) { return lookup(R0, x, z); };
   // the eye from the head's measure; the opening's shape from the creator's lids (the almond drawn in 2D)
   var px = P.eyeSpacing * HH, S = orbitSpec(HH, 2 * px, 0.525 * HH + EYE_LIFT + P.lift, headY, lidCurve(true), lidCurve(false), { tilt: P.tilt, almond: { liftRatio: P.lift / RX } });
+  /* brow arc (apply-brow-arc.py): spec */ S.carve = socketCarve(S);
   // the block of the grid round the eye at x > 0: its middle row on the corner line, an odd number of rows
   var mid = NS >> 1, jc = 0, best = Infinity, dzs = [];
   var rowsOf = plain || pos;
@@ -2081,11 +2084,44 @@ function lipFamily() {
 }
 
 /* ---- the brows (brow_image): Poisson-disk roots, hairs that follow the brow's growth, a powder under them ---- */
+/* brow arc (apply-brow-arc.py) */
+var BROW_ARC = { t: [0, 0.03, 0.25, 0.47, 0.63, 0.8, 1], top: [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], bot: [17.6, 17.2, 20.6, 22.2, 22.0, 21.0, 20.2] };      // (mm over the inner corners' line: the upper margin Park 2017's, the lower parallel to the eye's arc; apply-brow-arc.py)
+function browTab(tab, t) {      // (a cubic through the table's points)
+  var T = BROW_ARC.t, n = T.length, i = 0; t = clamp(t, 0, 1);
+  while (i < n - 2 && t > T[i + 1]) i++;
+  function m(j) { return j <= 0 ? (tab[1] - tab[0]) / (T[1] - T[0]) : j >= n - 1 ? (tab[n - 1] - tab[n - 2]) / (T[n - 1] - T[n - 2]) : (tab[j + 1] - tab[j - 1]) / (T[j + 1] - T[j - 1]); }
+  var h = T[i + 1] - T[i], s = (t - T[i]) / h, s2 = s * s, s3 = s2 * s;
+  return (2 * s3 - 3 * s2 + 1) * tab[i] + (s3 - 2 * s2 + s) * h * m(i) + (-2 * s3 + 3 * s2) * tab[i + 1] + (s3 - s2) * h * m(i + 1);
+}
+/* the brow's middle line and half-height at u (the eye's units out from the pupil), in mm over the corner line, the arch
+   applied, before browHeight and browThick */
+function browArcMM(u) {
+  var Kb = RX / 1.1, us0 = -0.6, us1 = 1.1 * P.browLen, t = (clamp(u * Kb, us0, us1) - us0) / (us1 - us0), sxb = P.sex || 0;
+  var top = browTab(BROW_ARC.top, t), bot = browTab(BROW_ARC.bot, t), c0 = 0.5 * (BROW_ARC.top[0] + BROW_ARC.bot[0]);
+  return [c0 + P.browArch * (1 - 0.6 * sxb) * (0.5 * (top + bot) - c0), 0.5 * (top - bot)];
+}
 function browCentre(u) {
-  var Kb = RX / 1.1, us0 = -0.6, us1 = 1.1 * P.browLen, ub = clamp(u * Kb, us0, us1), t = (ub - us0) / (us1 - us0);
-  var sxb = P.sex || 0, zc = 1.0 + 0.24 * P.browArch * (1 - 0.6 * sxb) * Math.sin(Math.PI * Math.pow(t, 1.6)) - 0.08 * t + P.browHeight - 0.06 * sxb;      // (sex: his brows sit lower on the ridge, flatter, heavier)
-  var rise = Math.sin(0.5 * Math.PI * Math.min(1, t / 0.28)), r = (0.016 + 0.17 * Math.pow(1 - t, 0.65) * (0.62 + 0.38 * rise)) * P.browThick * (1 + 0.35 * sxb);
-  return [zc - EYE_LIFT - u * RX * P.tilt, r];
+  var sxb = P.sex || 0, mmu = HH / 219, a = browArcMM(u);
+  var zc = a[0] * mmu + P.browHeight - 0.06 * sxb, r = a[1] * mmu * P.browThick * (1 + 0.15 * sxb);      // (sex: his brows sit lower on the ridge, flatter, heavier)
+  return [zc - u * RX * P.tilt, r];
+}
+/* the brow ridge's crest raised and lowered with the brow's middle line (head heights; the eye's side, x > 0) */
+function browRidgeArc(x, z, es) {
+  var u = (x - P.eyeSpacing) * HH / RX, dz = 0.8 * (browArcMM(u)[0] - 22.0) / 219;
+  return gauss(x, z, 0.15 * es, 0.62 + dz, x < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge) - gauss(x, z, 0.15 * es, 0.62, x < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
+}
+/* the socket carved under the brow's arc (S.carve, the skin field's span): a hollow inside the orbit's rim, deepest in its
+   upper inner quarter where the socket's wall runs into the nose's side. xl, zl from the pupil (model units, x lateral);
+   returns depth (y back) */
+function socketCarve(S) {
+  var mm = S.mm, sx = P.sex || 0, aMed = (S.cx - 8 * mm) / 1.05, aLat = 20 * mm, bLo = 15 * mm, gap = 2.5 * (1 - sx) * mm;
+  return function (xl, zl) {
+    var u = xl / RX, a = browArcMM(u), bUp = Math.max(8 * mm, (a[0] - a[1]) * mm + (P.browHeight - 0.06 * sx) - gap - (S.cz - (0.525 * HH + EYE_LIFT)));
+    var ax = xl < 0 ? aMed : aLat, bz = zl > 0 ? bUp : bLo, rho = Math.sqrt(xl * xl / (ax * ax) + zl * zl / (bz * bz));
+    if (rho > 1.12) return 0;
+    var th = Math.atan2(zl / bz, -xl / ax) * 180 / Math.PI, w = Math.max(0.25 + 0.75 * Math.exp(-Math.pow((th - 45) / 50, 2)), 0.7 * Math.exp(-Math.pow((th + 35) / 35, 2)));      // (and in its lower inner quarter, down the nose's side past the inner corner)
+    return 3 * mm * P.sockets * w * osm(1.1, 0.75, rho);
+  };
 }
 function paintBrows(eyes) {
   var c2 = browLayer.getContext('2d'); c2.clearTabs = 0; c2.clearRect(0, 0, TW, TH);
@@ -2101,7 +2137,7 @@ function paintBrows(eyes) {
     for (var yy = y0; yy < y1; yy++) for (var xx = x0; xx < x1; xx++) {
       var xm = (xx + 0.5) / PXU - HH / 2, zm = (TPX - (yy + 0.5)) / PXU, u = (xm - E.x) * s / RX, dz = zm - E.ez - u * RX * P.tilt;
       var cr = browCentre(u), sd = (dz - cr[0]) / Math.max(cr[1], 1e-3), ub = u * Kb;
-      var shape = sm(-1.15, -0.8, sd) * sm(1.2, 0.6, sd) * sm(-0.68, -0.35, ub) * sm(1.1 * P.browLen + 0.05, 1.1 * P.browLen - 0.25, ub);
+      var shape = sm(-1.15, -0.8, sd) * sm(1.2, 0.6, sd) * sm(-0.68, -0.35, ub - 0.18 * sd * sd) * sm(1.1 * P.browLen + 0.05, 1.1 * P.browLen - 0.25, ub);
       if (shape <= 0) continue;
       var powder = shape * (0.5 + 0.15 * warpedFbm(u * 3, dz * 3, 111, 2)) * sm(-0.85, -0.55, ub - 0.12 * Math.pow(Math.max(0, sd), 2)) * (0.6 + 0.4 * sm(-0.75, -0.3, ub));
       var o = ((yy - y0) * Wd + (xx - x0)) * 4;
@@ -2110,7 +2146,7 @@ function paintBrows(eyes) {
     c2.putImageData(im, x0, y0);
     // the hairs
     var r = rng(17 + (s > 0 ? 1 : 0)), dmin = 0.022 / Math.sqrt(P.browDensity), cell = dmin / Math.SQRT2, grid = {}, roots = [], tries = 0;
-    while (tries < 60000 && roots.length < 1400 * P.browDensity) {
+    while (tries < 60000 && roots.length < 2000 * P.browDensity) {
       tries++;
       var u = UIN - 0.05 + (UOUT - UIN + 0.05) * r(), cr = browCentre(u), dz = cr[0] + (r() * 2 - 1) * cr[1] * 1.05, ub = u * Kb, side0 = (dz - cr[0]) / Math.max(cr[1], 1e-3);
       var keep = (0.3 + 0.7 * sm(-0.72, -0.3, ub)) * sm(-0.74, -0.55, ub - 0.12 * Math.pow(Math.max(0, side0), 2));

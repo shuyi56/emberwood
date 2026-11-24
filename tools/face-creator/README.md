@@ -16,6 +16,7 @@ What the snapshot holds, oldest first:
 | Eye-white vessels rooted at the corners, five trunks fanned per corner | lips thread | `apply-sclera-veins.py` |
 | Pores in the skin's layers: 64/cm2 at 0.16 mm2 (Flament 2015), per-colour diffuse normals, occlusion not paint | pores thread | `apply-pores.py` (on `face-creator.html` or `main.js`) |
 | Face flow: the bridge's side walls run out into the cheeks and the inner corners (slope 2.0 to 1.2-1.28, crest wider at the radix, the upper wall turning back at 8 mm, not 5.5), and the bridge sinks into the glabella above the radix; tip, wings and nostrils unchanged | face flow thread (`docs/faces/face-flow.md`) | `apply-face-flow.py` |
+| Brow arc: the brows thicker (10 mm at the head) and curved round the eye on Park 2017's heights (peak over the lateral limbus), the brow ridge following them, the socket carved under the arc inside the skin field so the nose's side wall runs on into it along the eye's curve | face flow thread (`docs/faces/face-flow.md` section 7) | `apply-brow-arc.py` |
 
 The grid code indexes the head through `NS` (columns) and `NR` (rings) everywhere, so the nose's change of column
 count carries through the sockets, the mouth block and the lips without edits. The pores bake on the head's UVs and
