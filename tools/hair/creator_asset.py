@@ -28,6 +28,13 @@ AO_R = 0.03                        # DRAFT: the probe's radius, head heights (ab
 AO_STEPS = (0.03, 0.07, 0.12)      # DRAFT: probes outward from the vertex, head heights
 AO_MID = 0.75                      # STYLE: the light through the hair at the median card vertex
 AO_MIN = 0.35                      # STYLE: the deepest hair keeps a third of the light, so it never goes black
+# The strands' own self-shadowing: Scheuermann 2004 ("Practical Real-Time Hair Rendering and Shading", SIGGRAPH
+# sketch) computes per-vertex ambient occlusion in pre-processing and multiplies it into diffuse and specular alike;
+# without it every strand, the outermost and the one a centimetre under it, is lit the same and the hair reads as
+# one flat sheet. The amounts below are ours: the paper gives none.
+SAO_MID = 0.7                      # STYLE: the light at the median strand point
+SAO_MIN = 0.22                     # STYLE: the deepest strand point (darker than the cards': the gaps between locks
+                                   # are where the hair's depth shows)
 
 
 def b64(a, dt):
@@ -70,13 +77,19 @@ def main():
         p = p[~np.isnan(p[:, 0])]
         if len(p) >= 2:
             keep.append(p)
+    # each strand's lock and clump (its nearest guide): the page tones whole locks and clumps a little lighter or
+    # darker, the "ID map" of card hair (80.lv / CGMA: big clumps first, then subclumps)
+    from scipy.spatial import cKDTree
+    near = cKDTree(Gm['roots']).query(np.array([p[0] for p in keep]))[1]
+    lk = Gm['lock'].astype(int) * 1000 + Gm['clump'].astype(int) if 'lock' in Gm and 'clump' in Gm else near * 0
+    hsh = lambda v: ((v.astype(np.int64) * 2654435761 + 12345) >> 7) % 251
+    ids = np.stack([hsh(lk[near]), hsh(near)], 1).astype('u1')
     counts = np.array([len(p) for p in keep])
     P = np.concatenate(keep)
     q = 2.5 / 32767
     rep['strands'] = dict(n=int(len(keep)), counts=b64(counts, '<u2'), pos=b64(np.round(P / q), '<i2'), q=q,
                           hairs_per_strand=round(float(share.mean() * Gm['n_hairs'].sum()), 2))
     rep['guides'] = int(len(Gm['roots']))
-    from scipy.spatial import cKDTree
     tree = cKDTree(P[::2])
     V, _, Fc = read_obj(os.path.join(cdir, 'scalp-cap.obj'))
     centre = V.mean(0) - np.array([0, 0, 0.15])        # inside the skull, below the cap's middle
@@ -86,6 +99,15 @@ def main():
         out = V - centre
         out /= np.linalg.norm(out, axis=1, keepdims=True)
         return sum(np.array([len(x) for x in tree.query_ball_point(V + out * d, AO_R)]) for d in AO_STEPS)
+    # the strands' AO: probes outward from the head; below the skull's middle, level outward from the neck's axis
+    # (a probe from the skull's centre would run down along the hanging hair and count the strand's own lock)
+    outS = P - np.where(P[:, 2:3] < centre[2], np.array([centre[0], centre[1], 0]) + np.array([0, 0, 1]) * P[:, 2:3], centre)
+    outS /= np.maximum(np.linalg.norm(outS, axis=1, keepdims=True), 1e-6)
+    cs = sum(np.array([len(x) for x in tree.query_ball_point(P + outS * d, AO_R)]) for d in AO_STEPS)
+    sao = np.clip(np.exp(-cs / (np.median(cs) / -np.log(SAO_MID))), SAO_MIN, 1.0)
+    rep['strands']['ao'] = b64(np.round(sao * 255), 'u1')
+    rep['strands']['ids'] = b64(ids, 'u1')
+    print('strand ao mean %.2f, 10th pct %.2f' % (sao.mean(), np.percentile(sao, 10)))
     # the scale: the hair over the median LOD 0 vertex lets through AO_MID of the light
     k = np.median(crowd(read_obj(os.path.join(cdir, lod_files[0]))[0])) / -np.log(AO_MID)
     for name, f in zip(names, lod_files):

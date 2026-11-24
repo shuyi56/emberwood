@@ -2267,6 +2267,55 @@ def lay_in(X, keep, style_path, col):
     return push_valid(col, X)
 
 
+# The ears covered from the front (John, 2026-11-24: "fix the problem with the front"): the creator's side hair lies
+# in front of the ear, its inner edge at |x| 0.30 to 0.32 from the brow to the jaw; the ear's front spans |x| 0.33 to
+# 0.365, z 0.365 to 0.60. Ours lay at 0.37 to 0.39 there (the S's crest at the cheekbone is out from the face by 10 mm),
+# so the ear showed between the cheek and the hair. The face-framing hair is brought in to the creator's inner edge
+# per height, over the ear's height and a little past it; the S keeps its swing below the lobe.
+EAR_COVER_Z = (0.66, 0.6, 0.36, 0.24)  # HH: in full over the ear's height, eased in above and out below
+EAR_COVER_PCT = 10            # the inner edge: this percentile of |x| per height (hair beside the face, not the bangs)
+EAR_COVER_SLACK = 0.005       # HH (1 mm): ours may lie this far outside the creator's
+EAR_COVER_TH = (1.1, 1.45)    # |theta| of the roots moved: the face frame in full, none from the ear back
+
+
+def ear_cover(X, roots, bang, style_path, col):
+    """The face-framing hair moved in (in x) to the creator's inner edge at each height in EAR_COVER_Z, the move
+    smoothed along the strand; rebuilt at its segment lengths and kept out of the head."""
+    import gzip
+    d = json.load(gzip.open(style_path))
+    C = np.concatenate([np.array(st['p']).reshape(-1, 3) for st in d['strands']])
+    ok = ~np.isnan(X[..., 0])
+    thr = np.abs(SF.theta(roots))
+    wg = np.where(bang, 0.0, 1 - SF.sm(EAR_COVER_TH[0], EAR_COVER_TH[1], thr))
+    zb = np.arange(EAR_COVER_Z[0], EAR_COVER_Z[3] - 1e-9, -0.025)
+    ours = X[(wg > 0)].reshape(-1, 3)
+    ours = ours[~np.isnan(ours[:, 0])]
+    gap = np.zeros(len(zb))
+    for i, z in enumerate(zb):
+        def edge(P):
+            m = (np.abs(P[:, 2] - z) < 0.025) & (P[:, 1] < 0.12) & (np.abs(P[:, 0] - SF.AXIS[0]) > 0.2)
+            return np.percentile(np.abs(P[m, 0] - SF.AXIS[0]), EAR_COVER_PCT) if m.sum() > 20 else np.nan
+        a, b = edge(ours), edge(C)
+        if not (np.isnan(a) or np.isnan(b)):
+            gap[i] = max(a - b - EAR_COVER_SLACK, 0.0)
+    gap = np.convolve(np.pad(gap, 1, mode='edge'), np.ones(3) / 3, 'valid')
+    z = np.nan_to_num(X[..., 2])
+    ease = SF.sm(EAR_COVER_Z[0], EAR_COVER_Z[1], z) * (1 - SF.sm(EAR_COVER_Z[2], EAR_COVER_Z[3], z))
+    mv = np.where(ok, np.interp(-z, -zb, gap) * ease, 0.0) * wg[:, None]
+    mv = _smooth_along(mv)
+    mv[:, 0] = 0
+    Y = X.copy()
+    Y[..., 0] -= np.sign(X[..., 0] - SF.AXIS[0]) * mv
+    for g in np.where(wg > 0)[0]:
+        n = ok[g].sum()
+        if n < 3:
+            continue
+        dd = np.diff(Y[g, :n], axis=0)
+        L = np.linalg.norm(np.diff(X[g, :n], axis=0), axis=1, keepdims=True)
+        Y[g, 1:n] = X[g, 0] + np.cumsum(dd / np.maximum(np.linalg.norm(dd, axis=1, keepdims=True), 1e-12) * L, 0)
+    return push_valid(col, Y, mask=(wg > 0)[:, None] & ok)
+
+
 SIDE_BLEND_SIGMA = 0.02      # HH (4.4 mm): each side guide's shape blended with its lock's guides rooted round it, so
                              # neighbouring guides lie as one combed sheet instead of each holding its own small bends
 
@@ -2843,6 +2892,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             # on the face edge and the outer outline keeps the creator's width
             X2 = lateral_s(X2, roots, bang & (fl < 0), col)
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
+            # the ears covered from the front: the face frame in to the creator's inner edge (see EAR_COVER_*)
+            X2 = ear_cover(X2, roots, bang, trace, col)
             X2 = relax_spikes(X2, col, keep=bang)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
