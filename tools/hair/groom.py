@@ -2739,6 +2739,156 @@ def back_flow(X, sel, roots, col, z0=None):
     return X
 
 
+
+# The sweep back (John, 2026-11-24: "read how to properly sweep back hair"). The side hair cut on the ear line is swept
+# from the hairline back over the top of the ear, tucked behind it and laid down with the back hair, as a stylist
+# dries the face section last, away from the face. SOURCED:
+#   [SV-BD]  samvilla.com, "How to blow dry hair, 6 steps": fingers "at the front hairline and move the hair back away
+#            from the face"; the brush "parallel to the grain" (the comb takes hold at the root, not part way down).
+#   [SV-SEC] samvilla.com, "Section your hair": the face last, "blow drying away from the face to direct hair back"
+#            (the swept hair lies over the hair under it); sections 1 to 1.5 inches deep, never wider than the brush.
+#   [BTC-MB] behindthechair.com, men's blowout: the sides "straight back with a brush", airflow back (no lift
+#            at the side: the forward over-direction there is for the volume on top, which the Warden does not wear).
+#   [LO-TK]  lorealparisusa.com, tucking hair behind the ears; lorealparis.ca, side-swept hair: the tucked hair is held
+#            "just above your ear" / "just behind your ear"; newbeauty.com, hair tucking: the loose hair behind covers
+#            where the tuck is held.
+#   [DUM]    dummies.com, drawing hairstyles on fashion figures: lines "wrap around the head to the level of the ears"
+#            then fall; slicked-back lines "curve away from the forehead or toward the nape"; parallel lines.
+#   [CSP]    clipstudio.net 159719: locks "wrap around the head following the curves of its surface".
+# No source gives an angle or a height: the slope, the crossing heights and the lie are STYLE, named below.
+SWEEP_TH_BEHIND = 1.9        # |theta| where the swept hair is behind the ear (the ear spans 1.46 to 1.71 at its root,
+                             # from EAR_X and EAR_CANAL; 0.19 more for its rim standing EAR_OUT off the head)
+SWEEP_Z = (0.62, 0.3, 0.6, 0.85)  # STYLE: HH: where a guide passes behind the ear: 0.62 (just over the ear's top, 0.60,
+                             # where the tuck is held [LO-TK]) for the lowest roots, plus 0.3 HH per HH of root height
+                             # above SWEEP_ROOT_Z0, and 0.6 more above 0.85 (the top of the head goes back over the
+                             # crown, high); the lines keep the order of their roots (parallel, none crossing [DUM])
+SWEEP_TUCK_MM = 3.0          # STYLE: mm the ends lie under the outer surface of the hair behind the ear
+SWEEP_ROOT_Z0 = 0.55         # HH: the lowest root swept (the sideburn)
+SWEEP_LIE_MM = (1.5, 4.0)    # STYLE: mm over the skin at the root, rising to this over the hair rooted under it
+SWEEP_TURN = 0.12            # STYLE: HH (2.6 cm): the bend behind the ear from the sweep into the fall
+SWEEP_FALL_AIM = 0.25        # STYLE: back per unit down for the fall behind the ear (the back hair hangs nearly plumb)
+SWEEP_ROOT_SLOPE = 0.15      # STYLE: down per unit back where the hair leaves the root (along the scalp, straight back)
+SWEEP_C_SLOPE = 0.6          # STYLE: down per unit back where it passes behind the ear (gravity takes over)
+
+
+def _skin_radius(col, th, z):
+    """The head's radius from its axis (incl. the ears) at angle th and height z, by bisection on the collider."""
+    import torch
+    th, z = np.broadcast_arrays(np.asarray(th, float), np.asarray(z, float))
+    lo, hi = np.zeros(th.shape), np.full(th.shape, 0.8)
+    for _ in range(28):
+        mid = 0.5 * (lo + hi)
+        P = np.stack([SF.AXIS[0] + mid * np.sin(th), SF.AXIS[1] - mid * np.cos(th), z], -1).reshape(-1, 3)
+        d = col.head_depth(torch.tensor(P, dtype=torch.float64)).numpy().reshape(th.shape)
+        inside = d > 0
+        lo, hi = np.where(inside, mid, lo), np.where(inside, hi, mid)
+    return hi
+
+
+def sweep_back(X, sel, roots, col, seg_hh):
+    """Each guide in sel swept back from its root (see SWEEP_*): it leaves the hairline along the scalp toward the back,
+    wraps the head in a line whose height falls smoothly from its root to where it passes behind the ear (in the order
+    of the roots), bends down there and falls with the back hair, its end tucked under the outer surface of that hair. Kept at its length; nodes lie SWEEP_LIE_MM over the skin, rising over the hair rooted under them."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    th_r = SF.theta(roots)
+    sgn = np.sign(th_r)
+    gi = np.where(sel)[0]
+    if not len(gi):
+        return X
+    # (the stylists work in 1 to 1.5 inch sections [SV-SEC], but a brushed sweep shows no section edges: the height
+    # each guide passes behind the ear runs on smoothly with its root's; per-section heights left a stair of steps
+    # along the front of the sweep, 2026-11-24)
+    z0 = roots[gi, 2]
+    zc = SWEEP_Z[0] + SWEEP_Z[1] * (z0 - SWEEP_ROOT_Z0) + SWEEP_Z[2] * np.maximum(z0 - SWEEP_Z[3], 0)
+    lie0, lie1 = SWEEP_LIE_MM[0] / SF.HH_MM, SWEEP_LIE_MM[1] / SF.HH_MM
+    # the outer surface of the hair the sweep lies over [SV-SEC]: the hair rooted behind the ear, by (|theta|, z) cell
+    # (LAYER_BIN), the furthest node in each; empty cells take their nearest
+    from scipy.spatial import cKDTree
+    U = X[~sel & (np.abs(th_r) > BACK_FLOW_TH)].reshape(-1, 3)
+    U = U[~np.isnan(U[:, 0])]
+    ut, ur = _polar(U)
+    ki = np.c_[np.round(np.abs(ut) / LAYER_BIN[0]), np.round(U[:, 2] / LAYER_BIN[1])].astype(int)
+    env = {}
+    for k, r_ in zip(map(tuple, ki), ur):
+        env[k] = max(env.get(k, 0.0), r_)
+    ek = np.array(list(env.keys()), float)
+    ev = np.array(list(env.values()))
+    etree = cKDTree(ek)
+    gap = LAYER_GAP_MM / SF.HH_MM
+
+    def under_r(TH, Z):
+        q = np.c_[TH / LAYER_BIN[0], Z / LAYER_BIN[1]]
+        dd, ii = etree.query(q, k=4)
+        wq = 1.0 / (dd + 0.5)
+        return (ev[ii] * wq).sum(1) / wq.sum(1)
+
+    def herm(p0, p1, m0, m1, k):
+        u = np.linspace(0, 1, k)[:, None]
+        return ((2 * u ** 3 - 3 * u ** 2 + 1) * p0 + (u ** 3 - 2 * u ** 2 + u) * m0
+                + (-2 * u ** 3 + 3 * u ** 2) * p1 + (u ** 3 - u ** 2) * m1)
+
+    def unit(v):
+        return v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12)
+
+    ctr = np.asarray(SF.CENTRE, float)
+    for j, g in enumerate(gi):
+        sd = sgn[g]
+        P0 = X[g, 0]
+        # where it passes behind the ear (|theta| SWEEP_TH_BEHIND, height zc), over the skin and the hair there
+        tc = SWEEP_TH_BEHIND
+        rc = max(_skin_radius(col, tc, zc[j]) + lie1, under_r(np.array([tc]), np.array([zc[j]]))[0] + gap)
+        C = np.array([SF.AXIS[0] + sd * rc * np.sin(tc), SF.AXIS[1] - rc * np.cos(tc), zc[j]])
+        # the sweep, from the root straight back along the scalp [SV-BD][BTC-MB] to C, arriving SWEEP_C_SLOPE down,
+        # laid on the head's shell (radially from the skull's centre) so it wraps the head [DUM][CSP]
+        nrm = unit(P0 - ctr)
+        m0 = np.array([0.0, 1.0, -SWEEP_ROOT_SLOPE])
+        m0 = unit(m0 - np.dot(m0, nrm) * nrm)
+        m1 = unit(np.array([sd * np.cos(tc), np.sin(tc), -SWEEP_C_SLOPE]))
+        span = np.linalg.norm(C - P0)
+        A = herm(P0, C, 1.2 * span * m0, span * m1, 80)
+        dirs = unit(A - ctr)
+        lo, hi = np.zeros(len(A)), np.full(len(A), 0.9)
+        import torch
+        for _ in range(26):
+            mid = 0.5 * (lo + hi)
+            dep = col.head_depth(torch.tensor(ctr + dirs * mid[:, None], dtype=torch.float64)).numpy()
+            lo, hi = np.where(dep > 0, mid, lo), np.where(dep > 0, hi, mid)
+        u = np.linspace(0, 1, len(A))
+        w = np.clip(u / 0.35, 0, 1)
+        lift = lie0 + (lie1 - lie0) * w * w * (3 - 2 * w)
+        # (the shell only where the curve would sink into it or float off it: the hair lies on the head)
+        A = ctr + dirs * (hi + lift)[:, None]
+        A[0] = P0
+        # then the bend round SWEEP_TURN and the fall behind the ear, SWEEP_FALL_AIM back per unit down, in (arc, z)
+        a0 = 0.0
+        pc = np.array([a0, zc[j]])
+        mc = np.array([1.0, -SWEEP_C_SLOPE]) / np.hypot(1, SWEEP_C_SLOPE)
+        mf = np.array([SWEEP_FALL_AIM, -1.0]) / np.hypot(SWEEP_FALL_AIM, 1)
+        pf = pc + SWEEP_TURN * (mc + mf)
+        Bz = herm(pc, pf, 1.5 * SWEEP_TURN * mc, 1.5 * SWEEP_TURN * mf, 24)
+        tail = pf + np.linspace(0, 1.6, 80)[1:, None] * mf
+        AZ = np.r_[Bz[1:], tail]
+        Z = AZ[:, 1]
+        TH = tc + AZ[:, 0] / rc
+        # the fall lies over the hair behind the ear through the bend, then slips under its outer surface: the ends
+        # tucked, covered by the hair behind (newbeauty.com: the loose hair covers where the tuck is held)
+        f = np.clip(np.r_[0, np.cumsum(np.linalg.norm(np.diff(AZ, axis=0), axis=1))] / (2 * SWEEP_TURN), 0, 1)
+        f = f * f * (3 - 2 * f)
+        R = np.maximum(_skin_radius(col, TH, Z) + lie1,
+                       under_r(TH, Z) + gap - f * (gap + SWEEP_TUCK_MM / SF.HH_MM))
+        Bp = np.stack([SF.AXIS[0] + sd * R * np.sin(TH), SF.AXIS[1] - R * np.cos(TH), Z], -1)
+        P = np.r_[A, Bp]
+        # resampled at the segment length, the guide's own number of nodes
+        d = np.linalg.norm(np.diff(P, axis=0), axis=1)
+        s_ = np.r_[0, np.cumsum(d)]
+        m = int(n[g])
+        sq = np.minimum(np.arange(m) * seg_hh, s_[-1])
+        X[g, :m] = np.stack([np.interp(sq, s_, P[:, c]) for c in range(3)], -1)
+    X = push_valid(col, X, mask=sel[:, None] & ok)
+    return X
+
 # The ends: each lock a ribbon that closes to a point (John, 2026-11-24, with a drawn reference of long wavy hair:
 # "the hair needs a cut to form curves, right now the hair is all over the place"). SOURCED: the cut is point cut
 # throughout, ends bevelled, never blunt (behindthechair.com, TONI&GUY bouncy long layers; hairfinder.com, the pyramid
@@ -3137,7 +3287,10 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             okz_ = ~np.isnan(X2[..., 2])
             endz_ = X2[np.arange(len(X2)), okz_.sum(1) - 1, 2]
             bf_ = ~first_ & (np.abs(SF.theta(roots)) < BACK_FLOW_TH) & (endz_ > -0.05) & (~bang | (endz_ < BACK_BANG_Z))
-            X2 = back_flow(X2, bf_, roots, col, z0=np.where(bang, BACK_BANG_Z, BACK_FLOW_Z[0]))
+            # (John, 2026-11-24, "read how to properly sweep back hair": swept from the hairline over the ear's top,
+            # tucked behind it and laid down with the back hair (see SWEEP_*); back_flow combed it only from the
+            # temple down, so it fell, hinged back at the ear and ended in the air beside the head)
+            X2 = sweep_back(X2, bf_, roots, col, seg_hh)
             X2 = relax_kinks(X2, col, None, keep=~bf_)
             lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it

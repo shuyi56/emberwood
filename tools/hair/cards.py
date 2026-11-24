@@ -223,10 +223,18 @@ def card_points(cards, step=0.004):
     return np.array(P)
 
 
-def scalp_cap(head, out, step_deg=3.0, lift_mm=1.0):
+# The cap's edge: cut across each cell where the hair's share of the scalp map crosses one half (marching squares),
+# so it runs on the hairline's own curve. Cells kept whole or dropped (3 degrees: 4.6 mm at the temple) showed as a dark
+# stair along the temple once the side hair was swept back off it (2026-11-24).
+CAP_STEP_DEG = 3.0
+CAP_EDGE_K = 12              # scalp-map points the hair's share at a grid point is read from
+
+
+def scalp_cap(head, out, step_deg=CAP_STEP_DEG, lift_mm=1.0):
     """The scalp cap: a shell 1 mm over the hair-bearing scalp, under the cards, carrying the hair's root colour so
     gaps between cards (the crown whorl, the part) show hair, not skin (the usual game hair setup: 80 Level, "Tips and
-    tricks on hair for games"). Cells of a direction grid on the head, kept where the scalp map has hair."""
+    tricks on hair for games"). Cells of a direction grid on the head where the scalp map has hair, cut on the
+    hairline's curve at the edge (CAP_EDGE_K)."""
     from scipy.spatial import cKDTree
     import scalp_field as SF
     surf = SF.Surface(SF.load_head(head))
@@ -235,16 +243,46 @@ def scalp_cap(head, out, step_deg=3.0, lift_mm=1.0):
     az = np.radians(np.arange(0, 360, step_deg))
     E, A = np.meshgrid(el, az, indexing='ij')
     U = np.c_[(np.cos(E) * np.sin(A)).ravel(), (-np.cos(E) * np.cos(A)).ravel(), np.sin(E).ravel()]
-    P = surf.point(U) + surf.normals(U) * lift_mm / SF.HH_MM
-    hairy = F['mask'][cKDTree(F['P']).query(P)[1]].reshape(E.shape).astype(bool)
+    lift = lift_mm / SF.HH_MM
+    P = surf.point(U) + surf.normals(U) * lift
+    tree = cKDTree(F['P'])
+    _, nb = tree.query(P, k=CAP_EDGE_K)
+    fv = F['mask'][nb].astype(float).mean(1)
     ne, na = E.shape
     idx = np.arange(ne * na).reshape(ne, na)
+    extra, ekey = [], {}
+
+    def cut(a, b):
+        """The point on the grid edge a-b where the hair's share crosses one half (a new vertex, shared by both cells)."""
+        k = (min(a, b), max(a, b))
+        if k not in ekey:
+            t = np.clip((0.5 - fv[a]) / (fv[b] - fv[a]), 0, 1)
+            u = U[a] + t * (U[b] - U[a])
+            u /= np.linalg.norm(u)
+            ekey[k] = len(P) + len(extra)
+            extra.append(surf.point(u[None])[0] + surf.normals(u[None])[0] * lift)
+        return ekey[k]
+
     Fc = []
     for i in range(ne - 1):
         for j in range(na):
             q = [idx[i, j], idx[i, (j + 1) % na], idx[i + 1, (j + 1) % na], idx[i + 1, j]]
-            if sum(hairy.ravel()[q]) >= 3:
+            h = fv[q] >= 0.5
+            if h.all():
                 Fc += [(q[0], q[1], q[2]), (q[0], q[2], q[3])]
+                continue
+            if not h.any():
+                continue
+            poly = []
+            for t in range(4):
+                a, b = q[t], q[(t + 1) % 4]
+                if h[t]:
+                    poly.append(a)
+                if h[t] != h[(t + 1) % 4]:
+                    poly.append(cut(a, b))
+            Fc += [(poly[0], poly[t], poly[t + 1]) for t in range(1, len(poly) - 1)]
+    if extra:
+        P = np.r_[P, np.array(extra)]
     used = np.unique(np.array(Fc).ravel())
     remap = -np.ones(len(P), int); remap[used] = np.arange(len(used))
     with open(os.path.join(out, 'scalp-cap.obj'), 'w') as f:
