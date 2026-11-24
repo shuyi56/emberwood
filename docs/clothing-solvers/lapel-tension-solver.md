@@ -729,3 +729,39 @@ What the measuring did settle: the neckline starts at the lapel's roll top and r
 side by side along 6 cm, and any collar hung from the neckline folds its fall down over that gap. Stopped after two
 worse rounds (stop rule). The open choice is which cloth moves: the collar's seam (tried three ways, each worse) or the
 lapel's top edge (not tried).
+
+## Phase 12: the lapel's top edge recut onto the neckline (2026-11-24)
+
+John chose "Recut the lapel's top edge" (decision card) after three tries at moving the collar failed.
+
+**Measured first.** The 0.3 to 0.4 between the lapel's top edge and the neckline is two things: 0.2 to 0.35 off the
+coat's surface (the turned lapel lies a cloth above the front, which is right), and an in-plane drop below the neckline
+that grows from 0 at the roll top to 0.38 at the corner G. Only the second is a fault of the cut.
+
+**The recut (experimental).** The corner G moved up the fold, t -1.0 to -1.3, and the point P with it (-0.8 to -1.1) so
+the end edge keeps its direction:
+`{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.3,1.0],[-1.1,2.0],[1.0,0.0]],"outline_inner":[[-1.3,1.0],[0.0,0.0]],"outline_fillet":{"N":0.3,"G":0.08,"P":0.09}}`
+
+| | TZ48 (before) | G only to -1.3 | **G and P (TZ61)** |
+|---|---|---|---|
+| Top edge below the neckline, mean (her left / right) | 0.16 / 0.12 | 0.02 / -0.02 | **0.04 / -0.01** |
+| At the corner | 0.38 / 0.36 | 0.23 / 0.18 | 0.21 / 0.18 (the corner's fillet) |
+| polycheck, lapel | 4 of 4, no mismatch | end edge 21 degrees off, corners 24 off | **4 of 4, no mismatch** (top edge 13 degrees, photo 7) |
+
+**The collar on it** (`foldcollar_build.sh`, with `gorge_flush` 1.6 and `gorge_level` 0.12: within 1.6 of the lapel's top
+edge the collar is let down from its clearance toward the lapel's own level):
+
+| | Lifted collar on TZ48 | On the recut lapel | **With `gorge_flush`** |
+|---|---|---|---|
+| Outline gap to the photo | 0.055, 5 sides | 0.028, 4 sides | **0.027, 4 sides** |
+| Seam found by `join.py` | none | 1.2 / 0.4 cm | **1.7 / 1.5 cm** |
+| Step at the seam | - | 5.8 / 7.5 mm | **2.9 / 4.8 mm** (cloth 4.4) |
+| Turn across the seam, 90th pct | - | 20 / 18 degrees | 25 / 25 |
+| Tip fold | - | 9 / 8 degrees | 11 / 9 |
+
+**Rejected:** a last pass lifting collar cloth left under the coat's surface (`floor`): it lifted the collar off the seam
+again (no seam found) and the outline gap went to 0.040.
+
+**Open, and now the thing in the way:** the lapel's top edge is ragged (the stretched edges at t -0.4 to -0.8 found in
+phase 8), and one of its spikes comes through the collar's face as a fin in the 3/4 close-ups. It is there with and
+without `gorge_flush`. The join cannot read clean until that edge does.

@@ -25,7 +25,7 @@ Method (closed form, then a push off the coat):
   5. the fall is pushed off the coat and the lapels (BUILD's build.npz) by the cloth's thickness
 
 Options: width 2.2, stand 0.9, fold_angle 45, corner 0.5, open 25, mesh 0.06, lift 0.1, clear 0.14.
-Shaping to the neck (off by default; `bone` 0..1 lays each end's lower edge on the collarbone's line): fold_k (the roll line's turn spread, 3), lift_run (the crease's turn, 0.3),
+Shaping to the neck (off by default; `bone` 0..1 lays each end's lower edge on the collarbone's line; `gorge_flush` R lets the collar down level with the lapel within R of the lapel's top edge): fold_k (the roll line's turn spread, 3), lift_run (the crease's turn, 0.3),
 push_even/push_grow (600/20), shape_cut (the flat cut solved from the lay; saves uv and uv_rect).
 Units are the build's (1 = 2.62 cm)."""
 import sys, json, math
@@ -118,14 +118,28 @@ def build(B, opt):
     from scipy.sparse import coo_matrix
     nA = len(UV); Adj = coo_matrix((np.ones(2 * len(ed_)), (np.concatenate([ed_[:, 0], ed_[:, 1]]), np.concatenate([ed_[:, 1], ed_[:, 0]]))), shape=(nA, nA)).tocsr()
     dg = np.maximum(np.asarray(Adj.sum(1)).ravel(), 1); dirn = np.zeros((nA, 3)); dirn[idx] = nm
+    # (the gorge, `gorge_flush`: John chose "Recut the lapel's top edge", 2026-11-24, so that edge now lies on the
+    # neckline and the collar's cloth runs beside it. A butted seam has no step: within `gorge_flush` of a lapel's top
+    # edge the collar is not held a clearance above the lapel's surface but let down level with it, the clearance
+    # coming back smoothly away from the edge)
+    clrp = np.full(nA, clr); wz = np.zeros(nA)
+    if opt.get('gorge_flush'):
+        gr = float(opt['gorge_flush']); te = [L['pts' + s_][L['inner' + s_].astype(bool)] for s_ in '12' if ('inner' + s_) in L.files]
+        if te:
+            dte = cKDTree(np.vstack(te)).query(X3)[0]; u_ = np.clip(dte / gr, 0, 1); sm = u_ * u_ * (3 - 2 * u_); clrp = clr * sm + float(opt.get('gorge_level', 0.0)) * (1 - sm); wz = 1 - sm
     for _ in range(opt.get('push_rounds', 2)):
         d, j = tree.query(X3[idx]); sd = ((X3[idx] - KX[j]) * Kn[j]).sum(1)
-        need = np.zeros(nA); need[idx] = np.where((d < 0.6) & (sd < clr), clr - sd, 0.0)
+        need = np.zeros(nA); need[idx] = np.where((d < 0.6) & (sd < clrp[idx]), clrp[idx] - sd, 0.0)
         for _s in range(opt.get('push_grow', 6)):                # (the envelope: every point at least what its neighbours need)
             nb_max = np.zeros(nA); np.maximum.at(nb_max, ed_[:, 0], need[ed_[:, 1]]); np.maximum.at(nb_max, ed_[:, 1], need[ed_[:, 0]])
             need = np.maximum(need, 0.9 * nb_max) * fall
         for _s in range(opt.get('push_even', 30)): need = (0.5 * need + 0.5 * (Adj @ need) / dg) * fall     # (then evened)
         X3 += need[:, None] * dirn; moved += need
+    if opt.get('gorge_flush'):                                  # (and let down where the lay left it standing above the lapel)
+        d, j = tree.query(X3[idx]); sd = ((X3[idx] - KX[j]) * Kn[j]).sum(1)
+        fl = np.zeros(nA); fl[idx] = np.where(d < 1.0, np.clip(sd - clrp[idx], 0, 0.8), 0.0) * wz[idx]
+        for _s in range(40): fl = (0.5 * fl + 0.5 * (Adj @ fl) / dg) * fall
+        X3 -= fl[:, None] * dirn
     # 5b. the turned end on the collarbone: John, 2026-11-24, "Adjust that triangle part to the neck bone it's on".
     # The collarbone runs from the notch (|x| 0.75) out to the top of the shoulder (4.7), level and a little higher at
     # its outer end (blender/gown/gown.py `collarbones`: z 50.2 rising 0.2 along u^1.5). The laid triangle's lower edge
