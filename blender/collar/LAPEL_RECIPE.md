@@ -408,3 +408,94 @@ John (2026-11-22): "the left collar needs more adjustment to its position to com
 - `edge_fair` (12), `edge_in` (20): the free edge faired along itself and the cloth just inside brought along, because where the collar's point crosses the lapel's edge the ground steps down a cloth's thickness.
 
 After: the fall hovers 0.2 mm on average, the end edges lie on the cloth (gap 0.207 against a clearance of 0.207 over most of their length), the notch is 40.9 and 41.0 degrees as laid, sharp folds 0, and the two sides still mirror. The bottom edge at each point is slightly uneven in the close textured view where it crosses the lapel's edge.
+
+## The roll line straightened by the tension solver (2026-11-22)
+
+John: "Create a compression solver that reads our bodice without any lapels or collars then using the tension as a
+guideline develop the ideal shape of lapels and collars to reduce tension." `blender/tension/` reads the bare cut's
+field and scores every roll line by the strain the turned lapel must take. The current line's swing (`belly` 0.25)
+bows into the ring of tension and gathering round the bust; a straight line stays out of it. Built:
+
+```
+python3 blender/collar/foldfront.py CUT.blend LAPEL.blend '{"recipe":"derived_lapel"}'
+```
+
+Strain mean 4.3/4.7% to 3.1/3.6%, 95% of edges 14.3/15.0% to 9.7/10.9%, worst visible edge +39% to +27%, the pull on
+the button pins about halved, the notch laid 40.4 on both sides. The outline is 0.42 wide (was 0.40) so the lapel's
+reach stays 0.64 of the half shoulder. The roll top, break, point and collar are unchanged: the field either did not
+care or its preferences did nothing built. See `docs/clothing-solvers/lapel-tension-solver.md`.
+
+## The lapel and collar solved together (2026-11-23)
+
+John: "solve for smooth joins between lapel and collar that evenly distributes load". `blender/tension/feasible.py`
+swept 57 lapel and collar builds against the approved build's limits (26 feasible), then searched the join. The
+chosen pair: `{"recipe": "joined_lapel"}` (the derived lapel with its point raised from 0.27 to 0.24 of the roll line)
+and notchcollar `{"notch_angle": 30}`. The collar meets the lapel at 39 degrees across the gorge (90th percentile)
+against 50 to 54; lapel strain stays at the derived 9.5 / 10.8% (95th pct). A 0.09 point fillet scored a little
+better and tore the right lapel's edge; the stand's settings do not reach the gorge. Numbers and rounds:
+docs/clothing-solvers/lapel-tension-solver.md, phase 2.
+
+## The roll line's top eased (2026-11-23)
+
+John: "Fix the roll line". `{"recipe": "eased_top_lapel"}` is `joined_lapel` with `belly_top` -0.14: the line stays
+straight over the bust and swings 3.7 mm toward the V near the neck, so it runs into the collar's roll line. With
+the notch-30 collar the gorge carries its load more evenly than the approved build (cv 0.42 against 0.51) and the
+lapel's edge strain drops to 7.8 / 8.9% (95th pct). Swinging it out instead (+0.12) evens the load but puts the strain
+back to 14.9%. Rounds and numbers: docs/clothing-solvers/lapel-tension-solver.md, phase 3.
+
+## The roll line and the collar solved together (2026-11-23)
+
+John: "Can't solve independently the roll and collar the roll change add distortions to the collar you can see".
+The eased roll top turns the lapel crease's top tangent, and notchcollar's stand, which rises off each roll top at the
+crease's slope, rose at 0.71 instead of 1.13: the fall creased where it meets the roll turn at the side front of the
+neck. Worn together: `{"recipe": "eased_top_lapel"}` with notchcollar `{"notch_angle": 30, "rise_gain": 1.6}`, which
+restores the rise (1.14) and takes the crease out; every lapel number is phase 3's. Rounds: docs/clothing-solvers/
+lapel-tension-solver.md, phase 4.
+
+## The collar's shape (2026-11-23)
+
+John: "How do you solve for shape not just angle of the collar". Three shape options in notchcollar (`stand_shoulder`,
+`fall_side`, `end_bow`), started from Mueller & Sohn's stand taper and searched over three rounds. The taper creased
+the roll on this low stand, so the stand stays full; a slight hollow in the collar end evens the gorge load (cv 0.43 to
+0.39). Worn: `{"recipe": "eased_top_lapel"}` with notchcollar `{"notch_angle": 30, "rise_gain": 1.6, "end_bow": -0.2}`.
+Rounds: docs/clothing-solvers/lapel-tension-solver.md, phase 5.
+
+## The high (classical) lapel with the notch collar (2026-11-23)
+
+John: "Run the solver now with the harder problem of a high lapel", "The classic one", then "Collar roll runs into the
+lapel". On `classical_lapel` the collar needs the roll line to meet the neck 2.4 out (3.0 knots the collar ends), phase
+1's straight roll line, and the new `join_h` / `join_run` options, which start the collar's turn as wide and round as
+the lapel's roll at each roll top. Best so far: `{"recipe":"classical_lapel","neck_x":2.4,"foot":48.25,"belly":0.001}`
+with notchcollar `{"notch_angle":20,"notch_at":0.6,"point_len":0.5,"roll_r":0.16,"join_h":0.08,"join_run":2}`. Not
+approved: a small curl shows where the two rolls meet. Rounds: docs/clothing-solvers/lapel-tension-solver.md, phase 6.
+
+## Four-sided lapel (phase 8)
+
+Give the lapel its level top edge with `outline_inner` and fit its corners with `blender/tension/lapel_inverse.py`
+rather than by hand. Set the roll line (foot, neck_x) to the photo's roll angle first. Run
+`blender/tension/polycheck.py` on every build: the side count must match before anything else is compared. Fitted
+lapel: `{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.0,1.0],[-0.8,2.0],[1.0,0.0]],"outline_inner":[[-1.0,1.0],[0.0,0.0]]}`
+(the collar on it is not fitted yet).
+
+## The four-sided lapel recut for the folded collar (2026-11-24, experimental)
+
+The top edge lies on the neckline, so the folded collar (`foldcollar_build.sh`) is sewn beside it:
+`{"recipe":"classical_lapel","belly":0.001,"foot":49.0,"neck_x":0.4,"outline":[[-1.3,1.0],[-1.1,2.0],[1.0,0.0]],"outline_inner":[[-1.3,1.0],[0.0,0.0]],"outline_fillet":{"N":0.3,"G":0.08,"P":0.09}}`
+
+`top_ground` (0.06, on with `outline_inner`; 0 turns it off) carries the ground on above the roll top, where the lapel
+stands above the coat's neckline and a ray would read the neck behind it. See phase 12 of
+`docs/clothing-solvers/lapel-tension-solver.md`.
+
+## The notch collar's gorge laid flush (2026-11-24, experimental)
+
+`notchcollar.py ... '{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2,"gorge_flush":0.6}'` on the low lapel
+(`eased_top_lapel` on fronts levelled with `bodice_cut/over_top.py CUT 45.53,46.5`). The gorge is sewn edge to edge: the
+collar's face meets the lapel's within 0.3 mm along the gorge (it stood 7 to 9 mm proud). A shallow dent remains about
+1 cm from each roll top. Phase 16 of `docs/clothing-solvers/lapel-tension-solver.md`.
+
+## Flush gorge in the draft, 2 mm wool (2026-11-24, experimental)
+
+Set the coat's Solidify to 0.0763 (2 mm) on the cut, fold `eased_top_lapel`, then
+`notchcollar.py ... '{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2,"gorge_draft":1,"draft_fade":0.6,"draft_top_lift":0.116}'`
+(`draft_top_lift` = the cloth and the gap; 0.207 on the 4.4 mm cut). The gorge is flush within 0.3 mm, the seam rides
+over the lapel's fold at the roll top, no creases at the join. The lap at the buttons still carries the old thickness.
