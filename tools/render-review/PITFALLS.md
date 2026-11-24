@@ -201,3 +201,15 @@ repeated on more than one garment. The reviewer applies them once John merges th
   first render of the round is the first look at the ends in front, 3/4 and profile.
 - **Fix:** Point cut the ends with a 2 cm stagger instead of a straight line, leave the ends unrolled, let a cut end hang
   toward plumb, and check the ends at the jaw in the 3/4 and profile views before the front view.
+
+## R010 A collar's end or a lapel's gorge patched after the cloth is laid
+
+- **Seen:** 5 rejections on the lapel and collar solver (2026-11-24, 00:08 to 03:35Z, logged by the thread itself): dragging
+  the laid collar's end onto the lapel's top edge gave a 90 degree tip fold, moving the seam inside the build left the
+  outline gap at 0.081 and 0.068 against 0.055, moving part of the end after it was laid tore it, a gorge laid flush point
+  by point tore into a knot (91 degrees), and a gorge drafted to each point's own lapel normal zigzagged (176 degrees).
+  Four parameter searches around the collar on 2026-11-23 never moved the crease or the knot either.
+- **Spot:** The diff moves, drags, flushes or relaxes part of a collar's end, stand or the gorge after the fall is laid, or
+  adds one more collar parameter to a search while the same crease or fold persists.
+- **Fix:** Build the collar's end and the lapel's gorge as one surface from the draft, with the seam crossing the roll line
+  and running on under the fold; check tip fold and outline gap after each change, and stop after two rounds without gain.
