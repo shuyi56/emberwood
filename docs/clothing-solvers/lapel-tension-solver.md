@@ -914,3 +914,43 @@ the back it laid cleanly.
    `no_poke`): it has the first; the second is to be checked on it.
 4. Its gorge edge on the lapel's top edge at the lapel's own face, laid as one surface with it: the 55° kink and the
    4 mm step are where it is not.
+
+## Phase 16: the drafted notch collar laid flush on the low lapel's gorge (John, 2026-11-24: "Try it")
+
+**Where it stood.** A new gauge on the solidified meshes (`flush`: rays straight at the lapel's face, 1.6 mm inside
+the lapel's top edge and 1.6 mm past it) showed the drafted collar lying *on* the lapel, not sewn to it: along the
+gorge its face stood 7 to 9 mm proud of the lapel's, and in the first centimetre at the roll top the collar did not
+reach the edge at all (the coat showed through the corner). The cause is in the draft: each gorge point sat the cloth's
+thickness plus the gap over the lapel's top edge, along the one bodice normal at the notch, and the collar's own
+thickness then went outward on top of that. The lapel's face is its mesh: its Solidify goes in behind it.
+
+**The change (EXPERIMENTAL, `notchcollar` `"gorge_flush": 0.6`, off by default).** The gorge sewn as a tailor sews it,
+edge to edge with the seam pressed open, so the collar's face runs on from the lapel's: each gorge point goes onto the
+lapel's top edge, a cloth's thickness behind along the lapel's own normal there (`flush_lift`, so the collar's face is at
+the lapel's), the move is carried into the cloth as a smooth field (held at the gorge, nothing past 0.6, evened between),
+and within `flush_plane` 0.35 of the seam the cloth is laid into the lapel's plane so it leaves the seam at the lapel's
+slope.
+
+| her left (her right the same within 0.2) | drafted collar | gorge flush |
+|---|---|---|
+| collar face against the lapel's, middle of the gorge | 7 to 9 mm proud | within 0.3 mm |
+| first cm at the roll top | collar short of the edge | covered, 0 to 3 mm |
+| last half cm at the notch | 8 mm proud | 2.7 mm proud |
+| tip fold | 12° | 20° |
+| creases over 40° in the collar | 0 | 3 (53° at most, near the roll top) |
+| coat showing through the collar (colour-coded render) | none | none |
+
+`join.py`'s step, gap and turn no longer read this join: they measure the collar's mesh against the lapel's mid-surface
+and fit planes across both sides of a seam that is now edge to edge (its turn p90 reads 63° on a seam the sections show
+running flat out of the lapel's plane). The flush gauge and the sections replace them for this join.
+
+**Seen in clay:** the ledge along each gorge is gone; the gorge reads as a seam line between two faces at one depth. A
+shallow dent is left in the fall about 1 cm from each roll top, where the three creases are.
+
+**Tried and removed (rejections #140 to #142):** carrying each point by its nearest gorge point's move (tore a knot at
+the roll top, tip fold 91°); evening the cloth past the flat band (no change to the dent); carrying the move onto the
+stand as well (no change, and a dark tick at the roll top). Stopped per the stop rule after two rounds without gain.
+
+**What is left:** the dent by the roll top sits where the gorge turns into the roll line, the same corner that crumpled
+the folded collar in phase 15. It wants the fall's chart laid to the flush gorge from the start, not the fall moved
+after it is laid.

@@ -28,6 +28,7 @@ the Gaussian curvature map only (`derive.field_png`).
 | `lapel_inverse.py` | numpy | The inverse of the lapel's bend: the cut corners that land on the photo's corners, from the solved lapel's cut-to-view map. |
 | `flatview.py` | matplotlib | The flat cut beside the outline from the photo's camera, each side marked as a cut edge or an edge made by the fold or the view. |
 | `feasible.py` | matplotlib | Stage 1 and 2 of the coupled solve: the limits (the approved build's own numbers), the feasible map, the join objective. |
+| `flush.py` | bpy, scipy | The gorge join on the solidified meshes: rays straight at the lapel's face just inside its top edge and just past it, so a collar laid on the lapel (proud) or sewn flush to it reads directly. Replaces `join.py`'s step and turn for a flush gorge (phase 16). |
 
 ## Run
 

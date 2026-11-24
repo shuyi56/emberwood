@@ -485,3 +485,10 @@ The top edge lies on the neckline, so the folded collar (`foldcollar_build.sh`) 
 `top_ground` (0.06, on with `outline_inner`; 0 turns it off) carries the ground on above the roll top, where the lapel
 stands above the coat's neckline and a ray would read the neck behind it. See phase 12 of
 `docs/clothing-solvers/lapel-tension-solver.md`.
+
+## The notch collar's gorge laid flush (2026-11-24, experimental)
+
+`notchcollar.py ... '{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2,"gorge_flush":0.6}'` on the low lapel
+(`eased_top_lapel` on fronts levelled with `bodice_cut/over_top.py CUT 45.53,46.5`). The gorge is sewn edge to edge: the
+collar's face meets the lapel's within 0.3 mm along the gorge (it stood 7 to 9 mm proud). A shallow dent remains about
+1 cm from each roll top. Phase 16 of `docs/clothing-solvers/lapel-tension-solver.md`.

@@ -663,6 +663,50 @@ if settle:
         P3[zone] += 0.5 * (A_[zone] - P3[zone]); P3[fb_] = keep_
 print('notchcollar: the fall hung as a membrane over %d points toward the fronts' % len(zone))
 
+# the gorge laid flush (EXPERIMENTAL, John 2026-11-24 "Try it"): sewn to the lapel's top edge as a tailor sews it, edge
+# to edge with the seam pressed open, so the collar's face runs on from the lapel's face instead of lying on top of the
+# lapel (as laid above the gorge sits the cloth's thickness plus the gap over the lapel's face, along the one normal at
+# G: the collar's face stood 7 to 9 mm proud of the lapel's along the gorge, blender/tension/flush.py). The lapel's face is its mesh
+# (its Solidify goes in behind it), the collar's thickness lies outward: so each gorge point goes onto the lapel's edge,
+# flush_lift along the lapel's own normal there (-th: the collar's face at the lapel's), and the cloth near the gorge
+# follows, laid into the lapel's plane over flush_plane and carried along over flush_r
+flush_r = opt.get('gorge_flush', 0.0)
+if flush_r > 0:
+    from scipy.ndimage import gaussian_filter1d
+    flift = opt.get("flush_lift", -th); fplane = opt.get('flush_plane', 0.35)
+    for L, Nt in ((1, NtA), (2, NtB)):
+        lp_ = LP['pts%d' % L]; kl_ = cKDTree(lp_)
+        q0 = Nt['gorge'] - (th + gap) * Nt['nG']                         # (the lapel's top edge itself)
+        qn = np.zeros_like(q0)
+        for j_, q in enumerate(q0):
+            nb_ = kl_.query_ball_point(q, 0.3); A_ = lp_[nb_] - lp_[nb_].mean(0); n_ = np.linalg.svd(A_)[2][-1]
+            qn[j_] = n_ if n_ @ Nt['nG'] > 0 else -n_
+        qn = gaussian_filter1d(qn, 2, axis=0, mode='nearest'); qn /= np.linalg.norm(qn, axis=1)[:, None]
+        qt = q0 + flift * qn
+        side_ = np.sign(P3[:, 0]) == np.sign(q0[:, 0].mean())
+        gi_ = np.nonzero(on_gorge & side_)[0]
+        _, jg = cKDTree(Nt['gorge']).query(P3[gi_])
+        dsp = qt[jg] - P3[gi_]                                           # (each gorge point's move onto the edge)
+        # (the move carried into the cloth as a smooth field: held at the gorge, nothing past flush_r, evened between;
+        # taking each point's nearest gorge point's move instead tore the cloth where the nearest point changes)
+        qd_ = resample(qt, 0.01); dd_ = cKDTree(qd_).query(P3)[0]
+        free_ = side_ & ~on_gorge & (dd_ < flush_r)
+        Dm = np.zeros_like(P3); Dm[gi_] = dsp
+        for _ in range(opt.get('flush_even', 300)):
+            A_ = (Wm @ Dm) / deg[:, None]; Dm[free_] = A_[free_]
+        mv_ = np.nonzero(free_ | (on_gorge & side_))[0]
+        newp = P3[mv_] + Dm[mv_]
+        # (and into the lapel's plane near the seam, so the collar leaves the seam at the lapel's slope, not at a turn:
+        # the plane at each point a weighted mean of the gorge's, so it turns smoothly along the seam)
+        dq_ = np.linalg.norm(newp[:, None, :] - qt[None, :, :], axis=2); wq_ = np.exp(-(dq_ / 0.15) ** 2) + 1e-12
+        wq_ /= wq_.sum(1)[:, None]; o_ = wq_ @ qt; nq_ = wq_ @ qn; nq_ /= np.linalg.norm(nq_, axis=1)[:, None]
+        hgt = ((newp - o_) * nq_).sum(1)
+        wp_ = (1 - ss(0.0, fplane, dd_[mv_])) * ss(0.0, 0.08, dd_[mv_])     # (the gorge points themselves stay on the edge)
+        newp -= (wp_ * hgt)[:, None] * nq_
+        print('notchcollar: front %d: the gorge laid flush, %d points moved %.1f mm on average onto the lapel\'s edge, %d near it carried along'
+              % (L, len(gi_), 26.2 * np.linalg.norm(dsp, axis=1).mean(), len(mv_)))
+        P3[mv_] = newp
+
 # 8. what was built, measured
 ed = np.unique(np.sort(np.vstack([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [0, 2]]]), axis=1), axis=0)
 le = np.linalg.norm(P3[ed[:, 0]] - P3[ed[:, 1]], axis=1); lc = np.linalg.norm(UV[ed[:, 0]] - UV[ed[:, 1]], axis=1)
