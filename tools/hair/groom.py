@@ -2212,16 +2212,25 @@ WAVE_RESTORE = 1.45          # CALIBRATED: the side waves' depth brought back to
                              # the creator's 8.2)
 WAVE_ALT = True              # alternate sections curled the other way [TYMO2][MC2]: a wave lock's offset from its
                              # middle line flipped (half a wavelength) against the locks beside it
+WAVE_SPLIT_Z = 0.3           # HH: the height a side lock is split across at (the jaw, where its curl starts)
 WAVE_ALT_ID = 400            # the flipped half-locks' clump ids from here (under FRAME_CLUMP0's 900)
 
 
-def wave_signs(roots, sel, group, keep):
+def wave_signs(roots, sel, group, keep, X=None):
     """+1 / -1 per guide, and the new group ids: each side wave lock (in sel, not keep) split across the head at its
     middle into two sections about an inch wide [TYMO2], the back one curled the other way (its group id + WAVE_ALT_ID,
-    so its children blend only within it); keep (the face-framing locks) always +1: away from the face [TYMO2]."""
+    so its children blend only within it); keep (the face-framing locks) always +1: away from the face [TYMO2].
+    With X, each guide is split by where it lies at WAVE_SPLIT_Z (where the curl starts) rather than by its root: the
+    ear sweep carries the top layer back, and split by root its curl ran against the hair it then lies over (crossings
+    108 to 136 in the stress test)."""
     sg = np.ones(len(roots))
     group = group.copy()
     th = SF.theta(roots)
+    if X is not None:
+        ok = ~np.isnan(X[..., 0])
+        zz = np.where(ok, X[..., 2], np.inf)
+        k = np.argmin(np.abs(zz - WAVE_SPLIT_Z), axis=1)
+        th = SF.theta(X[np.arange(len(X)), k])
     for q in np.unique(group[sel & ~keep]):
         gi = np.where(sel & ~keep & (group == q))[0]
         if len(gi) < 4:
@@ -2294,6 +2303,97 @@ def finger_comb(X, roots, sel, group, col):
         d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
         Z[g, 1:k] = Y[g, 0] + np.cumsum(d, 0)
     return push_valid(col, Z, mask=sel[:, None] & ok)
+
+
+# The ear sweep (John, 2026-11-24: "do the ear sweep"; option B of the side-style sheet, hair-rebuild/sides: "dried
+# back above the ear"): the top of the side hair dried back from the temple over the top of the ear, then let fall.
+EAR_SWEEP_DEG = 22.0         # STYLE: the top layer's turn back from the temple to the top of the ear (35 at first: it
+                             # carried the hair 4.5 cm back and across the hair behind, crossings 108 to 136; 22: 120)
+EAR_SWEEP_Z = (0.5, 0.64)    # HH: the turn held above 0.64 (the ear's top 0.60), gone by 0.5: below it the hair falls
+EAR_SWEEP_TH = (0.8, 1.35)   # |theta| of the roots swept: the temple to the front of the ear (to 1.7 at first: the
+                             # hair over the ear's back was swept on into the back)
+EAR_SWEEP_ROOT_Z = 0.7       # HH: roots above this (the top layer, which lies over the hair beneath)
+EAR_SWEEP_EASE = 0.2         # rad (and 0.05 HH in root height): the sweep eased in and out over the edges of the part
+
+
+def ear_sweep(X, w, col):
+    """Each guide with a weight w > 0 turned back round the head (in the skin's tangent plane, away from the face) by
+    w * EAR_SWEEP_DEG while above the ear, the turn easing out below it so the hair then falls; rebuilt from the root at its
+    segment lengths and kept out of the head."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    a_max = math.radians(EAR_SWEEP_DEG)
+    for g in np.where(w > 0)[0]:
+        n = ok[g].sum()
+        if n < 3:
+            continue
+        P = X[g, :n]
+        d = np.diff(P, axis=0)
+        L = np.linalg.norm(d, axis=1, keepdims=True)
+        m = 0.5 * (P[1:] + P[:-1])
+        th, _ = _polar(m)
+        sd = np.sign(th)
+        tb = sd[:, None] * np.c_[np.cos(th), np.sin(th), np.zeros_like(th)]
+        a = a_max * w[g] * SF.sm(EAR_SWEEP_Z[0], EAR_SWEEP_Z[1], m[:, 2])
+        u = d / np.maximum(L, 1e-12)
+        down = np.array([0.0, 0.0, -1.0])
+        # turned toward the back by a: mix the strand's way with the back direction, at its own length
+        v = np.cos(a)[:, None] * u + np.sin(a)[:, None] * tb
+        v /= np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12)
+        X[g, 1:n] = P[0] + np.cumsum(v * L, 0)
+    return push_valid(col, X, mask=(w > 0)[:, None] & ok)
+
+
+# The side bangs as the front of a lateral S (John, 2026-11-24, with a reference photo of shoulder-length layers with
+# side bangs: "the side bangs should connect and form the front of the wave"; "hair styles should read like a lateral
+# curve ... at the sides"):
+# [MC3]  masterclass.com, "How to style long bangs": long bangs "go past the cheekbones for a face-framing effect";
+#        curtain bangs have "wispy sides that taper off into the rest of your hair".
+# [LH]   latest-hairstyles.com, long layered hair with side bangs: "the shortest layer and the side bangs connect
+#        smoothly", the bangs "blend seamlessly into the layers".
+# [HF2]  hairfinder.com, shoulder length with curtain bangs: "face-framing layers beginning around the cheekbones",
+#        sections "curled away from the face".
+# In the photo the bang sweeps across the brow and out past the outer eye, and that outward sweep is the first crest of
+# one S that runs down the front of the side: out at the cheekbone, in round the jaw, out again at the collar. Seen
+# from the front, the face-framing edge is a curve, not a plumb curtain. Ours hung straight from the temple to the jaw
+# (every wave of the sides started below the jaw, TOP_SMOOTH_Z), so the bangs and the sides read as two pieces.
+# (A first try carried the outer bangs' ends on along the framing locks, BANG_CONNECT: wisps over the eye at reach, no
+# change to the join when narrowed; rejected.)
+LAT_S_A_MM = 10.0            # STYLE: the S's sideways swing (the creator's side waves 8 mm median, 14 at the 90th pct)
+LAT_S_CREST_Z = 0.42         # HH: the first crest, out from the face: the outer eye to the cheekbone (eyes 0.53) [MC3]
+LAT_S_LAM = 0.6              # HH (13 cm): in round the jaw (0.12), out at the collar (-0.18), in again by -0.48
+LAT_S_Z = (0.58, 0.48, -0.35, -0.6)  # HH: grown in from the brow to the crest, faded out over the chest
+LAT_S_TH = (1.05, 1.5)       # |theta| of the roots: the face frame in full, none from behind the ear's front
+LAT_S_BANG_X = (0.16, 0.3)   # HH: a bang node moves with the S from none (the middle of the fringe) to full (its sides)
+
+
+def lateral_s(X, roots, bang, col):
+    """The front of the sides swung in one S seen from the front (LAT_S_*): each node of the face-framing hair moved
+    sideways (in x, away from the face at a crest) by the S at its height, the bangs' outer ends with it, so the side
+    bang's outward sweep is the S's first crest; rebuilt from the root at its segment lengths, kept out of the head."""
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    thr = np.abs(SF.theta(roots))
+    wg = 1 - SF.sm(LAT_S_TH[0], LAT_S_TH[1], thr)
+    sel = (wg > 0) & (ok.sum(1) > 3)
+    A = LAT_S_A_MM / SF.HH_MM
+    for g in np.where(sel)[0]:
+        n = ok[g].sum()
+        P = X[g, :n]
+        z = P[:, 2]
+        env = SF.sm(LAT_S_Z[0], LAT_S_Z[1], z) * (1 - SF.sm(LAT_S_Z[2], LAT_S_Z[3], z))
+        w = wg[g] * env
+        if bang[g]:
+            w = w * SF.sm(LAT_S_BANG_X[0], LAT_S_BANG_X[1], np.abs(P[:, 0] - SF.AXIS[0]))
+        sx = np.sign(roots[g, 0] - SF.AXIS[0])
+        D = sx * A * w * np.cos(2 * np.pi * (z - LAT_S_CREST_Z) / LAT_S_LAM)
+        Q = P.copy()
+        Q[:, 0] += D
+        d = np.diff(Q, axis=0)
+        L = np.linalg.norm(np.diff(P, axis=0), axis=1, keepdims=True)
+        d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        X[g, 1:n] = P[0] + np.cumsum(d, 0)
+    return push_valid(col, X, mask=sel[:, None] & ok)
 
 
 def recut(X, lengths, cut_z=None, keep=None):
@@ -2588,17 +2688,27 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             X2 = relax_kinks(X2, col, None, keep=bang)
             # and combed through last, within each wave lock and each framing lock: the lay-in moves nodes one by one
             # and left the sides unkempt in profile (John, 2026-11-24: "side looks unkempt, comb it")
+            # the ear sweep: the top of the side hair dried back over the ear (see EAR_SWEEP_*)
+            thr_ = np.abs(SF.theta(roots))
+            # (eased in and out at the edges of the swept part: a hard edge left swept guides crossing straight ones)
+            w_ = (SF.sm(EAR_SWEEP_TH[0] - EAR_SWEEP_EASE, EAR_SWEEP_TH[0] + EAR_SWEEP_EASE, thr_)
+                  * (1 - SF.sm(EAR_SWEEP_TH[1] - EAR_SWEEP_EASE, EAR_SWEEP_TH[1] + EAR_SWEEP_EASE, thr_))
+                  * SF.sm(EAR_SWEEP_ROOT_Z - 0.05, EAR_SWEEP_ROOT_Z + 0.05, roots[:, 2]))
+            X2 = ear_sweep(X2, np.where(~bang & (fl < 0), w_, 0.0), col)
             sd_sel = ~bang & (np.abs(SF.theta(roots)) > 0.6) & (np.abs(SF.theta(roots)) < 2.2)
             X2 = shape_blend(X2, roots, sd_sel, lk * 1000 + clump, SIDE_BLEND_SIGMA, col)
             X2 = side_form(X2, roots, lk * 1000 + clump, bang, col)
             # the waves back to the creator's depth, alternate locks curled the other way, the ends left out
             sgn = None
             if WAVE_ALT:                                   # (the back left as John approved it)
-                sgn, g2 = wave_signs(roots, sd_sel, lk * 1000 + clump, fl >= 0)
+                sgn, g2 = wave_signs(roots, sd_sel, lk * 1000 + clump, fl >= 0, X2)
                 clump = np.where(sgn < 0, clump + WAVE_ALT_ID, clump)
             X2 = wave_restore(X2, sd_sel, WAVE_RESTORE, col, sgn)
             # then finger-combed: each section a soft ribbon, the curl loosened, the last inch looser (see FC_*)
             X2 = finger_comb(X2, roots, sd_sel & (fl < 0), lk * 1000 + clump, col)
+            # the front of the sides swung in one S from the side bangs down (see LAT_S_*), then laid in: the S shows
+            # on the face edge and the outer outline keeps the creator's width
+            X2 = lateral_s(X2, roots, bang & (fl < 0), col)
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
