@@ -104,8 +104,8 @@ RESOLVE = {                     # the roots re-solved to the tie along John's li
     'ear wisp': dict(th=(1.05, 1.5), depth_mm=16.0, z=(0.0, 0.66)),
     'nape wisps': dict(th=(2.3, 3.2), depth_mm=13.0, z=(0.0, 1.0)),
 }
-LOCK_END = (0.98, 1.25)         # DRAFT, |theta|: where the temple lock's lines end their sweep (hairline roots first),
-                                # just forward of the sideburn's hairline to the fringe's outer end (1.29)
+LOCK_GATHER = 0.3               # DRAFT: the share of its root's offset a lock hair keeps at its end (the lock gathers)
+LOCK_LIFT_MM = 4.0              # DRAFT: the lock rides this far off the skin past its root (the fringe's lift is 6)
 LOOSE_FRACTION = (0.01, 0.05)   # John's bound on the loose locks' share of all hair
 CUTS_MM = (150, 120, 90, 60, 40, 25)     # the cuts the balance sheet is taken on (mm of skin from the tie)
 
@@ -485,46 +485,60 @@ def bang_line(B, i, k=40):
     return S + surf.normals(U) * lift[:, None]
 
 
-def loose_line(B, i, length, k=50):
-    """A loose lock's hair (design element). (John, 2026-11-25: "magenta should follow the flow of the orange".) It
-    is the fringe's outermost piece: it leaves its root the way the fringe's swept edge does, over the skin to the
-    front of the ear's top (bang_line's own sweep, carried on past BANG_TH), and from there turns to plumb over a
-    bending length and hangs in front of the ear, kept off the head. Before, it left along the flow to the tie
-    (backward) and dropped at once, so it cut across the fringe's lines."""
+_LOCK = {}
+
+
+def lock_curve(n=200):
+    """John's drawn lines for the temple lock, as one middle line in the model's side plane: (y, z) in heads by arc
+    length. ponytail_john_lines.json holds the three lines traced from his screenshot through the overlay's fit."""
+    if 'c' not in _LOCK:
+        import json
+        J = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ponytail_john_lines.json')))
+        rs = []
+        for v in J['lines'].values():
+            q = np.array(v['model_yz'])
+            s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(q, axis=0), axis=1))]
+            t = np.linspace(0, s[-1], n)
+            rs.append(np.c_[np.interp(t, s, q[:, 0]), np.interp(t, s, q[:, 1])])
+        c = np.mean(rs, axis=0)
+        for _ in range(30):                                   # the hand trace's corners rounded
+            c[1:-1] = 0.25 * c[:-2] + 0.5 * c[1:-1] + 0.25 * c[2:]
+        _LOCK['c'] = c
+    return _LOCK['c']
+
+
+def loose_line(B, i, length=None, k=50):
+    """A loose lock's hair (design element), laid along John's own lines (2026-11-25, drawn on the field3 overlay
+    after "magenta should follow the flow of the orange": "like this"). It leaves with the fringe, sweeps down and
+    back across the temple, flattens, and ends over the ear where the green lines start, heading back. It does not
+    hang plumb. Each hair is the drawn middle line shifted by its root's offset from the line's start; the offset
+    shrinks to LOCK_GATHER along the way, so the lock gathers into a ribbon and its hairs keep their order. The side
+    plane gives y and z; x is the skin's side there plus the lift. `length` is unused: the drawn lines set it."""
     surf = B['surf']
     P = B['P'][i]
     sx = 1.0 if P[0] >= 0 else -1.0
-    a0 = abs(float(SF.theta(P[None])[0]))
-    # The fringe's outer end is at 1.25 * BANG_TH + 0.35 = 1.29 rad, at the ear top's height. The lock's ends fan
-    # out forward of it by the root's depth behind the hairline: the hairs rooted at the hairline end furthest
-    # forward and hang down in front of the sideburn, so the hairline there stays covered (hairline_gap: the cells
-    # at 1.1 to 1.3 rad went bare with every end at 1.29 or behind it)
-    f = float(np.clip(B['inside_mm'][i] / LOOSE['temple lock']['depth_mm'], 0, 1))
-    th1 = sx * (LOCK_END[0] + (LOCK_END[1] - LOCK_END[0]) * f)
-    end = SF.on_skin_at(surf, th1, SF.EAR_TOP + 0.06)
-    step = length / k
-    U0, U1 = unit(P - SF.CENTRE), unit(end - SF.CENTRE)
-    arc = math.acos(float(np.clip(U0 @ U1, -1, 1))) * float(np.linalg.norm(end - SF.CENTRE))
-    na = int(np.clip(round(arc / step), 2, k - 4))
-    U = slerp(U0[None], U1, np.linspace(0, 1, na + 1))[0]
-    lift = (1.0 + 5.0 * np.sin(np.linspace(0, np.pi, na + 1)) ** 2) * MM     # the fringe's own root lift
-    out = list(surf.point(U) + surf.normals(U) * lift[:, None])
-    p = out[-1]
-    d = unit(out[-1] - out[-3])
-    down = np.array([0, 0, -1.0])
-    for j in range(k - na):
-        w = 1 - math.exp(-((j + 1) * step / MM) / BEND_L_MM * 2.5)
-        v = unit((1 - w) * d + w * down)
-        p = p + v * step
-        if p[2] > 0.2:
-            dep = surf.depth(p[None])[0] + 2.0 * MM
-            if dep > 0:
-                p = p + unit(p - SF.CENTRE) * dep
-        e = ear_depth(p[None])[0] + EAR_DELTA_MM * MM
-        if e > 0:
-            p = p + np.array([np.sign(p[0]), 0, 0]) * e
-        out.append(p)
-    return np.array(out)
+    c = lock_curve()
+    t = np.linspace(0, 1, k + 1)
+    cj = np.c_[np.interp(t, np.linspace(0, 1, len(c)), c[:, 0]), np.interp(t, np.linspace(0, 1, len(c)), c[:, 1])]
+    w = 1 - (1 - LOCK_GATHER) * sm(0.0, 0.8, t)
+    yz = cj + (P[1:] - c[0])[None] * w[:, None]
+    # the skin's side at each (y, z): the outermost x still inside the head
+    xs = np.linspace(0.0, 0.62, 125)
+    Q = np.zeros((len(yz), len(xs), 3)); Q[..., 0] = sx * xs[None]; Q[..., 1] = yz[:, None, 0]; Q[..., 2] = yz[:, None, 1]
+    ins = (surf.depth(Q.reshape(-1, 3)) > 0).reshape(len(yz), len(xs))
+    x = np.where(ins.any(1), xs[len(xs) - 1 - np.argmax(ins[:, ::-1], axis=1)], np.nan)
+    ok = ~np.isnan(x)
+    x = np.interp(np.arange(len(x)), np.where(ok)[0], x[ok])
+    for _ in range(6):
+        x[1:-1] = 0.25 * x[:-2] + 0.5 * x[1:-1] + 0.25 * x[2:]
+    lift = (1.0 + (LOCK_LIFT_MM - 1.0) * sm(0.0, 0.25, t)) * MM
+    out = np.c_[sx * (x + lift), yz]
+    out[0] = P + B['N'][i] * 1.0 * MM
+    e = ear_depth(out) + EAR_DELTA_MM * MM
+    out[:, 0] += sx * np.maximum(e, 0)
+    for _ in range(4):
+        out[1:-1, 0] = 0.25 * out[:-2, 0] + 0.5 * out[1:-1, 0] + 0.25 * out[2:, 0]
+    return out
 
 
 # --------------------------------------------------------------------------------------------- the gauges
@@ -950,6 +964,10 @@ def main():
             q = to_px(FF['cl'] + sg * (FF['R'] * MM)[:, None] * FF['e1'])
             ax.plot(q[:, 0], q[:, 1], color='yellow', lw=2)
         q = to_px(np.array([B['C']])); ax.plot(q[:, 0], q[:, 1], 'o', color='#e02020', ms=9)
+        # John's drawn lines for the temple lock, in the photo's pixels as traced (dashed), to check the magenta against
+        jl = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ponytail_john_lines.json')))
+        for v in jl['lines'].values():
+            q = np.array(v['photo_px']); ax.plot(q[:, 0], q[:, 1], '--', color='#ffe11a', lw=1.6)
         # the gap list: the same quantities read off the field, in heads of the photo's unit
         hp = sheet['computed']['unit_px'] if 'computed' in sheet else 620.0
         pv = lambda P_: to_px(np.atleast_2d(P_))[0]
