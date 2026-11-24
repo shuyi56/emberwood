@@ -555,3 +555,34 @@ Fix (`apply-brow-arc.py` step 11): `LB_WR` 0.65 (the crest's half-width at the b
 Cost: bony base 0.57-0.64 (was 0.64-0.74, norm 0.70-0.80), dorsal lines / TDP 0.74-1.16 (Ranger 0.74 under the 0.85 norm).
 The gauges read the lower bridge's width as tip-defining width, so a broader lower bridge scores as a smaller waist. The
 waist at y 0.25 stays 0.027-0.030 against the photo's 0.052 and is the next thing to widen.
+
+## 16. Where the bridge meets the wing: the alar groove
+
+John (2026-11-25): "read up more on how to sculpt where bridge meets wings."
+
+What the sources say (those that opened; PMC, Thieme, NCBI Bookshelf and ResearchGate pages were blocked):
+
+- Bloom, Ransom & Miller, "Reconstruction of Alar Defects" (Facial Plast Surg Clin N Am 2011): "The crescentic alar groove
+  serves as a topographic landmark that frames the ala and separates this convex structure from the surrounding cosmetic
+  subunits." "The alar groove deepens as it extends posteriorly." "The lower lateral cartilage does not cross the alar
+  groove and it is not part of the alar lobule."
+- Bloom & Constantinides, "Alar Base Modification" (2011): "the caudal margin of the lower lateral cartilage is about a
+  centimeter superior to the nostril rim"; "the transition from the shadows of the alar groove to the reflection of the
+  convex surface of the ala".
+- Plastic Surgery Key, "Surgical Anatomy and Physiology of the Nose": "Alar groove - the oblique skin depression between
+  the tip and the ala."
+- Proko, "How to Sculpt the Nose" (instructor A. J. Keith's comment): "the crease is usually much sharper at the bottom of
+  the nose and then softens a lot as it moves up and curls around the nostril", and "it's better to have a transition
+  between forms that's too soft rather than too sharp".
+- Proko, "How to Draw a Nose - Anatomy and Structure": the wings "each have a wide top plane and a thin side plane".
+
+So: the bridge's side runs on into the tip, the wing is a separate convex lobule about 10 mm tall hung under it, and the
+two are parted by a crescent groove that is deep at the cheek and fades toward the tip. No source that opened gives the
+groove's depth in mm.
+
+Ours before: the wing's top stood 17 mm above the rim at its back (`chb` 2.2 x half the wings' half-width), so it ran up
+into the side wall and there was no junction to see, and its groove was 0.3 mm at every point.
+
+Fix: `W4X.chb` 1.4 (wing top about 11 mm at the back, 7 at the front) and step 12 `AG_BACK` 3 (groove 0.9 mm at the
+cheek end easing to 0.3 by the tip). Also tried: the lower top alone (the junction shows less), and the deep groove on
+the tall wing (it sits too high on the side wall). All five faces' gauges are unchanged from section 15.

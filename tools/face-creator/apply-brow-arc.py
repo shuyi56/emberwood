@@ -38,7 +38,7 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 2.2}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 6.5, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 6.5, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
             'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 4.0, 'KF_TOPF': 0.4, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
@@ -225,6 +225,15 @@ def patch(src, P):
     src = src.replace(k11, k11 + '\n  %s: lowbridge */ CT.wr = %g; CT.wm = %g;' % (MARK[:-3], P['LB_WR'], P['LB_WM']), 1)
     src = re.sub(r'var sl = lerp\(lerp\(NL\.side\[2\], NL\.side\[1\], sm\(0, 0\.5, tc\)\), NL\.side\[0\], sm\(0\.5, 1, tc\)\) / \(0\.85 \+ 0\.15 \* nw\)(?: \* lerp\([^;]*\))?;',
                  lambda m: 'var sl = lerp(lerp(NL.side[2], NL.side[1], sm(0, 0.5, tc)), NL.side[0], sm(0.5, 1, tc)) / (0.85 + 0.15 * nw)' + ('' if P['LB_SL'] == 1 else ' * lerp(%g, 1, sm(0, 0.6, tc))' % P['LB_SL']) + ';', src, count=1)
+    # 12. the alar groove where the bridge's side meets the wing (John 2026-11-25: "read up more on how to sculpt where
+    # bridge meets wings"). Bloom, Ransom & Miller 2011: "The crescentic alar groove ... frames the ala and separates this
+    # convex structure from the surrounding cosmetic subunits", "The alar groove deepens as it extends posteriorly", "The
+    # lower lateral cartilage does not cross the alar groove"; Bloom & Constantinides 2011: the cartilage's lower edge is
+    # "about a centimeter superior to the nostril rim". AG_BACK multiplies the groove's depth at the wing's back, easing to
+    # 1 toward the tip (Proko, Keith: the crease is "much sharper at the bottom of the nose and then softens a lot as it
+    # moves up and curls around the nostril").
+    src = re.sub(r'var gr = W4\.cgr \* (?:lerp\([^;]*?sm\(0, 0\.7, tc\)\) \* )?mm \* Math\.exp',
+                 'var gr = W4.cgr * ' + ('' if P['AG_BACK'] == 1 else 'lerp(%g, 1, sm(0, 0.7, tc)) * ' % P['AG_BACK']) + 'mm * Math.exp', src, count=1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:
