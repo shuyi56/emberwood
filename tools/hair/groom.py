@@ -1326,6 +1326,20 @@ DRAPE_FWD = 0.7              # STYLE: forward per unit down as it leaves the nec
 DRAPE_KEEP = 0.4             # the share of its last direction a segment keeps (a smooth turn, no corner)
 
 
+# One side lock in front, the rest to the back (John, 2026-11-24, after the drawn reference: "cut all but the first
+# side lock and let the rest flow to the back"). The first lock (rooted at the temple, in front of FIRST_LOCK_TH) is
+# the face-framing piece, left at its length (the creator's, to the collar); everything rooted behind it leaves the jaw for the back of the shoulder. Overrides the creator's
+# front locks over the chest and the one fan of earlier today (which answered the seam between sides and back: with
+# all the side hair going back there is no curtain left in front to seam against).
+FIRST_LOCK_TH = (0.85, 1.0)  # STYLE: |theta| of the roots: the first lock in front of 0.85 (3 cm of hairline at the
+                             # temple, a brush-width section [SV3]), all to the back from 1.0
+FIRST_BACK = -0.7            # STYLE: back per unit down for the hair rooted in front of the ear: it has the ear and
+                             # the shoulder's top to pass (the hair behind the ear keeps DRAPE_BACK)
+FIRST_BACK_TH = (1.4, 1.9)   # |theta| over which the steeper sweep eases to DRAPE_BACK
+FIRST_BACK_Z = -0.2          # HH: the steeper sweep holds down to here (past the shoulder's top); below it the hair
+                             # hangs plumb down the back (swept all the way, it streamed out behind her)
+
+
 def drape_front(X, sel, seg_hh, col, fwd=DRAPE_FWD):
     """Each guide in sel laid down the front of the shoulder from DRAPE_Z: marched node by node, each segment down
     and forward (blended with the segment before), each node pushed out of the body, at the segment length."""
@@ -1346,7 +1360,12 @@ def drape_front(X, sel, seg_hh, col, fwd=DRAPE_FWD):
             continue
         prev = X[gi, k - 1] - X[gi, k - 2]
         prev /= np.maximum(np.linalg.norm(prev, axis=1, keepdims=True), 1e-12)
-        d = DRAPE_KEEP * prev + (1 - DRAPE_KEEP) * aim_all[gi]
+        aim = aim_all[gi].copy()
+        low = (X[gi, k - 1, 2] < FIRST_BACK_Z) & (fwd[gi] < DRAPE_BACK)
+        if low.any():
+            a2 = np.array([0.0, 0.0, -1.0])              # (plumb: at DRAPE_BACK it still hung 6 cm off the back)
+            aim[low] = a2 / np.linalg.norm(a2)
+        d = DRAPE_KEEP * prev + (1 - DRAPE_KEEP) * aim
         d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
         X[gi, k] = X[gi, k - 1] + d * seg_hh
         m = np.zeros(X.shape[:2], bool)
@@ -2074,7 +2093,8 @@ def bang_blend(X, bang, col):
     return push_valid(col, X, mask=bang[:, None] & ok)
 
 
-EDGE_Z = (0.55, 0.42, -0.1, -0.35)   # HH: the face edge filled in from below the bang's end (0.55 to 0.42) down past
+EDGE_Z = (0.55, 0.42, 0.15, 0.05)   # (to the jaw only, 2026-11-24: below it the side hair now goes back; was -0.1, -0.35)
+EDGE_Z_OLD = (0.55, 0.42, -0.1, -0.35)   # HH: the face edge filled in from below the bang's end (0.55 to 0.42) down past
                                      # the jaw (-0.1, out by -0.35: the shoulder drape stays as John approved it)
 EDGE_REACH = 0.45                    # rad: the forward swing fades out over this much behind the face edge
 EDGE_PCT = 2                         # the face edge: the 2nd percentile of |theta| of the hair at a height, per side
@@ -2607,6 +2627,37 @@ def hollywood_set(X, roots, sel, seg_hh, col):
     return push_valid(col, Y, mask=(w > 0)[:, None] & ok)
 
 
+# The cut on John's line (2026-11-24, a line drawn on the 3/4 view from the hairline over the eye, down the front
+# of the ear, then back and down along the edge of the back hair: "cut everything below that line", "except the first
+# lock", "cut all hair with the front of the ear as the boundary, so anything before the ear stays"). The hair rooted
+# between the first lock and the front of the ear stays, cut just under the ear lobe, so it covers the ear and frames
+# the cheek; behind the ear's front the cut runs out to full length ("short to long away from the face" [SV2]).
+# STYLE (John's line); overrides the creator's long side hair over the chest.
+EAR_CUT_Z = 0.28             # HH: the cut's height: under the ear lobe (0.365), read off John's line
+EAR_CUT_TH = (1.3, 1.6)      # |theta| of the roots: cut in full in front of the ear's front, none from behind the ear
+EAR_CUT_FIRST = (0.8, 0.9)   # |theta|: the first lock (in front of this) is left long
+
+
+def ear_line_cut(X, lengths, roots, keep):
+    """Each guide rooted between the first lock and the ear cut where it passes its line's height (EAR_CUT_*).
+    keep: left alone (the bangs). Returns X, lengths."""
+    X = X.copy()
+    lengths = lengths.copy()
+    th = np.abs(SF.theta(roots))
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    for g in np.where(~keep & (th > EAR_CUT_FIRST[0]) & (th < EAR_CUT_TH[1]))[0]:
+        end = X[g, n[g] - 1, 2]
+        w = SF.sm(EAR_CUT_FIRST[0], EAR_CUT_FIRST[1], th[g]) * (1 - SF.sm(EAR_CUT_TH[0], EAR_CUT_TH[1], th[g]))
+        target = end + w * (EAR_CUT_Z - end)
+        below = np.where(X[g, 1:n[g], 2] < target)[0]
+        if target > end + 1e-6 and len(below):
+            m = max(4, below[0] + 1)
+            X[g, m:] = np.nan
+            lengths[g] = min(lengths[g], m - 1)
+    return X, lengths
+
+
 # The ends: each lock a ribbon that closes to a point (John, 2026-11-24, with a drawn reference of long wavy hair:
 # "the hair needs a cut to form curves, right now the hair is all over the place"). SOURCED: the cut is point cut
 # throughout, ends bevelled, never blunt (behindthechair.com, TONI&GUY bouncy long layers; hairfinder.com, the pyramid
@@ -2889,7 +2940,9 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             thd_ = np.abs(SF.theta(roots))
             # (one fan over the shoulder: forward at the face, straight down over the ear, back behind it; all to the
             # front, then all to the back, left the shoulder bare between them, a V in profile)
-            fan_ = DRAPE_FWD + (DRAPE_BACK - DRAPE_FWD) * SF.sm(DRAPE_FAN_TH[0], DRAPE_FAN_TH[1], thd_)
+            # (2026-11-24, John: only the first side lock in front, see FIRST_LOCK_TH; was one fan over DRAPE_FAN_TH)
+            back_ = FIRST_BACK + (DRAPE_BACK - FIRST_BACK) * SF.sm(FIRST_BACK_TH[0], FIRST_BACK_TH[1], thd_)
+            fan_ = DRAPE_FWD + (back_ - DRAPE_FWD) * SF.sm(FIRST_LOCK_TH[0], FIRST_LOCK_TH[1], thd_)
             X2 = drape_front(X2, ~bang & (thd_ > DRAPE_TH[0]) & (thd_ < DRAPE_BACK_TH), seg_hh, col, fwd=fan_)
         X2 = relax_kinks(X2, col, cap, keep=bang)
         # the comb: strays back into their lock, crossing neighbours laid parallel, roots along the scalp
@@ -2992,6 +3045,7 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
     elif trace:
         X2, lengths = recut(X2, lengths)
         if wavy:
+            X2, lengths = ear_line_cut(X2, lengths, roots, bang)
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
             X2, lengths = lock_taper(X2, lengths, ~bang & (np.abs(SF.theta(roots)) < WAVE_FADE_TH[1]),
                                      lk * 1000 + clump, col)
