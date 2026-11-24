@@ -1136,7 +1136,13 @@ at each height and angle round the body's axis and give each solid's outer face 
      shift of the nearest row above fills the rows below the hem (the V hem sawed without it; rejection 154).
 3. *Under the coat.* The skirt's seam allowances and stitches (drafted for the old skirt, 0.3 off the fitted cloth) came
    through the basque as dark slits; what lies under the coat's hem (z over 35.6) is dropped from them (rejection 153).
-4. The skirt's modifier stack, with the extra shrinkwraps on the petticoat's 300,000 faces, took 14 GB to render and was
+4. *The petticoat and the hose through the skirt.* The shrinkwrap's `OUTSIDE` mode cannot move a point that lies inside the
+   petticoat's thickness (its nearest face is the inner one), so `clear_skirt` takes the shift needed by direction and height
+   from rays (the skirt's back face against the outer face of the petticoat and of the hose) and moves the whole skirt solid
+   by it, as the stack lift does (the offset 0.03). It was found in colour: red patches at the hips under the basque's side
+   gap, which were the hose, whose top stands wider than the petticoat tied at the waist (hose 4.23 against skirt 4.0 at the
+   side, z 38.8). The skirt moves out up to 0.62 there; no pokes are left in a 10-degree by 0.25 scan from z 35 to 40.3.
+5. The skirt's modifier stack, with the extra shrinkwraps on the petticoat's 300,000 faces, took 14 GB to render and was
    killed; the evaluated skirt is saved as plain geometry (`freeze`), the rig being at rest.
 
 **Result** (`waist.py`, `waist_layer.py '{"z_hem":37.5,"z_full":39.0}'`):
@@ -1144,7 +1150,7 @@ at each height and angle round the body's axis and give each solid's outer face 
 | | before | after |
 |---|---|---|
 | coat inner face against the skirt's outer, over the band (z 36 to 40) | -0.69 at worst, under at 97% of rays | +0.00 at worst, none under |
-| skirt against petticoat at the band (z 39.5), mean | 0.32 | 0.010 |
+| skirt's back face against the petticoat's outer, at the band (z 39.5), mean (min) | 0.32 (0.25) | 0.10 (0.03), the hose holding the skirt out at the hips |
 | coat edges stretched over 25% against the draft, in the zone | n/a | 1,149 of 79,250 (95th pct 1.14, worst 3.2) |
 
 The stretch is the flare itself: the basque's girth grows 5 to 14% from the waist to the hem, as a peplum's cut does. The
@@ -1154,6 +1160,4 @@ worst edges lie at the front darts (x of about plus or minus 1.9) and at the lap
 - The compression the tuck takes up at the waist is still in the cloth above the band as soft gathers; the lift took up
   part of it (the basque stands 0.12 to 0.4 units wider than the old waist at the band) but they are not solved. A real
   pattern would take the flare from the cut: the bodice draft, not a displacement, should carry the extra girth.
-- The petticoat still shows through the skirt below the hem line at the front hip (z 35.5 to 36, 0.35 to 0.5 units): a
-  fault of the habit's own skirt, outside the basque.
 - The skirt's wool is 0.1127 thick (3 mm), the coat's 0.0884: not unified.

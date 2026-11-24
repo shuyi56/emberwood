@@ -21,7 +21,7 @@ from mathutils import Vector, kdtree
 sys.path.insert(0, __import__('os').path.dirname(__file__))
 import waist as W
 
-OPT = dict(wrap='OUTSIDE_SURFACE', gap=0.03, taper=1.5, z_hem=35.5, z_full=38.5, z_clear=34.0, freeze=1, z_seams=35.6, petti_off=0.01, smooth_iters=6, fit_skirt=1)
+OPT = dict(wrap='OUTSIDE_SURFACE', gap=0.03, taper=1.5, z_hem=35.5, z_full=38.5, z_clear=34.0, freeze=1, z_seams=35.6, clear=1, clear_off=0.03, petti_off=0.03, smooth_iters=6, fit_skirt=1)
 if len(sys.argv) > 3 and sys.argv[-1].startswith('{'):
     OPT.update(json.loads(sys.argv[-1]))
 src, dst = [a for a in sys.argv[1:] if a.endswith('.blend')][:2]
@@ -132,19 +132,51 @@ def lift_coat(bvh_skirt, z_top):
     return d
 
 
+def clear_skirt():
+    """The petticoat and the hose (its top stands out at the hips, wider than the petticoat tied at the waist) come through the skirt where the skirt's back face lies inside the petticoat's outer face (the
+    shrinkwrap's OUTSIDE mode cannot move a point that is inside the petticoat's thickness: its nearest face is the inner
+    one). The shift needed, by direction and height, is taken from rays and applied to the whole skirt solid at once (the
+    stack lift's way), so the cloth keeps its thickness; it fades out below z_clear over a unit."""
+    from scipy.ndimage import gaussian_filter
+    bs = W.solid_bvh(W.SKIRT); bps = [W.solid_bvh(n) for n in (W.PETTI, 'Hose')]
+    zg = np.arange(OPT['z_clear'] - 1.0, 40.3, 0.2); pg = np.radians(np.arange(0, 360, 1.0))
+    G = np.zeros((len(zg), len(pg)))
+    for i, z in enumerate(zg):
+        for j, ph in enumerate(pg):
+            q = W.radii(bs, z, ph); cs = [c for c in (W.radii(b, z, ph) for b in bps) if c is not None]
+            if q is None or not cs: continue
+            G[i, j] = max(0.0, max(c[0] for c in cs) + OPT['clear_off'] - q[1]) * ss((z - zg[0]) / 1.0)
+    G0 = G.copy(); G = np.maximum(gaussian_filter(G, sigma=(1.5, 2.0), mode=('nearest', 'wrap')), G0)
+    me = sk.data; n = len(me.vertices)
+    P = np.array([v.co[:] for v in me.vertices]); Q = P.copy(); mx = 0.0; cnt = 0
+    for i in np.where((P[:, 2] > zg[0]) & (P[:, 2] < zg[-1]))[0]:
+        x, y, z = P[i]; r = np.hypot(x, y - W.YC); ph = np.degrees(np.arctan2(x, -(y - W.YC))) % 360.0
+        fi = np.clip((z - zg[0]) / 0.2, 0, len(zg) - 1.001); i0 = int(fi); ti = fi - i0
+        j0 = int(ph) % 360; j1 = (j0 + 1) % 360; tj = ph - int(ph)
+        a = G[i0, j0] * (1 - tj) + G[i0, j1] * tj; b = G[i0 + 1, j0] * (1 - tj) + G[i0 + 1, j1] * tj
+        dd = a * (1 - ti) + b * ti
+        if dd > 1e-4:
+            Q[i, 0] += dd * x / r; Q[i, 1] += dd * (y - W.YC) / r; mx = max(mx, dd); cnt += 1
+    me.vertices.foreach_set('co', Q.ravel()); me.update()
+    print('skirt cleared of the petticoat: %d points moved, up to %.3f' % (cnt, mx))
+    return G
+
+
 if OPT['fit_skirt']:
     fit_skirt()
 bpy.context.view_layer.update()
+# the skirt with its extra shrinkwraps on the petticoat's 300 000 faces needs 14 GB to render: its evaluated mesh goes in as
+# plain geometry (the rig is at rest, so nothing is lost for a still)
+e = sk.evaluated_get(bpy.context.evaluated_depsgraph_get())
+me2 = bpy.data.meshes.new_from_object(e)
+sk.modifiers.clear(); sk.vertex_groups.clear(); sk.data = me2
+print('skirt frozen: %d points' % len(me2.vertices))
+if OPT['clear']:
+    clear_skirt()
+bpy.context.view_layer.update()
 bv = W.solid_bvh(W.SKIRT)
-z_top = max(v.co.z for v in bpy.data.objects[W.SKIRT].evaluated_get(bpy.context.evaluated_depsgraph_get()).to_mesh().vertices if v.co.z < 45)
+z_top = max(v.co.z for v in me2.vertices if v.co.z < 45)
 lift_coat(bv, z_top)
-if OPT['freeze']:
-    # the skirt with its extra shrinkwraps on the petticoat's 300 000 faces needs 14 GB to render: its evaluated mesh
-    # goes in as plain geometry (the rig is at rest, so nothing is lost for a still)
-    e = sk.evaluated_get(bpy.context.evaluated_depsgraph_get())
-    me2 = bpy.data.meshes.new_from_object(e)
-    sk.modifiers.clear(); sk.vertex_groups.clear(); old = sk.data; sk.data = me2
-    print('skirt frozen: %d points' % len(me2.vertices))
 # the skirt's seam allowances and stitches stand where the skirt was drafted (0.3 off the fitted cloth at the band), and
 # under the basque they would come through it as dark slits: what lies under the coat's hem is dropped from them
 import bmesh
