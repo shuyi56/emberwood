@@ -876,7 +876,7 @@ join (`~/work/FC/section.py`: vertical cuts at fixed x through the coat, the lap
 | A dark slit where each collar end meets the neck | The roll line comes down to the neck edge, so the stand runs out in a wedge thinner than the cloth; drawn a cloth thick, the wedge and the fall crossed | `end_trim` 0.19: the stand's faces under the roll line where it is narrower than 0.19 are cut away | Mostly gone in context; join gauges unchanged |
 | A dark wedge across each collar end at the lapel's top edge | The collar's end is laid on the coat, but the turned lapel stands two cloths off it: the collar lies 6 mm behind the lapel's face and runs 3 to 9 mm on under its top edge | Not fixed | See below |
 
-**Tried and removed (rejection #137):**
+**Tried and removed (rejection #138):**
 
 - `flush_rounds`, `lift_min` 0.17 (the folded layers kept a cloth apart at the crease): scallops along the roll line
   and a larger slit. `end_close` (the stand's wedge laid up under the fall): tore the end into spikes. `end_trim` by
