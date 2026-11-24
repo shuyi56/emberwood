@@ -1029,3 +1029,33 @@ right in this build. What is wrong is the one point where our seam differs from 
 roll top; a tailor's gorge seam crosses the roll line and runs on under the fold to the neck, so collar and lapel
 turn over the fold together as one cloth. That needs the lapel's top edge carried on past the crease in foldfront
 (`lapels.npz` gives the edge from the crease out only) and the collar's outline cut to it.
+
+### Thinner wool, and the seam over the fold at the roll top (John, 2026-11-24: "Adjust the thickness of the wool accordingly", "And make the other changes you suggested"; EXPERIMENTAL)
+
+**The seam at the roll top.** `"draft_top_lift"`: at the roll top the gorge seam sits a cloth and the gap *over* the
+lapel's surface, where the lapel is turning over its fold (as the first drafted collar's whole gorge did), and comes
+down to the flush depth over `draft_fade` 0.6 (1.6 cm) along the gorge. This is the seam crossing the fold without
+recutting the lapel: the collar's corner rides over the fold with the lapel, then the two faces run on as one. The
+lapel's top edge did not need carrying past the crease in foldfront.
+
+**The wool.** The coat's Solidify was 0.1669 (4.4 mm), a blanket's thickness. Set to 0.0763 (2.0 mm, a coating
+melton) on the saved cut, and the lapel and collar rebuilt on it (foldfront and notchcollar both read the thickness
+from the modifier). The step the seam has to make at the roll top is two cloths and the gap, so it halves.
+
+`notchcollar '{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2,"gorge_draft":1,"draft_fade":0.6,"draft_top_lift":T}'`,
+T = the cloth and the gap (0.207 at 4.4 mm, 0.116 at 2 mm).
+
+| her left (her right the same within 0.3 mm) | drafted, 4.4 mm | seam over the fold, 4.4 mm | seam over the fold, 2 mm |
+|---|---|---|---|
+| collar face against the lapel's, 1.3 to 4 cm along the gorge | 7 to 9 mm proud | within 0.3 mm | within 0.3 mm |
+| at the gorge's two ends (0.8 and 4.5 cm) | short of the edge / 8 mm | 2.9 / 3.0 mm | 0.8 / 0.6 mm |
+| creases over 40° in the collar | 0 | 0 | 0 at the join (one of 40° on the outer edge at the shoulder) |
+| tip fold | 12° | 12 / 16° | 17 / 19° |
+
+In clay both are clean at the roll top (no teeth, no dent) and the fall beside the gorge is flat; the 2 mm build is the
+crisper. Colour-coded renders of the 2 mm build show no coat through the collar.
+
+**Left open by the thinner wool:** the bodice draft raises the right front the *old* cloth's thickness over the lap, so
+at the buttons the fronts now stand 0.18 apart against a cloth of 0.08 (2.6 mm of air). That is set in `bodice_cut.py`
+with the redingote modules, which are not in this branch: the cut needs rebuilding there at the new thickness. The
+bodice's Bevel (0.075) is now as wide as the cloth is thick.

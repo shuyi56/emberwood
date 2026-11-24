@@ -492,3 +492,10 @@ stands above the coat's neckline and a ray would read the neck behind it. See ph
 (`eased_top_lapel` on fronts levelled with `bodice_cut/over_top.py CUT 45.53,46.5`). The gorge is sewn edge to edge: the
 collar's face meets the lapel's within 0.3 mm along the gorge (it stood 7 to 9 mm proud). A shallow dent remains about
 1 cm from each roll top. Phase 16 of `docs/clothing-solvers/lapel-tension-solver.md`.
+
+## Flush gorge in the draft, 2 mm wool (2026-11-24, experimental)
+
+Set the coat's Solidify to 0.0763 (2 mm) on the cut, fold `eased_top_lapel`, then
+`notchcollar.py ... '{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2,"gorge_draft":1,"draft_fade":0.6,"draft_top_lift":0.116}'`
+(`draft_top_lift` = the cloth and the gap; 0.207 on the 4.4 mm cut). The gorge is flush within 0.3 mm, the seam rides
+over the lapel's fold at the roll top, no creases at the join. The lap at the buttons still carries the old thickness.
