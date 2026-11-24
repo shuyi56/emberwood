@@ -715,3 +715,17 @@ seam 0.4 to 0.5 cm, gap 5.2 mm, outline gap 0.056). Worse, so stopped. The seam 
 end laid along the lapel's top edge from the start (the seam taken from that edge, not from the neckline 0.3 off it),
 not a laid collar dragged there afterwards. Also fixed: the collarbone shift is taken up over 0.6 past the roll line
 (`bone_run`), which removes the teeth it tore along the neck edge.
+
+**Rejected, same day: the seam moved in the build (not committed).** Two more tries at the join, both worse than the
+lifted collar (outline gap 0.055, no seam found by `join.py`):
+
+| Try | Outline gap | Join |
+|---|---|---|
+| Seam started at each lapel's roll top (`seam_at` roll_top) | 0.081 | no seam found |
+| The same, the seam snapped onto the lapel's top edge up to its corner (`seam_on_lapel`) | 0.068, 5 sides | seam 1.0 cm, gap 5 mm, kink 23 to 27 degrees, tip fold 51 and 119 degrees |
+
+What the measuring did settle: the neckline starts at the lapel's roll top and runs parallel to the lapel's top edge
+(direction cosine 0.99) for that edge's whole 2.45 units, 0.3 to 0.4 off it. So collar and lapel are two cloths lying
+side by side along 6 cm, and any collar hung from the neckline folds its fall down over that gap. Stopped after two
+worse rounds (stop rule). The open choice is which cloth moves: the collar's seam (tried three ways, each worse) or the
+lapel's top edge (not tried).
