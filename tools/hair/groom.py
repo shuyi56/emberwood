@@ -621,42 +621,56 @@ WAVE_SET_ITERS = 60                # Laplacian steps that take the wave out of a
                                    # wave falls to 5%, the shoulder's 60 cm curve keeps 85%)
 
 
-def wave_set(X, roots, keep, lam, ph, seg_hh):
-    """The wave set again as the last step, as a stylist curls last, after the brush [see WAVE_SET sources in
-    build_groom]: the combing, the shoulder pass and the relax smooth the solved wave away. Each strand's middle line
-    (the wave smoothed out of it, the root held) gets the formula's settled wave laid back along it (wave_paths, with
-    the amplitude each node's hang leaves it, as wave_rest), at the rod's segment length. keep: left as they are."""
-    X = X.copy()
+def middle_line(X):
+    """Each strand's middle line: the wave smoothed out of it below WAVE_Z_RAMP's top (above it the tuck behind the ear
+    and the combed top keep their line; smoothed there, the tucked sides swung forward over the cheek), the root held,
+    carried on past the strand's end in its last direction. Returns the line, the valid nodes and their count."""
     G, S1 = X.shape[:2]
     ok = ~np.isnan(X[..., 0])
     n = ok.sum(1)
     C = X.copy()
-    for g in range(G):                                     # (past the end: the last direction carried on)
+    for g in range(G):
         k = n[g]
         if k < S1:
             d = C[g, k - 1] - C[g, k - 2]
             C[g, k:] = C[g, k - 1] + d * np.arange(1, S1 - k + 1)[:, None]
-    # (smoothed only where the wave lives, below WAVE_Z_RAMP's top: above it the tuck behind the ear and the combed
-    # top keep their line; smoothed there, the tucked sides swung forward over the cheek)
     wz = SF.sm(WAVE_Z_RAMP[0], WAVE_Z_RAMP[1], C[..., 2])[..., None]
     for _ in range(WAVE_SET_ITERS):
         L = np.zeros_like(C)
         L[:, 1:-1] = 0.5 * (C[:, :-2] + C[:, 2:]) - C[:, 1:-1]
         L[:, -1] = C[:, -2] - C[:, -1] + (C[:, -2] - C[:, -3])          # (the end: toward its line's continuation)
         C = C + 0.5 * L * wz
-    A0 = WAVE_SET_GAIN * WAVE_A_MM / SF.HH_MM * SF.sm(WAVE_Z_RAMP[0], WAVE_Z_RAMP[1], C[..., 2])
-    # the last inch left out of the iron, straight [WS-TYMO][WS-BTC]
+    return C, ok, n
+
+
+def wave_on(C, n, lam, ph, seg_hh, gain=1.0):
+    """The wave laid along middle lines C (strands n nodes long), as wave_rest lays it on the straight falls: the rest
+    curvature binormals of the rest wave (kb0, in the frame of the line it lies along now) and the settled shape (each
+    node's amplitude cut by the hair hanging below it). The last inch is left straight [WS-TYMO][WS-BTC]."""
+    G, S1 = C.shape[:2]
+    A0 = gain * WAVE_A_MM / SF.HH_MM * SF.sm(WAVE_Z_RAMP[0], WAVE_Z_RAMP[1], C[..., 2])
     A0 = A0 * np.clip(((n - 1)[:, None] - np.arange(S1)[None]) / WAVE_END_STRAIGHT, 0, 1)
+    Y, _ = wave_paths(C, lam, ph, A0, seg_hh)
+    T = np.diff(Y, axis=1); T /= np.linalg.norm(T, axis=-1, keepdims=True)
+    c = (T[:, :-1] * T[:, 1:]).sum(-1)
+    kb0 = 2 * np.cross(T[:, :-1], T[:, 1:]) / (1 + c)[..., None]
+    kb0[np.linalg.norm(kb0, axis=-1) < 1e-9] = 1e-9
     hang_m = np.maximum((n - 1)[:, None] - np.arange(S1)[None], 0) * SEG_M
     kw = 2 * np.pi / (lam * HH_M)
     f = 1.0 / (1.0 + hang_m / (ELASTOGRAVITY_M ** 3 * kw[:, None] ** 2))
-    Y, _ = wave_paths(C, lam, ph, A0 * f, seg_hh)
+    Ys, _ = wave_paths(C, lam, ph, A0 * f, seg_hh)
+    return kb0, Ys
+
+
+def wave_set(X, roots, keep, lam, ph, seg_hh):
+    """The wave set again as the last step, as a stylist curls last, after the brush [see WAVE_SET sources in
+    build_groom]: each strand's middle line gets the formula's settled wave laid back along it, at the rod's segment
+    length, on the sides only (fading out over WAVE_SET_TH). keep: left as they are."""
+    C, ok, n = middle_line(X)
+    _, Y = wave_on(C, n, lam, ph, seg_hh, WAVE_SET_GAIN)
     Y[~ok] = np.nan
-    # the sides only: the back kept as it settled (John, 2026-11-23: "the back is perfect, the sides need work"),
-    # the set fading out behind the shoulder
     w = (1.0 - SF.sm(WAVE_SET_TH[0], WAVE_SET_TH[1], np.abs(SF.theta(roots)))) * ~keep
-    X = X + w[:, None, None] * (Y - X)
-    return X
+    return X + w[:, None, None] * (Y - X)
 
 
 def push_out(col, X, layer=None, margin_hh=1.0 / SF.HH_MM, steps=8):
@@ -1754,6 +1768,20 @@ def side_resolve(X, roots, keep, d0, n_hairs, seg_hh, col, layer, kb0, iters, lo
     return X
 
 
+SIDE_FORM_PASSES = 4          # comb passes within each wave lock, CALIBRATED (2: 4.6 degrees, 4: 3.9)
+
+
+def side_form(X, roots, group, keep, col):
+    """The side guides combed within their wave locks (comb_pass, its group the lock), a light relax, the back left as
+    it is (the comb fading out between |theta| 2.2 and SIDE_SOLVE_TH + 0.2)."""
+    Y = comb_pass(X, group, col, None, passes=SIDE_FORM_PASSES)
+    Y = relax_kinks(push_valid(col, Y), col, None, keep=keep)
+    w = (1.0 - SF.sm(2.2, SIDE_SOLVE_TH + 0.2, np.abs(SF.theta(roots))))[:, None, None]
+    out = X + w * (np.nan_to_num(Y) - np.nan_to_num(X))
+    out[np.isnan(X[..., 0])] = np.nan
+    return out
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2015,6 +2043,11 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         # relax without the cap takes out the bends that push leaves)
         X2 = push_valid(col, X2)
         X2 = relax_kinks(X2, col, None, keep=bang)
+        if wavy:
+            # then formed: the side hair combed within its wave locks, as a stylist rakes waves into ribbons with the
+            # fingers [WS-AS] (re-solved, neighbouring side strands sat 6.6 degrees apart 30 cm down, the back 4.4,
+            # and read as messy; combed 4 passes: 3.9, crossings 114 to 92, the creator's 90)
+            X2 = side_form(X2, roots, lk * 1000 + clump, bang, col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
