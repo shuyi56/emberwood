@@ -846,3 +846,21 @@ level cut brings it to the left's value; the step itself is the next thing to ta
 build from `origin/claude/pr-cleanup/redingote-riding-habit` (front depth −3.73 against −3.13, same skin). On the
 fresh build the same change gives seams 1.36 / 1.37 cm and steps 3.3 / 3.1 mm. The study above uses the shared cut
 with `over_top.py`, so it compares with every earlier phase.
+
+**Load on the fronts after the recut** (foldfront's log, the front round the foot let go and the buttons pinned):
+
+| | Her right front | Her left front |
+|---|---|---|
+| Pull on the button pins | 0.002 (was 0.001) | 0.001 |
+| Strain passed into the front, mean / worst | 0.20% / 9.1% (worst was 25.6%) | 0.11% / 8.5% |
+| Lapel strain, mean / 95% | 3.4% / 10.1% (was 3.9% / 11.7%) | 4.4% / 14.6% |
+| Lapel strain at the foot of the fold, mean | 7.1% | 18.4% |
+
+The fronts carry almost nothing: the lapel is short and lies on the front. The one-sided number left is the under
+(left) lapel's foot, where 106 of its points are pressed behind the upper front.
+
+**Tried and rejected: room for the under lapel's foot.** The right front raised a further 1 and then 2 cloths over the
+triangle between the two roll lines below their crossing (an `UNDER` argument of `over_top.py`, removed). One cloth:
+left lapel 95% strain 14.6% to 11.9%, foot mean 18.4% to 18.1%. Two cloths: back to 14.6% and 18.4%, and the right
+lapel worse (95% 10.1% to 12.2%). The crush is set by foldfront's press rule for the under lapel, not by the room the
+bodice leaves. Stopped after two rounds.
