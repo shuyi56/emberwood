@@ -1,0 +1,577 @@
+<title>Lace Solver Bench</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a workbench. Controls on the left, the cloth in the middle, the run's instruments (readouts, the
+   convergence curve, the sections) on the right; stacked on a phone. */
+:root {
+  --bg: #eef0f2; --panel: #f9fafb; --ink: #1c232b; --muted: #5d6874; --line: #d5dae0;
+  --accent: #3d5a99; --accent-ink: #ffffff; --warn: #b5462e; --good: #2f6b4f; --stage: #dfe3e8;
+  --f-ui: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --f-data: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15191e; --panel: #1c2128; --ink: #e3e7ec; --muted: #98a3ae; --line: #2e353e;
+  --accent: #8ea7e0; --accent-ink: #10151c; --warn: #e2876e; --good: #7cc4a0; --stage: #20262e; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #15191e; --panel: #1c2128; --ink: #e3e7ec; --muted: #98a3ae; --line: #2e353e;
+  --accent: #8ea7e0; --accent-ink: #10151c; --warn: #e2876e; --good: #7cc4a0; --stage: #20262e; color-scheme: dark }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-ui); font-size: 14px; }
+.app { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 12px; height: 100%; box-sizing: border-box;
+  padding-block: 12px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.col { min-width: 0; display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: 0.01em; text-wrap: balance; }
+h2 { font-size: 11px; font-weight: 600; margin: 0; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+p.note { margin: 0; color: var(--muted); line-height: 1.45; font-size: 13px; }
+select, button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+.ctl label { font-size: 13px; }
+.ctl output { font-family: var(--f-data); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.ctl select { grid-column: 1 / -1; }
+.live { font-size: 10px; color: var(--good); letter-spacing: 0.06em; text-transform: uppercase; margin-left: 4px; }
+.stage { position: relative; background: var(--stage); border: 1px solid var(--line); border-radius: 8px; min-height: 360px; flex: 1; overflow: hidden; }
+.stage canvas { display: block; width: 100%; height: 100%; }
+.hud { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-family: var(--f-data); font-size: 11px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; font-variant-numeric: tabular-nums; }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.legend { position: absolute; left: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+.legend span.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.ramp { width: 140px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, #2c4f9e, #3fa7a0, #e8d35a, #d9532f, #7d1020); }
+.modes { display: flex; gap: 4px; flex-wrap: wrap; }
+.modes button[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+table.read { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.read td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+table.read td:last-child { text-align: right; font-family: var(--f-data); font-size: 12px; font-variant-numeric: tabular-nums; }
+canvas.chart { width: 100%; height: 150px; display: block; }
+canvas.sect { width: 100%; height: 190px; display: block; }
+.flags { font-size: 12px; color: var(--warn); margin: 0; padding-left: 16px; }
+.flags.ok { color: var(--good); list-style: none; padding-left: 0; }
+.key { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.key i { display: inline-block; width: 14px; height: 2px; vertical-align: 3px; margin-right: 4px; }
+@media (max-width: 1100px) { .app { grid-template-columns: 280px minmax(0, 1fr); } .col.right { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .app { grid-template-columns: minmax(0, 1fr); height: auto; } .stage { min-height: 70vw; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="app">
+  <div class="col left">
+    <div class="panel">
+      <h1>Lace Solver Bench</h1>
+      <p class="note">The project's fabric solver, stepped live. Pick a scene, move a setting and watch the cloth settle. Settings marked <span class="live">live</span> change the running solve; the rest rebuild it.</p>
+      <div class="ctl"><label for="preset">Scene</label><span></span><select id="preset"></select></div>
+      <p class="note" id="presetNote"></p>
+      <div class="row">
+        <button class="primary" id="play">Pause</button>
+        <button id="step">Step a frame</button>
+        <button id="sub">Step once</button>
+        <button id="reset">Rebuild</button>
+      </div>
+      <div class="ctl"><label for="speed">Frames per tick</label><output id="speedOut">1</output><input type="range" id="speed" min="1" max="6" step="1" value="1"></div>
+    </div>
+    <div class="panel" id="controls"></div>
+    <div class="panel">
+      <h2>Wind</h2>
+      <p class="note">The air's drag on each face of the cloth, taken against the wind's speed instead of still air: a face turned into the wind catches it, one edge-on lets it by. Gusts vary its strength and turn it a little. Live in every scene. A strong wind makes the solver take more, shorter steps (the readouts show how many), so the scene runs slower.</p>
+      <div class="ctl"><label for="wind-speed">Wind speed (m/s)<span class="live">live</span></label><output id="wind-speedOut">0.0</output><input type="range" id="wind-speed" min="0" max="12" step="0.1" value="0"></div>
+      <div class="ctl"><label for="wind-from">Blowing from (°, 0 front, 90 her left)<span class="live">live</span></label><output id="wind-fromOut">90</output><input type="range" id="wind-from" min="0" max="355" step="5" value="90"></div>
+      <div class="ctl"><label for="wind-gust">Gusts<span class="live">live</span></label><output id="wind-gustOut">0.50</output><input type="range" id="wind-gust" min="0" max="1" step="0.05" value="0.5"></div>
+    </div>
+  </div>
+
+  <div class="col mid">
+    <div class="stage" id="stage">
+      <div class="hud" id="hud"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content: space-between">
+        <h2>Show</h2>
+        <div class="modes" id="modes">
+          <button data-mode="lace" aria-pressed="true">Cloth</button>
+          <button data-mode="parts" aria-pressed="false">Colour code</button>
+          <button data-mode="strain" aria-pressed="false">Strain</button>
+          <button data-mode="clay" aria-pressed="false">Clay</button>
+        </div>
+      </div>
+      <div class="row">
+        <button id="v-front">Front</button><button id="v-side">Side</button><button id="v-back">Back</button><button id="v-q">3/4</button><button id="v-top">Top</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="col right">
+    <div class="panel">
+      <h2>Readouts</h2>
+      <table class="read" id="read"></table>
+    </div>
+    <div class="panel">
+      <h2>Convergence</h2>
+      <canvas class="chart" id="chart"></canvas>
+      <div class="key"><span><i style="background:#3d78c9"></i>fastest point (cm a step, log)</span><span><i style="background:#d9532f"></i>worst thread stretch (%)</span><span><i style="background:#3f9d72"></i>kinetic energy (log)</span></div>
+    </div>
+    <div class="panel">
+      <h2>Sections and contour check</h2>
+      <canvas class="sect" id="sect"></canvas>
+      <ul class="flags" id="flags"></ul>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/*@MODULES@*/
+
+const { PRESETS, strainOf } = __m['presets'];
+const L = __m['lace'];
+
+// ---------------------------------------------------------------- state
+const $ = (id) => document.getElementById(id);
+const state = { preset: PRESETS[0], values: {}, scene: null, playing: true, frame: 0, simT: 0, hist: [], mode: 'lace', ms: 0 };
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// ---------------------------------------------------------------- three
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+stage.prepend(renderer.domElement);
+const scene3 = new THREE.Scene();
+const paintStage = () => { renderer.setClearColor(new THREE.Color(css('--stage') || '#dfe3e8'), 1); };
+paintStage();
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', paintStage);
+new MutationObserver(paintStage).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 2000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene3.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 1.4));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(30, 60, 50); scene3.add(key);
+const rim = new THREE.DirectionalLight(0xffffff, 0.6); rim.position.set(-40, 20, -40); scene3.add(rim);
+let clothMesh = null, bodyGroup = new THREE.Group();
+scene3.add(bodyGroup);
+
+// the lace's look: the pattern drawn on a canvas over the cut strip (net, motifs, cordonnet, scallops)
+function laceTexture(scene) {
+  const [W, H] = scene.uvScale, pxPerCm = Math.min(64, 4096 / Math.max(W, H));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(64, Math.round(W * pxPerCm)); cv.height = Math.max(64, Math.round(H * pxPerCm));
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  if (!scene.S) { g.fillStyle = '#e9e4da'; g.fillRect(0, 0, cv.width, cv.height); }
+  else if (scene.S.mat.plain) {
+    // plain cloth (the skirt's worsted wool): a 2/2 twill's diagonal ribs, a few millimetres apart
+    g.fillStyle = '#56607a'; g.fillRect(0, 0, cv.width, cv.height);
+    g.strokeStyle = 'rgba(255,255,255,0.07)'; g.lineWidth = Math.max(1, pxPerCm * 0.08);
+    const step = Math.max(3, pxPerCm * 0.25);
+    g.beginPath();
+    for (let x = -cv.height; x < cv.width; x += step) { g.moveTo(x, cv.height); g.lineTo(x + cv.height, 0); }
+    g.stroke();
+  } else {
+    const p = scene.S.p, img = g.createImageData(cv.width, cv.height), d = img.data;
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+      const u = x / pxPerCm, v = y / pxPerCm, edge = L.scallopEdge(u, p.depth, p.scallop, p.scallopDepth);
+      // (the strip's rows are stretched to the scallop: v here is the share of the column's depth)
+      const vv = v / H * edge;
+      const part = L.lacePart(u, vv, p.depth, p.scallop, p.scallopDepth);
+      let a = 0;
+      if (part === 0) {
+        // the net: a hexagonal mesh about 1.2 mm across (Chantilly's tulle ground)
+        const s = 0.09, q = u / s, r = vv / (s * 0.866), rr = Math.floor(r), qq = q + (rr & 1) * 0.5;
+        const fx = qq - Math.floor(qq), fy = r - rr;
+        const near = Math.min(Math.abs(fx - 0.5) < 0.08 ? 0 : 1, fy, 1 - fy) ;
+        a = near < 0.12 ? 0.9 : 0.0;
+      } else if (part === 1) a = 0.92 + 0.08 * Math.sin(u * 40) * Math.sin(vv * 40);
+      else if (part === 2) a = 1;
+      else a = 0.97;
+      const k = 4 * (y * cv.width + x);
+      const tone = part === 2 ? 236 : part === 1 ? 246 : 250;
+      d[k] = tone; d[k + 1] = tone - 3; d[k + 2] = tone - 10; d[k + 3] = Math.round(255 * a);
+    }
+    g.putImageData(img, 0, 0);
+  }
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+function buildMesh(scene) {
+  if (clothMesh) { scene3.remove(clothMesh); clothMesh.geometry.dispose(); }
+  const n = scene.f.n, geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * n), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(3 * n).fill(1), 3));
+  const uv = new Float32Array(2 * n), [W, H] = scene.uvScale;
+  for (let i = 0; i < n; i++) {
+    uv[2 * i] = scene.uv[2 * i] / W;
+    if (scene.S) { const c = Math.floor(i / scene.S.rows), r = i % scene.S.rows; uv[2 * i + 1] = 1 - r / (scene.S.rows - 1); void c; }
+    else uv[2 * i + 1] = 1 - scene.uv[2 * i + 1] / H;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(new THREE.BufferAttribute(scene.tris, 1));
+  const tex = laceTexture(scene);
+  const mats = {
+    lace: new THREE.MeshStandardMaterial({ map: tex, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.85 }),
+    parts: new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 0.9, flatShading: false }),
+    strain: new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+    clay: new THREE.MeshStandardMaterial({ color: 0xc9c2b6, side: THREE.DoubleSide, roughness: 0.95 }),
+  };
+  clothMesh = new THREE.Mesh(geo, mats[state.mode]);
+  clothMesh.userData.mats = mats;
+  scene3.add(clothMesh);
+  // the bodies
+  bodyGroup.clear();
+  const bm = new THREE.MeshStandardMaterial({ color: 0x8a8f99, roughness: 0.8, transparent: true, opacity: 0.55 });
+  for (const b of scene.bodies || []) {
+    let m;
+    if (b.type === 'sphere') { m = new THREE.Mesh(new THREE.SphereGeometry(b.r, 48, 24), bm); m.position.set(...b.c); }
+    else if (b.type === 'cylinder') { m = new THREE.Mesh(new THREE.CylinderGeometry(b.r, b.r, b.y1 - b.y0, 48, 1, true), bm); m.position.set(0, (b.y0 + b.y1) / 2, 0); }
+    else if (b.type === 'floor') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.size, b.size), bm); m.rotation.x = -Math.PI / 2; m.position.y = b.y; }
+    else if (b.type === 'mesh') {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(b.positions, 3));
+      g.setIndex(new THREE.BufferAttribute(b.indices, 1));
+      g.computeVertexNormals();
+      m = new THREE.Mesh(g, b.color != null ? new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.9, side: THREE.DoubleSide }) : bm);
+    } else if (b.type === 'plane') { m = new THREE.Mesh(new THREE.PlaneGeometry(b.w, b.h), bm); m.position.set(0, b.y, b.z - 0.05); }
+    if (m) bodyGroup.add(m);
+  }
+}
+
+function updateMesh() {
+  const sc = state.scene, geo = clothMesh.geometry, P = geo.attributes.position.array, x = sc.f.pos;
+  for (let k = 0; k < P.length; k++) P[k] = x[k];
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  if (state.mode === 'parts' || state.mode === 'strain') {
+    const C = geo.attributes.color.array;
+    if (state.mode === 'parts') {
+      const cols = sc.partColors.map((h) => new THREE.Color(h));
+      for (let i = 0; i < sc.f.n; i++) { const c = cols[sc.parts[i]] || cols[0]; C[3 * i] = c.r; C[3 * i + 1] = c.g; C[3 * i + 2] = c.b; }
+    } else {
+      const st = state.lastStrain || strainOf(sc);
+      for (let i = 0; i < sc.f.n; i++) { const c = rampColor(Math.min(1, st.per[i] / 0.05)); C[3 * i] = c[0]; C[3 * i + 1] = c[1]; C[3 * i + 2] = c[2]; }
+    }
+    geo.attributes.color.needsUpdate = true;
+  }
+}
+const RAMP = [[0x2c, 0x4f, 0x9e], [0x3f, 0xa7, 0xa0], [0xe8, 0xd3, 0x5a], [0xd9, 0x53, 0x2f], [0x7d, 0x10, 0x20]];
+function rampColor(t) {
+  const s = t * (RAMP.length - 1), i = Math.min(RAMP.length - 2, Math.floor(s)), f = s - i, a = RAMP[i], b = RAMP[i + 1];
+  return [0, 1, 2].map((k) => ((a[k] + (b[k] - a[k]) * f) / 255) ** 2.2);
+}
+
+// cameras by name: the turnaround's views, framed on the cloth
+function frameCamera(view = 'q') {
+  const x = state.scene.f.pos;
+  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < x.length; i += 3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], x[i + k]); mx[k] = Math.max(mx[k], x[i + k]); }
+  // (a scene may ask for more in frame than its cloth: the figure a skirt is worn on)
+  if (state.scene.frameBox) { const [a, b] = state.scene.frameBox; mn = mn.map((v, k) => Math.min(v, a[k])); mx = mx.map((v, k) => Math.max(v, b[k])); }
+  const c = mn.map((v, k) => (v + mx[k]) / 2), size = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], 4);
+  const d = size * 2.3;
+  const dir = { front: [0, 0.05, 1], back: [0, 0.05, -1], side: [1, 0.05, 0], q: [0.7, 0.35, 0.75], top: [0.001, 1, 0.001] }[view];
+  const l = Math.hypot(...dir);
+  camera.position.set(c[0] + d * dir[0] / l, c[1] + d * dir[1] / l, c[2] + d * dir[2] / l);
+  controls.target.set(...c);
+  camera.near = size / 50; camera.far = size * 50; camera.updateProjectionMatrix();
+  controls.update();
+}
+for (const v of ['front', 'side', 'back', 'q', 'top']) $('v-' + v).onclick = () => frameCamera(v);
+
+function resize() {
+  const r = stage.getBoundingClientRect();
+  renderer.setSize(Math.max(50, r.width), Math.max(50, r.height), false);
+  camera.aspect = Math.max(50, r.width) / Math.max(50, r.height); camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+
+// ---------------------------------------------------------------- controls
+function presetDefaults(P) { const v = {}; for (const p of P.params) v[p.key] = p.value; return v; }
+function buildControls() {
+  const P = state.preset, box = $('controls');
+  box.innerHTML = '';
+  const h = document.createElement('h2'); h.textContent = 'Settings'; box.append(h);
+  for (const p of P.params) {
+    if (p.show && !p.show(state.values)) continue;
+    const wrap = document.createElement('div'); wrap.className = 'ctl';
+    const id = `p-${P.id}-${p.key}`;
+    const lab = document.createElement('label'); lab.htmlFor = id; lab.textContent = p.label + (p.unit && p.unit !== 'log' ? ` (${p.unit})` : '');
+    if (p.live) { const s = document.createElement('span'); s.className = 'live'; s.textContent = 'live'; lab.append(s); }
+    wrap.append(lab);
+    if (p.type === 'select') {
+      wrap.append(document.createElement('span'));
+      const sel = document.createElement('select'); sel.id = id;
+      for (const [val, txt] of p.options) { const o = document.createElement('option'); o.value = val; o.textContent = txt; sel.append(o); }
+      sel.value = state.values[p.key];
+      sel.onchange = () => { state.values[p.key] = sel.value; rebuild(); };
+      wrap.append(sel);
+    } else {
+      let val = state.values[p.key];
+      if (val == null) val = defaultFor(p);
+      const out = document.createElement('output'); out.textContent = p.fmt ? p.fmt(val) : val;
+      const inp = document.createElement('input'); inp.type = 'range'; inp.id = id; inp.min = p.min; inp.max = p.max; inp.step = p.step; inp.value = val;
+      inp.oninput = () => {
+        const v = parseFloat(inp.value);
+        out.textContent = p.fmt ? p.fmt(v) : v;
+        state.values[p.key] = v;
+        if (p.live && state.scene) { state.scene.live(p.key, v); state.hist.push({ mark: p.label }); }
+      };
+      inp.onchange = () => { if (!p.live) rebuild(); };
+      wrap.append(out, inp);
+    }
+    box.append(wrap);
+  }
+  const info = document.createElement('table'); info.className = 'read'; info.id = 'info';
+  box.append(info);
+}
+// a slider whose default is the material's own (the lace's or cloth's bending length)
+function defaultFor(p) {
+  if (p.key === 'bendingLength') {
+    const sc = state.scene;
+    if (sc && sc.S) return sc.S.mat.bendingLength * 100;
+    if (sc) { const row = (sc.info || []).find((r) => r[0] === 'Bending length'); if (row) return parseFloat(row[1]); }
+    return 1;
+  }
+  return p.min;
+}
+
+function rebuild() {
+  const P = state.preset;
+  let sc;
+  try { sc = P.build({ ...state.values }); }
+  catch (e) { console.error(e); $('flags').innerHTML = `<li>Could not build this scene: ${e.message}</li>`; return; }
+  state.scene = sc; state.frame = 0; state.simT = 0; state.hist = []; state.lastStrain = null;
+  buildMesh(sc);
+  updateMesh();
+  frameCamera('q');
+  buildControls();
+  const info = $('info');
+  info.innerHTML = (sc.info || []).map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  legend();
+  readouts();
+}
+
+function legend() {
+  const sc = state.scene, el = $('legend');
+  if (state.mode === 'parts') el.innerHTML = sc.partNames.map((n, k) => n ? `<div><span class="sw" style="background:${sc.partColors[k]}"></span>${n}</div>` : '').join('');
+  else if (state.mode === 'strain') el.innerHTML = '<div>Thread stretch against the cut</div><div class="ramp"></div><div class="row" style="justify-content:space-between;font-family:var(--f-data);font-size:11px"><span>0%</span><span>5%+</span></div>';
+  else el.innerHTML = state.mode === 'clay' ? '<div>Clay: form only</div>' : (sc.S && sc.S.mat.plain ? '<div>Worsted wool, twill</div>' : '<div>Lace: net, motifs, cordonnet</div>');
+}
+for (const b of $('modes').querySelectorAll('button')) b.onclick = () => {
+  state.mode = b.dataset.mode;
+  for (const o of $('modes').querySelectorAll('button')) o.setAttribute('aria-pressed', String(o === b));
+  clothMesh.material = clothMesh.userData.mats[state.mode];
+  legend(); updateMesh();
+};
+
+// ---------------------------------------------------------------- the wind
+// A cheap wind: no flow is solved. The solver's air drag (fabric-core.js _air: each face's speed through the air
+// along its normal, slowed by half the air's density times a sheet's drag coefficient over its mass per area) is
+// taken against the wind's speed instead of still air. Gusts: its strength swings by up to `gust` of itself on three
+// slow, unrelated waves (about 8, 3 and 1.4 s), and it turns by up to 25 degrees on two others.
+const wind = { speed: 0, from: 90, gust: 0.5, now: 0, ph: [Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28] };
+// (a scene built with no air drag gets a plain cloth's: 0.5 x 1.2 kg/m3 x a drag coefficient of 1.2, in cm)
+const STILL_AIR = 0.5 * 1.2 * 1.2 / 1e6;
+function applyWind(f, t) {
+  const p = wind.ph;
+  const g = (Math.sin(2 * Math.PI * 0.13 * t + p[0]) + 0.6 * Math.sin(2 * Math.PI * 0.31 * t + p[1]) + 0.35 * Math.sin(2 * Math.PI * 0.71 * t + p[2])) / 1.95;
+  const turn = 25 * Math.PI / 180 * wind.gust * (0.7 * Math.sin(2 * Math.PI * 0.09 * t + p[3]) + 0.3 * Math.sin(2 * Math.PI * 0.43 * t + p[4]));
+  const v = Math.max(0, wind.speed * (1 + wind.gust * g)) * 100;      // cm/s
+  wind.now = v / 100;
+  // (blowing from angle a round from her front toward her left: the air moves the other way)
+  const a = wind.from * Math.PI / 180 + turn;
+  f.settings.wind = [-v * Math.sin(a), 0, -v * Math.cos(a)];
+  if (v > 0 && !f.settings.air) f.settings.air = STILL_AIR;
+  windSteps(f);
+}
+// What the wind asks of the solve. Its push is the drag's air / (mass per area) x v^2, which at 3 m/s on wool is
+// three times gravity and on the light net of lace more; gravity's pull is carried by the tethers to the stitching,
+// the wind's is not, and with a step that moves a point more than about 0.1 mm under that push the pleats crushed
+// into the body and tore (80% stretch at 1.5 m/s on the skirt at 120 steps a second). So while it blows: the body
+// is tested on every walk over the threads, not only after them (the wind keeps pressing the cloth into it), and
+// the step shrinks so the push moves a point at most WIND_MOVE a step, from the gusts' peak, up to 960 a second.
+const WIND_MOVE = 0.01;      // cm
+function windSteps(f) {
+  const s = f.settings, w = f._windBase || (f._windBase = { sub: s.substep, contact: s.contact, set: null });
+  // (a setting changed since the wind last set the step is the scene's own: keep it as the base)
+  if (w.set != null && s.substep !== w.set) w.sub = s.substep;
+  if (f._sigma == null) {
+    const q = []; for (let i = 0; i < f.n; i++) if (f.w[i] !== 0 && f.area[i] > 0) q.push((f.kg ? f.kg[i] : 1) / f.area[i]);
+    q.sort((a, b) => a - b); f._sigma = q[Math.floor(0.05 * (q.length - 1))] || 1;
+  }
+  const peak = wind.speed * (1 + wind.gust) * 100, push = (s.air || 0) / f._sigma * peak * peak;
+  let sub = w.sub;
+  if (peak > 0 && push > 0) { const hz = Math.min(960, Math.ceil(Math.sqrt(push / WIND_MOVE) / 60) * 60); if (hz > 1 / w.sub) sub = 1 / hz; }
+  s.contact = peak > 0 ? 'iteration' : w.contact;
+  if (sub !== s.substep) { s.substep = sub; if (f.stiff) f.stiff._h = null; }
+  w.set = s.substep;
+  wind.hz = Math.round(1 / s.substep);
+}
+for (const k of ['speed', 'from', 'gust']) {
+  const inp = $('wind-' + k), out = $('wind-' + k + 'Out');
+  inp.oninput = () => { const v = parseFloat(inp.value); wind[k] = v; out.textContent = k === 'gust' ? v.toFixed(2) : k === 'from' ? v.toFixed(0) : v.toFixed(1); if (state.scene) state.hist.push({ mark: 'wind' }); };
+}
+
+// ---------------------------------------------------------------- the run
+function simFrame() {
+  const sc = state.scene, f = sc.f, before = Float64Array.from(f.pos), t0 = performance.now();
+  const dt = 1 / 60;
+  applyWind(f, state.simT);
+  if (sc.before) sc.before(dt);
+  const steps = f.advance(dt, { body: sc.body, neutral: true });
+  state.ms = 0.8 * state.ms + 0.2 * (performance.now() - t0);
+  let far = 0;
+  for (let a = 0; a < f.pos.length; a++) { const d = Math.abs(f.pos[a] - before[a]); if (d > far) far = d; }
+  const st = strainOf(sc);
+  state.lastStrain = st;
+  let ke = 0;
+  const h = f.settings.substep;
+  for (let i = 0; i < f.n; i++) { const m = f.kg ? f.kg[i] : 1, vx = (f.pos[3 * i] - f.prev[3 * i]) / h, vy = (f.pos[3 * i + 1] - f.prev[3 * i + 1]) / h, vz = (f.pos[3 * i + 2] - f.prev[3 * i + 2]) / h; ke += 0.5 * m * (vx * vx + vy * vy + vz * vz) / 1e4; }
+  const bad = !Number.isFinite(far) || !Number.isFinite(st.max);
+  state.frame++; state.simT += dt;
+  state.hist.push({ speed: far / Math.max(1, steps), strain: st.max, mean: st.mean, ke, steps });
+  if (state.hist.length > 600) state.hist.shift();
+  if (bad) { state.playing = false; $('play').textContent = 'Play'; }
+}
+
+function oneStep() {
+  const sc = state.scene, f = sc.f;
+  applyWind(f, state.simT);
+  if (sc.before) sc.before(f.settings.substep);
+  f.step(f.settings.substep, sc.body, { neutral: true });
+  state.simT += f.settings.substep;
+  state.lastStrain = strainOf(sc);
+}
+
+function readouts() {
+  const sc = state.scene, H = state.hist.filter((q) => q.speed !== undefined), last = H[H.length - 1];
+  const st = state.lastStrain || strainOf(sc);
+  const rows = [
+    ['Time solved', `${state.simT.toFixed(2)} s`], ['Frame', `${state.frame}`],
+    ['Solver time a frame', `${state.ms.toFixed(1)} ms`],
+    ['Fastest point', last ? `${(last.speed * 10).toFixed(3)} mm a step` : '–'],
+    ['Worst thread stretch', `${(100 * st.max).toFixed(2)}%`], ['Mean thread stretch', `${(100 * st.mean).toFixed(3)}%`],
+    ['Kinetic energy', last ? `${last.ke.toExponential(2)} J` : '–'],
+    ...(wind.speed > 0 ? [['Wind now', `${wind.now.toFixed(1)} m/s`], ['Steps a second (for the wind)', `${wind.hz}`]] : []),
+    ...(sc.measure ? sc.measure() : []),
+  ];
+  $('read').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+  const chips = [`t ${state.simT.toFixed(2)} s`, `${(100 * st.max).toFixed(1)}% worst`];
+  const settled = last && last.speed < 1e-4;
+  $('hud').innerHTML = chips.map((c) => `<span class="chip">${c}</span>`).join('') + (settled ? '<span class="chip">settled</span>' : '') + (st.max > 0.05 ? '<span class="chip warn">stretching</span>' : '');
+}
+
+function drawChart() {
+  const cv = $('chart'), r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const W = r.width, Hh = r.height, pad = { l: 34, r: 34, t: 8, b: 16 };
+  g.clearRect(0, 0, W, Hh);
+  const H = state.hist;
+  g.strokeStyle = css('--line'); g.lineWidth = 1; g.fillStyle = css('--muted'); g.font = '10px JetBrains Mono, monospace';
+  // log axis for the speed and energy: 1e-6 .. 1e1
+  const ly = (v) => { const lv = Math.log10(Math.max(1e-11, v)); return pad.t + (Hh - pad.t - pad.b) * (1 - (lv + 10) / 11); };
+  for (let e = -10; e <= 1; e += 1) { const y = ly(10 ** e); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(W - pad.r, y); g.globalAlpha = 0.5; g.stroke(); g.globalAlpha = 1; if (e % 2 === 0) g.fillText(`1e${e}`, 2, y + 3); }
+  const smax = 0.1, sy = (v) => pad.t + (Hh - pad.t - pad.b) * (1 - Math.min(1, v / smax));
+  g.textAlign = 'right';
+  for (const v of [0, 0.05, 0.1]) g.fillText(`${(v * 100).toFixed(0)}%`, W - 2, sy(v) + 3);
+  g.textAlign = 'left';
+  const N = Math.max(60, H.length), xs = (k) => pad.l + (W - pad.l - pad.r) * k / (N - 1);
+  const line = (sel, ymap, color) => {
+    g.strokeStyle = color; g.lineWidth = 1.6; g.beginPath(); let on = false;
+    H.forEach((q, k) => { if (q.speed === undefined) return; const y = ymap(sel(q)); if (!on) { g.moveTo(xs(k), y); on = true; } else g.lineTo(xs(k), y); });
+    g.stroke();
+  };
+  line((q) => q.speed, ly, '#3d78c9');
+  line((q) => q.ke, ly, '#3f9d72');
+  line((q) => q.strain, sy, '#d9532f');
+  // where a setting was moved
+  g.fillStyle = css('--muted');
+  H.forEach((q, k) => { if (q.mark) { g.globalAlpha = 0.6; g.fillRect(xs(k), pad.t, 1, Hh - pad.t - pad.b); g.globalAlpha = 1; } });
+  g.fillText(`last ${H.length} frames`, pad.l, Hh - 3);
+}
+
+function drawSections() {
+  const cv = $('sect'), r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const W = r.width, H = r.height;
+  g.clearRect(0, 0, W, H);
+  const sc = state.scene;
+  const flagsEl = $('flags');
+  if (!sc.sections) {
+    // a side profile instead: the cloth's outline from the side (y against z)
+    g.fillStyle = css('--muted'); g.font = '11px Instrument Sans, sans-serif';
+    g.fillText('Side profile (points from the side)', 6, 14);
+    const x = sc.f.pos; let mn = [Infinity, Infinity], mx = [-Infinity, -Infinity];
+    for (let i = 0; i < x.length; i += 3) { mn[0] = Math.min(mn[0], x[i + 2]); mx[0] = Math.max(mx[0], x[i + 2]); mn[1] = Math.min(mn[1], x[i + 1]); mx[1] = Math.max(mx[1], x[i + 1]); }
+    const s = Math.min((W - 20) / Math.max(1, mx[0] - mn[0]), (H - 30) / Math.max(1, mx[1] - mn[1]));
+    g.fillStyle = css('--accent');
+    for (let i = 0; i < x.length; i += 3) g.fillRect(10 + (x[i + 2] - mn[0]) * s, H - 8 - (x[i + 1] - mn[1]) * s, 1.5, 1.5);
+    const st = state.lastStrain || strainOf(sc);
+    flagsEl.className = st.max > 0.05 ? 'flags' : 'flags ok';
+    flagsEl.innerHTML = st.max > 0.05 ? `<li>Threads stretched ${(100 * st.max).toFixed(1)}% (over 5%)</li>` : '<li>No flags: threads within 5% of their cut length</li>';
+    return;
+  }
+  const S = sc.sections(), cols = ['#2c4f9e', '#3f8fb0', '#3fa77a', '#c79a2c', '#d9532f'];
+  // project each section: round mounts from above (x, z), a band from above (x, z), a jabot from above too
+  // (a jabot's sections run down the front: drawn from the front, down the page, their swing to the sides)
+  const pr = S.jabot ? (p) => [p[0], -p[1]] : (p) => [p[0], p[2]];
+  for (const s of S.lines) s.pts = s.pts.map((p) => { const q = pr(p); return [q[0], 0, q[1]]; });
+  let mn = [Infinity, Infinity], mx = [-Infinity, -Infinity];
+  for (const s of S.lines) for (const p of s.pts) { mn[0] = Math.min(mn[0], p[0]); mx[0] = Math.max(mx[0], p[0]); mn[1] = Math.min(mn[1], p[2]); mx[1] = Math.max(mx[1], p[2]); }
+  const sx = (W - 20) / Math.max(1e-3, mx[0] - mn[0]), sz = (H - 34) / Math.max(1e-3, mx[1] - mn[1]);
+  const s = S.round || S.jabot ? Math.min(sx, sz) : Math.min(sx, sz * 4);
+  const ox = 10 + ((W - 20) - (mx[0] - mn[0]) * s) / 2, oz = 20 + ((H - 34) - (mx[1] - mn[1]) * s) / 2;
+  S.lines.forEach((ln, k) => {
+    g.strokeStyle = cols[k % cols.length]; g.lineWidth = 1.4; g.beginPath();
+    ln.pts.forEach((p, i) => { const X = ox + (p[0] - mn[0]) * s, Z = oz + (p[2] - mn[1]) * s; if (i) g.lineTo(X, Z); else g.moveTo(X, Z); });
+    g.stroke();
+  });
+  g.font = '10px JetBrains Mono, monospace';
+  S.lines.forEach((ln, k) => { g.fillStyle = cols[k % cols.length]; g.fillText(`${ln.label}`, 8 + k * 40, 12); });
+  g.fillStyle = css('--muted'); g.fillText(S.jabot ? `from the front: 0% stitched line … 100% ${S.edge || 'scallop'}` : `from above: 0% heading … 100% ${S.edge || 'scallop'}`, 8, H - 4);
+  const st = state.lastStrain || strainOf(sc);
+  const flags = sc.flags ? sc.flags({ max: st.max }) : [];
+  flagsEl.className = flags.length ? 'flags' : 'flags ok';
+  flagsEl.innerHTML = flags.length ? flags.map((f) => `<li>${f}</li>`).join('') : '<li>No flags: sections ripple, no kinks, threads within 5%</li>';
+}
+
+// ---------------------------------------------------------------- wiring
+$('preset').innerHTML = PRESETS.map((p) => `<option value="${p.id}">${p.name}</option>`).join('');
+$('preset').onchange = () => { state.preset = PRESETS.find((p) => p.id === $('preset').value); state.values = presetDefaults(state.preset); $('presetNote').textContent = state.preset.note; rebuild(); };
+$('play').onclick = () => { state.playing = !state.playing; $('play').textContent = state.playing ? 'Pause' : 'Play'; };
+$('step').onclick = () => { state.playing = false; $('play').textContent = 'Play'; simFrame(); updateMesh(); readouts(); drawChart(); drawSections(); };
+$('sub').onclick = () => { state.playing = false; $('play').textContent = 'Play'; oneStep(); updateMesh(); readouts(); drawSections(); };
+$('reset').onclick = () => rebuild();
+$('speed').oninput = () => { $('speedOut').textContent = $('speed').value; };
+
+state.values = presetDefaults(state.preset);
+$('presetNote').textContent = state.preset.note;
+resize();
+rebuild();
+
+let tick = 0;
+function loop() {
+  if (state.playing && state.scene) {
+    const k = parseInt($('speed').value, 10);
+    for (let i = 0; i < k; i++) simFrame();
+    updateMesh();
+    if (++tick % 3 === 0) { readouts(); drawChart(); drawSections(); }
+  }
+  controls.update();
+  renderer.render(scene3, camera);
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
