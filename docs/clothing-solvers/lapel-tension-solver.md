@@ -1004,3 +1004,28 @@ and 9 (the bridle).
 crease, held to its length, with the stand ending where the two meet; (c) build stand and fall as two zones on that
 line, the stand curved in to the neck, the fall a flat panel from the roll line to the outer edge and the gorge; (d)
 put the join's ease in the last 1.3 cm each side of the roll top, where the dent is now.
+
+### The gorge drafted flush from the start (John, 2026-11-24: "Try it"; EXPERIMENTAL, `notchcollar` `"gorge_draft": 1, "draft_fade": 0.6`)
+
+Measured first: the collar's roll line already runs on from the lapel's crease (7 and 8° off it) and the stand already
+ends at the roll top, so points (b) and the stand's end of the reading were in the draft. What was not: the seam. With
+`gorge_draft` the gorge is drafted on the lapel's top edge a cloth behind the lapel's face, so the fall is laid, hung
+and settled to that seam instead of being moved onto it afterwards.
+
+| her left (her right the same) | drafted collar | flush by after-pass (`gorge_flush`) | flush in the draft (`gorge_draft`) |
+|---|---|---|---|
+| collar face against the lapel's, 1.3 to 4 cm along the gorge | 7 to 9 mm proud | within 0.3 mm | within 0.3 mm |
+| the fall beside the gorge (clay) | ledge on the lapel | a dent 1 cm from the roll top | flat, no dent |
+| creases over 40° | 0 | 3 (53°) | 9 (66°), all at the roll top |
+| the roll top (clay) | clean | clean | torn into small teeth |
+
+Five rounds (rejections #146, #147): the lapel's own normal is not defined at the roll top, where the cloth turns over
+its fold (the seam zigzagged, 176°); with the top's normals taken from further along, a collar a cloth behind the
+lapel's face at the roll top lies inside the lapel's fold and is pushed out (149°); faded up to the lapel's surface
+over the first 0.6 it still tears (66°). Stopped at five.
+
+**What it shows.** The fall as a flat panel comes from drafting the seam, not from flattening afterwards: the panel is
+right in this build. What is wrong is the one point where our seam differs from the tailor's: ours *starts* at the
+roll top; a tailor's gorge seam crosses the roll line and runs on under the fold to the neck, so collar and lapel
+turn over the fold together as one cloth. That needs the lapel's top edge carried on past the crease in foldfront
+(`lapels.npz` gives the edge from the crease out only) and the collar's outline cut to it.

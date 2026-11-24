@@ -276,9 +276,31 @@ def notch(L):
         if (v - (v @ u) * u) @ (inner - G3) < 0: best = v
     C3 = G3 + point_len * lu * best
     lift = lambda p: (p + (th + gap) * nG)
+    if opt.get('gorge_draft'):
+        # (EXPERIMENTAL, John 2026-11-24 "Try it", after the tailoring sources: the gorge is a butt seam in one surface,
+        # "the stitching seams appear to be continuous from lapel through collar" (Strickland, A Tailoring Manual). The
+        # gorge is drafted flush from the start: each point on the lapel's top edge, the cloth's thickness behind the
+        # lapel's face along the lapel's own normal there, so the fall is laid, hung and settled to that seam)
+        kl_ = cKDTree(pts)
+        def lift(p):
+            nb_ = kl_.query_ball_point(p, 0.3); n_ = np.linalg.svd(pts[nb_] - pts[nb_].mean(0))[2][-1]
+            return p + opt.get('flush_lift', -th) * (n_ if n_ @ nG > 0 else -n_)
     print('notchcollar: front %d: gorge %.1f cm from the roll line to the notch, the lapel\'s point %.1f cm past it, the collar\'s %.1f cm'
           % (L, 2.62 * Lt[kG], 2.62 * lu, 2.62 * point_len * lu))
     print('notchcollar: front %d: notch G at (%.3f, %.3f, %.3f), collar point C at (%.3f, %.3f, %.3f), lapel point P at (%.3f, %.3f, %.3f)' % (L, *G3, *C3, *P3))
+    if opt.get('gorge_draft'):
+        # (the lapel's normal is not defined at the roll top, where the cloth turns over the fold: the normals of the
+        # first draft_top of the gorge are taken from the point that far along it, then evened along the seam)
+        from scipy.ndimage import gaussian_filter1d
+        g0 = top3[:kG + 1]; gn = np.array([lift(p) - p for p in g0]) / opt.get('flush_lift', -th); gn /= np.linalg.norm(gn, axis=1)[:, None]
+        k0_ = min(int(np.searchsorted(Lt, opt.get('draft_top', 0.5))), kG); gn[:k0_] = gn[k0_]
+        gn = gaussian_filter1d(gn, 3, axis=0, mode='nearest'); gn /= np.linalg.norm(gn, axis=1)[:, None]
+        # (draft_fade: over this length from the roll top the seam comes up from the lapel's own surface to the flush
+        # depth. At the roll top the lapel is turning over its fold, and a collar a cloth behind its face there lies
+        # inside the fold)
+        fd_ = opt.get('draft_fade', 0.0); wl_ = ss(0.0, fd_, Lt[:kG + 1]) if fd_ > 0 else np.ones(kG + 1)
+        gl = g0 + (wl_ * opt.get('flush_lift', -th) + (1 - wl_) * opt.get('draft_top_lift', 0.0))[:, None] * gn
+        return dict(G3=gl[-1], P3=lift(P3), C3=C3, gorge=gl, nG=nG)
     return dict(G3=lift(G3), P3=lift(P3), C3=C3, gorge=np.array([lift(p) for p in top3[:kG + 1]]), nG=nG)
 NtA = notch(1); NtB = notch(2)
 for Nt in (NtA, NtB):
@@ -492,6 +514,12 @@ ch = UV / SC
 P3 = np.array([lay(ps, v) for ps, v in ch])
 on_roll = onb & (ch[:, 1] < 0.3 * hm) & (ch[:, 0] >= Rc[0, 0]) & (ch[:, 0] <= Rc[-1, 0])
 P3[on_roll] += np.array([0.5 * (th + gap) * radial(p) + 0.03 * Z for p in P3[on_roll]])   # (the fall's top edge stands just over and outside the stand's)
+if opt.get('gorge_draft'):       # (the roll line's ends brought to the flush gorge's top, so fold and seam meet at one point at each roll top)
+    ir_ = np.nonzero(on_roll)[0]
+    for Nt, NN in ((NtA, NA), (NtB, NB)):
+        off_ = Nt['gorge'][0] - (NN + 0.5 * (th + gap) * radial(NN) + 0.03 * Z)
+        w_ = 1 - ss(0.0, opt.get('draft_roll_run', 0.6), np.linalg.norm(P3[ir_] - NN, axis=1))
+        P3[ir_] += w_[:, None] * off_
 # the gorge is sewn to the lapel's top edge: its points sit on that edge (lifted the cloth's thickness)
 on_gorge = np.zeros(len(UV), bool)
 for Nt in (NtA, NtB):
