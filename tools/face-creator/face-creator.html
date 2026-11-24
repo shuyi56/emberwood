@@ -615,6 +615,7 @@ function faceRelief(x, z) {
     // bridge as a shelf threw a band of shade between the eyes)
     d += gauss(x, z, s * 0.15 * es, 0.62, x * s < 0.15 * es ? 0.075 : 0.12, 0.052, 0.03 * P.browRidge);
     /* brow arc (apply-brow-arc.py): ridge */ d += browRidgeArc(x * s, z, es);      // (the ridge curves with the brow: apply-brow-arc.py)
+    /* brow arc (apply-brow-arc.py): paranasal */ if (x * s > 0) d -= 1.5 / 219 * sm(24 / 219, 11 / 219, x * s) * sm(4 / 219, 8 / 219, x * s) * sm(0.37, 0.40, z) * sm(0.50, 0.47, z);      // (the cheek beside the nose falls toward it: apply-brow-arc.py)
     d += gauss(x, z, s * 0.14 * es, 0.525, 0.08, 0.05, -0.06 * P.sockets);
     d += gauss(x, z, s * 0.23, 0.415 + cb, 0.09, 0.06, 0.028 * P.cheekbones);
     d += gauss(x, z, s * 0.145, 0.375 + 0.5 * cb, 0.07, 0.06, 0.04 * P.apples);
@@ -1446,7 +1447,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     // (onto the face: softly over the bridge, softer still where the columella and the floor meet the lip, crisply in the
     // wing's crease above and behind it)
     var wa = sm(2.5 * mm, -0.5 * mm, PT[1] - PT[0]) * sm(zSn + 0.5 * mm, zSn + 3.0 * mm, z) * 1;
-    var kf = lerp(lerp(3.2 * mm, 1.6 * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z)) * lerp(1, 0.5, sm(zSn + 0.5 * L, zSn + 0.85 * L, z)), 4.2 * mm, wa);      // (and tighter up between the eyes, clear of the inner corners)
+    var kf = lerp(lerp(3.2 * mm, 4 * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z)) * lerp(1, 0.4, sm(zSn + 0.5 * L, zSn + 0.85 * L, z)), 4.2 * mm, wa);      // (and tighter up between the eyes, clear of the inner corners)
     var d = nSmin(dF, dN, kf);
     return -nSmin(-d, PT[2], kNos);
   }
@@ -2562,7 +2563,11 @@ function browRidgeArc(x, z, es) {
    line, the light's edge on the nose. Depth back from the crest at ax out (model units) */
 function browChisel(ax, w, sl, mm) {
   var Rf = 4 * w, k = 0.7 * mm, v = ax - w, fs = w / Rf, front = ax <= w ? ax * ax / (2 * Rf) : w * w / (2 * Rf) + fs * v;
-  return front + Math.max(0, sl - fs) * (0.5 * (v + Math.sqrt(v * v + k * k)) - 0.5 * k);
+  var sr = 0.5 * (v + Math.sqrt(v * v + k * k)) - 0.5 * k, fa = 0, fv = 2 * mm, fj = 6 * mm;
+  // (the side wall in a concave flare when fa > 0: steeper just after the dorsal line, flatter out toward the cheek, at
+  // the same depth fj out, so its base stays put. plane_breaks.py: the photo's side is darkest just past the corner)
+  if (fa > 0) sr = (1 - fa * fv * (1 - Math.exp(-fj / fv)) / fj) * sr + fa * fv * (1 - Math.exp(-sr / fv));
+  return front + Math.max(0, sl - fs) * sr;
 }
 /* the socket carved under the brow's arc (S.carve, the skin field's span): a hollow inside the orbit's rim, deepest in its
    upper inner quarter where the socket's wall runs into the nose's side. xl, zl from the pupil (model units, x lateral);

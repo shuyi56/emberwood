@@ -409,3 +409,28 @@ Both are knobs in `apply-brow-arc.py` (`CH_WLO`, `KF_TOPF`), left at values that
 the defaults stay. The fix the reading points to is a change of shape, not of blend: the side wall's cross-section
 should turn concave (steep just after the dorsal line, flattening outward into the cheek) and keep its base where the
 bony-base norm puts it.
+
+### 11b. The side's meeting with the cheek softened (John: "Go ahead")
+
+- **A concave flare on the side wall itself** (`CH_FA`, `CH_FV`, `CH_FJ`: steeper after the dorsal line, flatter
+  outward, same depth at 6 mm). It changed nothing at the cheek: the climb stayed about 2 mm. The crease is where the
+  nose's solid meets the face, not in the wall's own shape. Left off (`CH_FA` 0).
+- **The cheek beside the nose falls toward it** (`PN_D` 1.5 mm, from 11 mm out to nothing at 24 mm, faded in from
+  4-8 mm, between the eyes and the wings), **with a rounder meeting** (`KF_MID` 1.6 to 4 mm). `KF_TOPF` 0.4 keeps it
+  crisp by the inner corners. The trough moves the meeting outward and the rounder blend moves it back in, so the bony
+  base stays put.
+
+Kept (`PN_D` 1.5, `KF_MID` 4, `KF_TOPF` 0.4). Measures, five faces (table: `face-flow-data/plane-breaks-after.md`):
+
+| | Photo | Before | After |
+|---|---|---|---|
+| Climb from the shade onto the cheek (y 0.25-0.45) | 8.6-11.9 mm | 1.8-2.9 | 2.8-3.7 |
+| Shade line at the inner corner | 0.135 | 0.122-0.232 | 0.117-0.128 |
+| Shade line on the bridge's side | 0.115 | 0.123-0.147 | 0.135-0.155 |
+| Bony base / alar (norm 0.70-0.80) | | 0.715-0.737 | 0.676-0.796 (Ranger 0.676) |
+| Dorsal lines / TDP (norm 0.85-1.15) | | 1.06-1.16 | 1.04-1.15 |
+
+The shade now climbs back onto the cheek instead of stopping in a crease, and the Ranger's shade at the inner corner
+comes in from 0.23 to the photo's place. The climb is still a third of the photo's. The rest needs a rounder meeting,
+and past `KF_MID` 4 the bony base leaves its norm. The Ranger's bony base sits 0.02 under the norm. Further rounds gave
+only small gains, so the stopping rule ends it here.

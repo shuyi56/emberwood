@@ -38,9 +38,9 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'PN_D': 1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
-            'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 1.6, 'KF_TOPF': 0.5, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
+            'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 4.0, 'KF_TOPF': 0.4, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
 
 MARK = '/* brow arc (apply-brow-arc.py) */'
@@ -79,7 +79,11 @@ function browRidgeArc(x, z, es) {
    line, the light's edge on the nose. Depth back from the crest at ax out (model units) */
 function browChisel(ax, w, sl, mm) {
   var Rf = %(chrf)g * w, k = %(chk)g * mm, v = ax - w, fs = w / Rf, front = ax <= w ? ax * ax / (2 * Rf) : w * w / (2 * Rf) + fs * v;
-  return front + Math.max(0, sl - fs) * (0.5 * (v + Math.sqrt(v * v + k * k)) - 0.5 * k);
+  var sr = 0.5 * (v + Math.sqrt(v * v + k * k)) - 0.5 * k, fa = %(chfa)g, fv = %(chfv)g * mm, fj = %(chfj)g * mm;
+  // (the side wall in a concave flare when fa > 0: steeper just after the dorsal line, flatter out toward the cheek, at
+  // the same depth fj out, so its base stays put. plane_breaks.py: the photo's side is darkest just past the corner)
+  if (fa > 0) sr = (1 - fa * fv * (1 - Math.exp(-fj / fv)) / fj) * sr + fa * fv * (1 - Math.exp(-sr / fv));
+  return front + Math.max(0, sl - fs) * sr;
 }
 /* the socket carved under the brow's arc (S.carve, the skin field's span): a hollow inside the orbit's rim, deepest in its
    upper inner quarter where the socket's wall runs into the nose's side. xl, zl from the pupil (model units, x lateral);
@@ -133,7 +137,7 @@ def patch(src, P):
         old = re.search(r'function browCentre\(u\) \{\n.*?\n\}\n(?=function paintBrows)', src, flags=re.S)
     assert old, 'browCentre not found'
     blk = BROW_FN % {'mark': MARK, 'top': json.dumps(P['TOP']), 'thick': json.dumps(P['THICK']), 'ridgek': P['RIDGE_K'],
-                     'medx': P['MED_X'], 'lob': P['LO_B'], 'gap': P['RIM_GAP'], 'up': P['CARVE_UP'], 'carve': P['CARVE'], 'medp': P['MED_P'], 'low': P['LO_W'], 'mth': P['MALE_THICK'], 'valley': P['VALLEY'], 'vtop': P['VALLEY_TOP'], 'valw': P['VALLEY_W'], 'chrf': P['CH_RF'], 'chk': P['CH_K']}
+                     'medx': P['MED_X'], 'lob': P['LO_B'], 'gap': P['RIM_GAP'], 'up': P['CARVE_UP'], 'carve': P['CARVE'], 'medp': P['MED_P'], 'low': P['LO_W'], 'mth': P['MALE_THICK'], 'valley': P['VALLEY'], 'vtop': P['VALLEY_TOP'], 'valw': P['VALLEY_W'], 'chrf': P['CH_RF'], 'chk': P['CH_K'], 'chfa': P['CH_FA'], 'chfv': P['CH_FV'], 'chfj': P['CH_FJ']}
     src = src[:old.start()] + blk.lstrip('\n') + src[old.end():]
     src = re.sub(r'roots\.length < [0-9]+ \* P\.browDensity', 'roots.length < %d * P.browDensity' % P['ROOTS'], src, count=1)
     # (the head of the brow rounded at its top and bottom corners instead of cut square)
@@ -182,6 +186,14 @@ def patch(src, P):
     # 7b. the cheek side of the nose: soft down the bridge, crisp again up by the inner corners (plane_breaks.py: the
     # photo's shade climbs onto the cheek over 8-12 mm below the eyes, over 2-3 mm beside the inner corners)
     src = re.sub(r'\* lerp\(1, [0-9.]+, sm\(zSn \+ 0\.5 \* L, zSn \+ 0\.85 \* L, z\)\)', '* lerp(1, %g, sm(zSn + 0.5 * L, zSn + 0.85 * L, z))' % P['KF_TOPF'], src, count=1)
+    # 8. the cheek beside the nose tilted toward it, so the shade on the nose's side climbs back onto the cheek over
+    # 8-12 mm as in the photo instead of stopping in a crease (plane_breaks.py: rise); 0 depth leaves the face as it was
+    r8 = '    /* brow arc (apply-brow-arc.py): ridge */ d += browRidgeArc(x * s, z, es);'
+    assert r8 in src, 'ridge line not found'
+    src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': paranasal \*/[^\n]*', '', src)
+    if P['PN_D'] > 0:
+        i8 = src.index(r8); j8 = src.index('\n', i8)
+        src = src[:j8] + '\n    %s: paranasal */ if (x * s > 0) d -= %g / 219 * sm(%g / 219, %g / 219, x * s) * sm(4 / 219, 8 / 219, x * s) * sm(0.37, 0.40, z) * sm(0.50, 0.47, z);      // (the cheek beside the nose falls toward it: apply-brow-arc.py)' % (MARK[:-3], P['PN_D'], P['PN_X1'], P['PN_X0']) + src[j8:]
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:
