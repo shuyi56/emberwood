@@ -2248,6 +2248,54 @@ def wave_restore(X, sel, gain, col, sign=None):
     return push_valid(col, Y, mask=sel[:, None] & ok)
 
 
+# The finish after the curl [TYMO2][WWW2][GOOP]: let it cool, then break it up with the fingers: each section's curl
+# opens into a soft ribbon, the waves loosen, the last inch hangs looser. (goop.com, "3 ways to wear beach waves":
+# the bombshell finish, "don't use a hairbrush", curls broken up with the fingers; whowhatwear.com: "Once your hair
+# has cooled and set into place, use your fingers to gently break up the curls".)
+FC_RIBBON = 0.5              # STYLE: each guide drawn this far to its section's mean shape (from the jaw down)
+FC_LOOSEN = 0.8              # STYLE: the curl's height after the comb-out ("about 20%" looser, John's pick)
+FC_END_NODES = 2.5           # nodes (2.5 cm): the last inch eased toward its middle line [TYMO2][WH]
+FC_END_KEEP = 0.5            # share of the wave left at the very tip
+
+
+def finger_comb(X, roots, sel, group, col):
+    """The finger-comb finish (FC_*): each section (group) gathered into a ribbon, its guides drawn toward the
+    section's mean shape from the jaw down; then each strand's offset from its middle line scaled by FC_LOOSEN, less
+    still over the last inch; rebuilt at its segment lengths from the root and kept out of the head."""
+    ok = ~np.isnan(X[..., 0])
+    Y = X.copy()
+    for gr in np.unique(group[sel]):
+        gi = np.where(sel & (group == gr))[0]
+        if len(gi) < 2:
+            continue
+        F = X[gi] - roots[gi][:, None]
+        last = ok[gi].sum(1) - 1
+        for j in range(len(gi)):
+            F[j, last[j] + 1:] = F[j, last[j]]
+        M = F.mean(0)
+        for j, g in enumerate(gi):
+            n = last[j] + 1
+            w = FC_RIBBON * (1 - SF.sm(-0.05, 0.25, X[g, :n, 2]))[:, None]
+            P = roots[g] + F[j, :n] + w * (M[:n] - F[j, :n])
+            d = np.diff(P, axis=0)
+            L = np.linalg.norm(np.diff(X[g, :n], axis=0), axis=1, keepdims=True)
+            d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+            Y[g, 1:n] = X[g, 0] + np.cumsum(d, 0)
+    Y = push_valid(col, Y, mask=sel[:, None] & ok)
+    C, ok, n = middle_line(Y)
+    Z = Y.copy()
+    for g in np.where(sel)[0]:
+        k = n[g]
+        e = np.clip((k - 1 - np.arange(k)) / FC_END_NODES, 0, 1)
+        f = (FC_LOOSEN * (FC_END_KEEP + (1 - FC_END_KEEP) * e))[:, None]
+        P = C[g, :k] + f * (Y[g, :k] - C[g, :k])
+        d = np.diff(P, axis=0)
+        L = np.linalg.norm(np.diff(Y[g, :k], axis=0), axis=1, keepdims=True)
+        d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        Z[g, 1:k] = Y[g, 0] + np.cumsum(d, 0)
+    return push_valid(col, Z, mask=sel[:, None] & ok)
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2549,6 +2597,8 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
                 sgn, g2 = wave_signs(roots, sd_sel, lk * 1000 + clump, fl >= 0)
                 clump = np.where(sgn < 0, clump + WAVE_ALT_ID, clump)
             X2 = wave_restore(X2, sd_sel, WAVE_RESTORE, col, sgn)
+            # then finger-combed: each section a soft ribbon, the curl loosened, the last inch looser (see FC_*)
+            X2 = finger_comb(X2, roots, sd_sel & (fl < 0), lk * 1000 + clump, col)
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
