@@ -2685,6 +2685,60 @@ def ear_line_cut(X, lengths, roots, keep, first=None):
     return X, lengths
 
 
+# The cut side hair combed into the back's flow (John, 2026-11-24: "comb the hair remaining to follow the back flow"):
+# below the temple each cut guide turns toward the mean direction of the hair behind the ear near it, so the short
+# side hair sweeps back with the hair falling down the back instead of hanging straight beside the cheek. STYLE.
+BACK_FLOW_R = 0.15           # HH (3.3 cm): the hair behind the ear a node's flow is read from
+BACK_FLOW_W = 0.9            # how far a segment turns to that flow, in full below BACK_FLOW_Z[1]
+BACK_FLOW_Z = (0.78, 0.6)    # HH: eased in from the temple to the ear's top (the roots keep their line)
+BACK_FLOW_AIM = 1.2          # STYLE: back per unit down added to the flow: the hair behind the ear hangs nearly plumb,
+                             # and combed to it alone the side hair barely moved
+BACK_BANG_Z = 0.42           # HH: the bangs that hang below the cheekbone are combed back from it
+BACK_FLOW_TH = 1.6           # |theta| of the roots of the hair read as the back's flow (behind the ear)
+
+
+def back_flow(X, sel, roots, col, z0=None):
+    """Each guide in sel turned, node by node from the root, toward the flow of the hair rooted behind BACK_FLOW_TH
+    within BACK_FLOW_R of it (plumb where there is none) plus BACK_FLOW_AIM back; each new node kept out of the head
+    and body, at its segment length (marched as drape_front is, so the ear turns it rather than being crossed)."""
+    from scipy.spatial import cKDTree
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    ref = ~sel & (np.abs(SF.theta(roots)) > BACK_FLOW_TH)
+    d = np.diff(X[ref], axis=1)
+    P = 0.5 * (X[ref, 1:] + X[ref, :-1]).reshape(-1, 3)
+    D = d.reshape(-1, 3)
+    v = ~np.isnan(P[:, 0])
+    P, D = P[v], D[v] / np.linalg.norm(D[v], axis=1, keepdims=True)
+    tree = cKDTree(P)
+    L = np.linalg.norm(np.diff(X, axis=1), axis=-1)
+    for k in range(1, X.shape[1]):
+        gi = np.where(sel & (k < n))[0]
+        if not len(gi):
+            continue
+        seg = X[gi, k] - X[gi, k - 1]
+        seg /= np.maximum(np.linalg.norm(seg, axis=1, keepdims=True), 1e-12)
+        zt = BACK_FLOW_Z[0] if z0 is None else z0[gi]          # (per guide: where the comb takes hold)
+        w = BACK_FLOW_W * np.clip((zt - X[gi, k - 1, 2]) / (BACK_FLOW_Z[0] - BACK_FLOW_Z[1]), 0, 1)
+        fl = np.tile(np.array([0.0, 0.0, -1.0]), (len(gi), 1))
+        for q, near in enumerate(tree.query_ball_point(X[gi, k - 1], BACK_FLOW_R)):
+            if near:
+                fl[q] = D[near].mean(0)
+        fl /= np.maximum(np.linalg.norm(fl, axis=1, keepdims=True), 1e-12)
+        fl += BACK_FLOW_AIM * np.array([0.0, 1.0, 0.0])
+        fl /= np.linalg.norm(fl, axis=1, keepdims=True)
+        u = (1 - w)[:, None] * seg + w[:, None] * fl
+        u /= np.maximum(np.linalg.norm(u, axis=1, keepdims=True), 1e-12)
+        X[gi, k] = X[gi, k - 1] + u * L[gi, k - 1][:, None]
+        m = np.zeros(X.shape[:2], bool)
+        m[gi, k] = True
+        X = push_valid(col, X, mask=m)
+        v = X[gi, k] - X[gi, k - 1]
+        X[gi, k] = X[gi, k - 1] + v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12) * L[gi, k - 1][:, None]
+    return X
+
+
 # The ends: each lock a ribbon that closes to a point (John, 2026-11-24, with a drawn reference of long wavy hair:
 # "the hair needs a cut to form curves, right now the hair is all over the place"). SOURCED: the cut is point cut
 # throughout, ends bevelled, never blunt (behindthechair.com, TONI&GUY bouncy long layers; hairfinder.com, the pyramid
@@ -3074,7 +3128,18 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
         if wavy:
             # (John, 2026-11-24, the second framing lock circled: "that second lock needs to be cut". Only the first
             # framing lock stays long; the others, and all the side hair in front of the ear, are cut on the line)
-            X2, lengths = ear_line_cut(X2, lengths, roots, bang, first=first_locks(X2, clump))
+            first_ = first_locks(X2, clump)
+            X2, lengths = ear_line_cut(X2, lengths, roots, bang, first=first_)
+            # and what remains in front of the ear combed back into the back's flow (see BACK_FLOW_*)
+            # (the short hair only: the long hair behind the ear is already draped down the back, and combed again it
+            # streamed out behind her. With it the long side bangs, from the cheekbone down: in profile they were most
+            # of the curtain hanging beside the cheek; the fringe over the brow keeps its line)
+            okz_ = ~np.isnan(X2[..., 2])
+            endz_ = X2[np.arange(len(X2)), okz_.sum(1) - 1, 2]
+            bf_ = ~first_ & (np.abs(SF.theta(roots)) < BACK_FLOW_TH) & (endz_ > -0.05) & (~bang | (endz_ < BACK_BANG_Z))
+            X2 = back_flow(X2, bf_, roots, col, z0=np.where(bang, BACK_BANG_Z, BACK_FLOW_Z[0]))
+            X2 = relax_kinks(X2, col, None, keep=~bf_)
+            lengths = np.minimum(lengths, (~np.isnan(X2[..., 0])).sum(1) - 1)
             # the ends: every side lock closed to a point (see TAPER_*); the back's middle left as John approved it
             X2, lengths = lock_taper(X2, lengths, ~bang & (np.abs(SF.theta(roots)) < WAVE_FADE_TH[1]),
                                      lk * 1000 + clump, col)
