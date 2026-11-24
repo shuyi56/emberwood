@@ -1892,6 +1892,95 @@ def frame_locks(X, roots, sel_from, seg_hh, col, n_locks=FRAME_LOCKS):
     return X, fl
 
 
+BANG_BLEND_NODES = 6         # nodes (6 cm): the bang's end turned into the side hair's flow over this length
+BANG_BLEND_W = 0.85          # how far the tip's direction turns to the side hair's (0 at the start of the blend), STYLE
+BANG_BLEND_R = 0.12          # HH (2.6 cm): the side hair the bang's end is read against
+
+
+def bang_blend(X, bang, col):
+    """Curtain bangs flow into the side hair: brushed away from the face, the fringe's ends carry on into the hair at
+    the temple rather than stopping on an edge over the eye (John, 2026-11-24: "the flow from the bangs to the sides
+    should be smooth"). Over each bang's last BANG_BLEND_NODES nodes, its direction turns, more toward the tip, to the
+    mean direction of the hair that is not bangs within BANG_BLEND_R of it; the end is rebuilt at the rod's length and
+    pushed out of the head."""
+    from scipy.spatial import cKDTree
+    X = X.copy()
+    ok = ~np.isnan(X[..., 0])
+    n = ok.sum(1)
+    d = np.diff(X, axis=1)
+    o = ~bang
+    P = 0.5 * (X[o, 1:] + X[o, :-1]).reshape(-1, 3)
+    D = d[o].reshape(-1, 3)
+    v = ~np.isnan(P[:, 0])
+    P, D = P[v], D[v] / np.linalg.norm(D[v], axis=1, keepdims=True)
+    tree = cKDTree(P)
+    for g in np.where(bang & (n > BANG_BLEND_NODES + 2))[0]:
+        k0 = n[g] - BANG_BLEND_NODES
+        for j in range(k0, n[g]):
+            seg = X[g, j] - X[g, j - 1]
+            L = np.linalg.norm(seg)
+            near = tree.query_ball_point(X[g, j - 1], BANG_BLEND_R)
+            if not near:
+                X[g, j] = X[g, j - 1] + seg
+                continue
+            flow = D[near].mean(0)
+            flow /= max(np.linalg.norm(flow), 1e-12)
+            w = BANG_BLEND_W * SF.sm(0.0, 1.0, (j - k0 + 1) / BANG_BLEND_NODES)
+            u = (1 - w) * seg / L + w * flow
+            X[g, j] = X[g, j - 1] + u / max(np.linalg.norm(u), 1e-12) * L
+    return push_valid(col, X, mask=bang[:, None] & ok)
+
+
+EDGE_Z = (0.55, 0.42, -0.1, -0.35)   # HH: the face edge filled in from below the bang's end (0.55 to 0.42) down past
+                                     # the jaw (-0.1, out by -0.35: the shoulder drape stays as John approved it)
+EDGE_REACH = 0.45                    # rad: the forward swing fades out over this much behind the face edge
+EDGE_PCT = 2                         # the face edge: the 2nd percentile of |theta| of the hair at a height, per side
+
+
+def _face_edge(P, zb):
+    th, _ = _polar(P)
+    E = np.full((2, len(zb)), np.nan)
+    for i, z in enumerate(zb):
+        m = np.abs(P[:, 2] - z) < 0.03
+        for j, sd in enumerate((-1, 1)):
+            mm = m & (np.sign(th) == sd)
+            if mm.sum() > 20:
+                E[j, i] = np.percentile(np.abs(th[mm]), EDGE_PCT)
+    return E
+
+
+def face_edge(X, sel, style_path, col):
+    """The hair at the side of the face brought forward to the creator's face edge: under the bangs' ends the
+    creator's hair falls in an unbroken sheet at |theta| 0.75 from the cheekbone to the jaw, ours stood back at 0.93
+    to 1.1, and the temple and cheek showed between the bangs and the side hair (John, 2026-11-24: "there should be
+    no gaps like these"). Each guide in sel is swung forward round the body axis (at constant r) by the gap at its
+    height, in full at the edge and less further back (EDGE_REACH), so the sheet stretches forward instead of sliding."""
+    import gzip
+    d = json.load(gzip.open(style_path))
+    C = np.concatenate([np.array(s['p']).reshape(-1, 3) for s in d['strands']])
+    zb = np.arange(EDGE_Z[0], EDGE_Z[3] - 0.05, -0.05)
+    ok = ~np.isnan(X[..., 0])
+    Ec = _face_edge(C, zb)
+    Eo = _face_edge(X[sel & ok.any(1)].reshape(-1, 3)[ok[sel & ok.any(1)].ravel()], zb)
+    gap = np.nan_to_num(np.maximum(Eo - Ec, 0))
+    for _ in range(3):
+        gap[:, 1:-1] = 0.25 * gap[:, :-2] + 0.5 * gap[:, 1:-1] + 0.25 * gap[:, 2:]
+    Eo = np.where(np.isnan(Eo), np.nanmax(Eo), Eo)
+    th, r = _polar(X)
+    z = np.nan_to_num(X[..., 2])
+    w = SF.sm(EDGE_Z[0], EDGE_Z[1], z) * (1 - SF.sm(EDGE_Z[2], EDGE_Z[3], z))
+    Y = X.copy()
+    for j, sd in enumerate((-1, 1)):
+        g = sel[:, None] & ok & (np.sign(th) == sd)
+        zz, at = zb[::-1], (gap[j][::-1], Eo[j][::-1])
+        dth = np.interp(z, zz, at[0])
+        e = np.interp(z, zz, at[1])
+        fall = np.clip(1 - (np.abs(th) - e) / EDGE_REACH, 0, 1)
+        sw = np.where(g, dth * w * fall, 0.0)
+        Y = np.where(g[..., None], _from_polar(X, th - sd * sw, r), Y)
+    return push_valid(col, Y)
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2164,6 +2253,11 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             X2, fl = frame_locks(X2, roots, np.abs(SF.theta(roots)) < SIDE_SOLVE_TH, seg_hh, col)
             X2 = relax_kinks(X2, col, None, keep=bang & (fl < 0))
             clump = np.where(fl >= 0, 900 + fl, clump)
+            # the side of the face filled to the creator's edge under the bangs (no gap at the temple and cheek)
+            X2 = face_edge(X2, ~bang & (np.abs(SF.theta(roots)) < SIDE_SOLVE_TH), trace, col)
+            X2 = relax_kinks(X2, col, None, keep=bang & (fl < 0))
+            # and the bangs' ends carried on into the side hair, so the fringe flows into the sides
+            X2 = bang_blend(X2, bang & (fl < 0), col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
