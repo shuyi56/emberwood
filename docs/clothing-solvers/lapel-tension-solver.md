@@ -888,3 +888,29 @@ join (`~/work/FC/section.py`: vertical cuts at fixed x through the coat, the lap
 **What the third flaw needs:** the collar's end and the lapel at the gorge have to be built as one surface, the
 collar's end edge laid along the lapel's top edge at the lapel's own face, rather than a collar laid on the coat and
 moved afterwards. Any after-the-fact move of part of the end tears it.
+
+## Phase 15: back to the low notch lapel (John, 2026-11-24: "Explore the lower lapel and what do correct collar needs to be with the recent knowledge acquired"; "I mean go back to the previous lapel shape")
+
+**The fronts.** `eased_top_lapel` folded on the shared cut: its roll tops already match side to side (they sit at
+|x| 2.18, past the lap), but the right lapel stood 1.8 mm forward of the left in its middle, as the right front was a
+cloth forward above the folds' crossing (z 45.53). `over_top.py CUT 45.53,46.5`: top third 0.34 to 0.03 mm, middle 1.83
+to 0.23 mm; the foot third keeps the lap's 5 mm (the fronts do cross there). Lapel strain 95%: 7.6 / 8.9%.
+
+**The drafted notch collar** (`notchcollar` `{"notch_angle":30,"rise_gain":1.6,"end_bow":-0.2}`, the phase 5 pair) on
+the level fronts: gorge seam 7.8 cm a side, step 4.0 mm, turn across the gorge 41°, a 55° kink, tip fold 12°, the same
+both sides. It already carries the coat's cloth thickness (Solidify 0.1669) and sits 0.23 off the coat (13% within the
+coat's cloth, against 84% for the first folded collar).
+
+**The folded collar does not carry over (rejection #139).** Carried on down each gorge to the notch at the lapel's face
+(`gorge_seam`, removed), the band crumples at the roll top: the seam turns a corner there from the neckline into the
+gorge, and the fall lies on the inside of that corner and laps over itself (relaxed strain 73%, tip fold 140°). Round
+the back it laid cleanly.
+
+**What the low lapel's collar needs**, from phases 9 to 14:
+
+1. The drafted notch collar's shape: it is cut for the gorge and the notch, which the folded band cannot turn.
+2. The fronts level above the crossing (done here).
+3. The coat's cloth thickness and a clearance measured from the coat's side, so nothing shows through (phase 11 and
+   `no_poke`): it has the first; the second is to be checked on it.
+4. Its gorge edge on the lapel's top edge at the lapel's own face, laid as one surface with it: the 55° kink and the
+   4 mm step are where it is not.
