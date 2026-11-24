@@ -2163,6 +2163,57 @@ def lay_in(X, keep, style_path, col):
     return push_valid(col, X)
 
 
+SIDE_BLEND_SIGMA = 0.02      # HH (4.4 mm): each side guide's shape blended with its lock's guides rooted round it, so
+                             # neighbouring guides lie as one combed sheet instead of each holding its own small bends
+
+
+def shape_blend(X, roots, sel, group, sigma, col):
+    """Each guide in sel takes the Gaussian-weighted mean shape (from its root, by root distance) of the guides of its
+    group, each carried on past its end to blend over any length; rebuilt at its own segment lengths, kept out of the
+    head."""
+    ok = ~np.isnan(X[..., 0])
+    Y = X.copy()
+    for gr in np.unique(group[sel]):
+        gi = np.where(sel & (group == gr))[0]
+        if len(gi) < 3:
+            continue
+        F = X[gi] - roots[gi][:, None]
+        last = ok[gi].sum(1) - 1
+        for j in range(len(gi)):
+            F[j, last[j] + 1:] = F[j, last[j]]
+        D2 = ((roots[gi][:, None] - roots[gi][None]) ** 2).sum(-1)
+        W = np.exp(-D2 / (2 * sigma ** 2))
+        W /= W.sum(1, keepdims=True)
+        M = np.einsum('ij,jsk->isk', W, F)
+        for j, g in enumerate(gi):
+            n = last[j] + 1
+            d = np.diff(roots[g] + M[j, :n], axis=0)
+            L = np.linalg.norm(np.diff(X[g, :n], axis=0), axis=1, keepdims=True)
+            d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+            Y[g, 1:n] = X[g, 0] + np.cumsum(d, 0)
+    return push_valid(col, Y, mask=sel[:, None] & ok)
+
+
+WAVE_RESTORE = 1.45          # CALIBRATED: the side waves' depth brought back to the creator's after the combing (the
+                             # smoothing, lay-in and comb passes took the front/side wave from 7.3 to 5.5 mm median,
+                             # the creator's 8.2)
+
+
+def wave_restore(X, sel, gain, col):
+    """The side waves deepened again below the jaw: each strand's offset from its middle line (middle_line, which
+    holds above WAVE_Z_RAMP) scaled by gain; rebuilt at its segment lengths from the root, kept out of the head."""
+    C, ok, n = middle_line(X)
+    Y = X.copy()
+    for g in np.where(sel)[0]:
+        k = n[g]
+        P = C[g, :k] + gain * (X[g, :k] - C[g, :k])
+        d = np.diff(P, axis=0)
+        L = np.linalg.norm(np.diff(X[g, :k], axis=0), axis=1, keepdims=True)
+        d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
+        Y[g, 1:k] = X[g, 0] + np.cumsum(d, 0)
+    return push_valid(col, Y, mask=sel[:, None] & ok)
+
+
 def recut(X, lengths, cut_z=None, keep=None):
     """Cut again on the hair as it finally lies: the cut is made on the first settle, and the hair the body then holds
     out (the cape over the shoulders) hangs past the length line by the time it rests. And any guide that climbs back
@@ -2453,6 +2504,13 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             # ends swept out past the temples to |x| 0.58 at eye level (the creator's 0.47), the ledge John saw
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
             X2 = relax_kinks(X2, col, None, keep=bang)
+            # and combed through last, within each wave lock and each framing lock: the lay-in moves nodes one by one
+            # and left the sides unkempt in profile (John, 2026-11-24: "side looks unkempt, comb it")
+            sd_sel = ~bang & (np.abs(SF.theta(roots)) > 0.6) & (np.abs(SF.theta(roots)) < 2.2)
+            X2 = shape_blend(X2, roots, sd_sel, lk * 1000 + clump, SIDE_BLEND_SIGMA, col)
+            X2 = side_form(X2, roots, lk * 1000 + clump, bang, col)
+            X2 = wave_restore(X2, sd_sel, WAVE_RESTORE, col)
+            X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
         X2, lengths = recut(X2, lengths, ranger_cut_z, keep=bang)
