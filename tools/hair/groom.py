@@ -2194,19 +2194,53 @@ def shape_blend(X, roots, sel, group, sigma, col):
     return push_valid(col, Y, mask=sel[:, None] & ok)
 
 
+# Curling as stylists do it [CURL]:
+# [TYMO2] tymobeauty.com, "How to get beach waves with a curling iron": 1 inch sections, a 1.25 inch barrel for soft
+#         waves on long hair; start "around the upper mid-length", stop before the last 0.5 to 1 inch; the front away
+#         from the face, the rest alternated: "Alternating directions prevents the waves from joining into one large
+#         curl pattern"; curl the under layers too, from the nape up.
+# [EST]   esteticamagazine.com, Sam Villa's wrap and twist: "Beach waves tend to sit midshaft", "the ends should be
+#         left out".
+# [WH]    womanandhome.com: "leave the last couple of centimeters of hair off the tong"; an "S" shape, not a spring.
+# [MC2]   marieclaire.co.uk: "Wrap one section towards your face and the next away", "a more natural distribution".
+# [WWW2]  whowhatwear.com: alternated, the "curls offset each other and create the illusion of thicker" hair.
+# Ours, measured against the creator (the side and back hair, strands over 30 cm): neighbouring strands waved in step
+# (signal correlation 0.96, the creator's 0.50, 24% of its neighbour pairs out of step: ours 5%), one wave pattern
+# over the whole head; the ends bent 10.2 deg/cm (the creator's 8.8).
 WAVE_RESTORE = 1.45          # CALIBRATED: the side waves' depth brought back to the creator's after the combing (the
                              # smoothing, lay-in and comb passes took the front/side wave from 7.3 to 5.5 mm median,
                              # the creator's 8.2)
+WAVE_ALT = True              # alternate sections curled the other way [TYMO2][MC2]: a wave lock's offset from its
+                             # middle line flipped (half a wavelength) against the locks beside it
+WAVE_ALT_ID = 400            # the flipped half-locks' clump ids from here (under FRAME_CLUMP0's 900)
 
 
-def wave_restore(X, sel, gain, col):
-    """The side waves deepened again below the jaw: each strand's offset from its middle line (middle_line, which
-    holds above WAVE_Z_RAMP) scaled by gain; rebuilt at its segment lengths from the root, kept out of the head."""
+def wave_signs(roots, sel, group, keep):
+    """+1 / -1 per guide, and the new group ids: each side wave lock (in sel, not keep) split across the head at its
+    middle into two sections about an inch wide [TYMO2], the back one curled the other way (its group id + WAVE_ALT_ID,
+    so its children blend only within it); keep (the face-framing locks) always +1: away from the face [TYMO2]."""
+    sg = np.ones(len(roots))
+    group = group.copy()
+    th = SF.theta(roots)
+    for q in np.unique(group[sel & ~keep]):
+        gi = np.where(sel & ~keep & (group == q))[0]
+        if len(gi) < 4:
+            continue
+        back = np.abs(th[gi]) > np.median(np.abs(th[gi]))
+        sg[gi[back]] = -1.0
+        group[gi[back]] += WAVE_ALT_ID
+    return sg, group
+
+
+def wave_restore(X, sel, gain, col, sign=None):
+    """The side waves deepened again below the jaw, each lock curled its own way: each strand's offset from its
+    middle line (middle_line, which holds above WAVE_Z_RAMP) scaled by gain and its section's sign; rebuilt at its segment lengths from the root, kept out of the head."""
     C, ok, n = middle_line(X)
     Y = X.copy()
     for g in np.where(sel)[0]:
         k = n[g]
-        P = C[g, :k] + gain * (X[g, :k] - C[g, :k])
+        f = gain * (1.0 if sign is None else sign[g])
+        P = C[g, :k] + f * (X[g, :k] - C[g, :k])
         d = np.diff(P, axis=0)
         L = np.linalg.norm(np.diff(X[g, :k], axis=0), axis=1, keepdims=True)
         d *= L / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-12)
@@ -2509,7 +2543,12 @@ def build_groom(surf, F, body, n_guides=2400, style="ranger", iters=1500, log=No
             sd_sel = ~bang & (np.abs(SF.theta(roots)) > 0.6) & (np.abs(SF.theta(roots)) < 2.2)
             X2 = shape_blend(X2, roots, sd_sel, lk * 1000 + clump, SIDE_BLEND_SIGMA, col)
             X2 = side_form(X2, roots, lk * 1000 + clump, bang, col)
-            X2 = wave_restore(X2, sd_sel, WAVE_RESTORE, col)
+            # the waves back to the creator's depth, alternate locks curled the other way, the ends left out
+            sgn = None
+            if WAVE_ALT:                                   # (the back left as John approved it)
+                sgn, g2 = wave_signs(roots, sd_sel, lk * 1000 + clump, fl >= 0)
+                clump = np.where(sgn < 0, clump + WAVE_ALT_ID, clump)
+            X2 = wave_restore(X2, sd_sel, WAVE_RESTORE, col, sgn)
             X2 = lay_in(X2, np.zeros(len(roots), bool), trace, col)
     if trace and not wavy:
         # one length round the sides and back, on the creator's back length (RANGER_LEN_Z): no side cut
