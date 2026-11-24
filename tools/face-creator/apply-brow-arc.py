@@ -38,9 +38,9 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
-            'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 1.6, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
+            'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 1.6, 'KF_TOPF': 0.5, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
 
 MARK = '/* brow arc (apply-brow-arc.py) */'
@@ -164,7 +164,8 @@ def patch(src, P):
     src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': flare \*/[^\n]*', '', src)
     src = src.replace(g, g + '\n    %s: flare */ w *= %g * (1 - %g * sx); var qF = clamp((z - zRad) / Math.max(1e-6, zHB - zRad), 0, 1), wF = %g * Math.max(0, xHB - w) * (1 - Math.sqrt(Math.max(0, 1 - qF * qF))); w += wF;      // (above the radix the dorsal lines part and curve out into the brows\' heads, a quarter ellipse: upright at the radix, level at the brow)' % (MARK[:-3], P['CH_W'], P['MALE_W'], P['FLARE']), 1)
     h0 = 'var dD = (yl + sl * (Math.sqrt(w * w + ax * ax) - w) + 0.09 * bk * bk / mm - y) / Math.sqrt(1 + sl * sl);'
-    h1 = 'var dD = (yl + browChisel(ax, w, sl, mm) + 0.09 * Math.pow(Math.max(0, bk - wF), 2) / mm - y) / Math.sqrt(1 + sl * sl);      /* brow arc (apply-brow-arc.py): the chisel */'
+    h1 = 'var dD = (yl + browChisel(ax, %s, sl, mm) + 0.09' % ('w' if P['CH_WLO'] == 1 else 'w * lerp(%g, 1, sm(0.25, 0.85, tc))' % P['CH_WLO']) + ' * Math.pow(Math.max(0, bk - wF), 2) / mm - y) / Math.sqrt(1 + sl * sl);      /* brow arc (apply-brow-arc.py): the chisel */'
+    src = re.sub(r'var dD = \(yl \+ browChisel\([^\n]*the chisel \*/', lambda m: h0, src)
     if h0 in src:
         src = src.replace(h0, h1, 1)
     assert h1 in src, 'bridge section line not found'
@@ -178,6 +179,9 @@ def patch(src, P):
     # 7. the nose's side met by the cheek along a crisp junction (the blend of the nose into the face over the middle of
     # the nose, 5 mm, to KF_MID): the side plane ends in a line, the nasofacial groove, instead of a smear
     src = re.sub(r'lerp\(3\.2 \* mm, [0-9.]+ \* mm, sm\(zSn \+ 4 \* mm, zSn \+ 12 \* mm, z\)\)', 'lerp(3.2 * mm, %g * mm, sm(zSn + 4 * mm, zSn + 12 * mm, z))' % P['KF_MID'], src, count=1)
+    # 7b. the cheek side of the nose: soft down the bridge, crisp again up by the inner corners (plane_breaks.py: the
+    # photo's shade climbs onto the cheek over 8-12 mm below the eyes, over 2-3 mm beside the inner corners)
+    src = re.sub(r'\* lerp\(1, [0-9.]+, sm\(zSn \+ 0\.5 \* L, zSn \+ 0\.85 \* L, z\)\)', '* lerp(1, %g, sm(zSn + 0.5 * L, zSn + 0.85 * L, z))' % P['KF_TOPF'], src, count=1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:

@@ -356,3 +356,56 @@ round the wing, as the photo's does.
 Before and after tables: `face-flow-data/shadow-gaps-before.md` and `face-flow-data/shadow-gaps-after.md`. Renders are
 in the project files (`face-flow/`): `shadow-trace-before-after.png`, `render-nose-side-before-after.png` and
 `clay-nose-side-before-after.png`.
+
+## 11. Reading the chisel from the lines (`tools/gauges/face/plane_breaks.py`)
+
+John: "Read how to derive the right chisel properly from the lines". How artists get planes and their edges from tone:
+
+- **Where a plane break sits:** where the tone steps. Hampton builds the nose as a box that "drops back in shadow and
+  comes forward" ([Shading After Construction](https://proko.com/course-lesson/shading-after-construction/notes)).
+- **How sharp it is:** from the width of the step. "A sharp edge suggests a sudden plane change. A firm edge suggests a
+  rounded corner. A soft edge suggests a large round form" (Prokopenko,
+  [Intro to Edges](https://www.proko.com/course-lesson/intro-to-edges/notes)). Weistling's rule on the same course:
+  "Look for the one or two HARD edges and let the others all be softer."
+- **How far it turns:** from the size of the step. A matt surface reflects with the cosine of the angle to the light
+  (Horn, [Understanding Image Intensities](https://people.csail.mit.edu/people/bkph/papers/Understanding_Image_Intensities.pdf), 2.1).
+  Horn's edge profiles (section 3) also separate a convex corner from a concave junction.
+
+`plane_breaks.py` puts that into numbers. Across the shadow trace's line, at eight heights, on the photo and on each
+head, it reads the corner's start (`x_break`), the 10-90% width of the fall (`width`, mm), the side's tone (`core`) and
+turn, and the width of the climb from the shade back onto the cheek (`rise`, mm). On a head it also reads the turn
+from the true normals. On the bridge the tone reading and the geometry agree within 3 degrees, so the reading holds
+where it can be checked. The photo's light has more fill than our key, so its turns read low. Its positions and widths
+do not depend on that.
+
+What the photo says, and where we stand (table: `face-flow-data/plane-breaks-now.md`; plot:
+`face-flow-data/plane-profiles.png`):
+
+| | Photo | Ours (five faces) |
+|---|---|---|
+| The corner, front to side, on the bridge (y 0.05-0.25) | 3.0-4.2 mm wide | 2.8-4.3 mm: right |
+| The corner on the lower bridge (y 0.35-0.45) | 4.1-6.3 mm | 7.0-9.3 mm: too soft |
+| The corner at the radix, beside the inner corners (y -0.05) | 5.6 mm | 8.9-9.7 mm: too soft (the open item of section 10) |
+| The climb from the shade onto the cheek, below the eyes | 8-12 mm, gentle | about 2 mm: a crease |
+| The climb beside the inner corners (y -0.05 to 0.05) | 1.8-2.8 mm | about 2 mm: right |
+| Where the side is darkest | just past the corner, then lighter outward | at the cheek's junction, then a hard edge |
+
+So the photo has one firm edge (the dorsal line, the corner from front to side) and a soft one (the side flaring into
+the cheek). The side wall is steepest just after the corner and flattens outward into the cheek. Ours keeps turning
+away until it meets the cheek in a crease, so the darkest tone sits at the junction and the side reads as a drawn line.
+
+Tried, with the same gauges after each round (rounds p1-p11, five faces):
+
+- **Widening the front plane down the bridge** (`CH_WLO`, 1.15-1.9) moved the corner out to the photo's place, but the
+  dorsal lines then outran the tip-defining points (`dal_vs_tdp` up to 1.37, norm 0.85-1.15). The photo's dorsum
+  matches its own tip (0.059 against 0.0625 half-widths, about 0.95). Our tips are narrower, so the dorsum stays
+  matched to them, as now.
+- **Softening the side's junction with the cheek** (`KF_MID` 3-10, with `KF_TOPF` keeping it crisp by the inner
+  corners) gave the photo's long climb (5-7 mm at `KF_MID` 8), a lighter side and the photo's line on the bridge's side
+  (0.112-0.118 against 0.115). But a rounder blend eats the side wall from below: `bony_base` fell to 0.47-0.69 (norm
+  0.70-0.80).
+
+Both are knobs in `apply-brow-arc.py` (`CH_WLO`, `KF_TOPF`), left at values that change nothing. By the stopping rule
+the defaults stay. The fix the reading points to is a change of shape, not of blend: the side wall's cross-section
+should turn concave (steep just after the dorsal line, flattening outward into the cheek) and keep its base where the
+bony-base norm puts it.

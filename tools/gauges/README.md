@@ -324,6 +324,28 @@ the mouth's corners off the medial limbus, the wings off the inner corners.
 **Use it when.** Any change between the brow and the mouth, before and after, with `face_lines.py` for the profile
 angles a front view cannot see.
 
+### Plane breaks: `face/plane_breaks.py`
+
+**What it is for.** It reads the chisel from the tone, the way a draughtsman does, on a reference photo and on Face
+Creator heads. Across the shadow trace's line at eight heights it measures where the front of the nose turns into its
+side, how wide that turn is (sharp, firm or soft), how far the side turns, and how wide the climb from the shade back
+onto the cheek is. Sources: Prokopenko and Hampton on edges (Proko), Horn on image intensities.
+
+**In and out.** `ref <photo> <refmeasure sheet>`, `model <dump.json>` and `compare <ref.breaks.json> <model.breaks.json>...`.
+It writes `plane-breaks.md`. Per height: `x_break` (pupil distances), `width`, `rise` and `radius` (mm, pupil distance
+63 mm), `core` (the side's tone over the front's) and `turn` (degrees). On a head it adds `turn_geo` and `radius_geo`
+from the true normals, a check on the tone reading.
+
+**Run.**
+```
+python3 tools/gauges/face/plane_breaks.py ref ref.png ref.measure.json --out pb
+python3 tools/gauges/face/plane_breaks.py model dump/Rogue.json --out pb
+python3 tools/gauges/face/plane_breaks.py compare pb/ref.breaks.json pb/Rogue.breaks.json --out pb
+```
+
+**Limits.** The photo's light has more fill than the heads' key, so the photo's `turn` reads low; compare positions and
+widths, which do not depend on it. Above the inner corners the brows' hair and the socket's tilt make `turn` unreliable.
+
 ### Shadow trace: `face/shadow_trace.py`
 
 **What it is for.** It finds the shade's darkest line from under the brow's head, past the inner corner of the eye,
