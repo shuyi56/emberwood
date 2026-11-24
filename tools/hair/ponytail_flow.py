@@ -104,6 +104,8 @@ RESOLVE = {                     # the roots re-solved to the tie along John's li
     'ear wisp': dict(th=(1.05, 1.5), depth_mm=16.0, z=(0.0, 0.66)),
     'nape wisps': dict(th=(2.3, 3.2), depth_mm=13.0, z=(0.0, 1.0)),
 }
+LOCK_END = (0.98, 1.25)         # DRAFT, |theta|: where the temple lock's lines end their sweep (hairline roots first),
+                                # just forward of the sideburn's hairline to the fringe's outer end (1.29)
 LOOSE_FRACTION = (0.01, 0.05)   # John's bound on the loose locks' share of all hair
 CUTS_MM = (150, 120, 90, 60, 40, 25)     # the cuts the balance sheet is taken on (mm of skin from the tie)
 
@@ -484,16 +486,34 @@ def bang_line(B, i, k=40):
 
 
 def loose_line(B, i, length, k=50):
-    """A loose lock's hair (design element): it leaves its root along the main flow (tangent matched at the peel),
-    turns to plumb over a bending length, and hangs, kept off the head."""
+    """A loose lock's hair (design element). (John, 2026-11-25: "magenta should follow the flow of the orange".) It
+    is the fringe's outermost piece: it leaves its root the way the fringe's swept edge does, over the skin to the
+    front of the ear's top (bang_line's own sweep, carried on past BANG_TH), and from there turns to plumb over a
+    bending length and hangs in front of the ear, kept off the head. Before, it left along the flow to the tie
+    (backward) and dropped at once, so it cut across the fringe's lines."""
     surf = B['surf']
-    d = unit(B['X'][i, 3] - B['X'][i, 0])
-    p = B['P'][i] + B['N'][i] * 1.0 * MM
+    P = B['P'][i]
+    sx = 1.0 if P[0] >= 0 else -1.0
+    a0 = abs(float(SF.theta(P[None])[0]))
+    # The fringe's outer end is at 1.25 * BANG_TH + 0.35 = 1.29 rad, at the ear top's height. The lock's ends fan
+    # out forward of it by the root's depth behind the hairline: the hairs rooted at the hairline end furthest
+    # forward and hang down in front of the sideburn, so the hairline there stays covered (hairline_gap: the cells
+    # at 1.1 to 1.3 rad went bare with every end at 1.29 or behind it)
+    f = float(np.clip(B['inside_mm'][i] / LOOSE['temple lock']['depth_mm'], 0, 1))
+    th1 = sx * (LOCK_END[0] + (LOCK_END[1] - LOCK_END[0]) * f)
+    end = SF.on_skin_at(surf, th1, SF.EAR_TOP + 0.06)
     step = length / k
-    out = [p]
+    U0, U1 = unit(P - SF.CENTRE), unit(end - SF.CENTRE)
+    arc = math.acos(float(np.clip(U0 @ U1, -1, 1))) * float(np.linalg.norm(end - SF.CENTRE))
+    na = int(np.clip(round(arc / step), 2, k - 4))
+    U = slerp(U0[None], U1, np.linspace(0, 1, na + 1))[0]
+    lift = (1.0 + 5.0 * np.sin(np.linspace(0, np.pi, na + 1)) ** 2) * MM     # the fringe's own root lift
+    out = list(surf.point(U) + surf.normals(U) * lift[:, None])
+    p = out[-1]
+    d = unit(out[-1] - out[-3])
     down = np.array([0, 0, -1.0])
-    for j in range(k):
-        w = 1 - math.exp(-(j * step / MM) / BEND_L_MM * 2.5)
+    for j in range(k - na):
+        w = 1 - math.exp(-((j + 1) * step / MM) / BEND_L_MM * 2.5)
         v = unit((1 - w) * d + w * down)
         p = p + v * step
         if p[2] > 0.2:
