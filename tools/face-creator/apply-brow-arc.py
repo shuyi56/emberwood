@@ -40,7 +40,7 @@ import re
 
 DEFAULTS = {'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
-            'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
+            'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
 
 MARK = '/* brow arc (apply-brow-arc.py) */'
@@ -163,6 +163,13 @@ def patch(src, P):
     if h0 in src:
         src = src.replace(h0, h1, 1)
     assert h1 in src, 'bridge section line not found'
+    # 6. the lower nose chiselled to match: the wedge's front, sides and the bridge meet over tighter blends, so the dorsal
+    # lines run on into the tip-defining points and the lobule reads as planes instead of a ball
+    m6 = re.search(r'\n  var W4 = \{"off": 1\.0[^\n]*', src)
+    assert m6, 'W4 line not found'
+    src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': tip \*/[^\n]*', '', src)
+    m6 = re.search(r'\n  var W4 = \{"off": 1\.0[^\n]*', src)
+    src = src[:m6.end()] + '\n  %s: tip */ Object.assign(W4, {"kball": %g, "kjoin": %g});      // (the tip in planes, carrying on the bridge\'s chisel: apply-brow-arc.py)' % (MARK[:-3], P['TIP_KBALL'], P['TIP_KJOIN']) + src[m6.end():]
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:

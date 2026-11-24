@@ -281,3 +281,30 @@ The gauges, all five faces (`docs/faces/face-flow-data/brow-arc-flow-gaps.md`):
 
 Renders are in the project files (`face-flow/`): `brows2-before-after.png`, `render-chisel-before-after.png` and
 `clay-chisel-before-after.png`.
+
+## 9. The lower nose carried on from the chiselled bridge (same script, step 6)
+
+John: "The top surface of the nose looks good but now the bottom surface needs to be updated accordingly to the new top
+traced by the eye brows".
+
+The lower nose is one wedge (front, sides and base), with the ball as its rounded end, blended into the bridge. Two
+blends were wide, so the tip stayed a ball under the bridge's new planes:
+
+- The wedge's front and sides met over a blend of 0.9 tip radii.
+- The bridge and the wedge met over 5 mm.
+
+Both are tightened: `kball` to 0.5 and `kjoin` to 3.5 mm. The bridge's dorsal lines now run on into the tip's sides,
+and the lobule reads as a front plane between two side planes. One round went further, to 0.3 and 2.5 mm. It put
+spikes at the nostrils' corners, and the Ranger's tip-defining points (TDP) jumped to 10.8 mm, so it was dropped.
+
+| Face | TDP mm, before → after | Dorsal lines / TDP | Waist / TDP (ref 0.92) |
+|---|---|---|---|
+| Ranger | 7.5 → 8.1 | 1.10 → 1.02 | 0.73 → 0.69 |
+| Rogue | 6.75 → 6.6 | 1.09 → 1.11 | 0.77 → 0.79 |
+| Warden | 7.35 → 7.35 | 1.14 → 1.14 | 0.80 → 0.81 |
+| Sorceress | 6.75 → 6.45 | 1.09 → 1.14 | 0.79 → 0.81 |
+| Knight | 7.35 → 7.2 | 1.15 → 1.15 | 0.76 → 0.74 |
+
+The bony base and the join are unchanged.
+
+Renders are in the project files (`face-flow/`): `render-tip-before-after.png` and `clay-tip-before-after.png`.
