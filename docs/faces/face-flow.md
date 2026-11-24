@@ -539,3 +539,19 @@ Those widened the Ranger's tip-defining points: dorsal lines / TDP 0.74, 0.63 an
 Five faces after the change: bony base 0.64-0.74, dorsal lines / TDP 1.04-1.21 (Warden 1.21, a little over the 1.15 norm),
 waist / TDP 0.735-0.80 except the Ranger at 0.67. The nose's own outline has no gauge yet; the shade line reads the shadow
 under the wing and moves less than the shape.
+
+## 15. The lower bridge flows into the ball
+
+John (2026-11-25, with a close photo): "The bridge needs to flow down at the nostrils, right now it looks flat on ours."
+
+Plane-breaks gauge (section 11): on the photo the lit front of the nose widens steadily down the nose, half-width 0.034
+pupil distances at y -0.05 to 0.060 at y 0.45, and its sides turn gently (32-39 degrees). Ours held 0.025-0.034 and turned
+43-59 degrees: a straight slab of near-constant width, then a blob.
+
+Fix (`apply-brow-arc.py` step 11): `LB_WR` 0.65 (the crest's half-width at the ball, share of the wings' width, was 0.52) and
+`LB_SL` 0.75 (the side walls' slope eased toward the ball). Front half-width at y 0.45 is now 0.038-0.048 (was 0.034). Tried
+`LB_WR` 0.85 and 1.2: 0.85 flows but costs more gauge, 1.2 makes a triangle wider than the photo's.
+
+Cost: bony base 0.57-0.64 (was 0.64-0.74, norm 0.70-0.80), dorsal lines / TDP 0.74-1.16 (Ranger 0.74 under the 0.85 norm).
+The gauges read the lower bridge's width as tip-defining width, so a broader lower bridge scores as a smaller waist. The
+waist at y 0.25 stays 0.027-0.030 against the photo's 0.052 and is the next thing to widen.

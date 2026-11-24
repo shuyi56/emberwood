@@ -1312,6 +1312,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
   var CT = {"wallr": 0.28, "rf0": 0.1, "rf1": 0.8, "dwall": 0.6, "uf": 0.78, "u1": 0.62, "up": 0.5, "hsh": 0.23, "dw": 0.2, "wfoot": 0.28, "wwaist": 0.2, "vwaist": 0.45, "clang": 35, "nback": 0.14, "vtop": 0.85, "cshow": 3.0, "show": 2.0, "hwr": 0.97, "wr": 0.52, "wm": 1, "ncol": 0.3, "wall": 3.0, "nlen": 0.25, "nmid": 0.37, "ang": 8, "off": 1.0, "sm": 0.25, "und": 0.6, "n": 2.0, "Hw": 0.3, "Hs": 0.42, "pz": 0.5, "pv": 0.35, "va": 0.44, "lean": 0.146, "la": 0.63, "lb": 1.0, "t0": 5.0, "t1": 6.5, "ts": 5.0, "vf": 0.97, "rec": 0.8, "s0": 0.2, "cap": 0.35, "aw": 1.12, "kfl": 3.0}, cPh = Math.min(90 * Math.PI / 180, Math.atan2(Math.max(0, zPrn - rT - CT.show * mm - zSn), Tp0 - rT) + 3 * Math.PI / 180),      // (the floor runs from the wings' base to the tip's underside, less the columella's show, so the line under the nose follows where this nose's tip sits)
        cC = Math.cos(cPh), cS = Math.sin(cPh), cHw = CT.hwr * alarHalf,      // (the wing's height and its length along the floor are shares of its own width: one oval, scaled with the nose)
        cHs = CT.Hs * L;
+  /* brow arc (apply-brow-arc.py): lowbridge */ CT.wr = 0.65; CT.wm = 1;
   function lobW(v, s) {
     var sM = CT.sm * cHw, q = clamp(s / cHw, 0, 1), qq = s < sM ? CT.und * (sM - s) / sM : Math.min(1, (s - sM) / (cHw - sM)), gA = Math.pow(Math.max(0, 1 - Math.pow(qq, CT.n)), CT.pz);
     var va = (CT.va - CT.lean * q) * alarHalf, e = clamp(v < va ? (v - va) / (CT.lb * alarHalf) : (v - va) / (CT.la * alarHalf), -1, 1);
@@ -1360,7 +1361,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     var wLo = CT.wr * (0.433 ? 0.433 * alarHalf : rEnv), wMid = Math.min(NL.ridge[1] * nw * mm, CT.wm * wLo);
     w = lerp(lerp(wLo, wMid, sm(0, 0.5, tc)), NL.ridge[0] * nw * mm, sm(0.5, 1, tc));
     /* brow arc (apply-brow-arc.py): flare */ w *= 1 * (1 - 0.15 * sx); var qF = clamp((z - zRad) / Math.max(1e-6, zHB - zRad), 0, 1), wF = 0 * Math.max(0, xHB - w) * (1 - Math.sqrt(Math.max(0, 1 - qF * qF))); w += wF;      // (above the radix the dorsal lines part and curve out into the brows' heads, a quarter ellipse: upright at the radix, level at the brow)
-    var sl = lerp(lerp(NL.side[2], NL.side[1], sm(0, 0.5, tc)), NL.side[0], sm(0.5, 1, tc)) / (0.85 + 0.15 * nw);
+    var sl = lerp(lerp(NL.side[2], NL.side[1], sm(0, 0.5, tc)), NL.side[0], sm(0.5, 1, tc)) / (0.85 + 0.15 * nw) * lerp(0.75, 1, sm(0, 0.6, tc));
     // (past the wings' inner edge the side wall turns back faster, so it meets the cheek instead of running on across it)
     var bk = Math.max(0, ax - lerp(0.6 * alarHalf, 8 * mm, sm(0.2, 0.9, tc)));
     var dD = (yl + browChisel(ax, w, sl, mm) + 0.09 * Math.pow(Math.max(0, bk - wF), 2) / mm - y) / Math.sqrt(1 + sl * sl);      /* brow arc (apply-brow-arc.py): the chisel */
