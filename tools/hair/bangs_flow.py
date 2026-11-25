@@ -89,12 +89,19 @@ TAPER = 0.18                    # DRAFT: the deepest-rooted hairs end up to this
 # The presets. w0, w1 and D_DEG of the curtain are FITTED to the photo's strand angles (see fit()); the end heights are
 # MEASURED off the photo against the eye (refmeasure: fringe_edge, side_end, eye), the part is SOURCED [CC][BS][MBG].
 PRESETS = {
+    # ease_mm: D's turn away from the part grows linearly to d_deg at the section's edge (66 mm), so the fringe opens
+    # at one rate across its width and its ends lie evenly spaced (John 2026-11-25, "the front bangs are too thin
+    # while the sides are too full"). The old 8 mm smoothstep split the fringe at the part: 2 to 10 hairs per mm
+    # within 24 mm of it at half length, against 30 to 55 at the sides. corner_from_mm: the corners' turn toward the
+    # side end starts 20 mm from the part (was w0, 37.5), so hairs that now fall straighter reach it gently (from
+    # 37.5 mm, 39 tips curled tighter than the 19 mm bound).
     'curtain': dict(part_mm=0.0, sweep=0, d_deg=27.7, w0_mm=37.5, w1_mm=145.0, edge_above_eye=0.087,
-                    side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263),
+                    side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263, ease_mm=66.0,
+                    corner_from_mm=20.0),
     # the coordinator's reading of John's model: w = 1 at the bangs section's outer edge (66 mm, just inside the
     # temple), so the outer bang roots leave with the side flow's own tangent. Not what the photo measures (fit.json).
     'curtain-c1': dict(part_mm=0.0, sweep=0, d_deg=27.7, w0_mm=17.0, w1_mm=66.0, edge_above_eye=0.087,
-                       side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263),
+                       side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263, ease_mm=66.0),
     'straight': dict(part_mm=0.0, sweep=0, d_deg=0.0, w0_mm=52.0, w1_mm=80.0, edge_above_eye=0.087,
                      side_below_eye=-0.087, side_u_mm=70.0),
     'side-swept': dict(part_mm=-25.0, sweep=1, d_deg=55.0, w0_mm=40.0, w1_mm=105.0, edge_above_eye=0.06,
@@ -175,7 +182,12 @@ def D_at(X, N, u, prm):
     s = unit(s)
     a = math.radians(prm['d_deg'])
     # the turn fades in over the first PART_FADE_MM from the part, so the two sides do not split at a corner
-    a = a * sm(0.0, PART_FADE_MM, np.abs(u)) if prm['sweep'] == 0 else np.full(len(u), a)
+    if prm['sweep'] != 0:
+        a = np.full(len(u), a)
+    elif prm.get('ease_mm'):
+        a = a * np.clip(np.abs(u) / prm['ease_mm'], 0.0, 1.0) ** prm.get('ease_pow', 1.0)
+    else:
+        a = a * sm(0.0, PART_FADE_MM, np.abs(u))
     D = unit(np.cos(a)[:, None] * g + np.sin(a)[:, None] * s)
     # the corners: from w0 out to the section's edge the fall turns toward the side end, the point in front of the ear
     # where the photo's outer pieces end (MEASURED, side_end), so the corners sweep over the temple to it, as the
@@ -186,7 +198,7 @@ def D_at(X, N, u, prm):
         Es = E[None] * np.c_[np.where(X[:, 0] >= 0, 1.0, -1.0), np.ones(len(X)), np.ones(len(X))]
         v = Es - X
         v = unit(v - (v * N).sum(1, keepdims=True) * N)
-        c = sm(prm['w0_mm'], prm.get('edge_mm', BANG_EDGE_MM), np.abs(u)) * prm.get('corner', 1.0)
+        c = sm(prm.get('corner_from_mm', prm['w0_mm']), prm.get('edge_mm', BANG_EDGE_MM), np.abs(u)) * prm.get('corner', 1.0)
         D = unit((1 - c)[:, None] * D + c[:, None] * v)
     return D
 
