@@ -313,12 +313,13 @@ function start(fc) {
     const el = fc.renderer.domElement;
     PX_WORLD.value = 2 * Math.tan(fc.camera.fov * Math.PI / 360) / Math.max(1, el.clientHeight);
     const style = fc.P.hairStyle, have = !!assets[style];
-    [...sel.options].forEach(o => { o.disabled = o.value !== 'creator' && !have; });
+    const lods = have ? (assets[style]._lods = assets[style]._lods ?? JSON.parse(assets[style].dataset.summary || '{}')) : {};
+    [...sel.options].forEach(o => { o.disabled = o.value !== 'creator' && (!have || (o.value in LOD_INDEX && !lods[o.value])); });
     if (!have && mode !== 'creator') { mode = 'creator'; sel.value = 'creator'; }
     note.textContent = have ? '' : 'No groom for this style yet (groomed: ' + Object.keys(assets).join(', ') + ')';
     const groom = mode !== 'creator' && fc.P.hair;
     let changed = false;
-    const show = (m, v) => { if (m.visible !== v) { m.visible = v; changed = true; } };
+    const show = (m, v) => { if (m && m.visible !== v) { m.visible = v; changed = true; } };      // (a groom may have no cards yet: strands only)
     scene.children.forEach(m => { if (isCreatorHair(m)) show(m, fc.P.hair && !groom); });
     Object.values(built).forEach(b => { if (!(groom && b === built[style])) show(b.group, false); });
     if (groom) {
