@@ -521,7 +521,7 @@ def gauges(B, SFL, roots, lines, stag, prm, lock_lines):
         T0 = unit(np.array([lines[j][min(4, len(lines[j]) - 1)] - lines[j][min(2, len(lines[j]) - 2)]
                             for j in np.where(outer)[0]]))
         ang = np.degrees(np.arccos(np.clip((Bv * T0).sum(1), -1, 1)))
-        g['join'] = dict(roots=int(outer.sum()), w_mean=round(float(w_of(u0[outer], prm).mean()), 3),
+        g['join_first_step'] = dict(roots=int(outer.sum()), w_mean=round(float(w_of(u0[outer], prm).mean()), 3),
                          angle_to_side_flow_deg_median=round(float(np.median(ang)), 1),
                          angle_to_side_flow_deg_max=round(float(ang.max()), 1))
     # (4) lengths and the ends against the side lock
@@ -610,6 +610,25 @@ def main():
     t0 = time.time()
     B, SFL, roots, lines, stag = build_all(head, field_cache, out, prm, preset)
     G = dict(preset=preset, parameters=prm)
+    # the join at the section's side edge, made continuous (bangs_join.py). Gauged before and after.
+    import bangs_join as BJ
+    G['join_before'] = BJ.join_gauge(B, roots, lines)
+    side_new = {}
+    if prm.get('join_band_mm', BJ.JOIN_BAND_MM) > 0:
+        jb = prm.get('join_band_mm', BJ.JOIN_BAND_MM)
+        jkey = (jb, PF.Memo.h(*[np.asarray(p) for p in lines[::7]]), PF.Memo.h(B['X'][::97]),
+                hashlib.sha1(inspect.getsource(BJ).encode()).hexdigest())
+        jp = os.path.join(os.path.dirname(os.path.abspath(out)), 'cache-bangs',
+                          'bangs-join-%s.pkl' % hashlib.sha1(repr(jkey).encode()).hexdigest()[:16])
+        if os.path.exists(jp):
+            lines, side_new, G['join_info'] = pickle.load(open(jp, 'rb'))
+        else:
+            lines, side_new, G['join_info'] = BJ.join(B, SFL, roots, lines, prm, jb)
+            pickle.dump((lines, side_new, G['join_info']), open(jp, 'wb'), protocol=4)
+        G['join_after'] = BJ.join_gauge(B, roots, lines, side_new)
+        G['join_control'] = {'%+g mm' % c: BJ.join_gauge(B, roots, lines, side_new, at_d=c)['g1_deg_median_all']
+                             for c in (-9.0, 9.0)}     # (the same fits inside each family: the gauge's floor there)
+        apply_side(B, side_new)
     if sheet is not None:
         fitp = photo_fit(sheet, B)
         smp = photo_samples(sheet)
@@ -631,9 +650,34 @@ def main():
     BD.draw_all(B, SFL, roots, lines, prm, G, out, head, sheet, preset)
     print('time: drawings %.1f s' % (time.time() - t0), file=sys.stderr)
     json.dump(G, open(os.path.join(out, 'bangs.json'), 'w'), indent=1, default=float)
+    tie = [i for i in side_new if B['basin'][i] == 0]
+    lk = [i for i in side_new if B['basin'][i] >= 2]
     np.savez_compressed(os.path.join(out, 'bangs-lines.npz'), roots=roots,
-                        lines=np.array([PF_pad(p) for p in lines]))
+                        lines=np.array([PF_pad(p) for p in lines]),
+                        tie_roots=np.array(tie, int), tie_lines=np.array([side_new[i] for i in tie]).reshape(len(tie), -1, 3),
+                        lock_roots=np.array(lk, int), lock_lines=np.array([PF_pad(side_new[i], 51) for i in lk]).reshape(len(lk), -1, 3))
     print(json.dumps(G, indent=1, default=float))
+
+
+_LOCK_OVERRIDE = {}
+_loose_line = PF.loose_line
+
+
+def _joined_loose_line(B, i, length=None, k=50):
+    if int(i) in _LOCK_OVERRIDE:
+        return PF_pad(_LOCK_OVERRIDE[int(i)], k + 1)
+    return _loose_line(B, i, length, k)
+
+
+def apply_side(B, side_new):
+    """Put the joined side lines in place of the field's own: the tie lines in B['X'] (same nodes, so rho still
+    holds), the temple lock's through PF.loose_line. The ponytail's files and caches are not touched."""
+    for i, p in side_new.items():
+        if B['basin'][i] == 0:
+            B['X'][i] = p
+        else:
+            _LOCK_OVERRIDE[int(i)] = p
+    PF.loose_line = _joined_loose_line
 
 
 def PF_pad(p, n=120):

@@ -26,6 +26,17 @@ def main():
     z = np.load(os.path.join(bdir, 'bangs-lines.npz'))
     mine = {int(r): l for r, l in zip(z['roots'], z['lines'])}
     PF.bang_line = lambda B, i, k=32: mine[int(i)]
+    side = {}                                                         # the joined side lines (bangs_join.py)
+    if 'tie_roots' in z.files:
+        side.update({int(r): l for r, l in zip(z['tie_roots'], z['tie_lines'])})
+        side.update({int(r): l for r, l in zip(z['lock_roots'], z['lock_lines'])})
+    build = PF.build
+
+    def joined_build(h):
+        B = build(h)
+        BF.apply_side(B, side)
+        return B
+    PF.build = joined_build
     paths, hairs, basin, B = PR.fibres(head, per_root=1)
     RD.HEAD_CLOUD = SF.load_head(head)
     RD.SCALP_F = B['F']
