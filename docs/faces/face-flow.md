@@ -629,3 +629,24 @@ a ragged flap there, and 3 mm of rise pinched the base.
 Gauges: bony base unchanged (0.57-0.64); dorsal lines / TDP Rogue 1.06, Ranger 0.73, Sorceress 1.09, Warden 1.11, Knight
 0.76 (was 0.92; the gauge's tip points move with the floor). Open: the alar base still ends in a small knob; the
 nostrils are not yet re-fitted to the arched floor.
+
+## 19. Bigger arches: which constraints were relaxed
+
+John (2026-11-25): "What constraints can be relaxed to get better arches, the grooves are too small, they should fill the
+shadow."
+
+Constraints on the arch under the nose, by cost:
+1. The floor's rounding `BASE_K` 6.5 mm (section 12, raised to curve the base in): it smooths the underside over 6.5 mm and
+   irons a 2 mm arch nearly flat.
+2. The "base seen edge on" cap on the tip's height (`zPrn` in `noseSolid`): the underside shows as one line from the front.
+3. The arch's height `GULL_A` 2 mm (3 pinched the base while the rounding was 6.5).
+4. The dorsal lines / TDP norm, which falls whenever the floor moves.
+5. Structure: the lower nose is a wedge with the wing as a thin shell on its side, on a height-field mesh. Past the wedge's
+   width the rim is the shell's edge, so the arch's outer end is a knob however the floor is shaped.
+
+Relaxed: 1 and 3 (`BASE_K` 3.0, `GULL_A` 3.0, `GULL_P` 0.6 to bring the arch's top in over the nostril). The arches are about
+half again as tall. Not relaxed: 2. Six versions (arch 2-4 mm, rounding 2.5-4, top at 0.2-0.5 of the span) all keep the
+knob at the alar base: that is constraint 5 and needs the wing rebuilt as a solid lobule with its own rim.
+
+Gauges: bony base 0.57-0.64 (unchanged); dorsal lines / TDP Rogue 1.09, Ranger 0.73, Sorceress 1.06, Warden 1.07, Knight
+0.76.
