@@ -5,6 +5,7 @@ of the field's old fringe. Nothing else changes: the ponytail's lines come from 
 
 BANGS_DIR is a bangs_flow.py output folder (bangs-lines.npz). Clay by default (first renders are clay, project
 rule); --mode full renders the hair in colour (render.py's tone and melanin) on the same cameras, to files ending -full.
+--noise SCALE runs the noising round (noise_round.py) over the fibres first, at SCALE times its draft amounts.
 --before puts the old render's clay close-ups beside the new ones on the same cameras."""
 import os, sys, json, gzip
 import numpy as np
@@ -41,6 +42,11 @@ def main():
         return B
     PF.build = joined_build
     paths, hairs, basin, B = PR.fibres(head, per_root=1)
+    noise = None
+    if '--noise' in a:                                                # the noising round (noise_round.py)
+        import noise_round as NR
+        paths, noise = NR.apply(paths, surf=B['surf'], scale=float(a[a.index('--noise') + 1]))
+        print('noise', noise, file=sys.stderr)
     RD.HEAD_CLOUD = SF.load_head(head)
     RD.SCALP_F = B['F']
     surf = B['surf']
@@ -65,7 +71,7 @@ def main():
                 old = old[:, :old.shape[1] // 2]                      # the clay half
                 if old.shape[0] == im.shape[0]:
                     Image.fromarray(np.concatenate([old, im], 1)).save(os.path.join(out, name + '-before-after.png'))
-    json.dump(dict(fibres=len(paths), hairs=round(float(hairs.sum())), bang_fibres=int((basin == 1).sum())),
+    json.dump(dict(fibres=len(paths), hairs=round(float(hairs.sum())), bang_fibres=int((basin == 1).sum()), noise=noise),
               open(os.path.join(out, 'render.json'), 'w'), indent=1)
 
 

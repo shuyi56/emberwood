@@ -32,6 +32,11 @@ def main():
     build = PF.build
     PF.build = lambda h: (lambda B: (BF.apply_side(B, side), B)[1])(build(h))
     paths, hairs, basin, B = PR.fibres(head, per_root=1)
+    noise = None
+    if '--noise' in a:                                                # the noising round (noise_round.py)
+        import noise_round as NR
+        paths, noise = NR.apply(paths, surf=B['surf'], scale=float(a[a.index('--noise') + 1]))
+        print('noise', noise, file=sys.stderr)
     print('fibres', paths.shape, file=sys.stderr)
     rng = np.random.default_rng(5)
     keep = np.arange(len(paths))
