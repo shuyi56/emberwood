@@ -1408,6 +1408,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
         dW = -nSmin(-dW, -(u - uBw - Hc), 1.0 * mm); dW = -nSmin(-dW, -(f - cf1 - 1.0 * mm), 1.0 * mm); }
     }
     dW = -nSmin(-dW, -(uBw - u), W4.kbase * mm);
+    /* brow arc (apply-brow-arc.py): lobule */ { var aRx = 4.5 * mm, aRf = 8 * mm, aRu = 5 * mm, aF0 = 0.35 * alarHalf, aU0 = W4.off * mm + aF0 * tanB - -2 * mm + aRu, aC = Math.cos(20 * Math.PI / 180), aS = Math.sin(20 * Math.PI / 180), aDf = f - aF0, aDu = u - aU0, aL = aDf * aC + aDu * aS, aH = -aDf * aS + aDu * aC, aX = ax - (alarHalf - aRx - 0.4 * Math.max(-aRf, aL)), aE = Math.sqrt(aX * aX / (aRx * aRx) + aL * aL / (aRf * aRf) + aH * aH / (aRu * aRu)); dW = (aE - 1) * Math.min(aRx, aRf, aRu) * 0.9; }      // (the wing as a solid lobule: apply-brow-arc.py)
     o[0] = dN; o[1] = dW;
     // the nostril: a bean in the bottom plane between the columella and the wing's wall, domed up into the nose
     var fN0 = W4.nb * Tp, fN1 = W4.nf * fBr, hl = 0.5 * (fN1 - fN0), fNc = 0.5 * (fN0 + fN1);

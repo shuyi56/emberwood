@@ -650,3 +650,23 @@ knob at the alar base: that is constraint 5 and needs the wing rebuilt as a soli
 
 Gauges: bony base 0.57-0.64 (unchanged); dorsal lines / TDP Rogue 1.09, Ranger 0.73, Sorceress 1.06, Warden 1.07, Knight
 0.76.
+
+## 20. The wing rebuilt as a solid lobule
+
+John (2026-11-25): "Yes redo from scratch."
+
+The crescent wing (a thin shell on the wedge's side, section 19 constraint 5) is replaced by one rounded solid
+(`apply-brow-arc.py` step 15, `AL_ON` 1): half-axes 4.5 mm across, 8 mm along the floor, 5 mm up (10 mm tall: Bloom &
+Constantinides 2011, the cartilage's edge "about a centimeter superior to the nostril rim"), its outer face at the wings'
+width, its centre 0.35 of the wings' half-width forward of the subnasale, pitched 20 degrees so it climbs toward the tip
+and sheared in toward the tip (`AL_YAW` 0.4). Its bottom sits 2 mm above the floor's line at the alar base (`AL_DROP` -2:
+Crumley's insertion 2-3 mm above the columella-lip junction). Its own round underside is the rim, and the 3 mm smooth
+union with the wedge leaves the alar groove between them.
+
+From the front the outline under the nose is now the gull: the columella lowest, the floor arched over each nostril
+(section 18), a round lobe each side. First try with the bottom 1.5 mm below the floor hung the lobes level with the
+columella (jowls); 1 mm above still read low. The crescent's code stays in the file but its result is overwritten.
+
+Gauges: bony base 0.56-0.64; dorsal lines / TDP Rogue 1.09, Ranger 0.75, Sorceress 1.09, Warden 1.16, Knight 0.78;
+waist / TDP 0.58-0.83. Checked in clay on the Ranger and the Rogue, front and 3/4. Open: profile and the other three faces
+not yet looked at; the nostril's opening is not re-fitted to the lobule.

@@ -38,7 +38,7 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'GULL_P': 0.6, 'GULL_A': 3.0, 'GULL_D': 0.0, 'WG_DN': 0.0, 'WG_FR': 0.5, 'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 3.0, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'AL_ON': 1, 'AL_RX': 4.5, 'AL_RF': 8.0, 'AL_RU': 5.0, 'AL_F': 0.35, 'AL_DROP': -2.0, 'AL_PITCH': 20.0, 'AL_YAW': 0.4, 'GULL_P': 0.6, 'GULL_A': 3.0, 'GULL_D': 0.0, 'WG_DN': 0.0, 'WG_FR': 0.5, 'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 3.0, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
             'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 4.0, 'KF_TOPF': 0.4, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
@@ -251,6 +251,22 @@ def patch(src, P):
         k14 = 'var uB = W4.off * mm + f * tanB;'
         assert k14 in src
         src = src.replace(k14, k14 + '\n    %s: gull */ var gC = W4.colw * alarHalf, gT = clamp((ax - gC) / (alarHalf - gC), 0, 1); uB += (%g * Math.sin(Math.PI * Math.pow(gT, %g)) - %g * sm(0.55, 1, gT)) * mm;' % (MARK[:-3], P['GULL_A'], P['GULL_P'], P['GULL_D']), 1)
+    # 15. the wing rebuilt as a solid lobule (John 2026-11-25: "Yes redo from scratch"). The crescent wing was a thin shell on
+    # the wedge's side, so past the wedge's width the rim under the nose was only the shell's edge and ended in a knob
+    # (section 19). The lobule is one rounded solid (half-axes AL_RX across, AL_RF along the floor, AL_RU up, mm), its
+    # outer face at the wings' width, its bottom AL_DROP mm below the floor at the alar base, pitched AL_PITCH degrees so it
+    # climbs toward the tip, and sheared in toward the tip by AL_YAW. Its own round underside is the rim, and the smooth
+    # union with the wedge leaves the alar groove between them (Bloom, Ransom & Miller 2011: the groove "frames the ala and
+    # separates this convex structure"; wing about 10 mm tall, Bloom & Constantinides 2011).
+    src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': lobule \*/[^\n]*', '', src)
+    if P['AL_ON']:
+        k15 = '    dW = -nSmin(-dW, -(uBw - u), W4.kbase * mm);'
+        assert k15 in src
+        src = src.replace(k15, k15 + ('\n    %s: lobule */ { var aRx = %g * mm, aRf = %g * mm, aRu = %g * mm, aF0 = %g * alarHalf, aU0 = W4.off * mm + aF0 * tanB - %g * mm + aRu, '
+            'aC = Math.cos(%g * Math.PI / 180), aS = Math.sin(%g * Math.PI / 180), aDf = f - aF0, aDu = u - aU0, aL = aDf * aC + aDu * aS, aH = -aDf * aS + aDu * aC, '
+            'aX = ax - (alarHalf - aRx - %g * Math.max(-aRf, aL)), aE = Math.sqrt(aX * aX / (aRx * aRx) + aL * aL / (aRf * aRf) + aH * aH / (aRu * aRu)); '
+            'dW = (aE - 1) * Math.min(aRx, aRf, aRu) * 0.9; }      // (the wing as a solid lobule: apply-brow-arc.py)')
+            % (MARK[:-3], P['AL_RX'], P['AL_RF'], P['AL_RU'], P['AL_F'], P['AL_DROP'], P['AL_PITCH'], P['AL_PITCH'], P['AL_YAW']), 1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:
