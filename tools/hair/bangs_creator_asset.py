@@ -36,6 +36,13 @@ def main():
     build = PF.build
     PF.build = lambda h: (lambda B: (BF.apply_side(B, side), B)[1])(build(h))
     paths, hairs, basin, B = PR.fibres(head, per_root=1)
+    tiltv = comb = None
+    if '--volume' in a:                                               # the side hair in layers off the bed (hair_volume.py)
+        import hair_volume as HV
+        FF0 = PF.free_fall(B)
+        paths, tiltv, comb, vol = HV.layer(paths, basin == 0, BF.Shell(B['surf']), np.asarray(FF0['cl'])[0], float(B['r_tie']),
+                                     np.asarray(FF0['tang'])[0])
+        print('volume', vol, file=sys.stderr)
     noise = None
     if '--noise' in a:                                                # the noising round (noise_round.py)
         import noise_round as NR
@@ -68,7 +75,10 @@ def main():
     cs = sum(tree.query_ball_point(P + outS * d, CA.AO_R, return_length=True) for d in CA.AO_STEPS)
     sao = np.clip(np.exp(-cs / (np.median(cs) / -np.log(CA.SAO_MID))), CA.SAO_MIN, 1.0)
     hsh = lambda v: ((v.astype(np.int64) * 2654435761 + 12345) >> 7) % 251
-    ids = np.stack([hsh(basin[keep] * 7919 + keep // 40), hsh(keep)], 1).astype('u1')
+    lock_id = basin[keep] * 7919 + keep // 40
+    if comb is not None:                               # (a comb lock's hair shares its tone)
+        lock_id = np.where(comb[keep] >= 0, 104729 + comb[keep], lock_id)
+    ids = np.stack([hsh(lock_id), hsh(keep)], 1).astype('u1')
     # light through the hair from its flow and density (hair_light.py): per creator light, and ambient
     import hair_light as HL
     lt = HL.light(ps, hairs[keep] * len(paths) / len(keep))      # (each drawn strand: its fibre's hairs, scaled up)
@@ -91,6 +101,9 @@ def main():
     wt = BF.sm(0.0, 25.0, sj) * (dcl / BF.MM < Rj + 10.0)
     oh = P - np.c_[np.full(len(P), centre[0]), np.minimum(P[:, 1], centre[1]), np.full(len(P), centre[2])]
     oh /= np.maximum(np.linalg.norm(oh, axis=1, keepdims=True), 1e-9)
+    if tiltv is not None:                              # the comb furrows' own slopes (hair_volume.py), so they are lit
+        oh += np.concatenate([tiltv[i][~np.isnan(paths[i][:, 0])] for i in keep])
+        oh /= np.maximum(np.linalg.norm(oh, axis=1, keepdims=True), 1e-9)
     outv = oh * (1 - wt)[:, None] + out_tail * wt[:, None]
     outv /= np.maximum(np.linalg.norm(outv, axis=1, keepdims=True), 1e-9)
     print('tail points %.0f%%' % (100 * (wt > 0.5).mean()), 's range', sc.min(), sc.max(), 'R', Rj.min(), Rj.max())

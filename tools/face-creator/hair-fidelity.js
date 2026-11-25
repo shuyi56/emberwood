@@ -48,6 +48,11 @@ const CENTRE = [0, 0.56 * HH, -0.06 * HH];        // the skull's centre in the p
 const HAIR_MM = 0.07;                             // SOURCED: a scalp hair is 50-100 um across (Robbins, Chemical and Physical
                                                   // Behavior of Human Hair, ch. 9); the middle of that range
 const HEAD_MM = 219;                              // one head height in mm (scalp_field.HH_MM)
+// The fuzzy look of real hair: a strand's edge is soft, not a cut line, and among the full strands lie fine single
+// hairs. Each ribbon is drawn FUZZ_W wider than the hairs it stands for and its cover falls off across it (full in
+// the middle, none at the edge: the hairs of a strand lie scattered across it, not side by side), dithered per pixel
+// so it still sorts by depth; FINE_SHARE of the strands are drawn FINE_W wide, as the loose single hairs. STYLE.
+const FUZZ_W = 2.0, FUZZ_A = 0.9, FINE_SHARE = 0.3, FINE_W = 0.35;
 const STRAND_TWIST = 0.7;                         // STYLE: rad each strand's normal is turned round it, either way
 const STRAND_LIGHT = 0.85;                        // STYLE: the strands' paint against the hair colour: less light, so the
                                                   // lit side does not wash the strands into one flat sheet (cards: 0.8)
@@ -57,12 +62,12 @@ const STRAND_LIGHT = 0.85;                        // STYLE: the strands' paint a
 // the root and is broken up strand to strand ("sparkle"). The tangent is shifted along the normal, T' = T + s N, to
 // place each. SOURCED: the model and its structure. STYLE: every amount below (the paper prints none); the lobe
 // widths follow Marschner's 5-10 degrees for the primary, wider for the secondary (Gerard, arXiv 2302.06468).
-const SPEC1 = 0.04, SPEC1_EXP = 90, SPEC1_SHIFT = 0.1;     // STYLE: primary: strength, tightness, shift toward the tip
+const SPEC1 = 0.09, SPEC1_EXP = 90, SPEC1_SHIFT = 0.1;     // STYLE: primary: strength, tightness, shift toward the tip
 const SPEC2 = 0.22, SPEC2_EXP = 22, SPEC2_SHIFT = -0.14;    // STYLE: secondary: strength (x hair colour), toward the root
 const SPEC_JITTER = 0.12;                         // STYLE: each strand's own extra shift, so the band breaks into glints
 const LOCK_TONE = 0.2, CLUMP_TONE = 0.12;         // STYLE: a whole lock, and a clump in it, this much lighter or darker
                                                   // (the ID map of card hair: big clumps, then subclumps; 80.lv / CGMA)
-const LIGHT_FLOOR = 0.1;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
+const LIGHT_FLOOR = 0.2;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
                                                   // Zinke et al. 2008), which the single-scattering transmittance leaves out
 const AMB_FLOOR = 0.25;                           // STYLE: the same for the ambient (0.06 left the tail black in the 3/4)
 const STRAND_ROUGH = 0.6;                         // STYLE: a soft sheen along the lit strands (0.8 read matte and flat)
@@ -173,7 +178,7 @@ function buildStyle(asset, tone, creatorMat) {
   for (const c of cnt) {
     const jit = rnd(), tl0 = sID ? sID[2 * si] / 250 - 0.5 : 0, tc0 = sID ? sID[2 * si + 1] / 250 - 0.5 : 0; si++;
     const b = (0.8 + 0.4 * rnd()) * (1 + 2 * LOCK_TONE * tl0) * (1 + 2 * CLUMP_TONE * tc0), twist = (2 * rnd() - 1) * STRAND_TWIST;
-    const tc = Math.cos(twist), ts = Math.sin(twist);
+    const tc = Math.cos(twist), ts = Math.sin(twist), fine = rnd() < FINE_SHARE ? FINE_W : FUZZ_W;
     for (let j = 0, sj = 0; j < c; j++) {
       const q = k + j, a0 = k + Math.max(0, j - 1), a1 = k + Math.min(c - 1, j + 1), t = j / (c - 1);
       if (j) sj += Math.hypot(P[3 * q] - P[3 * q - 3], P[3 * q + 1] - P[3 * q - 2], P[3 * q + 2] - P[3 * q - 1]);
@@ -193,7 +198,7 @@ function buildStyle(asset, tone, creatorMat) {
         const v = 2 * q + e;
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
         nrm[3 * v] = ox2; nrm[3 * v + 1] = oy2; nrm[3 * v + 2] = oz2;
-        side[v] = e ? 1 : -1; wid[v] = wHair * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
+        side[v] = e ? 1 : -1; wid[v] = wHair * fine * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
         vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit;
         if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = sL[4 * q + c4] / 255;
       }
@@ -214,22 +219,25 @@ function buildStyle(asset, tone, creatorMat) {
   strandMat.onBeforeCompile = sh => {
     sh.uniforms.pxWorld = PX_WORLD;
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\n' +
-      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\n' +
+      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\n' +
       sh.vertexShader.replace('#include <project_vertex>', [
         'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
-        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight;',
+        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide;',
         'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
         'mvPosition.xyz += sd * ( 0.5 * max( strandW, -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
-    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\n' + sh.fragmentShader
+    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\n' + sh.fragmentShader
       // each light by the hair's own transmittance toward it (the lights in the scene's order: key, rim, fill; the key
       // casts the only shadow, so it stays first), the ambient by the hair's averaged transmittance
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
         'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= max( vLight[ i ], ' + LIGHT_FLOOR.toFixed(3) + ' );'))
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n\treflectedLight.indirectDiffuse *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' ); reflectedLight.indirectSpecular *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' );')
-      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';')
+      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';\n' +
+        '\t{ float fz = ' + FUZZ_A.toFixed(3) + ' * ( 1.0 - vSide * vSide );\n' +
+        '\t  float hn = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) + vStrandOcc.y );\n' +
+        '\t  if ( fz < hn ) discard; }')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );')
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
       .replace('#include <opaque_fragment>', [
@@ -245,7 +253,7 @@ function buildStyle(asset, tone, creatorMat) {
         '    float s1 = smoothstep( -1.0, 0.0, d1 ) * pow( sqrt( max( 0.0, 1.0 - d1 * d1 ) ), ' + f(SPEC1_EXP) + ' );',
         '    float s2 = smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), ' + f(SPEC2_EXP) + ' );',
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
-        '    sAcc += directionalLights[ i ].color * vLight[ i ] * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb );',
+        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb );',
         '  }',
         '  outgoingLight += sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
