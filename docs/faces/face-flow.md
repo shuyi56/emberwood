@@ -599,3 +599,33 @@ Fix (`apply-brow-arc.py` step 13, `WG_DN` 3.5, `WG_FR` 0.5): the wing's lower ri
 to nothing half way along, so the rim is an arch: down where the wing is fixed to the cheek, up over the nostril. 2.5 mm at
 a fifth of the way along left the pocket; 4.5 mm made a knob at the corner. Gauges on five faces unchanged from section 16.
 Open: the outer corner still reads as a small tick from the front; the next step is to blend the lowered rim into the cheek.
+
+## 18. The rim as a gull in flight
+
+John (2026-11-25) drew the rim on the clay front as one arch each side and asked "why are the lines not matching the
+shadow", then "Rethink and research on getting the arches."
+
+Diagnosis: rendering the nose with its parts hidden one at a time (the wedge alone, the wing alone) showed the line under
+the nose is the wedge's flat floor seen edge on. The wing is a slim shell on the wedge's side and hardly reaches that
+line, so section 17's 3.5 mm drop of the wing's foot only made a tick at each end, and nine further tries on the wing
+moved a few thousand pixels at most. The old contour table `CT` (`dwall`, `wallr`) is dead code for the lower nose: changing
+it renders pixel-identical.
+
+Sources:
+- Brito, Avashia & Rohrich, "Evidence-based Nasal Analysis for Rhinoplasty: The 10-7-5 Method" (2020): "The alar rim's
+  ideal shape resembles a gull in flight"; "The distance from the long axis of the nostril to either the alar rim or the
+  columella roll should be 1-2 mm" (so the rim's top stands 2-4 mm above the columella's lowest line).
+- Bloom & Constantinides (2011): "The appearance of the nostril rims and the columella are ideally arranged like a
+  'seagull in flight'"; the alar base ends 2-3 mm above the columella-lip junction (Crumley) to about 2 mm below it
+  (Guyuron), so about level with it.
+- entokey, "Management of the Alar Base": "the alar base should typically assume a medially directed curvature, rather
+  than a straight insertion."
+
+Fix (`apply-brow-arc.py` step 14, `GULL_A` 2.0, `GULL_D` 0): the floor itself carries the outline. From the columella's
+side to the alar base it rises 2 mm on a half sine over the nostril and returns to the floor's level at the base; the
+columella keeps its 3 mm show below. `WG_DN` is back to 0 (the ticks). An extra drop at the alar base (`GULL_D` 2-4 mm) hung
+a ragged flap there, and 3 mm of rise pinched the base.
+
+Gauges: bony base unchanged (0.57-0.64); dorsal lines / TDP Rogue 1.06, Ranger 0.73, Sorceress 1.09, Warden 1.11, Knight
+0.76 (was 0.92; the gauge's tip points move with the floor). Open: the alar base still ends in a small knob; the
+nostrils are not yet re-fitted to the arched floor.

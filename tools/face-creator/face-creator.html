@@ -1372,6 +1372,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     // (f forward of the subnasale, u up from it) ----
     var f = ySn - y, u = z - zSn;
     var uB = W4.off * mm + f * tanB;
+    /* brow arc (apply-brow-arc.py): gull */ var gC = W4.colw * alarHalf, gT = clamp((ax - gC) / (alarHalf - gC), 0, 1); uB += (2 * Math.sin(Math.PI * gT) - 0 * sm(0.55, 1, gT)) * mm;
     var colW = W4.colw * alarHalf;
     var hang = (W4.showmm ? W4.showmm * mm : W4.show * alarHalf) * sm(-0.05 * Tp, 0.25 * Tp, f) * (1 - sm(fBr, fBr + 0.4 * (Tp - fBr), f)) * sm(colW + 1.2 * mm, colW - 0.6 * mm, ax);
     var ub = uB - hang;
@@ -1385,7 +1386,7 @@ function noseSolid(zSn, zN, ySn, yN, faceY) {
     var dN = nSmin(dD, dL, W4.kjoin * mm);
     // the wing: a sail on the wedge's side, its outline an arc from the cheek round to the lobule, thickest at its foot, its
     // lower rim arched up between its two ends
-    var ef = (f - wC) / wRf, uBw = uB + W4.arch * alarHalf * Math.max(0, 1 - ef * ef) * (W4.archf ? (1 - sm(0.0, 0.8, ef)) : 1) - 3.5 * mm * sm(0.5, -0.8, ef);
+    var ef = (f - wC) / wRf, uBw = uB + W4.arch * alarHalf * Math.max(0, 1 - ef * ef) * (W4.archf ? (1 - sm(0.0, 0.8, ef)) : 1);
     var uw = Math.max(0, u - uBw) / wRu, r2 = ef * ef + uw * uw;
     var X = W + wT * Math.pow(Math.max(0, 1 - r2), W4.wp);
     var dW = -nSmin(-(ax - X) * 0.7, -(Math.sqrt(r2) - 1) * Math.min(wRf, wRu) * 0.6, W4.kw * mm);

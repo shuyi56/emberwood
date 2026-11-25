@@ -38,7 +38,7 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'WG_DN': 3.5, 'WG_FR': 0.5, 'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 6.5, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'GULL_A': 2.0, 'GULL_D': 0.0, 'WG_DN': 0.0, 'WG_FR': 0.5, 'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 6.5, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
             'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 4.0, 'KF_TOPF': 0.4, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
@@ -240,6 +240,17 @@ def patch(src, P):
     # down where the wing is fixed to the cheek, up over the nostril (Proko: the wing "hooks around and under").
     src = re.sub(r'(var ef = \(f - wC\) / wRf, uBw = uB \+ W4\.arch[^;]*?)(?: - [0-9.]+ \* mm \* sm\([^;]*?\))?;',
                  lambda m: m.group(1) + ('' if P['WG_DN'] == 0 else ' - %g * mm * sm(%g, -0.8, ef)' % (P['WG_DN'], P['WG_FR'])) + ';', src, count=1)
+    # 14. the rim as a gull in flight (John 2026-11-25: his lines on the clay front, then "Rethink and research on getting the
+    # arches"). Hiding the parts one at a time showed the line under the nose is the wedge's flat floor seen edge on, not the
+    # wing, so the floor itself is given the outline: lowest at the columella, rising GULL_A mm over each nostril, and
+    # coming down GULL_D mm at the alar base. Brito, Avashia & Rohrich 2020: "The alar rim's ideal shape resembles a gull
+    # in flight", rim and columella each 1-2 mm from the nostril's long axis; Bloom & Constantinides 2011: the alar base
+    # ends about 2 mm below the columella-lip junction (Guyuron) to 2-3 mm above it (Crumley).
+    src = re.sub(r'\n[^\n]*' + re.escape(MARK[:-3]) + r': gull \*/[^\n]*', '', src)
+    if P['GULL_A'] or P['GULL_D']:
+        k14 = 'var uB = W4.off * mm + f * tanB;'
+        assert k14 in src
+        src = src.replace(k14, k14 + '\n    %s: gull */ var gC = W4.colw * alarHalf, gT = clamp((ax - gC) / (alarHalf - gC), 0, 1); uB += (%g * Math.sin(Math.PI * gT) - %g * sm(0.55, 1, gT)) * mm;' % (MARK[:-3], P['GULL_A'], P['GULL_D']), 1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:
