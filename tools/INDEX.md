@@ -20,6 +20,7 @@ tools/
   solvers/
     folds/                  authored folds baked into the local fabric solver (folds.py)
     footwear/heel/          the heel's height and shape by gradient descent, and its stylized body
+    hair/                   a ponytail's locks as hanging elastic rods (tail_lock_rods.py)
     tests/                  the solvers' regression tests (numpy and scipy, no Blender)
   gauges/
     contours/               contour sheets: sections, profiles, strain and bend maps after a solve
@@ -68,7 +69,7 @@ Find your kind of project, then take everything in its row in order. "Every proj
 | **Tailoring** (lapels, collars, rolls, pressed hems) | `folds` (pressed and rolled creases to a measured angle, with the fold cache) | `tailoring/collar_basecheck.py` first (the base before any fold is tuned); `contours/collar_contours.py`; join continuity G0/G1/G2 (PR #86) | `docs/clothing-solvers/lapel-and-collar-retrospective.md` |
 | **Footwear** (boots, shoes, heels) | `blender/boot/last.py` (the last and the cut pieces); `solvers/footwear/heel` (heel height and shape); lace tension solver (PR #76) | `footwear/leather_gauge.py` before and after every shape, weight or pose change; `footwear/heel/study.py` and `sheet.py`; `contours/boot_*`; `colorcheck boot`; `drafttopo` (PR #87) | `zip-ankle-boot-retrospective.md`, `boots-and-hose-retrospective.md` |
 | **Laces and pleats** | lace study on the game solver (PR #79, `tools/lace-study/`); lace tension solver (PR #76) | the study's own contour flags; `colorcheck` (lace against eyelets) | `docs/clothing-solvers/lace-and-pleating.md` (PR #79) |
-| **Hair** | hair foundations (PR #88, `tools/hair/`): `scalp_field.py`, `groom.py` (rod model), `cards.py` for game cards | the tracer `tools/hair/creator_truth.py` (the creator's outline as ground truth, every gap marked); `hair/hair_check.py`; hair stress and bun hold tests (`rq_hair.py`, `rq_bun.py`, PR #85); `hair_bench.py` (PR #47); `colorcheck` cloth against hair | `/mnt/project-files/hair-rebuild/ranger-foundations.md` |
+| **Hair** | hair foundations (PR #88, `tools/hair/`): `scalp_field.py`, `groom.py` (rod model), `cards.py` for game cards; `solvers/hair/tail_lock_rods.py` for a tail's locks (3D rod statics) | the tracer `tools/hair/creator_truth.py` (the creator's outline as ground truth, every gap marked); `hair/hair_check.py`; hair stress and bun hold tests (`rq_hair.py`, `rq_bun.py`, PR #85); `hair_bench.py` (PR #47); `colorcheck` cloth against hair | `/mnt/project-files/hair-rebuild/ranger-foundations.md` |
 | **Face, head, skin** | (none: faces come only from the Face Creator) | `face_lines.py` (PR #75); `facecheck.py` (PR #26); face topology `rq_topo.py` (PR #69); `check-face.py` (PR #31); `color/face_colorcheck.py`; `skin-noise-check.py` (PR #48); neck-into-head joins (PR #86) | `tools/face-creator/README.md` |
 | **Anatomy and body proportions** | (built in `blender/base/female.py` from the measured head) | `refmeasure` against references; join continuity at the neck, shoulders and instep (PR #86); `contours` on the bare figure (`blender/base/contours.py`, PR #91) | `/mnt/project-files/anatomy/` |
 | **Accessories** (chains, pendants) | the chain's Verlet drop in `blender/shared/accessories.py` | `contours`; `layer_gaps` (the chain over the clothes) | the module's docstring |
@@ -84,6 +85,7 @@ Status: **main** is on main in this folder; **main (stays)** is on main outside 
 | Authored folds | solver | cloth, tailoring | numpy | main: `solvers/folds/folds.py` |
 | Heel optimizer | solver | footwear | numpy | main: `solvers/footwear/heel/optimize.py` |
 | Stylized heel | solver | footwear | numpy | main: `solvers/footwear/heel/stylize.py` |
+| Tail lock rods | solver | hair | numpy, scipy | PR #97: `solvers/hair/tail_lock_rods.py` |
 | Solver regression tests | test | cloth | numpy, scipy | main: `solvers/tests/` |
 | Local fabric solver (Python) | solver | cloth | numpy (scipy for MeshBody) | main (stays): `blender/shared/fabric.py`; PR #85 edits it, moves after it lands |
 | Local fabric solver (game) | solver | cloth, hair | node, browser | PR #83: `src/world/fabric-core.js`, `fabric-stiff.js` |

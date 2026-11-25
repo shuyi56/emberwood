@@ -20,20 +20,30 @@ TIE_FROM_MM = 20.0          # the tie is looked for past the hand-over from the 
 TIE_SEARCH_MM = 80.0        # and this far along the tail from the bundle's start
 
 
-TAIL_LOCKS = 70             # DRAFT: locks the tail's hair gathers into
+TAIL_LOCKS = 36             # DRAFT: locks the tail's hair gathers into
 TAIL_STATION_MM = 150.0     # where along the tail a hair's lock is read off
-TAIL_CLUMP = 0.5            # DRAFT: how far a hair is drawn to its lock's middle (XGen Clumping modifier's Clump amount)
+TAIL_CLUMP = 0.15           # DRAFT: how far a hair is drawn to its lock's middle (XGen Clumping modifier's Clump amount)
 TAIL_CLUMP_OVER_MM = (20.0, 110.0)      # DRAFT: the locks form over this run past the tie
+TAIL_ROD_FROM_MM = 30.0     # the locks are free rods from here along the tail (just past the tie, 27 mm)
+TAIL_LOCK_PACKING = 0.1     # DRAFT: a loose lock's packing, for its radius (lock contact keeps locks this thick apart)
+TAIL_RIBBON = 0.5           # DRAFT: a lock is a ribbon, this thick against its width
+TAIL_ROLL_MM = 300.0        # DRAFT: the ribbon rolls once round in this length
+TAIL_TIP_CLUMP = 0.55       # DRAFT: toward its end a lock draws in to a point (TAIL_CLUMP at its start)
 TAIL_LOCK_ROUND = 0.8       # DRAFT: how much a tail hair's "out" is its lock's own (each lock lit as a round bundle)
 
 
-def tail_locks(P, sid, n_strands, FF, seed=9):
-    """A tail hangs in locks, not as one rope: hair below a tie gathers into bundles with gaps between them. Each
-    strand joins the lock (of TAIL_LOCKS, uneven: nearest of random centres in the tail's section) it lies in at
-    TAIL_STATION_MM, and along the tail is drawn TAIL_CLUMP of the way to its lock's middle. Returns the moved points,
-    each strand's lock (-1: none) and each point's direction out from its lock's middle (0 off the tail)."""
+def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
+    """A tail hangs in locks, not as one rope. Each strand joins the lock (of TAIL_LOCKS, uneven: nearest of random
+    centres in the tail's section) it lies in at TAIL_STATION_MM. Each lock is then solved in 3D as an elastic rod
+    hanging from the tie (tools/solvers/hair/tail_lock_rods.py: bending, natural curl, gravity, contact with the other
+    locks and the head), and its hairs ride it: a hair keeps its place across its lock, in the rod's own frame, as a
+    flat ribbon (RIBBON) that rolls (ROLL_MM a turn) and draws in toward the tip. Returns the moved points, each
+    strand's lock (-1: none), each point's unit "out" on the tail (0 off it) and the solver's report."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair'))
+    import tail_lock_rods as TR
     from scipy.spatial import cKDTree
     rng = np.random.default_rng(seed)
+    mm = BF.MM
     cl, sc = np.asarray(FF['cl']), np.asarray(FF['s'], float)
     tg = np.gradient(cl, axis=0); tg /= np.maximum(np.linalg.norm(tg, axis=1, keepdims=True), 1e-12)
     e1 = np.asarray(FF['e1'], float); e1 = e1 - (e1 * tg).sum(1, keepdims=True) * tg
@@ -41,10 +51,10 @@ def tail_locks(P, sid, n_strands, FF, seed=9):
     jn = cKDTree(cl).query(P)[1]
     v = P - cl[jn]
     a, b = (v * e1[jn]).sum(1), (v * e2[jn]).sum(1)
-    sj = np.abs(sc[jn] - sc[0]) * (1.0 if sc.max() > 5 else 1 / BF.MM)
-    Rj = np.asarray(FF['R'], float)[jn] * BF.MM
-    on = (np.hypot(a, b) < Rj + 10 * BF.MM) & (sj > 1.0)
-    # each strand's place at the station
+    scm = np.abs(sc - sc[0]) * (1.0 if sc.max() > 5 else 1 / mm)
+    sj = scm[jn]
+    Rj = np.asarray(FF['R'], float)[jn] * mm
+    on = (np.hypot(a, b) < Rj + 10 * mm) & (sj > 1.0)
     d = np.where(on, np.abs(sj - TAIL_STATION_MM), 1e9)
     order = np.lexsort((d, sid)); first = order[np.r_[True, sid[order][1:] != sid[order][:-1]]]
     ok = d[first] < 15.0
@@ -53,22 +63,75 @@ def tail_locks(P, sid, n_strands, FF, seed=9):
     th, rr = rng.random(TAIL_LOCKS) * 2 * np.pi, rad * np.sqrt(rng.random(TAIL_LOCKS))
     lock = np.full(n_strands, -1)
     lock[sid[first][ok]] = cKDTree(np.c_[rr * np.cos(th), rr * np.sin(th)]).query(np.c_[sa[ok], sb[ok]])[1]
+    used, lock_c = np.unique(lock[lock >= 0], return_inverse=True)
+    lock[lock >= 0] = lock_c                                           # (compact: 0..n-1)
+    nl = len(used)
     lp = lock[sid]
-    m = on & (lp >= 0)
+    m = on & (lp >= 0) & (sj >= TAIL_ROD_FROM_MM)
+    j0 = int(np.argmin(np.abs(scm - TAIL_ROD_FROM_MM)))
+    # each lock's middle along the old tail (per station), for a hair's place across its lock
     key = lp[m] * len(cl) + jn[m]
     uk, inv = np.unique(key, return_inverse=True)
     cnt = np.bincount(inv)
     ca, cb = np.bincount(inv, a[m]) / cnt, np.bincount(inv, b[m]) / cnt
-    w = TAIL_CLUMP * BF.sm(TAIL_CLUMP_OVER_MM[0], TAIL_CLUMP_OVER_MM[1], sj[m])
-    da, db = ca[inv] - a[m], cb[inv] - b[m]
+    oa, ob = a[m] - ca[inv], b[m] - cb[inv]
+    # the rods' roots: each lock's middle at the tie, heading as the lock heads there
+    roots = np.zeros((nl, 3)); head_to = np.zeros((nl, 3)); length = np.zeros(nl); nh = np.zeros(nl)
+    hs = hairs[sid]
+    smax = np.zeros(n_strands); np.maximum.at(smax, sid[m], sj[m])
+    for k in range(nl):
+        mine = np.where(uk // len(cl) == k)[0]                         # (this lock's stations, in order along the tail)
+        q0, q1 = mine[:6], mine[10:16]
+        c0 = cl[j0] + ca[q0].mean() * e1[j0] + cb[q0].mean() * e2[j0]
+        c1 = cl[j0 + 10] + ca[q1].mean() * e1[j0 + 10] + cb[q1].mean() * e2[j0 + 10]
+        hd = 0.7 * tg[j0] * np.sign(tg[j0] @ (c1 - c0)) + 0.3 * (c1 - c0) / np.linalg.norm(c1 - c0)     # (mostly the tail's own heading)
+        roots[k], head_to[k] = c0, hd / np.linalg.norm(hd)
+        mem = np.where(lock == k)[0]
+        length[k] = np.percentile(smax[mem], 80) - TAIL_ROD_FROM_MM
+        nh[k] = hairs[mem].sum()
+    d1 = e1[j0][None] - (head_to @ e1[j0])[:, None] * head_to; d1 /= np.linalg.norm(d1, axis=1, keepdims=True)
+    frames = np.stack([d1, np.cross(head_to, d1), head_to], 2)
+    lock_r = np.sqrt(nh * np.pi * 0.035 ** 2 / TAIL_LOCK_PACKING / np.pi)
+
+    def head(pts, rd):
+        if shell is None:
+            return np.zeros(len(pts)), np.zeros((len(pts), 3))
+        U = pts * mm - BF.SF.CENTRE
+        r = np.linalg.norm(U, axis=1); U = U / np.maximum(r[:, None], 1e-12)
+        return shell.radius(U) / mm + rd - r / mm, U
+    out = TR.solve(roots / mm, frames, length, nh, lock_r, head=head, seed=seed, log=lambda t: print('  rods:', t, file=sys.stderr))
+    X, Rr, rs = out['x'] * mm, out['R'], out['s']
+    # the hairs ride their lock's rod
+    srel = sj[m] - TAIL_ROD_FROM_MM
+    lk = lp[m]
+    seg = rs[lk, 1]                                                    # the lock's segment length, mm
+    M = Rr.shape[1]
+    i = np.clip((srel / seg).astype(int), 0, M - 1)
+    fr = srel / seg - i                                                # (past the rod's end: on along its last segment)
+    base = X[lk, i] + (fr * seg * mm)[:, None] * Rr[lk, i][:, :, 2]
+    t01 = np.clip(srel / np.maximum(length[lk], 1.0), 0, 1)
+    w = BF.sm(0.0, 80.0, srel) * (TAIL_CLUMP + (TAIL_TIP_CLUMP - TAIL_CLUMP) * BF.sm(0.5, 1.0, t01))
+    psi = rng.random(nl)[lk] * 2 * np.pi + 2 * np.pi * srel / TAIL_ROLL_MM * BF.sm(0.0, 60.0, srel)
+    flat = 1 - (1 - TAIL_RIBBON) * BF.sm(0.0, 80.0, srel)
+    # (the lock's section pressed flat along its own axis at angle psi, the axis rolling along the lock)
+    cu, su = np.cos(psi), np.sin(psi)
+    pu, pv = oa * cu + ob * su, (-oa * su + ob * cu) * flat
+    na, nb = (pu * cu - pv * su) * (1 - w), (pu * su + pv * cu) * (1 - w)
+    D1, D2 = Rr[lk, i][:, :, 0], Rr[lk, i][:, :, 1]
     Q = P.copy()
-    Q[m] += (w * da)[:, None] * e1[jn[m]] + (w * db)[:, None] * e2[jn[m]]
-    lo = np.zeros_like(P)
-    o = -(da[:, None] * e1[jn[m]] + db[:, None] * e2[jn[m]])
-    lo[m] = o / np.maximum(np.linalg.norm(o, axis=1, keepdims=True), 1e-9) * (w / TAIL_CLUMP)[:, None]
-    print('tail locks: %d strands in %d locks, median move %.1f mm' % ((lock >= 0).sum(), len(np.unique(lock[lock >= 0])),
-          np.median(np.linalg.norm(Q[m] - P[m], axis=1)) / BF.MM), file=sys.stderr)
-    return Q, lock, lo
+    Q[m] = base + na[:, None] * D1 + nb[:, None] * D2
+    # which way is out: from the lock's own middle, and from the bundle's (the rods' mean at that length)
+    bundle = X.mean(0)                                                 # (M+1, 3): rods share the segment count
+    o_lock = na[:, None] * D1 + nb[:, None] * D2
+    o_lock /= np.maximum(np.linalg.norm(o_lock, axis=1, keepdims=True), 1e-9)
+    o_b = Q[m] - bundle[np.clip(i, 0, M)]
+    o_b /= np.maximum(np.linalg.norm(o_b, axis=1, keepdims=True), 1e-9)
+    o = TAIL_LOCK_ROUND * o_lock + (1 - TAIL_LOCK_ROUND) * o_b
+    tail_out = np.zeros_like(P); tail_out[m] = o / np.maximum(np.linalg.norm(o, axis=1, keepdims=True), 1e-9)
+    rep = dict(out['report'], strands=int((lock >= 0).sum()), lock_radius_mm_median=round(float(np.median(lock_r)), 1),
+               length_mm_median=round(float(np.median(length)), 0))
+    print('tail locks', rep, file=sys.stderr)
+    return Q, lock, tail_out, rep
 
 
 def main():
@@ -94,6 +157,11 @@ def main():
         paths, tiltv, comb, layv, vol = HV.layer(paths, basin == 0, BF.Shell(B['surf']), np.asarray(FF0['cl'])[0], float(B['r_tie']),
                                      np.asarray(FF0['tang'])[0])
         print('volume', vol, file=sys.stderr)
+    tier = None
+    if '--mid-layer' in a:                                            # a mid layer of thick clumps under the loose top (hair_layers.py)
+        import hair_layers as HLy
+        paths, tier, ml = HLy.mid_layer(paths)
+        print('mid layer', ml, file=sys.stderr)
     noise = None
     if '--trim' in a:                                                 # the fringe and the loose locks cut to a line (hair_trim.py)
         import hair_trim as HT
@@ -119,7 +187,7 @@ def main():
     tlock = lock_out = None
     if '--tail-locks' in a:
         sid = np.repeat(np.arange(len(ps)), counts)
-        P, tlock, lock_out = tail_locks(P, sid, len(ps), PF.free_fall(B))
+        P, tlock, lock_out, rods = tail_locks(P, sid, len(ps), PF.free_fall(B), hairs[keep] * len(paths) / len(keep), BF.Shell(B['surf']))
         ps = np.split(P, np.cumsum(counts)[:-1])
     from scipy.spatial import cKDTree
     tree = cKDTree(P[::2])
@@ -157,9 +225,6 @@ def main():
     v -= (v * tg[jn]).sum(1, keepdims=True) * tg[jn]
     dcl = np.linalg.norm(v, axis=1)
     out_tail = v / np.maximum(dcl[:, None], 1e-9)
-    if lock_out is not None:                           # (each lock round its own middle, not the whole tail's)
-        out_tail = out_tail * (1 - TAIL_LOCK_ROUND * np.linalg.norm(lock_out, axis=1, keepdims=True)) + TAIL_LOCK_ROUND * lock_out
-        out_tail /= np.maximum(np.linalg.norm(out_tail, axis=1, keepdims=True), 1e-9)
     sj = np.abs(sc[jn] - sc[0]) * (1.0 if sc.max() > 5 else 1 / BF.MM)       # mm along the tail from the tie
     Rj = np.asarray(FF['R'], float)[jn]
     wt = BF.sm(0.0, 25.0, sj) * (dcl / BF.MM < Rj + 10.0)
@@ -169,6 +234,9 @@ def main():
         oh += np.concatenate([tiltv[i][~np.isnan(paths[i][:, 0])] for i in keep])
         oh /= np.maximum(np.linalg.norm(oh, axis=1, keepdims=True), 1e-9)
     outv = oh * (1 - wt)[:, None] + out_tail * wt[:, None]
+    if lock_out is not None:                           # (the solved tail: out from each lock's own middle)
+        tw = np.linalg.norm(lock_out, axis=1, keepdims=True)
+        outv = np.where(tw > 0.5, lock_out, outv)
     outv /= np.maximum(np.linalg.norm(outv, axis=1, keepdims=True), 1e-9)
     print('tail points %.0f%%' % (100 * (wt > 0.5).mean()), 's range', sc.min(), sc.max(), 'R', Rj.min(), Rj.max())
     # the tie: where the field gathers the hair (the bundle's first section), for the page to wind its thong round
@@ -191,7 +259,8 @@ def main():
                             hairs_per_strand=round(share, 2), ao=CA.b64(np.round(sao * 255), 'u1'), ids=CA.b64(ids, 'u1'),
                             light=CA.b64(np.round(np.clip(occ, 0, 1) * 255), 'u1'), light_order='key,rim,fill,ambient',
                             out=CA.b64(np.round(outv * 127), 'i1'),
-                            **({'layer': CA.b64(np.round(layv[keep] * 255), 'u1')} if layv is not None else {})),
+                            **({'layer': CA.b64(np.round(layv[keep] * 255), 'u1')} if layv is not None else {}),
+                            **({'tier': CA.b64(tier[keep], 'u1')} if tier is not None else {})),
                source=dict(bangs=os.path.abspath(bdir), fibres=int(len(paths))))
     json.dump(rep, open(out, 'w'))
     print(out, os.path.getsize(out) // 1024, 'KB', len(ps), 'strands of', len(paths), 'fibres, %.1f hairs each' % share)

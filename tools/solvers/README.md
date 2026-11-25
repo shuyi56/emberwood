@@ -211,3 +211,31 @@ The Ranger's hair rebuild, foundations 1 to 8 (read `/mnt/project-files/hair-reb
 A necklace is a closed chain of a given length dropped over the head and let fall (a small Verlet simulation against
 the body and the clothes built so far): it comes to rest on the trapezius at the back and falls into a U (a V with a
 pendant) in front. The pendant hangs from the chain's lowest point and turns about its bail only as far as it must.
+
+## Hair
+
+### Tail lock rods: `hair/tail_lock_rods.py` (PR #97)
+
+**Purpose.** The locks of a ponytail in 3D: each lock is one Kirchhoff rod clamped at the tie and free at the tip,
+with natural curl, bent by its weight and pushed off the other locks and the head. Locks part as they fall because
+nothing below the tie holds them together.
+
+**Inputs.** Per lock: root (mm), frame at the tie (d1, d2, tangent), length, hairs, radius; optionally a head
+function (points, radii) -> (depth inside, outward normal). **Outputs.** Node positions, frames, arc lengths, radii
+and a report.
+
+**Run.** `import tail_lock_rods as TR; out = TR.solve(roots, frames, lengths, n_hairs, radius, head=head)`. The
+creator asset drives it: `tools/hair/bangs_creator_asset.py ... --tail-locks` (hairs ride their lock's rod as a flat
+ribbon that rolls). About 30 s for 33 locks of 75 segments.
+
+**Trouble looks like.** `residual_mm` over 0.5 or `imbalance_rad_max` over 0.5 (not settled: raise ITERS);
+`gap_under_half_share` over 0.01 (locks inside each other: raise CONTACT_K, which needs a smaller RELAX);
+`rank_swaps_outer` above 0 (outer locks crossed round the axis); a plain fixed-point iteration (RELAX near 1) never
+settles, since a 300 mm lock is far past its 45 mm bending length.
+
+**When.** Any tail, braid end or loose hank below a tie. Not for hair lying on the head (that is the flow field).
+
+**Grounded in.** Kirchhoff rod statics; Bertails et al. 2006, Super-Helices (hair as an inextensible rod with
+natural curvature under gravity); Bergou et al. 2008, Discrete Elastic Rods (the Bishop frame). E 3.9 GPa, density
+1.3 g/cm3, 70 um (Robbins ch. 9). DRAFT: GJ/EI 0.7, the curl (radius 12 mm, pitch 100 mm, off the reference photo),
+contact stiffness, lock packing 0.1.
