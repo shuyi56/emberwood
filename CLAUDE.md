@@ -6,6 +6,13 @@ committing. Render all 8 facings and a few walk frames (columns 2, 4 and 6), and
 area you changed. One good front view proves nothing: most problems show up in the 3/4 and
 profile rows.
 
+## Start every project and thread with the solvers and gauges index
+
+Before any build, read `tools/INDEX.md`. Find your kind of project in its decision guide, take the solvers and gauges
+it names, and read their entries (`tools/solvers/README.md`, `tools/gauges/README.md`) before you start. New solvers
+and gauges go in `tools/solvers/<domain>/` or `tools/gauges/<domain>/`, documented in the same shape, with a row in
+the index. Edit the real files under `tools/`; the files left at old paths are shims.
+
 ## Shoulders: how to blend them into the arms
 
 The neck-to-arm line has to read as one continuous curve. The usual ways it breaks are a square
@@ -103,14 +110,37 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   which checks caught or missed problems, and what to do differently.
 - Add to the existing files where a lesson fits. Create a new file for a new topic. Commit it to the thread's branch.
 
+## Hair grooms: the Face Creator's lines are the ground truth
+
+Build and check every groom (`tools/hair/`) against the creator's own hairstyle, not against a look
+or a measurement alone.
+
+1. Export the creator's style and head: `node tools/render-queue/rq_hair_export.cjs face-creator.html DIR <style>`
+   (working copy in `hair-stress/code`). It writes `DIR/<style>.json.gz` (the cap grid and the strand clumps) and
+   `DIR/head.json.gz`.
+2. Groom with the creator traced: `python3 tools/hair/groom.py HEAD OUT --trace DIR/<style>.json.gz`. Styled hair
+   (bangs, face-framing locks) is combed along the creator's strands and ends where they end. It is not solved:
+   a lone hair holds a shape over only 4.5 cm, so a solve lets styled hair fall straight. Add
+   `--reuse OLD/groom.npz` so that only the guides that changed are solved (seconds, not 20 minutes).
+3. Check against the creator after every change: `python3 tools/hair/creator_truth.py HEAD DIR/<style>.json.gz OUT
+   CHECK`. It draws the creator's outline (red) and strands (blue) over the groom from five views, marks magenta
+   where the creator has hair and the groom does not, and cyan where the groom adds hair. The numbers per view are
+   in truth.json. Fix the largest magenta area first: a hole in the creator's coverage is the worst fault.
+4. Where a cited measurement and the creator disagree, follow the creator and note the measurement it overrides.
+   Example: the bang section's depth is 60 mm from the creator, not the guides' 32 mm.
+5. The hairline has no gaps: from ear to ear, no bare scalp behind it. `groom.py` gauges every groom it writes
+   (`tools/hair/hairline_gap.py HEAD GROOM --map OUT.png`) and fails the build on a bare cell. Fix the hair, not the
+   threshold.
+6. Then render (`render.py`, `--size 750` keeps it inside memory), bake the cards (`cards.py`), and log each
+   rejected look with `rq_reject.py`.
+
 ## Boots: lessons from the zip ankle boot
 
 See `docs/clothing-solvers/zip-ankle-boot-retrospective.md` for the numbers.
 
-- Measure with `blender/zipboot/gauge.py` before and after every change to a boot's shape, weights or pose. Pose
+- Measure with `tools/gauges/footwear/leather_gauge.py` (the old `blender/zipboot/gauge.py` still runs it) before and after every change to a boot's shape, weights or pose. Pose
   asymmetry over 0.02 units, or stretch outside 0.9 to 1.15, means the rig is distorting the leather.
 - Make a stance's turn-out in the hip (`female.TURNOUT_AT_HIP`), never at the ankle: at the ankle it twists any shaft.
 - On a heel the toes pitch: move the leather's bend back to the ball (`zipboot.bend_at_ball`).
 - Render with `--rest` before blaming the shape: a line that is only there posed is the rig.
 - Fit clearance by region (toes, heel, shaft), and when one region tightens, check the next one.
-

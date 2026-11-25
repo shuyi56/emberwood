@@ -36,6 +36,14 @@ NECK_FROM = [float(x) for x in os.environ.get('BODICE_NECK_FROM', '0.9,1.4').spl
 # comes down onto the body again over OVER_RUN (in w). 0 keeps it raised everywhere.
 OVER_RUN = float(os.environ.get('BODICE_OVER_RUN', 0.6))
 
+# the bodice cut with the lapels' fold in mind (John, 2026-11-24: "Join did not account for asymmetry ... co design the
+# bodice so it can take load from the lapel"): the fronts cross only below the height where the two folds meet. Above
+# it they stand apart in the V, yet the right front was still a cloth's thickness forward all the way to the neck, so
+# its roll line, its lapel and the collar's end on it stood 4.5 mm in front of the left's, and one collar cannot meet
+# both. OVER_TOP 'z0,z1' (model units; the folds' crossing and the roll lines' top, from foldfront's log) brings the
+# right front down onto the body between them, so both neck corners are cut at one level. Empty keeps it raised.
+OVER_TOP = [float(x) for x in os.environ.get('BODICE_OVER_TOP', '').split(',') if x]
+
 
 def over_only_on_the_lap(run=OVER_RUN):
     import numpy as np
@@ -51,6 +59,8 @@ def over_only_on_the_lap(run=OVER_RUN):
             t = np.clip((yc - 0.5 * w - p[:, 1]) / w, 0, 1); front = t * t * (3 - 2 * t)
             over = th * (p[:, 0] < lap + 0.5 * bodice.LAP_GAP) * front
             u = np.clip((p[:, 0] + lap + run * w) / (run * w), 0, 1); keep = u * u * (3 - 2 * u)
+            if len(OVER_TOP) == 2:
+                v = np.clip((p[:, 2] - OVER_TOP[0]) / (OVER_TOP[1] - OVER_TOP[0]), 0, 1); keep = np.minimum(keep, 1 - v * v * (3 - 2 * v))
             return f(p) - over * (1 - keep)
         return lift
     surface_lift._lap_only = True
