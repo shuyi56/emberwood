@@ -3,7 +3,8 @@ of the field's old fringe. Nothing else changes: the ponytail's lines come from 
 
     python3 tools/hair/bangs_render.py HEAD.json.gz BANGS_DIR OUT_DIR --field-cache CACHE [--size 750] [--before RENDER5]
 
-BANGS_DIR is a bangs_flow.py output folder (bangs-lines.npz). Clay only (first renders are clay, project rule).
+BANGS_DIR is a bangs_flow.py output folder (bangs-lines.npz). Clay by default (first renders are clay, project
+rule); --mode full renders the hair in colour (render.py's tone and melanin) on the same cameras, to files ending -full.
 --before puts the old render's clay close-ups beside the new ones on the same cameras."""
 import os, sys, json, gzip
 import numpy as np
@@ -20,6 +21,8 @@ def main():
     a = sys.argv[1:]
     head, bdir, out = a[0], a[1], a[2]
     size = int(a[a.index('--size') + 1]) if '--size' in a else 750
+    mode = a[a.index('--mode') + 1] if '--mode' in a else 'clay'
+    sfx = '' if mode == 'clay' else '-' + mode
     os.makedirs(out, exist_ok=True)
     BF.reuse_field_cache(a[a.index('--field-cache') + 1])
     PF.HEAD = head
@@ -45,17 +48,17 @@ def main():
     row = []
     for az in (0, 45, 90, 135, 180):
         cv = RD.Canvas(size, az)
-        bg, zb = RD.clay_backdrop(cv, surf, body, 'clay')
-        row.append((RD.to_srgb(RD.render_hair(cv, paths, 'clay', bg, zb, hairs)) * 255).astype(np.uint8))
-    Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'turn-clay.png'))
+        bg, zb = RD.clay_backdrop(cv, surf, body, mode)
+        row.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
+    Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'turn-%s.png' % mode))
     shots = (('closeup-front', 0, (-0.5, 0.5, 0.25, 1.1)), ('closeup-34', 40, (-0.5, 0.5, 0.25, 1.1)),
              ('closeup-side', 90, (-0.55, 0.75, 0.1, 1.12)))
     for name, az, box in shots:
         cv = RD.Canvas(size, az, box)
-        bg, zb = RD.clay_backdrop(cv, surf, body, 'clay')
-        im = (RD.to_srgb(RD.render_hair(cv, paths, 'clay', bg, zb, hairs)) * 255).astype(np.uint8)
-        Image.fromarray(im).save(os.path.join(out, name + '.png'))
-        if '--before' in a:
+        bg, zb = RD.clay_backdrop(cv, surf, body, mode)
+        im = (RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8)
+        Image.fromarray(im).save(os.path.join(out, name + sfx + '.png'))
+        if '--before' in a and mode == 'clay':
             p = os.path.join(a[a.index('--before') + 1], name + '.png')
             if os.path.exists(p):
                 old = np.asarray(Image.open(p).convert('RGB'))
