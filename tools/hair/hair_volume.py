@@ -50,13 +50,18 @@ FURROW_MM = 2.6         # DRAFT: a lock's ridge over its furrows, at most
 FURROW_SLOPE = 0.8      # DRAFT: the steepest side of a ridge (rise over run)
 LOCK_STEP_MM = 1.3      # DRAFT: a lock stands this much higher or lower than the mean
 FURROW_FROM_MM = (10.0, 40.0)   # DRAFT: furrows grow in over this run from the root
+TOP_EL_DEG = 35.0       # the top section: roots above this elevation from the skull's centre (above the parietal ridge,
+                        # where a stylist's horseshoe parting runs; Milady Standard Cosmetology, sectioning)
+NAPE_EL_DEG = -5.0      # the nape section: roots at the back below this
+LAYER_GAP_MM = 2.5      # DRAFT: the top section lies this much clear of the sections it is combed over
+LAYER_FROM_MM = (15.0, 50.0)    # DRAFT: it comes clear over this run from the root
 TIE_FADE_MM = (4.0, 40.0)   # DRAFT: no lift within the first of the tie's rim, all of it past the second
 RATE = ROOT_PER_MM2 * math.pi * (HAIR_DIAM_MM / 2) ** 2 / PACKING       # mm of height per mm of hair
 
 
 def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
     """Lift fibres paths[sel] (n, m, 3) off the bed in layers. tie_c, tie_r: the tie's centre and radius; tie_axis:
-    the tail's direction there (for the comb locks; without it, no furrows). Returns (paths, tilt, comb lock per fibre, report)."""
+    the tail's direction there (for the comb locks; without it, no furrows). Returns (paths, tilt, comb lock per fibre, layer per fibre, report)."""
     rng = np.random.default_rng(seed)
     P = np.array(paths[sel], float)
     n, m, _ = P.shape
@@ -78,6 +83,14 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
     win = (win.reshape(-1) * SF.sm(14.0, 9.0, (r - rb) / MM))          # (and only near the head)
     Sf = S.reshape(-1)
     h = np.minimum(RATE * Sf * np.repeat(var[lock], m), CAP_MM) + ROOT_MM * SF.sm(0.0, ROOT_OVER_MM, Sf)
+    # sections, as hair is parted to be dressed: the top (inside the horseshoe) is combed over the sides, the sides over
+    # the nape. Each root cell goes whole to one section (its edge is a parting between locks, not a ruled line).
+    u0 = P[:, 0] - SF.CENTRE; u0 /= np.linalg.norm(u0, axis=1, keepdims=True)
+    el = np.degrees(np.arcsin(u0[:, 2])) + 4.0 * (2 * rng.random(len(uk)) - 1)[lock]
+    top = el > TOP_EL_DEG
+    nape = (el < NAPE_EL_DEG) & (P[:, 0, 1] > SF.CENTRE[1])
+    section = np.where(top, 1.0, np.where(nape, 0.3, 0.6))             # how far out the section lies (1 outermost)
+    h = h + np.repeat(top * LAYER_GAP_MM, m) * SF.sm(LAYER_FROM_MM[0], LAYER_FROM_MM[1], Sf)
     Nn = shell.normals(U)
     tilt = np.zeros((n * m, 3))
     furrow = np.zeros(n * m)
@@ -118,9 +131,11 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
     Q[sel] = out
     T = np.zeros_like(Q); T[sel] = tilt.reshape(n, m, 3)
     C = np.full(len(Q), -1); C[sel] = comb
+    Lay = np.ones(len(Q)); Lay[sel] = section
     hm = h.reshape(n, m).max(1)
     jump = np.abs(np.diff(np.linalg.norm(out - P, axis=2), axis=1)).max() / MM
     rep = dict(fibres=int(n), rate_mm_per_mm=round(RATE, 4), lift_mm_median_max=round(float(np.median(hm)), 1),
                lift_mm_p95=round(float(np.percentile(hm, 95)), 1), root_move_mm_max=round(float(np.linalg.norm(out[:, 0] - P[:, 0], axis=1).max() / MM), 3),
                node_jump_mm_max=round(float(jump), 2), tilt_p95=round(float(np.percentile(np.linalg.norm(tilt, axis=1), 95)), 2))
-    return Q, T, C, rep
+    rep['top_section_share'] = round(float(top.mean()), 2); rep['nape_section_share'] = round(float(nape.mean()), 2)
+    return Q, T, C, Lay, rep

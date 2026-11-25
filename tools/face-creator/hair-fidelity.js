@@ -53,6 +53,19 @@ const HEAD_MM = 219;                              // one head height in mm (scal
 // the middle, none at the edge: the hairs of a strand lie scattered across it, not side by side), dithered per pixel
 // so it still sorts by depth; FINE_SHARE of the strands are drawn FINE_W wide, as the loose single hairs. STYLE.
 const FUZZ_W = 2.0, FUZZ_A = 0.9, FINE_SHARE = 0.3, FINE_W = 0.35;
+// Layers: hair is dressed in sections, the top combed over the sides, the sides over the nape (hair_volume.py), and the
+// under layers are darker than the canopy over them: less light reaches them, and the outer hair is the weathered,
+// sun-lightened hair (Robbins ch. 5, photochemical lightening). A strand takes its section's tone (the innermost at
+// LAYER_DARK of the outermost), and any point buried under other hair (its baked ambient) goes down to INNER_DARK,
+// so an under layer seen past the edge of an upper one reads as a separate, deeper layer. STYLE amounts.
+const LAYER_DARK = 0.5, INNER_DARK = 0.45;
+// Glints: a hair's section is an ellipse and the hair twists along its length, so the light it focuses back comes and
+// goes along it: "glints", bright near-white streaks that sit at different places on neighbouring hairs
+// (Marschner et al. 2003, "Light Scattering from Human Hair Fibers", sect. 5.2.3 and their fig. on eccentricity). Here:
+// a tight white lobe (GLINT_EXP) on top of the two highlights, let through only where the strand's own slow wave
+// along its length (GLINT_MM long cycles, phase and rate its own) is near its crest (GLINT_DUTY of the length).
+// SOURCED: the effect and its cause. STYLE: the amounts. STRAND_TONE: each strand this much lighter or darker (STYLE).
+const GLINT = 0.5, GLINT_EXP = 110, GLINT_MM = 24, GLINT_DUTY = 0.35, STRAND_TONE = 0.32;
 const STRAND_TWIST = 0.7;                         // STYLE: rad each strand's normal is turned round it, either way
 const STRAND_LIGHT = 0.85;                        // STYLE: the strands' paint against the hair colour: less light, so the
                                                   // lit side does not wash the strands into one flat sheet (cards: 0.8)
@@ -65,7 +78,7 @@ const STRAND_LIGHT = 0.85;                        // STYLE: the strands' paint a
 const SPEC1 = 0.09, SPEC1_EXP = 90, SPEC1_SHIFT = 0.1;     // STYLE: primary: strength, tightness, shift toward the tip
 const SPEC2 = 0.22, SPEC2_EXP = 22, SPEC2_SHIFT = -0.14;    // STYLE: secondary: strength (x hair colour), toward the root
 const SPEC_JITTER = 0.12;                         // STYLE: each strand's own extra shift, so the band breaks into glints
-const LOCK_TONE = 0.2, CLUMP_TONE = 0.12;         // STYLE: a whole lock, and a clump in it, this much lighter or darker
+const LOCK_TONE = 0.2, CLUMP_TONE = 0.2;          // STYLE: a whole lock, and a clump in it, this much lighter or darker
                                                   // (the ID map of card hair: big clumps, then subclumps; 80.lv / CGMA)
 const LIGHT_FLOOR = 0.2;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
                                                   // Zinke et al. 2008), which the single-scattering transmittance leaves out
@@ -169,15 +182,18 @@ function buildStyle(asset, tone, creatorMat) {
   // the key, the rim and the fill, and the ambient, from the hair's own flow and density. It then replaces the AO.
   // which way is out at each point (the head's on the head, the tail's own axis along the tail), when the asset has it
   const sOut = S.out ? toPage(Float32Array.from(new Int8Array(bytes(S.out))), 1 / HH) : null;
+  const sLay = S.layer ? new Uint8Array(bytes(S.layer)) : null;
   const sL = S.light ? new Uint8Array(bytes(S.light)) : null, lit = new Float32Array(np * 8).fill(1);
   const wHair = (S.hairs_per_strand || 1) * HAIR_MM * HH / HEAD_MM;
   const pos = new Float32Array(np * 6), tan = new Float32Array(np * 6), nrm = new Float32Array(np * 6);
   const side = new Float32Array(np * 2), wid = new Float32Array(np * 2), vc = new Float32Array(np * 6), idx = [];
+  const sArc = new Float32Array(np * 2);          // per vertex: mm along the strand
   const occ = new Float32Array(np * 4);            // per vertex: the baked AO, and the strand's own random value
   let k = 0, si = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (const c of cnt) {
+    const lay = sLay ? LAYER_DARK + (1 - LAYER_DARK) * sLay[si] / 255 : 1;
     const jit = rnd(), tl0 = sID ? sID[2 * si] / 250 - 0.5 : 0, tc0 = sID ? sID[2 * si + 1] / 250 - 0.5 : 0; si++;
-    const b = (0.8 + 0.4 * rnd()) * (1 + 2 * LOCK_TONE * tl0) * (1 + 2 * CLUMP_TONE * tc0), twist = (2 * rnd() - 1) * STRAND_TWIST;
+    const b = lay * (1 - STRAND_TONE + 2 * STRAND_TONE * rnd()) * (1 + 2 * LOCK_TONE * tl0) * (1 + 2 * CLUMP_TONE * tc0), twist = (2 * rnd() - 1) * STRAND_TWIST;
     const tc = Math.cos(twist), ts = Math.sin(twist), fine = rnd() < FINE_SHARE ? FINE_W : FUZZ_W;
     for (let j = 0, sj = 0; j < c; j++) {
       const q = k + j, a0 = k + Math.max(0, j - 1), a1 = k + Math.min(c - 1, j + 1), t = j / (c - 1);
@@ -193,13 +209,13 @@ function buildStyle(asset, tone, creatorMat) {
       const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
       const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
       const ol = 1; const ox2 = nx * tc + bx * ts, oy2 = ny * tc + by * ts, oz2 = nz * tc + bz * ts;
-      const ao = sL ? 1 : sAO ? sAO[q] / 255 : 1, shade = b * shadeAt(sj, t) * ao;
+      const ao = sL ? 1 : sAO ? sAO[q] / 255 : 1, shade = b * shadeAt(sj, t) * ao * (sL ? INNER_DARK + (1 - INNER_DARK) * sstep(sL[4 * q + 3] / 128) : 1);
       for (let e = 0; e < 2; e++) {
         const v = 2 * q + e;
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
         nrm[3 * v] = ox2; nrm[3 * v + 1] = oy2; nrm[3 * v + 2] = oz2;
         side[v] = e ? 1 : -1; wid[v] = wHair * fine * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
-        vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit;
+        vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit; sArc[v] = sj * HEAD_MM / HH;
         if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = sL[4 * q + c4] / 255;
       }
       if (j < c - 1) idx.push(2 * q, 2 * q + 1, 2 * q + 3, 2 * q, 2 * q + 3, 2 * q + 2);
@@ -210,7 +226,7 @@ function buildStyle(asset, tone, creatorMat) {
   sg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); sg.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   sg.setAttribute('strandT', new THREE.BufferAttribute(tan, 3)); sg.setAttribute('strandSide', new THREE.BufferAttribute(side, 1));
   sg.setAttribute('strandW', new THREE.BufferAttribute(wid, 1)); sg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
-  sg.setAttribute('strandOcc', new THREE.BufferAttribute(occ, 2));
+  sg.setAttribute('strandOcc', new THREE.BufferAttribute(occ, 2)); sg.setAttribute('strandArc', new THREE.BufferAttribute(sArc, 1));
   sg.setAttribute('strandLight', new THREE.BufferAttribute(lit, 4));
   sg.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
   sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
@@ -219,16 +235,16 @@ function buildStyle(asset, tone, creatorMat) {
   strandMat.onBeforeCompile = sh => {
     sh.uniforms.pxWorld = PX_WORLD;
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\n' +
-      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\n' +
+      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\nattribute float strandArc;\nvarying float vArc;\n' +
       sh.vertexShader.replace('#include <project_vertex>', [
         'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
-        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide;',
+        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide; vArc = strandArc;',
         'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
         'mvPosition.xyz += sd * ( 0.5 * max( strandW, -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
-    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\n' + sh.fragmentShader
+    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\n' + sh.fragmentShader
       // each light by the hair's own transmittance toward it (the lights in the scene's order: key, rim, fill; the key
       // casts the only shadow, so it stays first), the ambient by the hair's averaged transmittance
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
@@ -247,13 +263,16 @@ function buildStyle(asset, tone, creatorMat) {
         '  vec3 t2 = normalize( sT + ( ' + f(SPEC2_SHIFT) + ' + ' + f(SPEC_JITTER) + ' * ( vStrandOcc.y - 0.5 ) ) * normal );',
         // (the primary half-way to the hair's hue: pure light colour on single strands read as grey hairs. STYLE: Scheuermann's is untinted)
         '  vec3 sWarm = mix( vec3( 1.0 ), diffuseColor.rgb / max( max( diffuseColor.r, diffuseColor.g ), 0.001 ), 0.5 );',
+        '  float gPh = 6.2832 * ( vArc / ( ' + f(GLINT_MM) + ' * ( 0.6 + 0.8 * vStrandOcc.y ) ) + 17.0 * vStrandOcc.y );',
+        '  float gOn = smoothstep( ' + f(1 - 2 * GLINT_DUTY) + ', 1.0, 0.6 * sin( gPh ) + 0.4 * sin( 2.7 * gPh + 40.0 * vStrandOcc.y ) );',
         '  for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {',
         '    vec3 sL = directionalLights[ i ].direction, sH = normalize( sL + sV );',
         '    float d1 = dot( t1, sH ), d2 = dot( t2, sH );',
         '    float s1 = smoothstep( -1.0, 0.0, d1 ) * pow( sqrt( max( 0.0, 1.0 - d1 * d1 ) ), ' + f(SPEC1_EXP) + ' );',
         '    float s2 = smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), ' + f(SPEC2_EXP) + ' );',
+        '    float dg = dot( sT, sH ), sg = pow( max( 0.0, 1.0 - dg * dg ), ' + f(GLINT_EXP / 2) + ' );',
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
-        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb );',
+        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * vec3( 1.0, 0.97, 0.92 ) );',
         '  }',
         '  outgoingLight += sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
