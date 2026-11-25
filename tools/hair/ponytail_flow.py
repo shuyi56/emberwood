@@ -84,10 +84,18 @@ PI0, RSTAR_MM = 0.85, 47.0      # Pi0 SOURCED [GWB12]. R*, the radius where the 
 WAVE_LEN = PH['wave_len']       # MEASURED
 WAVE_A = 0.5 * PH['wave_swing'] # MEASURED: half the crest-to-trough swing
 WAVE_ON = 0.25                  # DRAFT, HH: the wave grows in over this length below the tie ([GWB12]: reduced there)
+CURL_LOCKS = 9                  # DRAFT: the locks the tail is cut into (one in the middle, the rest in a ring)
+CURL_CORE = 0.42                # DRAFT: the middle lock's share of the bundle's radius
+CURL_GATHER = 0.5               # DRAFT: how far a strand closes on its lock's middle (render.py CLUMP: 0.55 at the tip)
+CURL_A_MM = 8.0                 # DRAFT: a lock's winding radius at mid tail (the whole tail's swing is 10.6, MEASURED)
+CURL_PHASE = 1.1                # DRAFT, rad: the spread of the locks' phases
+CURL_ON_MM = 120.0              # DRAFT: the locks form over this length below the handover (one wave)
 # ---- the basins that do not go to the tie
 BANG_TH = 0.75                  # |theta|: the fringe's section, corner to corner (groom.py's bang section)
 BANG_DEPTH_MM = 60.0            # the section's depth behind the hairline: the creator's (groom.py BANG_DEPTH note)
 BANG_EDGE_Z = PH['bang_edge_h'] * (1 + PH['head_top_hair'])   # MEASURED: the fringe's edge, HH above the chin
+BANG_FAN = 0.07                 # DRAFT, rad: each fringe hair's end is spread this far round the head by its root
+BANG_STAGGER_MM = 9.0           # DRAFT: the deepest-rooted fringe hairs end up to this much above the edge
 LOOSE = {                       # DRAFT sizes (no source gives a thickness); places from [LO][BIO] and the photo
     'temple lock': dict(th=(0.75, 0.95), depth_mm=22.0, z=(0.6, 1.0), len=0.62),
 }
@@ -99,12 +107,18 @@ LOOSE = {                       # DRAFT sizes (no source gives a thickness); pla
 SAG_G = 0.9                     # CALIBRATED to John's drawn lines: gravity's pull across the hair's line against the
                                 # pull toward the tie, where the skin is vertical (the dip it gives is in the gauges)
 SAG_FADE = (0.15, 0.55)         # rad from the tie (12 to 45 mm of skin): the pull fades, and the hair turns up into it
+EAR_OVER_MM = 7.0               # DRAFT: the lowest ear line clears the ear's top by this (scalp_field EAR_CLEAR 4 mm
+                                # plus the hair's own offset over the ear, EAR_DELTA 3 mm)
+EAR_LANES_MM = 12.0             # DRAFT: the ear lines' lanes over the ear's top are spread over this height
+EAR_EASE = 10                   # passes easing the corner where an ear line turns over the ear
 RESOLVE = {                     # the roots re-solved to the tie along John's lines (the first field's ear wisp and
                                 # nape wisps, same patches): drawn in their old colours so they can be followed
     'ear wisp': dict(th=(1.05, 1.5), depth_mm=16.0, z=(0.0, 0.66)),
     'nape wisps': dict(th=(2.3, 3.2), depth_mm=13.0, z=(0.0, 1.0)),
 }
 LOCK_GATHER = 0.3               # DRAFT: the share of its root's offset a lock hair keeps at its end (the lock gathers)
+LOCK_END_Y = 0.0                # HH: the lock is cut here, just inside the ear's front edge (ear_depth: its middle 0.04,
+                                # half 0.06), which keeps the hairline cell in front of the ear covered
 LOCK_LIFT_MM = 4.0              # DRAFT: the lock rides this far off the skin past its root (the fringe's lift is 6)
 LOOSE_FRACTION = (0.01, 0.05)   # John's bound on the loose locks' share of all hair
 CUTS_MM = (150, 120, 90, 60, 40, 25)     # the cuts the balance sheet is taken on (mm of skin from the tie)
@@ -269,19 +283,68 @@ def build(head):
     # Stage: the re-solved lines only. Their direction is toward the tie along the skin plus gravity's pull across
     # that line (SAG_G), so they sag below the shortest way, over the ear's top, and come up into the tie from under
     # it. Each step closes the same share of the angle left to the tie, so every line arrives.
-    ri = np.where(resolve > 0)[0]
-    if len(ri):
-        Uc = U0[ri].copy()
-        U[ri, 0] = Uc
-        for k in range(1, K):
+    def sag_steps(Uc, steps):
+        """Lines stepped from Uc to the tie: toward the tie plus gravity's pull across that line."""
+        out = [Uc]
+        for k in range(1, steps):
             om = np.arccos(np.clip(Uc @ UT, -1, 1))
             d = unit(UT[None] - (Uc @ UT)[:, None] * Uc)
             g = np.array([0, 0, -1.0])[None] - (-Uc[:, 2:3]) * Uc
             gp = g - (g * d).sum(1, keepdims=True) * d
             v = d + SAG_G * sm(SAG_FADE[0], SAG_FADE[1], om)[:, None] * gp
-            h = om / (K - k) * np.linalg.norm(v, axis=1)
+            h = om / (steps - k) * np.linalg.norm(v, axis=1)
             Uc = unit(Uc + unit(v) * h[:, None])
-            U[ri, k] = Uc
+            out.append(Uc)
+        out[-1] = np.repeat(UT[None], len(Uc), 0)
+        return np.stack(out, 1)
+
+    def even(Ul):
+        """Each line resampled to K directions, even by angle along it, its corners eased."""
+        out = np.zeros((len(Ul), K, 3))
+        for j, u in enumerate(Ul):
+            a_ = np.r_[0, np.cumsum(np.arccos(np.clip((u[1:] * u[:-1]).sum(1), -1, 1)))]
+            tt = np.linspace(0, a_[-1], K)
+            out[j] = np.c_[[np.interp(tt, a_, u[:, c]) for c in range(3)]].T
+        for _ in range(EAR_EASE):
+            out[:, 1:-1] = 0.25 * out[:, :-2] + 0.5 * out[:, 1:-1] + 0.25 * out[:, 2:]
+        return unit(out.reshape(-1, 3)).reshape(len(Ul), K, 3)
+
+    rn = np.where(resolve == 2)[0]                          # the nape: straight into the sag field
+    if len(rn):
+        U[rn] = sag_steps(U0[rn].copy(), K)
+    # The ear roots go over the ear's top first. (render4, self review: stepped straight for the tie they crossed
+    # the ear's lower half and left its upper half bare between them and the blue lines. John's lines for them were
+    # drawn over the photo's ear top, and the photo's ear sits 0.22 head lower on its head than the creator's does
+    # (ear top 0.377 against 0.60 through the overlay's fit). The creator's ear is this head's ear, so the lines keep
+    # John's route, over the ear's top and into the tie, on the creator's ear and not at the photo's height.)
+    # Each line runs to its own lane over the ear's top, the lanes in the order of the roots' heights, then on to
+    # the tie.
+    re_ = np.where(resolve == 1)[0]
+    if len(re_):
+        zr = P[re_, 2]
+        lane = np.zeros(len(re_))
+        for sgn in (-1, 1):
+            k_ = np.where(np.sign(P[re_, 0]) == sgn)[0]
+            if len(k_):
+                lane[k_] = np.argsort(np.argsort(zr[k_])) / max(len(k_) - 1, 1)
+        th_e = abs(float(SF.theta(np.array([[0.33, SF.EAR_CANAL[1], SF.EAR_TOP]]))[0]))
+        W = np.array([SF.on_skin_at(surf, np.sign(P[i, 0]) * th_e,
+                                    SF.EAR_TOP + (EAR_OVER_MM + EAR_LANES_MM * l_) * MM) for i, l_ in zip(re_, lane)])
+        UW = unit(W - SF.CENTRE)
+        t1 = np.linspace(0, 1, 40)[None]
+        om1 = np.arccos(np.clip((U0[re_] * UW).sum(1), -1, 1))[:, None]
+        so1 = np.maximum(np.sin(om1), 1e-9)
+        leg1 = (np.sin((1 - t1) * om1) / so1)[..., None] * U0[re_][:, None] + (np.sin(t1 * om1) / so1)[..., None] * UW[:, None]
+        # past the ear they run the shortest way to the tie. The tie stands lower than the ear's top on this head
+        # (0.56 against 0.60), so a sag there would drop them back across the ear.
+        t2 = np.linspace(0, 1, 90)[None]
+        om2 = np.arccos(np.clip(UW @ UT, -1, 1))[:, None]
+        so2 = np.maximum(np.sin(om2), 1e-9)
+        leg2 = (np.sin((1 - t2) * om2) / so2)[..., None] * UW[:, None] + (np.sin(t2 * om2) / so2)[..., None] * UT[None, None]
+        U[re_] = even(np.concatenate([leg1, leg2[:, 1:]], 1))
+    ri = np.where(resolve > 0)[0]
+    if len(ri):
+        U[ri, 0] = U0[ri]
         U[ri, -1] = UT
         S[ri] = surf.point(U[ri].reshape(-1, 3)).reshape(len(ri), K, 3)
         NL[ri] = surf.normals(U[ri].reshape(-1, 3)).reshape(len(ri), K, 3)
@@ -462,6 +525,38 @@ def bundle_places(B):
     return out_psi, out_r
 
 
+def tail_lock(psi_i, rr_i):
+    """(lock id, its middle's radius share, its middle's angle) for a strand's place in the bundle's section."""
+    ns = CURL_LOCKS - 1
+    if rr_i < CURL_CORE:
+        return 0, 0.0, 0.0
+    sec = int(((psi_i + math.pi) % (2 * math.pi)) / (2 * math.pi) * ns) % ns
+    return 1 + sec, 0.5 * (1 + CURL_CORE), -math.pi + (sec + 0.5) * 2 * math.pi / ns
+
+
+def tail_place(FF, psi_i, rr_i, j, middle=False):
+    """A strand's point at the bundle's node j (middle=True: its lock's middle there).
+    The tail's locks. (render4, self review: with every strand shifted alike the tail was one smooth ribbon and came
+    to a point.) The section is cut into CURL_LOCKS locks, a middle one and a ring of sectors, so neighbours stay
+    neighbours. Below the handover each lock's strands gather toward its own middle (CURL_GATHER), and the lock winds
+    round its place in a loose helix of the wave's own length (the photo's waves are one curl seen from the side),
+    each lock at its own phase, wider toward the tip. Out of phase, the locks part at the crests and close at the
+    troughs, which is the tail's volume. A lock moves as one piece, so its strands keep their order round its middle,
+    and the locks keep theirs round the bundle while the winding stays inside the gap between them."""
+    lk, pc_r, pc_a = tail_lock(psi_i, rr_i)
+    ph = CURL_PHASE * math.sin(12.9898 * (lk + 1)) + (0.0 if lk == 0 else pc_a)
+    cx_, cy_ = pc_r * math.cos(pc_a), pc_r * math.sin(pc_a)
+    px_, py_ = (cx_, cy_) if middle else (rr_i * math.cos(psi_i), rr_i * math.sin(psi_i))
+    sj = FF['s'][j]
+    on = float(sm(HAND_AXIS_MM, HAND_AXIS_MM + CURL_ON_MM, sj))
+    g = CURL_GATHER * on
+    qx, qy = px_ + (cx_ - px_) * g, py_ + (cy_ - py_) * g
+    a_ = CURL_A_MM * on * (0.6 + 0.8 * sj / FF['L']) * (0.5 if lk == 0 else 1.0)
+    w_ = 2 * math.pi * sj / (WAVE_LEN / MM) + ph
+    ox, oy = a_ * math.cos(w_), a_ * math.sin(w_)
+    return FF['cl'][j] + ((FF['R'][j] * qx + ox) * FF['e1'][j] + (FF['R'][j] * qy + oy) * FF['e2']) * MM
+
+
 def strand(B, FF, psi, rr, i, n_scalp=60, n_hand=24, step_mm=6.0):
     """One tie strand as a polyline: scalp, handover, bundle. Returns (points, part ids 0/1/2)."""
     X, rho = B['X'][i], B['rho'][i]
@@ -473,7 +568,7 @@ def strand(B, FF, psi, rr, i, n_scalp=60, n_hand=24, step_mm=6.0):
     s_h = HAND_AXIS_MM
     js = np.searchsorted(FF['s'], s_h)
     def place(j):
-        return FF['cl'][j] + (FF['R'][j] * MM) * rr[i] * (math.cos(psi[i]) * FF['e1'][j] + math.sin(psi[i]) * FF['e2'])
+        return tail_place(FF, psi[i], rr[i], j)
     P0, P1 = A[-1], place(js)
     d0 = unit(A[-1] - A[-2]); d1 = unit(place(js + 1) - place(js))
     span = np.linalg.norm(P1 - P0)
@@ -509,8 +604,16 @@ def bang_line(B, i, k=40):
     # the middle of the fringe falls to the brow; its outer part is swept to the side, to the front of the ear's top
     # (MEASURED: the photo's bang_at_ear, 0.145 head in front of the ear canal at the ear top's height)
     wout = float(sm(0.3, BANG_TH, a0))
-    th1 = sx * (1.25 * a0 + 0.05 + 0.3 * wout)
-    z1 = BANG_EDGE_Z + (SF.EAR_TOP + 0.02 - BANG_EDGE_Z) * wout + 0.02 * math.cos(140 * P[0])
+    # (render4, self review: every end stood 0.05 rad to its own side of the middle, which left a bare stripe down
+    # the forehead, and every root at one angle shared one line, so the fringe was drawn as stacked stripes with skin
+    # between. The side offset now grows in from the middle, and each hair's end is spread by its own root: BANG_FAN
+    # round the head, and up to BANG_STAGGER_MM shorter the deeper it is rooted, as a cut fringe's layers lie.)
+    u1, u2 = (math.sin(P[0] * 9973.0 + P[1] * 7919.0 + P[2] * 6151.0) * 43758.5453) % 1.0, \
+        (math.sin(P[0] * 5081.0 + P[1] * 9151.0 + P[2] * 3571.0) * 24634.6345) % 1.0
+    th1 = sx * (1.25 * a0 + 0.05 * float(sm(0.0, 0.3, a0)) + 0.3 * wout) + BANG_FAN * (u1 - 0.5) * (1 - 0.6 * wout)
+    deep = float(np.clip(B['inside_mm'][i] / BANG_DEPTH_MM, 0, 1))
+    z1 = BANG_EDGE_Z + (SF.EAR_TOP + 0.02 - BANG_EDGE_Z) * wout + 0.02 * math.cos(140 * P[0]) \
+        + BANG_STAGGER_MM * MM * deep * u2
     end = SF.on_skin_at(surf, th1, z1)
     U = slerp(unit(P - SF.CENTRE)[None], unit(end - SF.CENTRE), np.linspace(0, 1, k))[0]
     S = surf.point(U)
@@ -555,6 +658,14 @@ def loose_line(B, i, length=None, k=50):
     cj = np.c_[np.interp(t, np.linspace(0, 1, len(c)), c[:, 0]), np.interp(t, np.linspace(0, 1, len(c)), c[:, 1])]
     w = 1 - (1 - LOCK_GATHER) * sm(0.0, 0.8, t)
     yz = cj + (P[1:] - c[0])[None] * w[:, None]
+    # (render4, self review: John's lines end at the photo's ear top; on the creator's head, whose ear sits higher,
+    # the same lines ran on across the ear's lower half. The lock keeps their route and is cut where it reaches the
+    # ear's front edge, LOCK_END_Y, so the ear stays clear.)
+    cut = np.where(yz[:, 0] > LOCK_END_Y)[0]
+    if len(cut) and cut[0] > 3:
+        sa = np.r_[0, np.cumsum(np.linalg.norm(np.diff(yz[:cut[0] + 1], axis=0), axis=1))]
+        tt = np.linspace(0, sa[-1], k + 1)
+        yz = np.c_[np.interp(tt, sa, yz[:cut[0] + 1, 0]), np.interp(tt, sa, yz[:cut[0] + 1, 1])]
     # the skin's side at each (y, z): the outermost x still inside the head
     xs = np.linspace(0.0, 0.62, 125)
     Q = np.zeros((len(yz), len(xs), 3)); Q[..., 0] = sx * xs[None]; Q[..., 1] = yz[:, None, 0]; Q[..., 2] = yz[:, None, 1]
@@ -703,17 +814,46 @@ def gauges(B, FF, psi, rr, lines):
                 d = pts[j] - B['T']
                 ang[i] = math.atan2(d @ B['e_sd'], d @ B['e_up'])
         stations.append(ang)
-    for smm in (30.0, 150.0, 300.0):
+    j30 = int(np.searchsorted(FF['s'], 30.0))
+    ang = {}
+    for i in ids:                                    # at the handover's end the bundle is still one piece
+        pts, part, rho_line = lines[i]
+        tl = pts[part == 2]
+        if len(tl) and HAIR_LEN / MM - B['rho0'][i] > 40:
+            q = tl[int(np.argmin(np.linalg.norm(tl - FF['cl'][j30], axis=1)))] - FF['cl'][j30]
+            if np.linalg.norm(q) > 1.5 * MM:
+                ang[i] = math.atan2(q @ FF['e2'], q @ FF['e1'][j30])
+    stations.append(ang)
+    # Down the tail the bundle is in locks: a strand's rank is its order round its own lock's middle, and the locks'
+    # rank is their order round the bundle. Both are read at 150 and 300 mm and compared.
+    lock_st, mid_st = [], []
+    for smm in (150.0, 300.0):
         j = int(np.searchsorted(FF['s'], smm))
-        ang = {}
+        ang, mids = {}, {}
         for i in ids:
             pts, part, rho_line = lines[i]
             tl = pts[part == 2]
             if len(tl) and HAIR_LEN / MM - B['rho0'][i] > smm + 10:
-                q = tl[int(np.argmin(np.linalg.norm(tl - FF['cl'][j], axis=1)))] - FF['cl'][j]
-                if np.linalg.norm(q) > 1.5 * MM:
-                    ang[i] = math.atan2(q @ FF['e2'], q @ FF['e1'][j])
-        stations.append(ang)
+                lk = tail_lock(psi[i], rr[i])[0]
+                m_ = tail_place(FF, psi[i], rr[i], j, middle=True)
+                q = tail_place(FF, psi[i], rr[i], j) - m_
+                if np.linalg.norm(q) > 0.5 * MM:
+                    ang[i] = (lk, math.atan2(q @ FF['e2'], q @ FF['e1'][j]))
+                if lk:
+                    qm = m_ - FF['cl'][j]
+                    mids[lk] = math.atan2(qm @ FF['e2'], qm @ FF['e1'][j])
+        lock_st.append(ang); mid_st.append(mids)
+    for lk in range(CURL_LOCKS):
+        A_ = {i: v[1] for i, v in lock_st[0].items() if v[0] == lk}
+        B_ = {i: v[1] for i, v in lock_st[1].items() if v[0] == lk}
+        common = [i for i in A_ if i in B_]
+        if len(common) >= 3:
+            oa = sorted(common, key=lambda i: A_[i])
+            seq = np.unwrap(np.array([B_[i] for i in oa]))
+            swaps += int((np.diff(seq) < -0.35).sum()); pairs += len(common) - 1
+    for mids in mid_st:                              # the locks' own order round the bundle
+        seq = np.unwrap(np.array([mids[k_] for k_ in sorted(mids)]))
+        swaps += int((np.diff(seq) < -0.35).sum()); pairs += max(len(mids) - 1, 0)
     for A_, B_ in zip(stations[:-1], stations[1:]):
         common = [i for i in A_ if i in B_]
         if len(common) < 3:
@@ -885,7 +1025,7 @@ def main():
     extra = []
     bi = np.where(B['basin'] == 1)[0]
     # stage: the fringe's lines (depends on the head, the fringe's constants and bang_line itself)
-    bkey = (file_key(HEAD), BANG_TH, BANG_DEPTH_MM, BANG_EDGE_Z, len(bi), inspect.getsource(bang_line))
+    bkey = (file_key(HEAD), BANG_TH, BANG_DEPTH_MM, BANG_EDGE_Z, BANG_FAN, BANG_STAGGER_MM, len(bi), inspect.getsource(bang_line))
     bang_all = cached('bangs', bkey, lambda: [bang_line(B, i, k=32) for i in bi])
     extra.append(('bangs', [bang_all[j] for j in rng.choice(len(bi), size=min(260, len(bi)), replace=False)]))
     for k, (nm, c) in enumerate(LOOSE.items()):

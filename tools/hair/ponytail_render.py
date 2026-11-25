@@ -22,6 +22,8 @@ import render as RD  # noqa: E402
 NODES = 150                 # nodes per drawn fibre, even by length (3 mm on the longest)
 PSI_JIT = 0.10              # DRAFT, rad: a copy's shift round the bundle's section
 RR_JIT = 0.06               # DRAFT: and along its radius (share of the bundle's radius)
+FRONT_COPIES = 4            # the fringe and the lock are drawn finer, as render.py's FRONT_BOOST draws the front
+FRONT_SPREAD = 0.012        # HH: a front copy's offset from its root's line (about 1.3 mm each way)
 CUT_JIT = 0.10              # render.py's cut jitter: tips end within the last 10% of the length
 
 
@@ -49,16 +51,16 @@ def fibres(head, per_root=3, seed=7):
         psi[i], rr[i] = p0, r0
     for i in np.where(B['basin'] == 1)[0]:
         pts = PF.bang_line(B, i, k=32)
-        for c in range(per_root):
-            off = (rng.random(3) - 0.5) * 0.004 * (c > 0)
-            paths.append(resample(pts + off, keep=1 - 0.04 * rng.random())); hairs.append(B['hairs'][i] / per_root)
+        for c in range(FRONT_COPIES):
+            off = (rng.random(3) - 0.5) * FRONT_SPREAD * (c > 0)
+            paths.append(resample(pts + off, keep=1 - 0.04 * rng.random())); hairs.append(B['hairs'][i] / FRONT_COPIES)
             basin.append(1)
     for k, (nm, cfg) in enumerate(PF.LOOSE.items()):
         for i in np.where(B['basin'] == 2 + k)[0]:
             pts = PF.loose_line(B, i, cfg['len'])
-            for c in range(per_root):
-                off = (rng.random(3) - 0.5) * 0.004 * (c > 0)
-                paths.append(resample(pts + off, keep=1 - 0.04 * rng.random())); hairs.append(B['hairs'][i] / per_root)
+            for c in range(FRONT_COPIES):
+                off = (rng.random(3) - 0.5) * FRONT_SPREAD * (c > 0)
+                paths.append(resample(pts + off, keep=1 - 0.04 * rng.random())); hairs.append(B['hairs'][i] / FRONT_COPIES)
                 basin.append(2 + k)
     return np.array(paths), np.array(hairs), np.array(basin), B
 
