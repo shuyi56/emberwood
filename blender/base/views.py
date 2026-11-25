@@ -11,7 +11,8 @@
 --head     the head and shoulders from the same five angles (DIR/head.png)
 --clay     with --turn or --head: the same views again with every surface one matte grey, the hair included and
            the painted layers (makeup, brows, painted strands, fuzz) hidden, so only the forms and how they meet
-           show (DIR/turn-clay.png, DIR/head-clay.png)
+           show (DIR/turn-clay.png, DIR/head-clay.png). --clay-only: those alone, the look not rendered (a cheap
+           draft of the forms).
 --angles   NAMES: render --turn, --head and --pieces from only these angles (front, 3/4, profile, back3/4, back;
            comma separated) instead of all five. One angle first, the full turn once that view is confirmed.
 --mannequin  build the figure's body and a plain head only: no eyes, lids, ears, face paint, mouth or hair (most of
@@ -296,7 +297,7 @@ def walk(n, out, stem='walk', seconds=0.69, wide=1.0):
         if o.animation_data:
             o.animation_data_clear()
     floor = bpy.data.meshes.new('Walk floor')
-    fz = female.ANKLE_Z - 3.4      # (the sole is 3.4 under the ankle: the floor, wherever the figure's legs put it)
+    fz = female.ANKLE_Z - getattr(female, 'SOLE_UNDER_ANKLE', 3.4)   # (the sole is 3.4 under the ankle, or the measured foot's ankle height: the floor, wherever the figure's legs put it)
     floor.from_pydata([(-60, -60, fz), (60, -60, fz), (60, 60, fz), (-60, 60, fz)], [], [(0, 1, 2, 3)])
     fo = bpy.data.objects.new('Walk floor', floor)
     sc.collection.objects.link(fo)
@@ -379,7 +380,8 @@ def main():
             return
         saved = {}
         with tempfile.TemporaryDirectory() as tmp:
-            for look in ('', '-clay') if '--clay' in argv else ('',):
+            looks = ('-clay',) if '--clay-only' in argv else ('', '-clay') if '--clay' in argv else ('',)
+            for look in looks:
                 clay(look == '-clay', saved)
                 if '--turn' in argv:
                     centre, h = fit(shown, 1 / 1.75) if framed else ((0, 0, 32.5), 68.0)

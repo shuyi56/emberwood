@@ -6,6 +6,13 @@ committing. Render all 8 facings and a few walk frames (columns 2, 4 and 6), and
 area you changed. One good front view proves nothing: most problems show up in the 3/4 and
 profile rows.
 
+## Start every project and thread with the solvers and gauges index
+
+Before any build, read `tools/INDEX.md`. Find your kind of project in its decision guide, take the solvers and gauges
+it names, and read their entries (`tools/solvers/README.md`, `tools/gauges/README.md`) before you start. New solvers
+and gauges go in `tools/solvers/<domain>/` or `tools/gauges/<domain>/`, documented in the same shape, with a row in
+the index. Edit the real files under `tools/`; the files left at old paths are shims.
+
 ## Shoulders: how to blend them into the arms
 
 The neck-to-arm line has to read as one continuous curve. The usual ways it breaks are a square
@@ -79,3 +86,14 @@ or a measurement alone.
    threshold.
 6. Then render (`render.py`, `--size 750` keeps it inside memory), bake the cards (`cards.py`), and log each
    rejected look with `rq_reject.py`.
+
+## Boots: lessons from the zip ankle boot
+
+See `docs/clothing-solvers/zip-ankle-boot-retrospective.md` for the numbers.
+
+- Measure with `tools/gauges/footwear/leather_gauge.py` (the old `blender/zipboot/gauge.py` still runs it) before and after every change to a boot's shape, weights or pose. Pose
+  asymmetry over 0.02 units, or stretch outside 0.9 to 1.15, means the rig is distorting the leather.
+- Make a stance's turn-out in the hip (`female.TURNOUT_AT_HIP`), never at the ankle: at the ankle it twists any shaft.
+- On a heel the toes pitch: move the leather's bend back to the ball (`zipboot.bend_at_ball`).
+- Render with `--rest` before blaming the shape: a line that is only there posed is the rig.
+- Fit clearance by region (toes, heel, shaft), and when one region tightens, check the next one.
