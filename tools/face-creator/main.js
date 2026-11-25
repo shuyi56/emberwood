@@ -795,7 +795,7 @@ var NOSE_LIFE = {
   nostril: [1.75, 5.0, 3.4]            // the nostril's opening and its depth up into the nose, half-axes, mm
 };
 Object.assign(NOSE_LIFE, {"ridge": [3.2, 3.0, 4.4], "side": [2.0, 2.1, 1.6], "ala": [3.6, 9.5, 4.6]});
-Object.assign(NOSE_LIFE, {"scale": 0.9, "nostril": [1.75, 5.0, 3.4]});
+Object.assign(NOSE_LIFE, {"scale": 0.8, "nostril": [1.75, 5.0, 3.4]});
 /* face flow (apply-face-flow.py) */ Object.assign(NOSE_LIFE, {"ridge": [4.2, 3.4, NOSE_LIFE.ridge[2]], "side": [1.2, 1.28, NOSE_LIFE.side[2]]});      // (the bridge an hourglass on a pyramid: face flow, apply-face-flow.py)
 function warpInv(w) { var lo = -0.2, hi = 1.2; for (var k = 0; k < 50; k++) { var m = (lo + hi) / 2; if (FACE_WARP(m) < w) lo = m; else hi = m; } return (lo + hi) / 2; }
 function nSmin(a, b, k) { var h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }

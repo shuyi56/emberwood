@@ -38,7 +38,7 @@ import argparse
 import json
 import re
 
-DEFAULTS = {'AL_ON': 1, 'AL_RX': 4.5, 'AL_RF': 8.0, 'AL_RU': 5.0, 'AL_F': 0.35, 'AL_DROP': -2.0, 'AL_PITCH': 20.0, 'AL_YAW': 0.4, 'GULL_P': 0.6, 'GULL_A': 3.0, 'GULL_D': 0.0, 'WG_DN': 0.0, 'WG_FR': 0.5, 'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 3.0, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
+DEFAULTS = {'NOSE_SC': 0.8, 'AL_ON': 1, 'AL_RX': 4.5, 'AL_RF': 8.0, 'AL_RU': 5.0, 'AL_F': 0.35, 'AL_DROP': -2.0, 'AL_PITCH': 20.0, 'AL_YAW': 0.4, 'GULL_P': 0.6, 'GULL_A': 3.0, 'GULL_D': 0.0, 'WG_DN': 0.0, 'WG_FR': 0.5, 'AG_BACK': 3.0, 'LB_WR': 0.65, 'LB_WM': 1.0, 'LB_SL': 0.75, 'RIDGE_K': 0.8, 'RIM_GAP': 2.5, 'MED_X': 8.0, 'MED_P': 2.0, 'CH_RF': 4.0, 'CH_K': 0.7, 'CH_WLO': 1.0, 'CH_FA': 0.0, 'CH_FV': 2.0, 'CH_FJ': 6.0, 'ROOF_S': 0.0, 'ROOF_W': 6.0, 'ROOF_K': 3.0, 'PN_D': -1.5, 'PN_X0': 11.0, 'PN_X1': 24.0, 'PN_ZT': 0.47, 'W4X': {'blg': 5.0, 'blc': 0.45, 'blw': 0.6, 'ctp': 0.3, 'chf': 0.9, 'chb': 1.4}, 'GR_D': 1.0, 'GR_W': 1.6, 'GR_OFF': 1.6, 'BASE_K': 3.0, 'LEAN': 0.4, 'WB_K': 0.35, 'WB_R': 0.5, 'CH_W': 1.0, 'MALE_W': 0.15, 'FLARE': 0.0, 'LO_B': 15.0, 'CARVE': 3.6, 'CARVE_UP': 45.0,
             'TOP': [25.8, 26.9, 29.6, 30.9, 29.4, 26.4, 21.8], 'THICK': [8.4, 9.6, 0.5, 1.4],
             'VALLEY': 2.0, 'VALLEY_W': 3.5, 'VALLEY_TOP': 26.0, 'KF_MID': 4.0, 'KF_TOPF': 0.4, 'TIP_KBALL': 0.5, 'TIP_KJOIN': 3.5, 'LO_W': 0.7, 'HEAD_ROUND': 0.18, 'MALE_THICK': 0.15,
             'ROOTS': 2000}
@@ -267,6 +267,11 @@ def patch(src, P):
             'aX = ax - (alarHalf - aRx - %g * Math.max(-aRf, aL)), aE = Math.sqrt(aX * aX / (aRx * aRx) + aL * aL / (aRf * aRf) + aH * aH / (aRu * aRu)); '
             'dW = (aE - 1) * Math.min(aRx, aRf, aRu) * 0.9; }      // (the wing as a solid lobule: apply-brow-arc.py)')
             % (MARK[:-3], P['AL_RX'], P['AL_RF'], P['AL_RU'], P['AL_F'], P['AL_DROP'], P['AL_PITCH'], P['AL_PITCH'], P['AL_YAW']), 1)
+    # 16. the whole nose's size (John 2026-11-26: "New nose is too big adjust overall size"). The shade-line gauge puts our
+    # wings' outer edge at 0.19-0.23 pupil distances from the midline against the photo's 0.182, and the bridge's side at
+    # 0.14-0.16 against 0.115. noseSolid scales the whole nose across and out from the face by NOSE_LIFE.scale (set where the
+    # nose is first defined, 0.9) with its height (nasion to subnasale) unchanged, so every ratio inside it holds; NOSE_SC sets that scale.
+    src = re.sub(r'(Object\.assign\(NOSE_LIFE, \{"scale": )[0-9.]+', lambda m: m.group(1) + '%g' % P['NOSE_SC'], src, count=1)
     # 4. the edges: broken instead of a rod's (John: "Improve the edges of the brows too rod like")
     for a, b in EDGES:
         if a in src:

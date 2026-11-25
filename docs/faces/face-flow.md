@@ -670,3 +670,19 @@ columella (jowls); 1 mm above still read low. The crescent's code stays in the f
 Gauges: bony base 0.56-0.64; dorsal lines / TDP Rogue 1.09, Ranger 0.75, Sorceress 1.09, Warden 1.16, Knight 0.78;
 waist / TDP 0.58-0.83. Checked in clay on the Ranger and the Rogue, front and 3/4. Open: profile and the other three faces
 not yet looked at; the nostril's opening is not re-fitted to the lobule.
+
+## 21. The nose's overall size
+
+John (2026-11-26): "New nose is too big, adjust overall size."
+
+Measured with the shade-line gauge against the photo: the wings' outer edge at 0.19-0.23 pupil distances from the midline
+(photo 0.182), the bridge's side at 0.14-0.16 (photo 0.115). `noseSolid` already scales the whole nose across and out from
+the face by `NOSE_LIFE.scale`, with its height (nasion to subnasale) unchanged so every ratio inside it holds, and the
+file set that to 0.9 where the nose is first defined (`Object.assign(NOSE_LIFE, {"scale": 0.9, ...})`). A first try
+set the fallback at `var sc = NL.scale || 1`, which does nothing while the value is set (three scales gave pixel-identical
+renders); the patch (`apply-brow-arc.py` step 16, `NOSE_SC`) now changes the value itself.
+
+Scale 0.8 (was 0.9): wings 0.172-0.207 (photo 0.182); bridge side 0.085-0.143 (three faces now under the photo's 0.115, so
+those bridges read slightly slim); bony base 0.58-0.71 (was 0.56-0.64; Rogue and Sorceress inside the 0.70-0.80 norm
+or at it); dorsal lines / TDP Rogue 1.09, Ranger 0.75, Sorceress 1.09, Warden 1.08, Knight 0.79. 0.82 and 0.76 were
+tried; 0.70 loses the wing lobes' shape and the tip's. Checked in clay on all five faces, front and 3/4.
