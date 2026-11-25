@@ -49,9 +49,13 @@ HAIR_D_MM = SF.SHAFT_UM / 1000  # SOURCED [LS20] via scalp_field: 80 micron
 HAIR_A = math.pi * HAIR_D_MM ** 2 / 4          # mm^2, one hair's section
 
 # ---- the photo, in heads (reference.measure.json: unit head_top -> chin, 620 px; plumb the ear canal)
-PH = dict(tie_above_chin=0.545, tie_behind_ear=0.471, tie_w=0.210, apex_rise=0.116, apex_behind_tie=0.158,
-          pony_len_y=1.694, tail_behind_tie=0.31, pony_max_w=0.524, fall_deg=2.2, wave_len=0.548, wave_swing=0.097, bang_edge_h=0.594,
-          ear_wisp=0.453, head_top_hair=0.03)
+# (Re-measured 2026-11-25 on the corrected sheet, unit 616 px. The first sheet's values: tie_behind_ear 0.471,
+# tie_w 0.210, apex_rise 0.116, apex_behind_tie 0.158, pony_len_y 1.694, tail_behind_tie 0.31, pony_max_w 0.524,
+# fall_deg 2.2, bang_edge_h 0.594. tie_above_chin reads 0.542 now; 0.545 is kept, inside the reading's error, so
+# the tie and the lines solved to it stay where they are.)
+PH = dict(tie_above_chin=0.545, tie_behind_ear=0.510, tie_w=0.252, apex_rise=0.146, apex_behind_tie=0.105,
+          pony_len_y=1.713, tail_behind_tie=0.20, pony_max_w=0.633, fall_deg=1.1, wave_len=0.548, wave_swing=0.097, bang_edge_h=0.575,
+          ear_wisp=0.374, head_top_hair=0.03)
 # ---- initial and boundary conditions
 TIE_Z = PH['tie_above_chin'] * (1 + PH['head_top_hair'])    # MEASURED: the tie's height above the chin, HH (the photo's
                                                             # unit includes about 3% of hair over the crown)
@@ -107,16 +111,20 @@ LOOSE = {                       # DRAFT sizes (no source gives a thickness); pla
 SAG_G = 0.9                     # CALIBRATED to John's drawn lines: gravity's pull across the hair's line against the
                                 # pull toward the tie, where the skin is vertical (the dip it gives is in the gauges)
 SAG_FADE = (0.15, 0.55)         # rad from the tie (12 to 45 mm of skin): the pull fades, and the hair turns up into it
-EAR_OVER_MM = 7.0               # DRAFT: the lowest ear line clears the ear's top by this (scalp_field EAR_CLEAR 4 mm
-                                # plus the hair's own offset over the ear, EAR_DELTA 3 mm)
-EAR_LANES_MM = 12.0             # DRAFT: the ear lines' lanes over the ear's top are spread over this height
+EAR_COVER = 0.10                # MEASURED on the corrected sheet: the side hair lies over the ear's upper part. Its edge
+                                # crosses the ear 0.114 head below the ear's own top (visible top at 425 px, the
+                                # ear's top under the hair at about 355, an ESTIMATE from the lobe and the canal).
+                                # The lowest ear line runs this far below the ear's top, on the ear at EAR_DELTA.
+                                # (Before: EAR_OVER_MM 7, every line clear above the ear, from the first sheet's ear.)
+EAR_LANES_MM = 5.0              # DRAFT: the highest ear line runs this far above the ear's top
 EAR_EASE = 10                   # passes easing the corner where an ear line turns over the ear
 RESOLVE = {                     # the roots re-solved to the tie along John's lines (the first field's ear wisp and
                                 # nape wisps, same patches): drawn in their old colours so they can be followed
     'ear wisp': dict(th=(1.05, 1.5), depth_mm=16.0, z=(0.0, 0.66)),
     'nape wisps': dict(th=(2.3, 3.2), depth_mm=13.0, z=(0.0, 1.0)),
 }
-LOCK_GATHER = 0.3               # DRAFT: the share of its root's offset a lock hair keeps at its end (the lock gathers)
+LOCK_GATHER = 0.45              # DRAFT: the share of its root's offset a lock hair keeps at its end. 0.3 on the first
+                                # sheet's fit; on the corrected one 0.3 leaves the sideburn hairline bare (4 cells)
 LOCK_END_Y = 0.0                # HH: the lock is cut here, just inside the ear's front edge (ear_depth: its middle 0.04,
                                 # half 0.06), which keeps the hairline cell in front of the ear covered
 LOCK_LIFT_MM = 4.0              # DRAFT: the lock rides this far off the skin past its root (the fringe's lift is 6)
@@ -329,7 +337,7 @@ def build(head):
                 lane[k_] = np.argsort(np.argsort(zr[k_])) / max(len(k_) - 1, 1)
         th_e = abs(float(SF.theta(np.array([[0.33, SF.EAR_CANAL[1], SF.EAR_TOP]]))[0]))
         W = np.array([SF.on_skin_at(surf, np.sign(P[i, 0]) * th_e,
-                                    SF.EAR_TOP + (EAR_OVER_MM + EAR_LANES_MM * l_) * MM) for i, l_ in zip(re_, lane)])
+                                    SF.EAR_TOP - EAR_COVER + (EAR_COVER + EAR_LANES_MM * MM) * l_) for i, l_ in zip(re_, lane)])
         UW = unit(W - SF.CENTRE)
         t1 = np.linspace(0, 1, 40)[None]
         om1 = np.arccos(np.clip((U0[re_] * UW).sum(1), -1, 1))[:, None]
@@ -619,6 +627,24 @@ def bang_line(B, i, k=40):
     S = surf.point(U)
     lift = (1.0 + 5.0 * np.sin(np.linspace(0, np.pi, k)) ** 2) * MM          # the dried root's lift (groom.py: 6 mm)
     return S + surf.normals(U) * lift[:, None]
+
+
+def photo_fit(head, L_, lm):
+    """(scale, tx, ty): the model's side plane onto the photo, px = sc * y + tx, -sc * z + ty. Scale and shift, no
+    turn (the photo's plumb is trusted).
+    (2026-11-25: the first sheet had the nose tip 98 px, the chin 57 px, the ear 60 to 90 px and the tie 83 px too
+    far forward, found by the bangs work and confirmed on gridded crops. The sheet is re-measured; the old one is
+    kept as reference.measure.v1.json. The fit no longer uses the skull's back, which the hair hides: it is the chin,
+    the nose tip, and the head's top for the height alone.)"""
+    Pm = SF.load_head(head)
+    chin = Pm[(np.abs(Pm[:, 0]) < 0.03) & (Pm[:, 2] < 0.05) & (Pm[:, 2] > -0.02)]
+    chin = chin[np.argmin(chin[:, 1])]
+    model = {'chin': np.array([0, chin[1] + 0.06, 0.0]), 'nose_tip': L_['pronasale']}
+    A_, b_ = [], []
+    for k, p in model.items():
+        A_ += [[p[1], 1, 0], [-p[2], 0, 1]]; b_ += [lm[k][0], lm[k][1]]
+    A_ += [[-(1 + PH['head_top_hair']), 0, 1]]; b_ += [lm['head_top'][1]]
+    return np.linalg.lstsq(np.array(A_), np.array(b_), rcond=None)[0]
 
 
 _LOCK = {}
@@ -1121,17 +1147,7 @@ def main():
         img = Image.open(os.path.join(os.path.dirname(a[a.index('--photo') + 1]), sheet['image'])).convert('RGB')
         lm = sheet['landmarks']
         L_ = B['F']['landmarks']
-        # fit: scale and shift (no turn: the photo's plumb is trusted) on chin, nose tip, skull top, skull back, tie
-        Pm = SF.load_head(HEAD)
-        chin = Pm[(np.abs(Pm[:, 0]) < 0.03) & (Pm[:, 2] < 0.05) & (Pm[:, 2] > -0.02)]
-        chin = chin[np.argmin(chin[:, 1])]
-        back = Pm[(np.abs(Pm[:, 0]) < 0.03) & (np.abs(Pm[:, 2] - 0.62) < 0.02)]
-        back = back[np.argmax(back[:, 1])]
-        model = {'chin': np.array([0, chin[1] + 0.06, 0.0]), 'nose_tip': L_['pronasale'], 'head_back': back}
-        A_, b_ = [], []
-        for k, p in model.items():
-            A_ += [[p[1], 1, 0], [-p[2], 0, 1]]; b_ += [lm[k][0], lm[k][1]]
-        sc, tx, ty = np.linalg.lstsq(np.array(A_), np.array(b_), rcond=None)[0]
+        sc, tx, ty = photo_fit(HEAD, L_, lm)
         to_px = lambda P_: np.c_[sc * P_[:, 1] + tx, -sc * P_[:, 2] + ty]
         fig, ax = plt.subplots(figsize=(11, 14.6), facecolor='white')
         ax.imshow(img)
@@ -1174,7 +1190,12 @@ def main():
             bang_edge_h=(lm['chin'][1] - pv(np.array([0, -0.4, BANG_EDGE_Z]))[1]) / hp,
             ear_top_to_tie_bottom_level=(pv(np.array([0.33, 0.04, SF.EAR_TOP]))[1]
                                          - pv(B['C'] - FF['e1'][0] * B['r_tie'])[1]) / hp)
-        ref = dict(PH); ref['ear_top_to_tie_bottom_level'] = (lm['ear_top'][1] - lm['tie_bottom'][1]) / hp
+        # (the photo's ear top is under the hair: ear_top is where the hair's edge crosses the ear, ear_top_hidden the
+        # ear's own top, an ESTIMATE from the lobe, the canal and an ear's usual length)
+        et = lm.get('ear_top_hidden', lm['ear_top'])
+        ref = dict(PH); ref['ear_top_to_tie_bottom_level'] = (et[1] - lm['tie_bottom'][1]) / hp
+        mod['ear_top_above_chin'] = (lm['chin'][1] - pv(np.array([0.33, 0.04, SF.EAR_TOP]))[1]) / hp
+        ref['ear_top_above_chin'] = (lm['chin'][1] - et[1]) / hp
         gaps = []
         for k, v in mod.items():
             gp = v - ref[k]
