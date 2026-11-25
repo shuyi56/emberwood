@@ -28,7 +28,15 @@ TAIL_ROD_FROM_MM = 30.0     # the locks are free rods from here along the tail (
 TAIL_LOCK_PACKING = 0.1     # DRAFT: a loose lock's packing, for its radius (lock contact keeps locks this thick apart)
 TAIL_RIBBON = 0.5           # DRAFT: a lock is a ribbon, this thick against its width
 TAIL_ROLL_MM = 300.0        # DRAFT: the ribbon rolls once round in this length
-TAIL_TIP_CLUMP = 0.55       # DRAFT: toward its end a lock draws in to a point (TAIL_CLUMP at its start)
+TAIL_TIP_CLUMP = 0.15       # DRAFT: toward its end a lock draws in to a point (TAIL_CLUMP at its start)
+TAIL_SUBLOCKS = 3           # DRAFT: a lock parts into this many sub-locks as it falls (a river's distributaries)
+TAIL_SUB_SPREAD = 1.4       # DRAFT: a sub-lock's middle stands this much farther from its lock's line at the tip
+TAIL_HAIR_SPREAD = 0.7      # DRAFT: and a hair this much farther from its sub-lock's middle. Both grow as ds/dt = k(t) s, k
+                            # rising smoothly from 0 at the tie: a lock is a clump of hairs, not a rod, so it opens as it
+                            # falls, every hair keeping its place in the order across the lock (no crossings)
+TAIL_SPREAD_FROM = 0.12     # the share of a lock's length where the opening starts
+TAIL_JOIN_MM = 45.0         # a hair passes from the tail's field line to its lock's rod over this length, eased with a
+                            # quintic (zero slope and curvature change at both ends: the line stays G2 across the join)
 TAIL_LOCK_ROUND = 0.8       # DRAFT: how much a tail hair's "out" is its lock's own (each lock lit as a round bundle)
 
 
@@ -69,16 +77,41 @@ def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
     lp = lock[sid]
     m = on & (lp >= 0) & (sj >= TAIL_ROD_FROM_MM)
     j0 = int(np.argmin(np.abs(scm - TAIL_ROD_FROM_MM)))
+    # how far along its lock each point lies: by the hair's own length past where it enters the tail (hair does not
+    # stretch; read off the centre line's stations instead, a hair's nodes landed up to half a station off along the
+    # rod, which showed as a jagged line)
+    seg_ = np.r_[0.0, np.linalg.norm(np.diff(P, axis=0), axis=1)] / mm
+    seg_[np.r_[0, np.where(np.diff(sid) != 0)[0] + 1]] = 0.0
+    arc = np.cumsum(seg_)
+    idx_m = np.where(m)[0]
+    firstm = np.full(n_strands, -1); firstm[sid[idx_m][::-1]] = idx_m[::-1]
+    f = firstm[sid[idx_m]]
+    cont = scm[jn] + ((P - cl[jn]) * tg[jn]).sum(1) / mm * np.sign(scm[-1] - scm[0])     # (the station, read continuously)
+    srel = np.maximum(arc[idx_m] - arc[f] + cont[f] - TAIL_ROD_FROM_MM, 0.0)
     # each lock's middle along the old tail (per station), for a hair's place across its lock
     key = lp[m] * len(cl) + jn[m]
     uk, inv = np.unique(key, return_inverse=True)
     cnt = np.bincount(inv)
     ca, cb = np.bincount(inv, a[m]) / cnt, np.bincount(inv, b[m]) / cnt
+    def along(keys, val, groups):
+        """A per-(group, station) mean, eased along the stations (a mean over few hairs jumps station to station)."""
+        G = np.full((groups, len(cl)), np.nan); G[keys // len(cl), keys % len(cl)] = val
+        idx = np.arange(len(cl))
+        for r in range(groups):
+            ok = ~np.isnan(G[r])
+            if ok.sum() < 2:
+                G[r] = np.nan_to_num(G[r]); continue
+            f = np.interp(idx, idx[ok], G[r, ok])
+            for _ in range(3):
+                f = np.convolve(np.pad(f, 6, mode='edge'), np.ones(13) / 13, mode='valid')
+            G[r] = f
+        return G[keys // len(cl), keys % len(cl)]
+    ca, cb = along(uk, ca, nl), along(uk, cb, nl)
     oa, ob = a[m] - ca[inv], b[m] - cb[inv]
     # the rods' roots: each lock's middle at the tie, heading as the lock heads there
     roots = np.zeros((nl, 3)); head_to = np.zeros((nl, 3)); length = np.zeros(nl); nh = np.zeros(nl)
     hs = hairs[sid]
-    smax = np.zeros(n_strands); np.maximum.at(smax, sid[m], sj[m])
+    smax = np.zeros(n_strands); np.maximum.at(smax, sid[idx_m], srel)
     for k in range(nl):
         mine = np.where(uk // len(cl) == k)[0]                         # (this lock's stations, in order along the tail)
         q0, q1 = mine[:6], mine[10:16]
@@ -87,7 +120,7 @@ def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
         hd = 0.7 * tg[j0] * np.sign(tg[j0] @ (c1 - c0)) + 0.3 * (c1 - c0) / np.linalg.norm(c1 - c0)     # (mostly the tail's own heading)
         roots[k], head_to[k] = c0, hd / np.linalg.norm(hd)
         mem = np.where(lock == k)[0]
-        length[k] = np.percentile(smax[mem], 80) - TAIL_ROD_FROM_MM
+        length[k] = np.percentile(smax[mem], 98)       # (the rod runs to the lock's longest hairs: no hair runs on past it)
         nh[k] = hairs[mem].sum()
     d1 = e1[j0][None] - (head_to @ e1[j0])[:, None] * head_to; d1 /= np.linalg.norm(d1, axis=1, keepdims=True)
     frames = np.stack([d1, np.cross(head_to, d1), head_to], 2)
@@ -102,7 +135,6 @@ def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
     out = TR.solve(roots / mm, frames, length, nh, lock_r, head=head, seed=seed, log=lambda t: print('  rods:', t, file=sys.stderr))
     X, Rr, rs = out['x'] * mm, out['R'], out['s']
     # the hairs ride their lock's rod
-    srel = sj[m] - TAIL_ROD_FROM_MM
     lk = lp[m]
     seg = rs[lk, 1]                                                    # the lock's segment length, mm
     M = Rr.shape[1]
@@ -113,13 +145,35 @@ def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
     w = BF.sm(0.0, 80.0, srel) * (TAIL_CLUMP + (TAIL_TIP_CLUMP - TAIL_CLUMP) * BF.sm(0.5, 1.0, t01))
     psi = rng.random(nl)[lk] * 2 * np.pi + 2 * np.pi * srel / TAIL_ROLL_MM * BF.sm(0.0, 60.0, srel)
     flat = 1 - (1 - TAIL_RIBBON) * BF.sm(0.0, 80.0, srel)
+    # the lock opens as it falls: its hairs part into sub-locks (by where a hair lies round its lock's middle), the
+    # sub-locks' middles move apart, and the hairs of each spread about their own middle
+    ns = np.bincount(sid[idx_m], minlength=n_strands).astype(float)
+    ma = np.bincount(sid[idx_m], oa, minlength=n_strands) / np.maximum(ns, 1)
+    mb = np.bincount(sid[idx_m], ob, minlength=n_strands) / np.maximum(ns, 1)
+    sub_s = (((np.arctan2(mb, ma) + rng.random(nl)[np.maximum(lock, 0)] * 2 * np.pi) % (2 * np.pi)) / (2 * np.pi / TAIL_SUBLOCKS)).astype(int) % TAIL_SUBLOCKS
+    sub = sub_s[sid[idx_m]]
+    key2 = (lk * TAIL_SUBLOCKS + sub) * len(cl) + jn[m]
+    uk2, inv2 = np.unique(key2, return_inverse=True)
+    c2 = np.bincount(inv2)
+    qa, qb = np.bincount(inv2, oa) / c2, np.bincount(inv2, ob) / c2
+    qa, qb = along(uk2, qa, nl * TAIL_SUBLOCKS), along(uk2, qb, nl * TAIL_SUBLOCKS)
+    g = BF.sm(TAIL_SPREAD_FROM, 1.0, t01)
+    oa2 = qa[inv2] * (1 + TAIL_SUB_SPREAD * g) + (oa - qa[inv2]) * (1 + TAIL_HAIR_SPREAD * g)
+    ob2 = qb[inv2] * (1 + TAIL_SUB_SPREAD * g) + (ob - qb[inv2]) * (1 + TAIL_HAIR_SPREAD * g)
     # (the lock's section pressed flat along its own axis at angle psi, the axis rolling along the lock)
     cu, su = np.cos(psi), np.sin(psi)
-    pu, pv = oa * cu + ob * su, (-oa * su + ob * cu) * flat
+    pu, pv = oa2 * cu + ob2 * su, (-oa2 * su + ob2 * cu) * flat
     na, nb = (pu * cu - pv * su) * (1 - w), (pu * su + pv * cu) * (1 - w)
-    D1, D2 = Rr[lk, i][:, :, 0], Rr[lk, i][:, :, 1]
+    i2 = np.clip(i + np.where(fr > 0.5, 1, -1), 0, M - 1)            # (frames eased between segments: no step in a hair's place)
+    wf = np.abs(fr - 0.5)[:, None]
+    D1 = Rr[lk, i][:, :, 0] * (1 - wf) + Rr[lk, i2][:, :, 0] * wf
+    D2 = Rr[lk, i][:, :, 1] * (1 - wf) + Rr[lk, i2][:, :, 1] * wf
     Q = P.copy()
-    Q[m] = base + na[:, None] * D1 + nb[:, None] * D2
+    rod = base + na[:, None] * D1 + nb[:, None] * D2
+    kj = np.clip(srel / TAIL_JOIN_MM, 0, 1); kj = kj ** 3 * (10 - 15 * kj + 6 * kj * kj)
+    Q[m] = P[m] + kj[:, None] * (rod - P[m])
+    half = np.degrees(np.arctan(np.percentile(np.hypot(oa2, ob2)[t01 > 0.9], 95) / mm / np.maximum(np.median(length), 1.0)))
+    print('lock opening: half angle %.1f deg at the tip (limit 7)' % half, file=sys.stderr)
     # which way is out: from the lock's own middle, and from the bundle's (the rods' mean at that length)
     bundle = X.mean(0)                                                 # (M+1, 3): rods share the segment count
     o_lock = na[:, None] * D1 + nb[:, None] * D2
@@ -131,7 +185,56 @@ def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
     rep = dict(out['report'], strands=int((lock >= 0).sum()), lock_radius_mm_median=round(float(np.median(lock_r)), 1),
                length_mm_median=round(float(np.median(length)), 0))
     print('tail locks', rep, file=sys.stderr)
-    return Q, lock, tail_out, rep
+    region = np.zeros(len(P), int); region[idx_m] = np.where(srel < TAIL_JOIN_MM, 1, 2)      # 0 head, 1 join, 2 tail
+    return Q, lock, tail_out, rep, region
+
+
+def kink_gauge(P, counts, region=None):
+    """How sharply hair lines turn: the turn at each node between its two segments, degrees. Per region (an int per
+    point, or None for all): the 99.9th percentile, the largest, and the share of nodes turning over 20 degrees.
+    A smooth line at this sampling (2 to 3 mm a segment) turns a few degrees a node."""
+    e = np.diff(P, axis=0); ln = np.linalg.norm(e, axis=1)
+    c = (e[1:] * e[:-1]).sum(1) / np.maximum(ln[1:] * ln[:-1], 1e-18)
+    turn = np.degrees(np.arccos(np.clip(c, -1, 1)))                   # at points 1..n-2
+    ends = np.cumsum(counts)
+    ok = np.ones(len(P), bool); ok[ends - 1] = False; ok[np.r_[0, ends[:-1]]] = False
+    ok[1:-1] &= (ln[1:] > 0.2 * BF.MM) & (ln[:-1] > 0.2 * BF.MM)
+    t = np.zeros(len(P)); t[1:-1] = turn
+    out = {}
+    for r in ([None] if region is None else np.unique(region)):
+        q = t[ok if r is None else ok & (region == r)]
+        if len(q):
+            out['all' if r is None else int(r)] = (round(float(np.percentile(q, 99.9)), 1), round(float(q.max()), 1), round(float((q > 20).mean()), 5))
+    return out
+
+
+FAIR_DEG = 8.0              # a node turning more than this is faired (a smooth line here turns a few degrees a node)
+FAIR_ITERS = 60
+
+
+def fair(P, counts):
+    """Fairing: where a hair line turns sharply at a node (where two constructions meet: the head's field and the tail,
+    the tail and a lock's rod, a lift's end, a clump's start), the node and its two neighbours are drawn to the mean
+    of their neighbours, again and again until no node turns more than FAIR_DEG. Roots and tips stay. Only kinked
+    nodes move, so a smooth line is left exactly as it was (plain smoothing would shrink every wave)."""
+    Q = P.copy()
+    ends = np.cumsum(counts)
+    fixed = np.zeros(len(P), bool); fixed[ends - 1] = True; fixed[np.r_[0, ends[:-1]]] = True
+    moved = np.zeros(len(P), bool)
+    for _ in range(FAIR_ITERS):
+        e = np.diff(Q, axis=0); ln = np.linalg.norm(e, axis=1)
+        c = (e[1:] * e[:-1]).sum(1) / np.maximum(ln[1:] * ln[:-1], 1e-18)
+        bad = np.zeros(len(P), bool); bad[1:-1] = np.degrees(np.arccos(np.clip(c, -1, 1))) > FAIR_DEG
+        bad &= ~fixed
+        if not bad.any():
+            break
+        sel = bad.copy(); sel[1:] |= bad[:-1]; sel[:-1] |= bad[1:]; sel &= ~fixed
+        k = np.where(sel)[0]
+        Q[k] = 0.25 * Q[k - 1] + 0.5 * Q[k] + 0.25 * Q[k + 1]
+        moved |= sel
+    d = np.linalg.norm(Q - P, axis=1) / BF.MM
+    return Q, dict(nodes_moved_share=round(float(moved.mean()), 4), move_mm_p99=round(float(np.percentile(d[moved], 99)) if moved.any() else 0.0, 2),
+                   move_mm_max=round(float(d.max()), 2))
 
 
 def main():
@@ -186,9 +289,16 @@ def main():
     q = 2.5 / 32767
     tlock = lock_out = None
     if '--tail-locks' in a:
+        P_before = P
         sid = np.repeat(np.arange(len(ps)), counts)
-        P, tlock, lock_out, rods = tail_locks(P, sid, len(ps), PF.free_fall(B), hairs[keep] * len(paths) / len(keep), BF.Shell(B['surf']))
+        P, tlock, lock_out, rods, region = tail_locks(P, sid, len(ps), PF.free_fall(B), hairs[keep] * len(paths) / len(keep), BF.Shell(B['surf']))
         ps = np.split(P, np.cumsum(counts)[:-1])
+        P_solved = P
+        P, fr_ = fair(P, counts)
+        ps = np.split(P, np.cumsum(counts)[:-1])
+        print('fairing', fr_, file=sys.stderr)
+        print('kinks {region: (99.9th pct deg, max deg, share over 20 deg)}; 0 head, 1 join, 2 tail\n  before', kink_gauge(P_before, counts, region),
+              '\n  solved', kink_gauge(P_solved, counts, region), '\n  faired', kink_gauge(P, counts, region), file=sys.stderr)
     from scipy.spatial import cKDTree
     tree = cKDTree(P[::2])
     centre = np.array([0.0, 0.0, 0.0])
