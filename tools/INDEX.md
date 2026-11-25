@@ -93,6 +93,7 @@ Status: **main** is on main in this folder; **main (stays)** is on main outside 
 | Lace tension solver | solver | footwear, laces | numpy | PR #76: `blender/shared/lace_tension.py` |
 | Lace and pleating study | solver | laces | node | PR #79: `tools/lace-study/` |
 | Scalp field, groom, cards | solver | hair | numpy | PR #88: `tools/hair/` |
+| Bangs flow (B/D blend over the ponytail's side flow) | solver, gauge | hair | numpy, scipy | this PR: `tools/hair/bangs_flow.py`, `bangs_draw.py`, `bangs_render.py` |
 | Contour sheet (folds) | gauge | cloth | numpy (PIL for labels) | main: `gauges/contours/contours.py` |
 | Collar fold contour sheet | gauge | tailoring | numpy, matplotlib | main: `gauges/contours/collar_contours.py` |
 | Boot contour dump and plot | gauge | footwear | Blender, then matplotlib | main: `gauges/contours/boot_dump.py`, `boot_plot.py` |
