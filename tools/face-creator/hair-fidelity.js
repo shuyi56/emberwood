@@ -162,6 +162,8 @@ function buildStyle(asset, tone, creatorMat) {
   const sAO = S.ao ? new Uint8Array(bytes(S.ao)) : null, sID = S.ids ? new Uint8Array(bytes(S.ids)) : null;
   // the light through the hair (tools/hair/hair_light.py), when the asset has it: per point, the transmittance toward
   // the key, the rim and the fill, and the ambient, from the hair's own flow and density. It then replaces the AO.
+  // which way is out at each point (the head's on the head, the tail's own axis along the tail), when the asset has it
+  const sOut = S.out ? toPage(Float32Array.from(new Int8Array(bytes(S.out))), 1 / HH) : null;
   const sL = S.light ? new Uint8Array(bytes(S.light)) : null, lit = new Float32Array(np * 8).fill(1);
   const wHair = (S.hairs_per_strand || 1) * HAIR_MM * HH / HEAD_MM;
   const pos = new Float32Array(np * 6), tan = new Float32Array(np * 6), nrm = new Float32Array(np * 6);
@@ -177,7 +179,7 @@ function buildStyle(asset, tone, creatorMat) {
       if (j) sj += Math.hypot(P[3 * q] - P[3 * q - 3], P[3 * q + 1] - P[3 * q - 2], P[3 * q + 2] - P[3 * q - 1]);
       let tx = P[3 * a1] - P[3 * a0], ty = P[3 * a1 + 1] - P[3 * a0 + 1], tz = P[3 * a1 + 2] - P[3 * a0 + 2];
       const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
-      const ox = P[3 * q] - CENTRE[0], oy = P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = P[3 * q + 2] - CENTRE[2];
+      const ox = sOut ? sOut[3 * q] : P[3 * q] - CENTRE[0], oy = sOut ? sOut[3 * q + 1] : P[3 * q + 1] - Math.min(P[3 * q + 1], CENTRE[1]), oz = sOut ? sOut[3 * q + 2] : P[3 * q + 2] - CENTRE[2];
       // the normal: out from the head but square to the strand (a hair is lit across, never along it, as in
       // Kajiya-Kay's hair model), then turned round the strand by its own twist: so each wave, bend and lock catches
       // the light by its own direction, where the head's shape alone lit the whole fall as one smooth shell
@@ -249,6 +251,21 @@ function buildStyle(asset, tone, creatorMat) {
         '#endif',
         '#include <opaque_fragment>'].join('\n'));
   };
+  // the tie, on the field's own tie point: a leather thong wound three times round the gathered hair (as the
+  // creator's ponytail has it, which stands where that style's sculpted tail leaves the head, not this groom's)
+  if (asset.tie) {
+    const c = toPage(new Float32Array(asset.tie.c), 1), t = toPage(new Float32Array(asset.tie.t), 1 / HH);
+    const ax = new THREE.Vector3(t[0], t[1], t[2]).normalize(), R = asset.tie.r * HH;
+    const leather = new THREE.MeshStandardMaterial({ color: 0x5c3d2b, roughness: 0.7, envMapIntensity: 0.4 });
+    parts.tie = new THREE.Group(); parts.tie.name = 'groom-tie';
+    for (let w = -1; w <= 1; w++) {
+      const m = new THREE.Mesh(new THREE.TorusGeometry(R * 1.04, R * 0.11, 10, 40), leather);
+      m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
+      m.position.set(c[0] + ax.x * w * R * 0.2, c[1] + ax.y * w * R * 0.2, c[2] + ax.z * w * R * 0.2); m.castShadow = true;
+      parts.tie.add(m);
+    }
+    group.add(parts.tie);
+  }
   parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
   group.add(parts.strands);
   const segs = idx.length / 6;
@@ -320,6 +337,8 @@ function start(fc) {
   const isVeil = mat => mat && mat.isMeshBasicMaterial && mat.vertexColors && mat.blending === THREE.CustomBlending;
   const isCreatorHair = m => m.isMesh && (m === fc.hairMesh || m.material === fc.hairCapMat || isVeil(m.material) ||
     (m.material && fc.hairCapMat.map && m.material.map === fc.hairCapMat.map));
+  // the creator's own ponytail tie (LEATHER, main.js): it marks that style's sculpted tail, so it goes with it
+  const isCreatorTie = m => m.isMesh && m.material && m.material.color && m.material.color.getHex() === 0x5c3d2b && m.material.vertexColors;
   const asset_n = el => (el._n = el._n || JSON.parse(el.textContent).strands.n).toLocaleString();
   function frame() {
     place();
@@ -333,7 +352,7 @@ function start(fc) {
     const groom = mode !== 'creator' && fc.P.hair;
     let changed = false;
     const show = (m, v) => { if (m && m.visible !== v) { m.visible = v; changed = true; } };      // (a groom may have no cards yet: strands only)
-    scene.children.forEach(m => { if (isCreatorHair(m)) show(m, fc.P.hair && !groom); });
+    scene.children.forEach(m => { if (isCreatorHair(m) || isCreatorTie(m)) show(m, fc.P.hair && !groom); });
     Object.values(built).forEach(b => { if (!(groom && b === built[style])) show(b.group, false); });
     if (groom) {
       let b = built[style];
