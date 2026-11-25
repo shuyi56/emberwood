@@ -66,6 +66,17 @@ const LAYER_DARK = 0.5, INNER_DARK = 0.45;
 // along its length (GLINT_MM long cycles, phase and rate its own) is near its crest (GLINT_DUTY of the length).
 // SOURCED: the effect and its cause. STYLE: the amounts. STRAND_TONE: each strand this much lighter or darker (STYLE).
 const GLINT = 0.5, GLINT_EXP = 110, GLINT_MM = 24, GLINT_DUTY = 0.35, STRAND_TONE = 0.32;
+// The coverage layer. Hair for games and film is built from the inside out: first an opaque base that blocks the
+// overall shape so nothing shows through ("make sure you cannot see through the hair onto the skull", Verhoolen /
+// Lithvall, 80.lv; "the bottom layer of hair is 100 opaque", Hindsbol Hansen, CGMA; Unreal's Hair Card Generator
+// names it Coverage: "the core layer, meant for creating coverage"), then the layers that carry the detail, with
+// gaps left in them "to give the hair depth". Without it the soft strands lie over skin and over each other's gaps
+// and the eye sees speckle, not depth. Here: every strand drawn a second time under itself, COVER_IN mm in toward
+// the head, COVER_W wider, opaque, with no highlights, and at COVER_DARK of its tone: the light that reaches the
+// inner hair is what many hairs let through (Zinke et al. 2008, dual scattering: T = d a^n for n hairs in front,
+// d 0.7 in Sadeghi and Tamstorf's implementation), dark and without a highlight of its own.
+// SOURCED: the layer and its job. STYLE: the three amounts.
+const COVER_IN = 2.8, COVER_W = 1.8, COVER_DARK = 0.6;
 const STRAND_TWIST = 0.7;                         // STYLE: rad each strand's normal is turned round it, either way
 const STRAND_LIGHT = 0.85;                        // STYLE: the strands' paint against the hair colour: less light, so the
                                                   // lit side does not wash the strands into one flat sheet (cards: 0.8)
@@ -232,16 +243,16 @@ function buildStyle(asset, tone, creatorMat) {
   sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
   const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: STRAND_ROUGH,
     metalness: 0, envMapIntensity: 0.15 });
-  strandMat.onBeforeCompile = sh => {
-    sh.uniforms.pxWorld = PX_WORLD;
-    sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\n' +
+  const compile = cover => sh => {
+    sh.uniforms.pxWorld = PX_WORLD; sh.uniforms.coverIn = { value: cover ? COVER_IN * HH / HEAD_MM : 0 }; sh.uniforms.coverW = { value: cover ? COVER_W : 1 };
+    sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\nuniform float coverIn;\nuniform float coverW;\n' +
       'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\nattribute float strandArc;\nvarying float vArc;\n' +
       sh.vertexShader.replace('#include <project_vertex>', [
-        'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
+        'vec4 mvPosition = modelViewMatrix * vec4( transformed - coverIn * normal, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
         'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide; vArc = strandArc;',
         'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
-        'mvPosition.xyz += sd * ( 0.5 * max( strandW, -mvPosition.z * pxWorld ) * strandSide );',
+        'mvPosition.xyz += sd * ( 0.5 * max( strandW * coverW, -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
     sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\n' + sh.fragmentShader
@@ -253,7 +264,7 @@ function buildStyle(asset, tone, creatorMat) {
       .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';\n' +
         '\t{ float fz = ' + FUZZ_A.toFixed(3) + ' * ( 1.0 - vSide * vSide );\n' +
         '\t  float hn = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) + vStrandOcc.y );\n' +
-        '\t  if ( fz < hn ) discard; }')
+        (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + '; }' : '\t  if ( fz < hn ) discard; }'))
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );')
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
       .replace('#include <opaque_fragment>', [
@@ -274,7 +285,7 @@ function buildStyle(asset, tone, creatorMat) {
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
         '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * vec3( 1.0, 0.97, 0.92 ) );',
         '  }',
-        '  outgoingLight += sAcc * vStrandOcc.x * vStrandOcc.x; }',
+        '  outgoingLight += ' + (cover ? '0.0 * ' : '') + 'sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
         '#include <opaque_fragment>'].join('\n'));
   };
@@ -293,7 +304,11 @@ function buildStyle(asset, tone, creatorMat) {
     }
     group.add(parts.tie);
   }
-  parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
+  strandMat.onBeforeCompile = compile(false); strandMat.customProgramCacheKey = () => 'strand';
+  const coverMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: 0 });
+  coverMat.color = strandMat.color; coverMat.onBeforeCompile = compile(true); coverMat.customProgramCacheKey = () => 'strand-cover';
+  const cover = new THREE.Mesh(sg, coverMat); cover.frustumCulled = false; cover.name = 'groom-coverage';
+  parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.add(cover); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
   group.add(parts.strands);
   const segs = idx.length / 6;
   return { group, parts, cardMat, capMat, strandMat, segs, tone };
