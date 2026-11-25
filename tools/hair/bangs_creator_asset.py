@@ -47,6 +47,7 @@ def main():
     ps = [ps[k] for k in ok]
     keep = keep[ok]
     P = np.concatenate(ps)
+    share = float(hairs.sum()) / len(ps)
     counts = np.array([len(p) for p in ps])
     q = 2.5 / 32767
     from scipy.spatial import cKDTree
@@ -64,10 +65,16 @@ def main():
     sao = np.clip(np.exp(-cs / (np.median(cs) / -np.log(CA.SAO_MID))), CA.SAO_MIN, 1.0)
     hsh = lambda v: ((v.astype(np.int64) * 2654435761 + 12345) >> 7) % 251
     ids = np.stack([hsh(basin[keep] * 7919 + keep // 40), hsh(keep)], 1).astype('u1')
-    share = float(hairs.sum()) / len(ps)
+    # light through the hair from its flow and density (hair_light.py): per creator light, and ambient
+    import hair_light as HL
+    lt = HL.light(ps, hairs[keep] * len(paths) / len(keep))      # (each drawn strand: its fibre's hairs, scaled up)
+    occ = np.stack([lt['key'], lt['rim'], lt['fill'], lt['ambient']], 1)
+    print('light: key T median %.2f, 10th pct %.2f; ambient median %.2f, 10th pct %.2f' % (
+        np.median(lt['key']), np.percentile(lt['key'], 10), np.median(lt['ambient']), np.percentile(lt['ambient'], 10)))
     rep = dict(lods=[], guides=0, cap=dict(pos=CA.b64(V, '<f4'), idx=CA.b64(Fc, '<u4')),
                strands=dict(n=int(len(ps)), counts=CA.b64(counts, '<u2'), pos=CA.b64(np.round(P / q), '<i2'), q=q,
-                            hairs_per_strand=round(share, 2), ao=CA.b64(np.round(sao * 255), 'u1'), ids=CA.b64(ids, 'u1')),
+                            hairs_per_strand=round(share, 2), ao=CA.b64(np.round(sao * 255), 'u1'), ids=CA.b64(ids, 'u1'),
+                            light=CA.b64(np.round(np.clip(occ, 0, 1) * 255), 'u1'), light_order='key,rim,fill,ambient'),
                source=dict(bangs=os.path.abspath(bdir), fibres=int(len(paths))))
     json.dump(rep, open(out, 'w'))
     print(out, os.path.getsize(out) // 1024, 'KB', len(ps), 'strands of', len(paths), 'fibres, %.1f hairs each' % share)

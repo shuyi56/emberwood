@@ -62,6 +62,9 @@ const SPEC2 = 0.22, SPEC2_EXP = 22, SPEC2_SHIFT = -0.14;    // STYLE: secondary:
 const SPEC_JITTER = 0.12;                         // STYLE: each strand's own extra shift, so the band breaks into glints
 const LOCK_TONE = 0.2, CLUMP_TONE = 0.12;         // STYLE: a whole lock, and a clump in it, this much lighter or darker
                                                   // (the ID map of card hair: big clumps, then subclumps; 80.lv / CGMA)
+const LIGHT_FLOOR = 0.1;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
+                                                  // Zinke et al. 2008), which the single-scattering transmittance leaves out
+const AMB_FLOOR = 0.25;                           // STYLE: the same for the ambient (0.06 left the tail black in the 3/4)
 const STRAND_ROUGH = 0.6;                         // STYLE: a soft sheen along the lit strands (0.8 read matte and flat)
 const PX_WORLD = { value: 0.002 };                // one pixel's width at unit depth: set each frame from the camera
 function cutTexture() {
@@ -157,6 +160,9 @@ function buildStyle(asset, tone, creatorMat) {
   const pts = new Float32Array(raw.length); for (let i = 0; i < raw.length; i++) pts[i] = raw[i] * S.q;
   const P = toPage(pts, 1), np = P.length / 3;
   const sAO = S.ao ? new Uint8Array(bytes(S.ao)) : null, sID = S.ids ? new Uint8Array(bytes(S.ids)) : null;
+  // the light through the hair (tools/hair/hair_light.py), when the asset has it: per point, the transmittance toward
+  // the key, the rim and the fill, and the ambient, from the hair's own flow and density. It then replaces the AO.
+  const sL = S.light ? new Uint8Array(bytes(S.light)) : null, lit = new Float32Array(np * 8).fill(1);
   const wHair = (S.hairs_per_strand || 1) * HAIR_MM * HH / HEAD_MM;
   const pos = new Float32Array(np * 6), tan = new Float32Array(np * 6), nrm = new Float32Array(np * 6);
   const side = new Float32Array(np * 2), wid = new Float32Array(np * 2), vc = new Float32Array(np * 6), idx = [];
@@ -180,13 +186,14 @@ function buildStyle(asset, tone, creatorMat) {
       const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
       const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
       const ol = 1; const ox2 = nx * tc + bx * ts, oy2 = ny * tc + by * ts, oz2 = nz * tc + bz * ts;
-      const ao = sAO ? sAO[q] / 255 : 1, shade = b * shadeAt(sj, t) * ao;
+      const ao = sL ? 1 : sAO ? sAO[q] / 255 : 1, shade = b * shadeAt(sj, t) * ao;
       for (let e = 0; e < 2; e++) {
         const v = 2 * q + e;
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
         nrm[3 * v] = ox2; nrm[3 * v + 1] = oy2; nrm[3 * v + 2] = oz2;
         side[v] = e ? 1 : -1; wid[v] = wHair * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
         vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit;
+        if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = sL[4 * q + c4] / 255;
       }
       if (j < c - 1) idx.push(2 * q, 2 * q + 1, 2 * q + 3, 2 * q, 2 * q + 3, 2 * q + 2);
     }
@@ -197,6 +204,7 @@ function buildStyle(asset, tone, creatorMat) {
   sg.setAttribute('strandT', new THREE.BufferAttribute(tan, 3)); sg.setAttribute('strandSide', new THREE.BufferAttribute(side, 1));
   sg.setAttribute('strandW', new THREE.BufferAttribute(wid, 1)); sg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
   sg.setAttribute('strandOcc', new THREE.BufferAttribute(occ, 2));
+  sg.setAttribute('strandLight', new THREE.BufferAttribute(lit, 4));
   sg.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
   sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
   const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: STRAND_ROUGH,
@@ -204,16 +212,21 @@ function buildStyle(asset, tone, creatorMat) {
   strandMat.onBeforeCompile = sh => {
     sh.uniforms.pxWorld = PX_WORLD;
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\n' +
-      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\n' +
+      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\n' +
       sh.vertexShader.replace('#include <project_vertex>', [
         'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
-        'vStrandT = tv; vStrandOcc = strandOcc;',
+        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight;',
         'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
         'mvPosition.xyz += sd * ( 0.5 * max( strandW, -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
-    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\n' + sh.fragmentShader
+    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\n' + sh.fragmentShader
+      // each light by the hair's own transmittance toward it (the lights in the scene's order: key, rim, fill; the key
+      // casts the only shadow, so it stays first), the ambient by the hair's averaged transmittance
+      .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
+        'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= max( vLight[ i ], ' + LIGHT_FLOOR.toFixed(3) + ' );'))
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n\treflectedLight.indirectDiffuse *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' ); reflectedLight.indirectSpecular *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' );')
       .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );')
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
@@ -230,7 +243,7 @@ function buildStyle(asset, tone, creatorMat) {
         '    float s1 = smoothstep( -1.0, 0.0, d1 ) * pow( sqrt( max( 0.0, 1.0 - d1 * d1 ) ), ' + f(SPEC1_EXP) + ' );',
         '    float s2 = smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), ' + f(SPEC2_EXP) + ' );',
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
-        '    sAcc += directionalLights[ i ].color * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb );',
+        '    sAcc += directionalLights[ i ].color * vLight[ i ] * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb );',
         '  }',
         '  outgoingLight += sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
