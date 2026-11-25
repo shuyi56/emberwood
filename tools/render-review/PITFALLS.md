@@ -213,3 +213,18 @@ repeated on more than one garment. The reviewer applies them once John merges th
   adds one more collar parameter to a search while the same crease or fold persists.
 - **Fix:** Build the collar's end and the lapel's gorge as one surface from the draft, with the seam crossing the roll line
   and running on under the fold; check tip fold and outline gap after each change, and stop after two rounds without gain.
+
+## R011 Side and temple hair built from separate locks or one slope
+
+- **Seen:** 7 rejections on the Warden hair (2026-11-24, 10:20 to 22:38Z, 5 logged by the thread itself, 2 by John), plus
+  3 on the ponytail's temple lock (23:24 to 23:39Z): the hair behind a draped side left a bare V over the shoulder, a side
+  swept back at one slope streamed out behind the back, combing only toward the hair behind the ear moved nothing, curtain
+  bangs gathered into three separate locks left the cheek and ear bare, the hairline left 10 to 15 mm of scalp at both
+  temples, the hair behind the ear hooked back along the neck, and the temple lock hung plumb instead of following the
+  fringe.
+- **Spot:** The diff builds or combs the side hair, a curtain, a temple lock or the hair behind the ear, and the first
+  render of the round is the first look at the side in profile and 3/4.
+- **Fix:** Define the side as one solid shape in front of the ear and feed the temple and sideburn hair into it; turn the
+  drape from forward to back over a range of roots, not at one slope; sweep back only to below the shoulder's top, then
+  plumb; cap the backward fall per unit of drop; and run the hairline-gap gauge before the render (bare scalp at the
+  hairline's edge, a bare wedge between the front lock and the back hair).

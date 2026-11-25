@@ -123,7 +123,8 @@ def compute(hours=None, names=None):
 
     # job intervals: finished jobs from the manifests, running ones from start events with no end yet
     ended = {e["key"] for e in events if e["ev"] in ("done", "failed", "killed", "stopped")}
-    running = {e["key"]: e for e in events if e["ev"] == "start" and e["key"] not in ended and e["key"] not in jobs}
+    running = {e["key"]: e for e in events if e["ev"] == "start" and e["key"] not in ended and e["key"] not in jobs
+               and now - ts(e["t"]) < 7200}   # a job is killed at 30 min: an older start with no end is a lost event, not a job still running
     iv = [(j["start"], j["end"]) for j in jobs.values()] + [(ts(e["t"]), now) for e in running.values()]
     busy = union(clip(iv, lo, now))
 
