@@ -89,19 +89,20 @@ TAPER = 0.18                    # DRAFT: the deepest-rooted hairs end up to this
 # The presets. w0, w1 and D_DEG of the curtain are FITTED to the photo's strand angles (see fit()); the end heights are
 # MEASURED off the photo against the eye (refmeasure: fringe_edge, side_end, eye), the part is SOURCED [CC][BS][MBG].
 PRESETS = {
-    # ease_mm: D's turn away from the part grows linearly to d_deg at the section's edge (66 mm), so the fringe opens
-    # at one rate across its width and its ends lie evenly spaced (John 2026-11-25, "the front bangs are too thin
-    # while the sides are too full"). The old 8 mm smoothstep split the fringe at the part: 2 to 10 hairs per mm
-    # within 24 mm of it at half length, against 30 to 55 at the sides. corner_from_mm: the corners' turn toward the
-    # side end starts 20 mm from the part (was w0, 37.5), so hairs that now fall straighter reach it gently (from
-    # 37.5 mm, 39 tips curled tighter than the 19 mm bound).
     'curtain': dict(part_mm=0.0, sweep=0, d_deg=27.7, w0_mm=37.5, w1_mm=145.0, edge_above_eye=0.087,
-                    side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263, ease_mm=66.0,
-                    corner_from_mm=20.0),
+                    side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263),
+    # the curtain with its centre piece swept to one side (John 2026-11-25: "keep it like before and sweep the center
+    # bang on a side"): D splits at split_mm instead of at the part, and the hairs from there to centre_mm on the
+    # other side are turned sweep_deg across the forehead, easing into the curtain's own d_deg. DRAFT values.
+    'curtain-swept': dict(part_mm=0.0, sweep=0, d_deg=27.7, w0_mm=37.5, w1_mm=145.0, edge_above_eye=0.087,
+                          side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263,
+                          split_mm=-35.0, split_w_mm=10.0, sweep_deg=35.0, centre_mm=45.0),
+    # (ease_mm 66, a linear turn to the edge, evened the fringe out: centre 27 to 36 hairs per mm at half length,
+    # sides 15 to 22. John kept the curtain as it was; the key stays for other presets.)
     # the coordinator's reading of John's model: w = 1 at the bangs section's outer edge (66 mm, just inside the
     # temple), so the outer bang roots leave with the side flow's own tangent. Not what the photo measures (fit.json).
     'curtain-c1': dict(part_mm=0.0, sweep=0, d_deg=27.7, w0_mm=17.0, w1_mm=66.0, edge_above_eye=0.087,
-                       side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263, ease_mm=66.0),
+                       side_below_eye=0.097, side_u_mm=70.0, side_end_behind_nose=0.263),
     'straight': dict(part_mm=0.0, sweep=0, d_deg=0.0, w0_mm=52.0, w1_mm=80.0, edge_above_eye=0.087,
                      side_below_eye=-0.087, side_u_mm=70.0),
     'side-swept': dict(part_mm=-25.0, sweep=1, d_deg=55.0, w0_mm=40.0, w1_mm=105.0, edge_above_eye=0.06,
@@ -174,6 +175,7 @@ def D_at(X, N, u, prm):
     hair toward that side)."""
     f = unit(np.array([0, -1.0, -1.0]))[None]
     g = unit(f - (f * N).sum(1, keepdims=True) * N)
+    sp = prm.get('split_mm', 0.0)             # the centre piece's own part (see 'curtain-swept'); 0: the part
     sgn = np.sign(u) if prm['sweep'] == 0 else np.full(len(u), float(prm['sweep']))
     sgn[sgn == 0] = 1.0
     s = sgn[:, None] * np.array([1.0, 0, 0])[None]
@@ -186,6 +188,21 @@ def D_at(X, N, u, prm):
         a = np.full(len(u), a)
     elif prm.get('ease_mm'):
         a = a * np.clip(np.abs(u) / prm['ease_mm'], 0.0, 1.0) ** prm.get('ease_pow', 1.0)
+    elif sp:
+        # the centre piece: a signed turn (+: toward +x) running from the curtain's -d_deg on the short side, through 0
+        # at the split, to +sweep_deg split_w_mm past it, then easing into the curtain's +d_deg by centre_mm. It rises
+        # monotonically across the split, so the ends there keep their order and open over 2 split_w_mm (an 8 mm turn,
+        # as at the part, opened a bare V at the split: 0 hairs per mm over 30 mm at half length).
+        ac = math.radians(prm.get('sweep_deg', prm['d_deg']))
+        W = prm.get('split_w_mm', 15.0)
+        r = sm(sp - W, sp + W, u)
+        f = -a + (a + ac) * r
+        f = np.where(u > sp + W, ac + (a - ac) * sm(sp + W, prm.get('centre_mm', 30.0), u), f)
+        sgn[:] = 1.0
+        s = np.array([1.0, 0, 0])[None].repeat(len(u), 0)
+        s = s - (s * N).sum(1, keepdims=True) * N
+        s = unit(s - (s * g).sum(1, keepdims=True) * g)
+        a = f
     else:
         a = a * sm(0.0, PART_FADE_MM, np.abs(u))
     D = unit(np.cos(a)[:, None] * g + np.sin(a)[:, None] * s)
