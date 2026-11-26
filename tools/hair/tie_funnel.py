@@ -45,7 +45,7 @@ def funnel(paths, sel, c_tie, t_tie, r_tie, shell, n_hairs=None):
     n, m, _ = Q.shape
     Uu = np.zeros((n, m))
     t_tie = np.asarray(t_tie, float) / np.linalg.norm(t_tie)
-    turn, rmin, a0, a1, done = [], [], [], [], 0
+    turn, rmin, a0, a1, done, ends_ = [], [], [], [], 0, []
     e1 = np.cross(t_tie, [0.0, 0.0, 1.0]); e1 /= np.linalg.norm(e1); e2 = np.cross(t_tie, e1)
     # the tie's own radius from the hair it holds, against the radius the lines cross its plane at now
     rc = []
@@ -106,12 +106,15 @@ def funnel(paths, sel, c_tie, t_tie, r_tie, shell, n_hairs=None):
         ang = np.arccos(np.clip((e[1:] * e[:-1]).sum(1) / (ln[1:] * ln[:-1]), -1, 1))
         rmin.append(float((0.5 * (ln[1:] + ln[:-1]) / np.maximum(ang, 1e-6)).min() / MM))
         v0, v1 = P0 - c_tie, P1 - c_tie
-        a0.append(np.arctan2(v0 @ e2, v0 @ e1)); a1.append(np.arctan2(v1 @ e2, v1 @ e1))
+        a0.append(np.arctan2(v0 @ e2, v0 @ e1)); a1.append(np.arctan2(v1 @ e2, v1 @ e1)); ends_.append(P1)
         done += 1
     a0, a1 = np.array(a0), np.array(a1)
     o = np.argsort(a0); rk = np.argsort(np.argsort(a1))[o]
     dr = np.abs(rk - np.arange(len(rk))); dr = np.minimum(dr, len(rk) - dr)
     turn, rmin = np.array(turn), np.array(rmin)
-    rep = dict(tie_radius_mm=round(r_tight / MM, 1), was_mm=round(r_now / MM, 1), fibres=int(done), of=int(sel.sum()), tie_turn_deg_median=round(float(np.median(turn)), 1), tie_turn_deg_p95=round(float(np.percentile(turn, 95)), 1),
+    ends_ = np.array(ends_)
+    cen = ends_.mean(0)
+    r_seen = float(np.percentile(np.linalg.norm(ends_ - cen - ((ends_ - cen) @ t_tie)[:, None] * t_tie, axis=1), 97))
+    rep = dict(centre=cen, seen_radius_mm=round(r_seen / MM, 1), tie_radius_mm=round(r_tight / MM, 1), was_mm=round(r_now / MM, 1), fibres=int(done), of=int(sel.sum()), tie_turn_deg_median=round(float(np.median(turn)), 1), tie_turn_deg_p95=round(float(np.percentile(turn, 95)), 1),
                bend_radius_mm_min_p05=round(float(np.percentile(rmin, 5)), 1), under_curl_bound_share=round(float((rmin < CURL_MIN_MM).mean()), 4))
     return Q, Uu, rep

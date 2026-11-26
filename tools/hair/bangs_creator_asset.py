@@ -261,7 +261,7 @@ def main():
         paths, tiltv, comb, layv, vol = HV.layer(paths, basin == 0, BF.Shell(B['surf']), np.asarray(FF0['cl'])[0], float(B['r_tie']),
                                      np.asarray(FF0['tang'])[0])
         print('volume', vol, file=sys.stderr)
-    fun_u = None
+    fun_u = fun_tie = None
     if '--funnel' in a:                                               # the side hair's last stretch gathered to the tie (tie_funnel.py)
         import tie_funnel as TF
         FFf = PF.free_fall(B)
@@ -270,6 +270,7 @@ def main():
         jf = int(np.argmin(np.abs(smf - 27.0)))                       # (the tie: 27 mm along the tail, as the tie search below finds)
         paths, fun_u, fu = TF.funnel(paths, basin == 0, clf[jf], clf[jf + 2] - clf[jf - 2], float(B['r_tie']), BF.Shell(B['surf']), float(hairs[basin == 0].sum()))
         print('funnel', fu, file=sys.stderr)
+        fun_tie = (clf[jf], (clf[jf + 2] - clf[jf - 2]) / np.linalg.norm(clf[jf + 2] - clf[jf - 2]))
     tier = None
     if '--mid-layer' in a:                                            # a mid layer of thick clumps under the loose top (hair_layers.py)
         import hair_layers as HLy
@@ -376,6 +377,14 @@ def main():
     jt, rt = best if best else (0, float(B['r_tie']))
     print('tie at %.0f mm along the tail, radius %.1f mm' % (sm_[jt], rt / BF.MM))
     tie = dict(c=[float(x) for x in cl[jt]], t=[float(x) for x in tg[jt]], r=rt, s_mm=float(abs(sc[jt] - sc[0])))
+    if fun_tie is not None:
+        # with the funnel, the band goes where the funnel gathers the hair, and is sized and centred from the hair
+        # drawn there (not from the tail's centre line and its free radius: a band wider than the neck it holds
+        # reads as a loose ring)
+        cq, tq = fun_tie
+        cen, rq = fu['centre'], fu['seen_radius_mm'] * BF.MM             # (where the funnel's own hairs cross the band's plane)
+        tie = dict(c=[float(x) for x in cen], t=[float(x) for x in tq], r=rq, s_mm=27.0, fit='hair')
+        print('band on the funnel neck: radius %.1f mm, centre %.1f mm off the tail line' % (rq / BF.MM, np.linalg.norm(cen - cq) / BF.MM))
     rep = dict(lods=[], guides=0, tie=tie, cap=dict(pos=CA.b64(V, '<f4'), idx=CA.b64(Fc, '<u4')),
                strands=dict(n=int(len(ps)), counts=CA.b64(counts, '<u2'), pos=CA.b64(np.round(P / q), '<i2'), q=q,
                             hairs_per_strand=round(share, 2), ao=CA.b64(np.round(sao * 255), 'u1'), ids=CA.b64(ids, 'u1'),

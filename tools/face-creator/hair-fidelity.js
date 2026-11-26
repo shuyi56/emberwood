@@ -76,7 +76,12 @@ const GLINT = 0.5, GLINT_EXP = 110, GLINT_MM = 24, GLINT_DUTY = 0.35, STRAND_TON
 // inner hair is what many hairs let through (Zinke et al. 2008, dual scattering: T = d a^n for n hairs in front,
 // d 0.7 in Sadeghi and Tamstorf's implementation), dark and without a highlight of its own.
 // SOURCED: the layer and its job. STYLE: the three amounts.
-const COVER_IN = 2.8, COVER_W = 1.8, COVER_DARK = 0.6;
+const COVER_IN = 2.8, COVER_W = 1.8, COVER_DARK = 0.78, COVER_SPEC = 0.35, COVER_END = 0.72;
+// (0.6 with no highlight read as a flat black band wherever the layer shows past the top hair: under the fringe's
+// edge, along the lower side. So it is hair there too: COVER_DARK of the tone, COVER_SPEC of the highlights, its
+// ribbons' edges broken like the strands', and it stops short of each hair's end (fading out from COVER_END of the
+// length), so a hem is the top hair's own tips, not a dark slab behind them.)
+const THONG_MM = 3.2;                             // STYLE: the tie's leather thong, across
 // The mid layer (hair_layers.py: the strands gathered into thick clumps): drawn MID_W wider than a top strand and
 // opaque, MID_IN mm under the top layer, at MID_DARK of its tone and MID_SPEC of its highlights, so the loose top
 // hair lies over solid clumps with gaps between them down to the coverage layer. STYLE amounts.
@@ -232,7 +237,7 @@ function buildStyle(asset, tone, creatorMat) {
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
         nrm[3 * v] = ox2; nrm[3 * v + 1] = oy2; nrm[3 * v + 2] = oz2;
         side[v] = e ? 1 : -1; wid[v] = wHair * fine * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
-        vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit; tierA[v] = mid; sArc[v] = sj * HEAD_MM / HH;
+        vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit; tierA[v] = mid + 0.45 * t;      // (the tier, and under it the share of the length: 0..0.45) sArc[v] = sj * HEAD_MM / HH;
         if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = sL[4 * q + c4] / 255;
       }
       if (j < c - 1) idx.push(2 * q, 2 * q + 1, 2 * q + 3, 2 * q, 2 * q + 3, 2 * q + 2);
@@ -252,26 +257,26 @@ function buildStyle(asset, tone, creatorMat) {
   const compile = cover => sh => {
     sh.uniforms.pxWorld = PX_WORLD; sh.uniforms.coverIn = { value: cover ? COVER_IN * HH / HEAD_MM : 0 }; sh.uniforms.coverW = { value: cover ? COVER_W : 1 };
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\nuniform float coverIn;\nuniform float coverW;\n' +
-      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\nattribute float strandArc;\nvarying float vArc;\nattribute float strandTier;\nvarying float vTier;\n' +
+      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\nattribute float strandArc;\nvarying float vArc;\nattribute float strandTier;\nvarying float vTier;\nvarying float vTip;\n' +
       sh.vertexShader.replace('#include <project_vertex>', [
-        'vec4 mvPosition = modelViewMatrix * vec4( transformed - ( coverIn + strandTier * ' + (MID_IN * HH / HEAD_MM).toFixed(5) + ' ) * normal, 1.0 );',
+        'vec4 mvPosition = modelViewMatrix * vec4( transformed - ( coverIn + floor( strandTier + 0.01 ) * ' + (MID_IN * HH / HEAD_MM).toFixed(5) + ' ) * normal, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
-        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide; vArc = strandArc; vTier = strandTier;',
+        'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide; vArc = strandArc; vTier = floor( strandTier + 0.01 ); vTip = fract( strandTier + 0.01 ) / 0.45;',
         'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
         'mvPosition.xyz += sd * ( 0.5 * max( strandW * coverW, -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
-    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\nvarying float vTier;\n' + sh.fragmentShader
+    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\nvarying float vTier;\nvarying float vTip;\n' + sh.fragmentShader
       // each light by the hair's own transmittance toward it (the lights in the scene's order: key, rim, fill; the key
       // casts the only shadow, so it stays first), the ambient by the hair's averaged transmittance
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
         'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= max( vLight[ i ], ' + LIGHT_FLOOR.toFixed(3) + ' );'))
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n\treflectedLight.indirectDiffuse *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' ); reflectedLight.indirectSpecular *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' );' +
-        (cover ? ' reflectedLight.directSpecular *= 0.0; reflectedLight.indirectSpecular *= 0.0;' : ''))   // (no sheen of its own on the coverage layer: at grazing angles it showed as grey patches on the tail)
+        (cover ? ' reflectedLight.directSpecular *= 0.0; reflectedLight.indirectSpecular *= 0.0;' : ''))     // (no sheen of its own on the coverage layer: at grazing angles it showed as grey patches on the tail)
       .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';\n' +
         '\t{ float fz = ' + FUZZ_A.toFixed(3) + ' * ( 1.0 - vSide * vSide );\n' +
         '\t  float hn = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) + vStrandOcc.y );\n' +
-        (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + '; }' : '\t  if ( vTier < 0.5 && fz < hn ) discard; }'))
+        (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + ';\n\t  if ( min( 1.6 * ( 1.0 - vSide * vSide ), 1.0 - smoothstep( ' + COVER_END.toFixed(3) + ', 0.98, vTip ) ) < hn ) discard; }' : '\t  if ( vTier < 0.5 && fz < hn ) discard; }'))
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );')
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
       .replace('#include <opaque_fragment>', [
@@ -292,7 +297,7 @@ function buildStyle(asset, tone, creatorMat) {
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
         '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * vec3( 1.0, 0.97, 0.92 ) );',
         '  }',
-        '  outgoingLight += ' + (cover ? '0.0 * ' : '') + 'mix( 1.0, ' + MID_SPEC.toFixed(3) + ', vTier ) * sAcc * vStrandOcc.x * vStrandOcc.x; }',
+        '  outgoingLight += ' + (cover ? COVER_SPEC.toFixed(3) + ' * ' : '') + 'mix( 1.0, ' + MID_SPEC.toFixed(3) + ', vTier ) * sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
         '#include <opaque_fragment>'].join('\n'));
   };
@@ -301,12 +306,14 @@ function buildStyle(asset, tone, creatorMat) {
   if (asset.tie) {
     const c = toPage(new Float32Array(asset.tie.c), 1), t = toPage(new Float32Array(asset.tie.t), 1 / HH);
     const ax = new THREE.Vector3(t[0], t[1], t[2]).normalize(), R = asset.tie.r * HH;
+    // fitted to the hair it holds (tie.fit 'hair'): the thong's inner face lies on the hair, its thickness fixed (THONG_MM)
+    const tube = asset.tie.fit ? 0.5 * THONG_MM * HH / HEAD_MM : R * 0.11, major = asset.tie.fit ? R + 0.7 * tube : R * 1.04, pitch = asset.tie.fit ? 2.1 * tube : R * 0.2;
     const leather = new THREE.MeshStandardMaterial({ color: 0x5c3d2b, roughness: 0.7, envMapIntensity: 0.4 });
     parts.tie = new THREE.Group(); parts.tie.name = 'groom-tie';
     for (let w = -1; w <= 1; w++) {
-      const m = new THREE.Mesh(new THREE.TorusGeometry(R * 1.04, R * 0.11, 10, 40), leather);
+      const m = new THREE.Mesh(new THREE.TorusGeometry(major, tube, 10, 40), leather);
       m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), ax);
-      m.position.set(c[0] + ax.x * w * R * 0.2, c[1] + ax.y * w * R * 0.2, c[2] + ax.z * w * R * 0.2); m.castShadow = true;
+      m.position.set(c[0] + ax.x * w * pitch, c[1] + ax.y * w * pitch, c[2] + ax.z * w * pitch); m.castShadow = true;
       parts.tie.add(m);
     }
     group.add(parts.tie);
