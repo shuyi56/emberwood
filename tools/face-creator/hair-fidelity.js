@@ -116,6 +116,13 @@ const SCATTER = 8.0;                              // STYLE: strength of the scat
 const SC_SPEC = 1.5;                              // STYLE: the highlight the scattered light makes, x hair colour
 const SC_BF2 = 0.02;                              // DRAFT: its spread per hair passed, sigma_f^2 = beta_f^2 n (Zinke et al. 2008);
                                                   // beta_f about 8 degrees, no cited value for this lobe form
+// The glow of the lit top layer. A directly lit hair also returns the light the hairs under it scatter back, a wide
+// soft lobe round the highlight (local back scattering, d_b * f_back: Zinke et al. 2008; Sadeghi & Tamstorf 2010), and
+// passes light straight through itself toward a viewer facing the lamp (the TT lobe, Marschner et al. 2003): the pale
+// halo on the outline.
+const GLOW_BACK = 0.06, GLOW_BACK_EXP = 5;        // STYLE: back-scatter glow: strength and width
+const GLOW_TT = 0.5, GLOW_TT_EXP = 4;            // STYLE: transmitted glow: strength and tightness round the lamp's direction
+const GLOW_WHITE = 0.8;                           // STYLE: the glow's colour, from the hair's hue (0) to the lamp's white (1)
 const KK_GAIN = 3.0;                              // STYLE: strength of the fibre diffuse past the Lambert term
 // Direct light on a hair is not a surface's: a fibre is lit from all round its axis, by sin(T, L) (Kajiya & Kay 1989),
 // and what darkens it is other hair, which the baked transmittance already holds. Lambert on the head's outward normal
@@ -316,7 +323,7 @@ function buildStyle(asset, tone, creatorMat) {
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
       .replace('#include <opaque_fragment>', [
         '#if NUM_DIR_LIGHTS > 0',
-        '{ vec3 sT = normalize( vStrandT ), sV = normalize( vViewPosition ), sAcc = vec3( 0.0 ), sSc = vec3( 0.0 ), sKK = vec3( 0.0 ), sScS = vec3( 0.0 );',
+        '{ vec3 sT = normalize( vStrandT ), sV = normalize( vViewPosition ), sAcc = vec3( 0.0 ), sSc = vec3( 0.0 ), sKK = vec3( 0.0 ), sScS = vec3( 0.0 ), sGl = vec3( 0.0 );',
         '  vec3 t1 = normalize( sT + ' + f(SPEC1_SHIFT) + ' * normal );',
         '  vec3 t2 = normalize( sT + ( ' + f(SPEC2_SHIFT) + ' + ' + f(SPEC_JITTER) + ' * ( vStrandOcc.y - 0.5 ) ) * normal );',
         // (the primary half-way to the hair's hue: pure light colour on single strands read as grey hairs. STYLE: Scheuermann's is untinted)
@@ -334,6 +341,7 @@ function buildStyle(asset, tone, creatorMat) {
         // forward-scattered light on the part the direct light does not reach: lit along the strand (Kajiya-Kay
         // sin(T, L)), wrapped wide round the head instead of cut off at the surface normal (Karis's wrapped Lambert)
         '    float sTf = ' + f(SC_DF) + ' * pow( max( vLight[ i ], 0.004 ), ' + f(SC_EXP) + ' ) * ( 1.0 - vLight[ i ] );',
+        '    sGl += directionalLights[ i ].color * vLight[ i ] * ( ' + f(GLOW_BACK) + ' * wrap * smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), ' + f(GLOW_BACK_EXP) + ' ) + ' + f(GLOW_TT) + ' * pow( max( 0.0, -dot( sV, sL ) ), ' + f(GLOW_TT_EXP) + ' ) * sqrt( max( 0.0, 1.0 - dot( sT, sL ) * dot( sT, sL ) ) ) );',
         '    float sLT = dot( sT, sL ), sSin = sqrt( max( 0.0, 1.0 - sLT * sLT ) ), sNL = dot( normal, sL );',
         '    sSc += directionalLights[ i ].color * sTf * ( 0.5 + 0.5 * sNL ) * sSin;',
         // and its highlight: the secondary lobe, spread wider by every hair the light has passed
@@ -342,6 +350,7 @@ function buildStyle(asset, tone, creatorMat) {
         // the fibre's own diffuse where it exceeds the surface's Lambert term, under the same transmittance
         '    sKK += directionalLights[ i ].color * max( vLight[ i ], ' + f(LIGHT_FLOOR) + ' ) * max( 0.0, sSin * clamp( ( sNL + ' + f(KK_WRAP) + ' ) / ' + f(1 + KK_WRAP) + ', 0.0, 1.0 ) - clamp( sNL, 0.0, 1.0 ) );',
         '  }',
+        '' + (cover ? '' : '  outgoingLight += ( 1.0 - vTier ) * sGl * mix( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( 1.0, 0.97, 0.92 ), ' + f(GLOW_WHITE) + ' ) * vStrandOcc.x;'),
         '  outgoingLight += ( ' + f(KK_GAIN) + ' * RECIPROCAL_PI * sKK + ' + f(SC_SPEC) + ' * ( 0.4 + 1.2 * vStrandOcc.y ) * sScS ) * diffuseColor.rgb * vStrandOcc.x;',
         '  outgoingLight += ' + f(SCATTER) + ' * RECIPROCAL_PI * sSc * diffuseColor.rgb * pow( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( ' + f(SC_SAT) + ' ) ) * mix( 1.0, vStrandOcc.x, 0.5 );',
         '  outgoingLight += ' + (cover ? COVER_SPEC.toFixed(3) + ' * ' : '') + 'mix( 1.0, ' + MID_SPEC.toFixed(3) + ', vTier ) * sAcc * vStrandOcc.x * vStrandOcc.x; }',
