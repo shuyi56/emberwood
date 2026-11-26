@@ -69,7 +69,7 @@ def _build(x0, R0, W, l):
     return X, Rs
 
 
-def solve(roots, frames, lengths, n_hairs, radius, head=None, seed=0, curl=(CURL_R_MM, CURL_PITCH_MM), log=None):
+def solve(roots, frames, lengths, n_hairs, radius, head=None, seed=0, curl=(CURL_R_MM, CURL_PITCH_MM), log=None, squeeze=1.0, squeeze_mm=45.0):
     """roots (n, 3) mm; frames (n, 3, 3) columns d1, d2, t at the tie; lengths (n,) mm; n_hairs (n,); radius (n,) mm,
     a lock's radius at the tie; head: f(points mm) -> (depth inside mm, outward normal) or None."""
     rng = np.random.default_rng(seed)
@@ -85,6 +85,10 @@ def solve(roots, frames, lengths, n_hairs, radius, head=None, seed=0, curl=(CURL
     grow = np.clip(s / CURL_FROM_MM, 0, 1); grow = grow * grow * (3 - 2 * grow)
     K0 = (k0[:, None] * grow)[:, :, None] * np.stack([np.cos(tau0[:, None] * s + phi[:, None]), np.sin(tau0[:, None] * s + phi[:, None]), np.zeros_like(s)], 2)
     rad = radius[:, None] * np.sqrt(np.clip(1 - 0.7 * (np.arange(M + 1)[None, :] / M) ** 2, 0.1, 1))    # (thinning to the tip)
+    # under the band the locks are pressed to `squeeze` of their free radius, and swell back over squeeze_mm (without
+    # it, locks crowded at a tight tie start inside each other and the contact throws the outer ones clear)
+    sn = np.c_[np.zeros(n), np.cumsum(np.repeat(l[:, None], M, 1), 1)] / squeeze_mm
+    sn = np.clip(sn, 0, 1); rad = rad * (squeeze + (1 - squeeze) * sn * sn * (3 - 2 * sn))
     W = np.zeros((n, M, 3))
     # each joint's own step: its elastic stiffness over that plus the stiffness the load below it adds (the weight's
     # and the contacts' levers), so the heavy top of a lock moves slowly and the light tip freely

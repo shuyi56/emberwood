@@ -58,7 +58,7 @@ const FUZZ_W = 2.0, FUZZ_A = 0.9, FINE_SHARE = 0.3, FINE_W = 0.35;
 // sun-lightened hair (Robbins ch. 5, photochemical lightening). A strand takes its section's tone (the innermost at
 // LAYER_DARK of the outermost), and any point buried under other hair (its baked ambient) goes down to INNER_DARK,
 // so an under layer seen past the edge of an upper one reads as a separate, deeper layer. STYLE amounts.
-const LAYER_DARK = 0.5, INNER_DARK = 0.45;
+const LAYER_DARK = 0.75, INNER_DARK = 0.65;   // (0.5 and 0.45 stacked with the mid and coverage tones to flat black on the lower side)
 // Glints: a hair's section is an ellipse and the hair twists along its length, so the light it focuses back comes and
 // goes along it: "glints", bright near-white streaks that sit at different places on neighbouring hairs
 // (Marschner et al. 2003, "Light Scattering from Human Hair Fibers", sect. 5.2.3 and their fig. on eccentricity). Here:
@@ -95,9 +95,9 @@ const SPEC2 = 0.22, SPEC2_EXP = 22, SPEC2_SHIFT = -0.14;    // STYLE: secondary:
 const SPEC_JITTER = 0.12;                         // STYLE: each strand's own extra shift, so the band breaks into glints
 const LOCK_TONE = 0.2, CLUMP_TONE = 0.2;          // STYLE: a whole lock, and a clump in it, this much lighter or darker
                                                   // (the ID map of card hair: big clumps, then subclumps; 80.lv / CGMA)
-const LIGHT_FLOOR = 0.2;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
+const LIGHT_FLOOR = 0.3;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
                                                   // Zinke et al. 2008), which the single-scattering transmittance leaves out
-const AMB_FLOOR = 0.25;                           // STYLE: the same for the ambient (0.06 left the tail black in the 3/4)
+const AMB_FLOOR = 0.4;                            // STYLE: the same for the ambient (0.06 left the tail black in the 3/4)
 const STRAND_ROUGH = 0.6;                         // STYLE: a soft sheen along the lit strands (0.8 read matte and flat)
 const PX_WORLD = { value: 0.002 };                // one pixel's width at unit depth: set each frame from the camera
 function cutTexture() {

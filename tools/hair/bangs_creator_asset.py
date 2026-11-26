@@ -37,6 +37,7 @@ TAIL_HAIR_SPREAD = 0.7      # DRAFT: and a hair this much farther from its sub-l
 TAIL_SPREAD_FROM = 0.12     # the share of a lock's length where the opening starts
 TAIL_JOIN_MM = 45.0         # a hair passes from the tail's field line to its lock's rod over this length, eased with a
                             # quintic (zero slope and curvature change at both ends: the line stays G2 across the join)
+TAIL_TIE_SQUEEZE = 0.45     # DRAFT: under the band a lock is pressed to this share of its free radius (the tie's packing)
 TAIL_LOCK_ROUND = 0.8       # DRAFT: how much a tail hair's "out" is its lock's own (each lock lit as a round bundle)
 
 
@@ -132,7 +133,7 @@ def tail_locks(P, sid, n_strands, FF, hairs, shell=None, seed=9):
         U = pts * mm - BF.SF.CENTRE
         r = np.linalg.norm(U, axis=1); U = U / np.maximum(r[:, None], 1e-12)
         return shell.radius(U) / mm + rd - r / mm, U
-    out = TR.solve(roots / mm, frames, length, nh, lock_r, head=head, seed=seed, log=lambda t: print('  rods:', t, file=sys.stderr))
+    out = TR.solve(roots / mm, frames, length, nh, lock_r, head=head, seed=seed, squeeze=TAIL_TIE_SQUEEZE, log=lambda t: print('  rods:', t, file=sys.stderr))
     X, Rr, rs = out['x'] * mm, out['R'], out['s']
     # the hairs ride their lock's rod
     lk = lp[m]
@@ -260,6 +261,15 @@ def main():
         paths, tiltv, comb, layv, vol = HV.layer(paths, basin == 0, BF.Shell(B['surf']), np.asarray(FF0['cl'])[0], float(B['r_tie']),
                                      np.asarray(FF0['tang'])[0])
         print('volume', vol, file=sys.stderr)
+    fun_u = None
+    if '--funnel' in a:                                               # the side hair's last stretch gathered to the tie (tie_funnel.py)
+        import tie_funnel as TF
+        FFf = PF.free_fall(B)
+        clf, scf = np.asarray(FFf['cl']), np.asarray(FFf['s'], float)
+        smf = np.abs(scf - scf[0]) * (1.0 if scf.max() > 5 else 1 / BF.MM)
+        jf = int(np.argmin(np.abs(smf - 27.0)))                       # (the tie: 27 mm along the tail, as the tie search below finds)
+        paths, fun_u, fu = TF.funnel(paths, basin == 0, clf[jf], clf[jf + 2] - clf[jf - 2], float(B['r_tie']), BF.Shell(B['surf']), float(hairs[basin == 0].sum()))
+        print('funnel', fu, file=sys.stderr)
     tier = None
     if '--mid-layer' in a:                                            # a mid layer of thick clumps under the loose top (hair_layers.py)
         import hair_layers as HLy
@@ -343,6 +353,8 @@ def main():
     if tiltv is not None:                              # the comb furrows' own slopes (hair_volume.py), so they are lit
         oh += np.concatenate([tiltv[i][~np.isnan(paths[i][:, 0])] for i in keep])
         oh /= np.maximum(np.linalg.norm(oh, axis=1, keepdims=True), 1e-9)
+    if fun_u is not None:                              # (in the funnel "out" turns from the head's to the tail's with the hair)
+        wt = np.maximum(wt, np.concatenate([fun_u[i][~np.isnan(paths[i][:, 0])] for i in keep]))
     outv = oh * (1 - wt)[:, None] + out_tail * wt[:, None]
     if lock_out is not None:                           # (the solved tail: out from each lock's own middle)
         tw = np.linalg.norm(lock_out, axis=1, keepdims=True)
