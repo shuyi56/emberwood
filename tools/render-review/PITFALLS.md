@@ -228,3 +228,16 @@ repeated on more than one garment. The reviewer applies them once John merges th
   drape from forward to back over a range of roots, not at one slope; sweep back only to below the shoulder's top, then
   plumb; cap the backward fall per unit of drop; and run the hairline-gap gauge before the render (bare scalp at the
   hairline's edge, a bare wedge between the front lock and the back hair).
+
+## R012 Hair strand noise, glints or coverage set in one large step
+
+- **Seen:** 3 rejections on the hair rebuild (2026-11-25, 21:02 to 22:48Z, logged by the thread itself): lock noise of 3 mm
+  with a third harmonic and per-hair noise turned straight hair into frizzy curl, glints at 9 mm cycles and strength 1.1
+  read as glitter or dandruff specks over the whole head, and a coverage layer 1.2 mm under the strands, 3 times wide at
+  tone 0.42, buried the detail strands so the hair read near black. Each was fixed in the next round by going the other
+  way (longer quieter noise, 24 mm glints at strength 0.5, a deeper narrower lighter coverage).
+- **Spot:** The diff adds or retunes strand noise, glints or a coverage and darkening layer, and the first render of the
+  round is the first look at the whole head at full strength.
+- **Fix:** Start each of these at the quiet end (no short harmonic, per-hair noise near zero, glints as short streaks
+  inside the highlight band, coverage deeper, narrower and lighter than the detail layer), render one close-up from the side
+  and the back, and raise one parameter at a time.
