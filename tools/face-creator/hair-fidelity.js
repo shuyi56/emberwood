@@ -120,8 +120,8 @@ const SC_BF2 = 0.02;                              // DRAFT: its spread per hair 
 // soft lobe round the highlight (local back scattering, d_b * f_back: Zinke et al. 2008; Sadeghi & Tamstorf 2010), and
 // passes light straight through itself toward a viewer facing the lamp (the TT lobe, Marschner et al. 2003): the pale
 // halo on the outline.
-const GLOW_BACK = 0.035, GLOW_BACK_EXP = 5;        // STYLE: back-scatter glow: strength and width
-const GLOW_TT = 0.25, GLOW_TT_EXP = 4;            // STYLE: transmitted glow: strength and tightness round the lamp's direction
+const GLOW_BACK = 0.0, GLOW_BACK_EXP = 5;        // STYLE: back-scatter glow: strength and width
+const GLOW_TT = 0.0, GLOW_TT_EXP = 4;            // STYLE: transmitted glow: strength and tightness round the lamp's direction
 const GLOW_WHITE = 0.8;                           // STYLE: the glow's colour, from the hair's hue (0) to the lamp's white (1)
 const KK_GAIN = 3.0;                              // STYLE: strength of the fibre diffuse past the Lambert term
 // Direct light on a hair is not a surface's: a fibre is lit from all round its axis, by sin(T, L) (Kajiya & Kay 1989),
