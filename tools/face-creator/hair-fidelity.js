@@ -7,6 +7,7 @@ const HH = 8.6;                                   // the creator's units per hea
 const MODES = [['creator', 'Creator (sculpted locks)'], ['lod2', 'Groom: cards, LOD 2'], ['lod1', 'Groom: cards, LOD 1'],
   ['lod0', 'Groom: cards, LOD 0'], ['strands', 'Groom: strands']];
 const LOD_INDEX = { lod0: 0, lod1: 1, lod2: 2 };
+const CAP_FADE_MM = 10;                           // STYLE: the scalp cap fades into the skin over this width at the hairline
 const SCALP_SHADE = 0.4;                          // STYLE: the scalp cap against the hair colour: the shade map's root (0.5) in
                                                   // the shadow of the hair over it (render.py: 0.35)
 
@@ -100,9 +101,28 @@ const SPEC2 = 0.22, SPEC2_EXP = 22, SPEC2_SHIFT = -0.14;    // STYLE: secondary:
 const SPEC_JITTER = 0.12;                         // STYLE: each strand's own extra shift, so the band breaks into glints
 const LOCK_TONE = 0.2, CLUMP_TONE = 0.2;          // STYLE: a whole lock, and a clump in it, this much lighter or darker
                                                   // (the ID map of card hair: big clumps, then subclumps; 80.lv / CGMA)
-const LIGHT_FLOOR = 0.3;                          // STYLE: light that reaches deep hair by many scatterings (dual scattering,
-                                                  // Zinke et al. 2008), which the single-scattering transmittance leaves out
-const AMB_FLOOR = 0.4;                            // STYLE: the same for the ambient (0.06 left the tail black in the 3/4)
+const LIGHT_FLOOR = 0.08;                         // STYLE: a small rest of direct light in deep hair. It was 0.3 and flat; the light
+                                                  // that many scatterings carry inward is now the forward-scatter term below
+// Light under other hair (dual scattering: Zinke et al. 2008; the artist's form, Sadeghi & Tamstorf 2010). Light that
+// passes n hairs comes out forward-scattered with T_f = d_f * a_f^n: it is spread wide, so it lights a hair from all
+// round its axis, not by a surface normal, and it has taken the hair's hue on the way (Karis 2016).
+const SC_DF = 0.7;                                // forward-scatter density d_f (Sadeghi & Tamstorf 2010: 0.7)
+const SC_AF = 0.75;                               // DRAFT: share of the light one hair passes on forward, a_f. No source
+                                                  // gives it for dark hair; the baked transmittance is exp(-0.6 n), so
+const SC_EXP = Math.log(1 / SC_AF) / 0.6;         // a_f^n = T^(ln(1/a_f) / 0.6)
+const SCATTER = 8.0;                              // STYLE: strength of the scattered diffuse. At 1 (the albedo's own share) dark
+                                                  // brown hair gains 1 level of 255 under the filmic toe; Sadeghi & Tamstorf
+                                                  // make the forward- and back-scatter intensities artist controls for this
+const SC_SPEC = 1.5;                              // STYLE: the highlight the scattered light makes, x hair colour
+const SC_BF2 = 0.02;                              // DRAFT: its spread per hair passed, sigma_f^2 = beta_f^2 n (Zinke et al. 2008);
+                                                  // beta_f about 8 degrees, no cited value for this lobe form
+const KK_GAIN = 3.0;                              // STYLE: strength of the fibre diffuse past the Lambert term
+// Direct light on a hair is not a surface's: a fibre is lit from all round its axis, by sin(T, L) (Kajiya & Kay 1989),
+// and what darkens it is other hair, which the baked transmittance already holds. Lambert on the head's outward normal
+// put a second, solid terminator on top and left the hair that faces away from every lamp black.
+const KK_WRAP = 0.5;                              // STYLE: how far the light wraps round the head (Scheuermann 2004 wraps
+                                                  // N.L to 0.25..1; Karis 2016 wraps the scattered part)
+const SC_SAT = 0.5;                               // STYLE: how far the scattered light takes the hair's hue (Karis: absorption along the path)
 const STRAND_ROUGH = 0.6;                         // STYLE: a soft sheen along the lit strands (0.8 read matte and flat)
 const PX_WORLD = { value: 0.002 };                // one pixel's width at unit depth: set each frame from the camera
 function cutTexture() {
@@ -173,7 +193,7 @@ function buildStyle(asset, tone, creatorMat) {
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );');
   };
   // the scalp under the hair in the root colour, as render.py draws it (SCALP_SHADE), so no skin shows between hairs
-  const capMat = new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(SCALP_SHADE), roughness: 1, metalness: 0 });   // (fully rough, as UE's scalp: no stray highlight)
+  const capMat = new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(SCALP_SHADE), roughness: 1, metalness: 0, vertexColors: true, transparent: true });   // (fully rough, as UE's scalp: no stray highlight)
   asset.lods.forEach((L, i) => {
     const g = new THREE.BufferGeometry(), P = toPage(new Float32Array(bytes(L.pos)), 1), UV = new Float32Array(bytes(L.uv));
     const A = cardAttributes(P, UV, L.ao ? new Float32Array(bytes(L.ao)) : null);
@@ -189,6 +209,21 @@ function buildStyle(asset, tone, creatorMat) {
   const cg = new THREE.BufferGeometry();
   cg.setAttribute('position', new THREE.BufferAttribute(toPage(new Float32Array(bytes(asset.cap.pos)), 1), 3));
   cg.setIndex(new THREE.BufferAttribute(new Uint32Array(bytes(asset.cap.idx)), 1)); cg.computeVertexNormals();
+  // The cap fades into the skin at the hairline. Solid to its edge, it stood as a black band wherever the roots thin out:
+  // behind the ear, under the nape hem, at the temple. (UE4 Photorealistic Character paints the scalp under the hair
+  // and fades that paint out at the hairline; the width is STYLE.)
+  { const cp = cg.getAttribute('position'), ci = cg.getIndex().array, nV = cp.count, eCount = new Map();
+    const ek = (a, b) => a < b ? a * nV + b : b * nV + a;
+    for (let t = 0; t < ci.length; t += 3) for (let k = 0; k < 3; k++) { const e = ek(ci[t + k], ci[t + (k + 1) % 3]); eCount.set(e, (eCount.get(e) || 0) + 1); }
+    const edge = new Set(); eCount.forEach((n, e) => { if (n === 1) { edge.add(Math.floor(e / nV)); edge.add(e % nV); } });
+    const eb = [...edge], fade = CAP_FADE_MM * HH / HEAD_MM, rgba = new Float32Array(nV * 4);
+    for (let v = 0; v < nV; v++) {
+      let d2 = Infinity; const x = cp.getX(v), y = cp.getY(v), z = cp.getZ(v);
+      for (const b of eb) { const dx = cp.getX(b) - x, dy = cp.getY(b) - y, dz = cp.getZ(b) - z; d2 = Math.min(d2, dx * dx + dy * dy + dz * dz); }
+      const a = Math.min(1, Math.sqrt(d2) / fade);
+      rgba[4 * v] = rgba[4 * v + 1] = rgba[4 * v + 2] = 1; rgba[4 * v + 3] = a * a * (3 - 2 * a);
+    }
+    cg.setAttribute('color', new THREE.BufferAttribute(rgba, 4)); }
   parts.cap = new THREE.Mesh(cg, capMat); group.add(parts.cap);
   // The strands: each drawn child stands for `hairs_per_strand` real hairs (about 9.6), so it is a ribbon that wide:
   // that many hairs of HAIR_MM side by side, turned to face the camera, and never under a pixel. (As one-pixel lines
@@ -271,7 +306,7 @@ function buildStyle(asset, tone, creatorMat) {
       // casts the only shadow, so it stays first), the ambient by the hair's averaged transmittance
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
         'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= max( vLight[ i ], ' + LIGHT_FLOOR.toFixed(3) + ' );'))
-      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n\treflectedLight.indirectDiffuse *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' ); reflectedLight.indirectSpecular *= max( vLight.w, ' + AMB_FLOOR.toFixed(3) + ' );' +
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n\t{ float sAmb = max( vLight.w, ' + SC_DF.toFixed(3) + ' * pow( max( vLight.w, 0.004 ), ' + SC_EXP.toFixed(3) + ' ) ); reflectedLight.indirectDiffuse *= sAmb; reflectedLight.indirectSpecular *= sAmb; }' +
         (cover ? ' reflectedLight.directSpecular *= 0.0; reflectedLight.indirectSpecular *= 0.0;' : ''))     // (no sheen of its own on the coverage layer: at grazing angles it showed as grey patches on the tail)
       .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';\n' +
         '\t{ float fz = ' + FUZZ_A.toFixed(3) + ' * ( 1.0 - vSide * vSide );\n' +
@@ -281,7 +316,7 @@ function buildStyle(asset, tone, creatorMat) {
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
       .replace('#include <opaque_fragment>', [
         '#if NUM_DIR_LIGHTS > 0',
-        '{ vec3 sT = normalize( vStrandT ), sV = normalize( vViewPosition ), sAcc = vec3( 0.0 );',
+        '{ vec3 sT = normalize( vStrandT ), sV = normalize( vViewPosition ), sAcc = vec3( 0.0 ), sSc = vec3( 0.0 ), sKK = vec3( 0.0 ), sScS = vec3( 0.0 );',
         '  vec3 t1 = normalize( sT + ' + f(SPEC1_SHIFT) + ' * normal );',
         '  vec3 t2 = normalize( sT + ( ' + f(SPEC2_SHIFT) + ' + ' + f(SPEC_JITTER) + ' * ( vStrandOcc.y - 0.5 ) ) * normal );',
         // (the primary half-way to the hair's hue: pure light colour on single strands read as grey hairs. STYLE: Scheuermann's is untinted)
@@ -296,7 +331,19 @@ function buildStyle(asset, tone, creatorMat) {
         '    float dg = dot( sT, sH ), sg = pow( max( 0.0, 1.0 - dg * dg ), ' + f(GLINT_EXP / 2) + ' );',
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
         '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * vec3( 1.0, 0.97, 0.92 ) );',
+        // forward-scattered light on the part the direct light does not reach: lit along the strand (Kajiya-Kay
+        // sin(T, L)), wrapped wide round the head instead of cut off at the surface normal (Karis's wrapped Lambert)
+        '    float sTf = ' + f(SC_DF) + ' * pow( max( vLight[ i ], 0.004 ), ' + f(SC_EXP) + ' ) * ( 1.0 - vLight[ i ] );',
+        '    float sLT = dot( sT, sL ), sSin = sqrt( max( 0.0, 1.0 - sLT * sLT ) ), sNL = dot( normal, sL );',
+        '    sSc += directionalLights[ i ].color * sTf * ( 0.5 + 0.5 * sNL ) * sSin;',
+        // and its highlight: the secondary lobe, spread wider by every hair the light has passed
+        '    float sES = 1.0 / ( ' + f(1 / SPEC2_EXP) + ' + ' + f(SC_BF2) + ' * ( -log( max( vLight[ i ], 0.004 ) ) / 0.6 ) );',
+        '    sScS += directionalLights[ i ].color * sTf * ( 0.5 + 0.5 * sNL ) * smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), sES );',
+        // the fibre's own diffuse where it exceeds the surface's Lambert term, under the same transmittance
+        '    sKK += directionalLights[ i ].color * max( vLight[ i ], ' + f(LIGHT_FLOOR) + ' ) * max( 0.0, sSin * clamp( ( sNL + ' + f(KK_WRAP) + ' ) / ' + f(1 + KK_WRAP) + ', 0.0, 1.0 ) - clamp( sNL, 0.0, 1.0 ) );',
         '  }',
+        '  outgoingLight += ( ' + f(KK_GAIN) + ' * RECIPROCAL_PI * sKK + ' + f(SC_SPEC) + ' * ( 0.4 + 1.2 * vStrandOcc.y ) * sScS ) * diffuseColor.rgb * vStrandOcc.x;',
+        '  outgoingLight += ' + f(SCATTER) + ' * RECIPROCAL_PI * sSc * diffuseColor.rgb * pow( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( ' + f(SC_SAT) + ' ) ) * mix( 1.0, vStrandOcc.x, 0.5 );',
         '  outgoingLight += ' + (cover ? COVER_SPEC.toFixed(3) + ' * ' : '') + 'mix( 1.0, ' + MID_SPEC.toFixed(3) + ', vTier ) * sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
         '#include <opaque_fragment>'].join('\n'));
