@@ -292,6 +292,112 @@ which also reads painted strand textures and runs inside `smoke.py`); take that 
 
 ## Faces, heads, measuring
 
+### Face flow: `face/face_flow.py`, `face/render_clay.cjs`
+
+**What it is for.** The brow-to-mouth lines a sculptor reads, traced on a reference photo and on a Face Creator head
+from the same front orthographic camera, in one unit (the pupils' distance), with every gap listed: the brow-tip line
+(the lit front plane's edge from the brow's underside down the bridge's side to the tip-defining point), the outer line
+(the lid crease, the nasofacial groove, the wing's crease), the philtrum's columns and the upper lip's line; and the
+landmarks between them (inner and outer eye corners, wings, tip-defining points, bow peaks, mouth corners).
+
+**In and out.** `ref <photo> <refmeasure sheet>`: the photo's yellow strokes traced automatically (John marks his
+references in yellow) and levelled on the pupils. `model <dump.json>`: a head dumped by `tools/face-check/dump-heads.cjs`
+(PR #75). `compare <ref.flow.json> <model.flow.json>...`: `flow-gaps.md`, `flow-gaps.json` and `flow-sheet.png` (the
+photo with both sets of lines, and each head's clay front with ours in cyan and the photo's in yellow).
+`render_clay.cjs <creator.html> <out> [faces]` renders the cheap clay and raking-key matcap views (front, 3/4, side,
+back, and close-ups of the brow-to-mouth region from the front and 3/4) with the hair hidden.
+
+**Run.**
+```
+python3 tools/gauges/face/face_flow.py ref ref.png ref.measure.json --out flow
+node tools/face-check/dump-heads.cjs face-creator.html dump Ranger,Rogue      (PR #75)
+python3 tools/gauges/face/face_flow.py model dump/Ranger.json --out flow
+python3 tools/gauges/face/face_flow.py compare flow/ref.flow.json flow/Ranger.flow.json --out flow
+node tools/gauges/face/render_clay.cjs face-creator.html clay Ranger
+```
+
+**Trouble looks like.** The brow-tip line's waist far narrower than the tip-defining points (a fin of a bridge); the
+outer line close in at mid-bridge (the side walls do not run out into the cheek); a large brow-to-nose join gap (the
+brow's line and the nose's do not meet); many polygon sides at 1 mm or a sharp turn on a line (a step, not a flow);
+the mouth's corners off the medial limbus, the wings off the inner corners.
+
+**Use it when.** Any change between the brow and the mouth, before and after, with `face_lines.py` for the profile
+angles a front view cannot see.
+
+### Plane breaks: `face/plane_breaks.py`
+
+**What it is for.** It reads the chisel from the tone, the way a draughtsman does, on a reference photo and on Face
+Creator heads. Across the shadow trace's line at eight heights it measures where the front of the nose turns into its
+side, how wide that turn is (sharp, firm or soft), how far the side turns, and how wide the climb from the shade back
+onto the cheek is. Sources: Prokopenko and Hampton on edges (Proko), Horn on image intensities.
+
+**In and out.** `ref <photo> <refmeasure sheet>`, `model <dump.json>` and `compare <ref.breaks.json> <model.breaks.json>...`.
+It writes `plane-breaks.md`. Per height: `x_break` (pupil distances), `width`, `rise` and `radius` (mm, pupil distance
+63 mm), `core` (the side's tone over the front's) and `turn` (degrees). On a head it adds `turn_geo` and `radius_geo`
+from the true normals, a check on the tone reading.
+
+**Run.**
+```
+python3 tools/gauges/face/plane_breaks.py ref ref.png ref.measure.json --out pb
+python3 tools/gauges/face/plane_breaks.py model dump/Rogue.json --out pb
+python3 tools/gauges/face/plane_breaks.py compare pb/ref.breaks.json pb/Rogue.breaks.json --out pb
+```
+
+**Limits.** The photo's light has more fill than the heads' key, so the photo's `turn` reads low; compare positions and
+widths, which do not depend on it. Above the inner corners the brows' hair and the socket's tilt make `turn` unreliable.
+
+### Shadow trace: `face/shadow_trace.py`
+
+**What it is for.** It finds the shade's darkest line from under the brow's head, past the inner corner of the eye,
+down the side of the nose and round its wing. It traces this on a reference photo and on Face Creator heads lit the
+same way, from the same front camera, in the same unit as `face_flow.py`. It shows whether our shade runs where the
+photo's does, as one smooth wave.
+
+How each side is made:
+
+- **The photo:** John's yellow marks are painted out (biharmonic inpainting), the image is levelled on the pupils,
+  and its luminance is taken.
+- **The heads:** a z-buffer of the head and eyes, with normals from it, lit by a soft frontal key from a little above
+  (Lambert's law with a wrap).
+- **On both:** the same opening is masked round each eye. The line is the darkest smooth path on each side: dynamic
+  programming over rows 0.01 apart, with a penalty for bending.
+
+**In and out.** `ref <photo> <refmeasure sheet>`, `model <dump.json>` and `compare <ref.shadow.json> <model.shadow.json>...`.
+They write `shadow-gaps.md` and `shadow-sheet.png`. The sheet shows the photo's line in red, ours in blue, and the photo's
+laid over ours in yellow. The measures are the line's x out from the midline at four heights:
+
+- the brow's head (y -0.25);
+- the inner corner (0);
+- the bridge's side (0.25);
+- round the wing (0.5).
+
+From those come the wave (inset and outset against its narrowest point), its curvature's sign changes and its
+sharpest turn.
+
+**Run.**
+```
+python3 tools/gauges/face/shadow_trace.py ref ref.png ref.measure.json --out sh
+python3 tools/gauges/face/shadow_trace.py model dump/Ranger.json --out sh
+python3 tools/gauges/face/shadow_trace.py compare sh/ref.shadow.json sh/Ranger.shadow.json --out sh
+```
+
+**Trouble looks like.**
+
+- The line out at 0.3-0.4 at the brow's head: the shade sits in the socket under the brow, not beside the bridge.
+- The line out past 0.2 at the inner corner: the side of the bridge is lit down to the eyes.
+- A sharp turn per 0.05 well above the photo's 27 degrees: a kink where one shade hands over to another.
+
+**Use it when.** Any change to the nose's side, the socket's inner corner or the brow's head. Use it together with
+`face_flow.py`.
+
+**Grounded in.** Park 2011 (doi 10.3342/ceo.2011.4.2.55); Brito, Avashia and Rohrich 2020 (PMC7159929); Cangello and
+Hilinski nasal analysis; plasticsurgerykey, Nasal analysis and anatomy; Bridgman, Constructive Anatomy; Proko, Planes
+and forms of the head; Anatomy for Sculptors, Forming the head. The 35 degree edge of the lit plane is this gauge's own
+choice (EXPERIMENTAL), between face_lines' 30 (tip-defining points) and 45 (dorsal lines). The numbers and the first
+use: `docs/faces/face-flow.md`.
+
+### On open PRs
+
 All on open PRs; they land here under `gauges/face/` and `gauges/measuring/`.
 
 - `tools/refmeasure/` (PR #89): comparative measurement of a reference image and of a render against it, the
