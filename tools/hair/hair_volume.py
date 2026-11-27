@@ -40,20 +40,23 @@ HAIR_DIAM_MM = 0.07
 PACKING = 0.12          # DRAFT
 CAP_MM = 9.0            # DRAFT
 LOCK_MM = 7.0
-LOCK_VAR = 0.35         # DRAFT
+LOCK_VAR = 0.18         # DRAFT (0.35 made 7 mm cells of unequal height: a bristly crest on the top outline from the front)
 ROOT_MM = 2.0           # DRAFT
 ROOT_OVER_MM = 8.0      # DRAFT
 BED_OVER_MM = 12.0      # DRAFT
 BED_MAX_MM = 5.0        # DRAFT
 LOCKS = 46              # DRAFT: comb locks round the tie
-FURROW_MM = 2.6         # DRAFT: a lock's ridge over its furrows, at most
+FURROW_MM = 1.3         # DRAFT: a lock's ridge over its furrows, at most (2.6 read as ridges on the head)
 FURROW_SLOPE = 0.8      # DRAFT: the steepest side of a ridge (rise over run)
-LOCK_STEP_MM = 1.3      # DRAFT: a lock stands this much higher or lower than the mean
-FURROW_FROM_MM = (10.0, 40.0)   # DRAFT: furrows grow in over this run from the root
+LOCK_STEP_MM = 0.6      # DRAFT (was 1.3): a lock stands this much higher or lower than the mean
+FURROW_FROM_MM = (25.0, 70.0)   # DRAFT: furrows grow in over this run from the root (later than 10..40, so the
+                                # hair just behind the fringe stays one smooth surface)
 TOP_EL_DEG = 35.0       # the top section: roots above this elevation from the skull's centre (above the parietal ridge,
                         # where a stylist's horseshoe parting runs; Milady Standard Cosmetology, sectioning)
 NAPE_EL_DEG = -5.0      # the nape section: roots at the back below this
-LAYER_GAP_MM = 2.5      # DRAFT: the top section lies this much clear of the sections it is combed over
+LAYER_GAP_MM = 1.2      # DRAFT: the top section lies this much clear of the sections it is combed over (2.5 stacked
+                        # with the root stand and furrows to a 12 mm roll 60 mm behind the fringe; the hairs' own
+                        # packed thickness there is 3.8 mm)
 LAYER_FROM_MM = (15.0, 50.0)    # DRAFT: it comes clear over this run from the root
 TIE_FADE_MM = (4.0, 40.0)   # DRAFT: no lift within the first of the tie's rim, all of it past the second
 RATE = ROOT_PER_MM2 * math.pi * (HAIR_DIAM_MM / 2) ** 2 / PACKING       # mm of height per mm of hair
