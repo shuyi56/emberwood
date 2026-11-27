@@ -33,7 +33,9 @@ function toPage(src, scale) {
 // about 1 cm a month (Wikipedia, Human hair growth), so the end of a 45 cm length is nearly four years old, and its
 // colour has been changed by that much sunlight, mainly UVA (Nogueira & Joekes 2004, via Nogueira et al. 2006), light
 // hair more than dark (Signori 2004, same review). No measured root-to-tip lightness was found: the amounts are STYLE.
-const ROOT_DARK = 0.5;                            // STYLE: the root against the mid-length
+const ROOT_DARK = 0.85;                           // STYLE: the root against the mid-length. It was 0.5, on top of the baked
+                                                  // self-shadowing that already darkens covered roots: exposed roots along the
+                                                  // fringe boundary then drew a dark band across the head
 const ROOT_CM = 4;                                // STYLE: how far from the root the darkening reaches
 const TIP_LIGHT = 1.35;                           // STYLE: the very end against the mid-length
 const TIP_FRAC = 0.45;                            // STYLE: the share of each hair's length that lightens toward its end
