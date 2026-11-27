@@ -259,7 +259,7 @@ def main():
         import hair_volume as HV
         FF0 = PF.free_fall(B)
         paths, tiltv, comb, layv, vol = HV.layer(paths, basin == 0, BF.Shell(B['surf']), np.asarray(FF0['cl'])[0], float(B['r_tie']),
-                                     np.asarray(FF0['tang'])[0])
+                                     np.asarray(FF0['tang'])[0], junction=paths[basin == 1][:, 0])
         print('volume', vol, file=sys.stderr)
     fun_u = fun_tie = None
     if '--funnel' in a:                                               # the side hair's last stretch gathered to the tie (tie_funnel.py)

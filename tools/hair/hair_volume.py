@@ -58,11 +58,16 @@ LAYER_GAP_MM = 1.2      # DRAFT: the top section lies this much clear of the sec
                         # with the root stand and furrows to a 12 mm roll 60 mm behind the fringe; the hairs' own
                         # packed thickness there is 3.8 mm)
 LAYER_FROM_MM = (15.0, 50.0)    # DRAFT: it comes clear over this run from the root
+JUNCTION_MM = 5.0       # DRAFT: where swept-back hair is rooted beside a fringe, its root stands this high: the fringe
+                        # stands 4 to 6 mm within 10 to 15 mm of its own roots (measured on this groom), and the
+                        # swept-back hair's 1 to 3 mm there left a trough across the head with a roll behind it
+JUNCTION_NEAR_MM = (30.0, 6.0)  # DRAFT: none of it past the first distance from the fringe's roots, all within the second
+JUNCTION_OVER_MM = 10.0 # DRAFT: reached over this run from the root
 TIE_FADE_MM = (4.0, 40.0)   # DRAFT: no lift within the first of the tie's rim, all of it past the second
 RATE = ROOT_PER_MM2 * math.pi * (HAIR_DIAM_MM / 2) ** 2 / PACKING       # mm of height per mm of hair
 
 
-def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
+def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3, junction=None):
     """Lift fibres paths[sel] (n, m, 3) off the bed in layers. tie_c, tie_r: the tie's centre and radius; tie_axis:
     the tail's direction there (for the comb locks; without it, no furrows). Returns (paths, tilt, comb lock per fibre, layer per fibre, report)."""
     rng = np.random.default_rng(seed)
@@ -94,6 +99,13 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
     nape = (el < NAPE_EL_DEG) & (P[:, 0, 1] > SF.CENTRE[1])
     section = np.where(top, 1.0, np.where(nape, 0.3, 0.6))             # how far out the section lies (1 outermost)
     h = h + np.repeat(top * LAYER_GAP_MM, m) * SF.sm(LAYER_FROM_MM[0], LAYER_FROM_MM[1], Sf)
+    hj = np.zeros(n * m); rep_j = None
+    if junction is not None and len(junction):         # junction: the roots of the hair combed the other way (the fringe)
+        from scipy.spatial import cKDTree
+        dj = cKDTree(np.asarray(junction, float)).query(P[:, 0])[0] / MM
+        near = SF.sm(JUNCTION_NEAR_MM[0], JUNCTION_NEAR_MM[1], dj)
+        hj = np.repeat(JUNCTION_MM * near, m) * SF.sm(0.0, JUNCTION_OVER_MM, Sf)
+        rep_j = int((near > 0.05).sum())
     Nn = shell.normals(U)
     tilt = np.zeros((n * m, 3))
     furrow = np.zeros(n * m)
@@ -124,7 +136,7 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
         eth -= (eth * Nn).sum(1, keepdims=True) * Nn
         eth /= np.maximum(np.linalg.norm(eth, axis=1, keepdims=True), 1e-12)
         tilt = -(slope * win)[:, None] * eth
-    h = np.maximum(h + furrow, 0.3 * h) * win
+    h = np.maximum(np.maximum(h + furrow, 0.3 * h), hj) * win
     bed = np.clip((rb - r) / MM, 0.0, BED_MAX_MM) * SF.sm(0.0, BED_OVER_MM, Sf) * np.minimum(1.0, win * 4)
     D = (U * (bed * MM)[:, None] + Nn * (h * MM)[:, None]).reshape(n, m, 3)
     for _ in range(4):                                 # (eased along the hair, the root held: no kinks where a window ends)
@@ -140,5 +152,6 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3):
     rep = dict(fibres=int(n), rate_mm_per_mm=round(RATE, 4), lift_mm_median_max=round(float(np.median(hm)), 1),
                lift_mm_p95=round(float(np.percentile(hm, 95)), 1), root_move_mm_max=round(float(np.linalg.norm(out[:, 0] - P[:, 0], axis=1).max() / MM), 3),
                node_jump_mm_max=round(float(jump), 2), tilt_p95=round(float(np.percentile(np.linalg.norm(tilt, axis=1), 95)), 2))
+    rep['junction_fibres'] = rep_j
     rep['top_section_share'] = round(float(top.mean()), 2); rep['nape_section_share'] = round(float(nape.mean()), 2)
     return Q, T, C, Lay, rep
