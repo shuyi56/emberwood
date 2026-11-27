@@ -58,11 +58,15 @@ LAYER_GAP_MM = 1.2      # DRAFT: the top section lies this much clear of the sec
                         # with the root stand and furrows to a 12 mm roll 60 mm behind the fringe; the hairs' own
                         # packed thickness there is 3.8 mm)
 LAYER_FROM_MM = (15.0, 50.0)    # DRAFT: it comes clear over this run from the root
-JUNCTION_MM = 5.0       # DRAFT: where swept-back hair is rooted beside a fringe, its root stands this high: the fringe
+JUNCTION_MM = 0.0       # OFF (5.0 tried: it steepened the roots to 27 degrees and the crest stayed). DRAFT: where swept-back hair is rooted beside a fringe, its root stands this high: the fringe
                         # stands 4 to 6 mm within 10 to 15 mm of its own roots (measured on this groom), and the
                         # swept-back hair's 1 to 3 mm there left a trough across the head with a roll behind it
 JUNCTION_NEAR_MM = (30.0, 6.0)  # DRAFT: none of it past the first distance from the fringe's roots, all within the second
 JUNCTION_OVER_MM = 10.0 # DRAFT: reached over this run from the root
+FRONT_FLAT = 0.3        # DRAFT: beside the fringe the swept-back hair lies this much of its lift: seen from the front,
+FRONT_FLAT_MM = (10.0, 80.0)    # every hair there climbs away from the viewer, and each climb shows end-on as an
+                        # upright tick as tall as the lift (a picket crest above the fringe). All of the lift past the
+                        # second distance from the fringe's roots. Hair pulled to a tie lies close at the front hairline.
 TIE_FADE_MM = (4.0, 40.0)   # DRAFT: no lift within the first of the tie's rim, all of it past the second
 RATE = ROOT_PER_MM2 * math.pi * (HAIR_DIAM_MM / 2) ** 2 / PACKING       # mm of height per mm of hair
 
@@ -106,6 +110,10 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3, junction=None)
         near = SF.sm(JUNCTION_NEAR_MM[0], JUNCTION_NEAR_MM[1], dj)
         hj = np.repeat(JUNCTION_MM * near, m) * SF.sm(0.0, JUNCTION_OVER_MM, Sf)
         rep_j = int((near > 0.05).sum())
+        dp = cKDTree(np.asarray(junction, float)).query(flat)[0] / MM
+        front = FRONT_FLAT + (1 - FRONT_FLAT) * SF.sm(FRONT_FLAT_MM[0], FRONT_FLAT_MM[1], dp)
+    else:
+        front = 1.0
     Nn = shell.normals(U)
     tilt = np.zeros((n * m, 3))
     furrow = np.zeros(n * m)
@@ -136,7 +144,7 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3, junction=None)
         eth -= (eth * Nn).sum(1, keepdims=True) * Nn
         eth /= np.maximum(np.linalg.norm(eth, axis=1, keepdims=True), 1e-12)
         tilt = -(slope * win)[:, None] * eth
-    h = np.maximum(np.maximum(h + furrow, 0.3 * h), hj) * win
+    h = np.maximum(np.maximum(h + furrow, 0.3 * h) * front, hj) * win
     bed = np.clip((rb - r) / MM, 0.0, BED_MAX_MM) * SF.sm(0.0, BED_OVER_MM, Sf) * np.minimum(1.0, win * 4)
     D = (U * (bed * MM)[:, None] + Nn * (h * MM)[:, None]).reshape(n, m, 3)
     for _ in range(4):                                 # (eased along the hair, the root held: no kinks where a window ends)
