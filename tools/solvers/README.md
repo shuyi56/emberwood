@@ -313,6 +313,36 @@ that hangs free: that is the falls' flow field.
 curve; contact is an active set on top of it. John 2026-11-29: "set the start and end points then set a solver to build
 the smooth flow".
 
+### Sheet flow: `hair/sheet_flow.py` (PR #99)
+
+**What it is for.** A styled piece of hair solved as ONE SURFACE in 3D, with its hairs drawn as lines on it. A fringe
+is a sheet: its hairs lie side by side and move together. Solved one at a time (endpoint flow, above) each line found
+its own way round the head, so neighbours wobbled apart and a shape that bends two ways needed every line told so.
+
+**In and out.** `solve(P0, T0, P1, T1, gap, Nv, across, via)`: the sheet's root edge and end edge as points and unit
+directions per column `[Nu, 3]`; `gap(X)`, which returns how far each point stands above the body plus its clearance
+(negative: inside) and the outward normal there; `across`, the weight of bending across the hairs against bending
+along them; `via`, set curves on the way `(share along, points [Nu, 3], weight)`. Out: the sheet `[Nu, Nv, 3]` and a
+report (`passes`, `pushed`, `on_body`, `worst_inside`, `along_radius_min`, `along_radius_p1`, `along_radius_median`,
+`across_radius_median`). `lines(sheet, t)` reads a hair off the sheet at its place `t` across it. All three
+coordinates of every node are in one system. The body holds a node along its normal only and lets it go when it
+lifts; along the skin the node stays free. The step pinned at each edge is the column's own node spacing.
+
+**Run.** `photo_waves.fringe_flow(root, layer, surf, side)` builds the edges (`FRINGE_ENDS`, `FRINGE_WAIST`,
+`FRINGE_SHEET`) and calls it; `field2` caches each side (`fringe+1`, `fringe-1`), keyed on this file's text too. Look
+at it with `python3 tools/hair/overlays/head_flow.py HEAD CACHE OUT.png`.
+
+**Trouble looks like.** A corner where the lines pass a `via`: the body is holding nodes in all three coordinates, or
+the via's weight is acting as a hard point (weight 1.0 gave a 56 degree turn at one node; 0.03 gives a bow). A kink at
+the root or the end: the pinned step differs from the column's spacing (1.9 mm beside 4.9 mm gave a 53 degree turn).
+`along_radius_min` was 0.9 mm with both faults and is 2.7 mm without them.
+
+**Use it when.** The piece is a section whose hairs lie together: a fringe, a curtain, a swept side. Use endpoint flow
+for a single lock.
+
+**Grounded in.** The thin-plate energy (squared second differences both ways) with clamped edges; contact as an active
+set on the normal component. John 2026-11-29: "you need a 3d solver, treat bangs as surfaces".
+
 ### Tail lock rods: `hair/tail_lock_rods.py` (PR #97)
 
 **Purpose.** The locks of a ponytail in 3D: each lock is one Kirchhoff rod clamped at the tie and free at the tip,

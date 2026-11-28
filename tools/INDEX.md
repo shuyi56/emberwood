@@ -87,6 +87,7 @@ Status: **main** is on main in this folder; **main (stays)** is on main outside 
 | Heel optimizer | solver | footwear | numpy | main: `solvers/footwear/heel/optimize.py` |
 | Stylized heel | solver | footwear | numpy | main: `solvers/footwear/heel/stylize.py` |
 | Endpoint flow (the smoothest line from a set root to a set end, kept off the head; the photo hair's fringe) and the flow diagrams (`tools/hair/overlays/`: roots only, the head, the whole field over the photo) | solver, gauge | hair | numpy, pillow | PR #99: `solvers/hair/endpoint_flow.py`, `tools/hair/overlays/` |
+| Sheet flow (a styled section solved as one surface in 3D, its hairs as lines on it, held off the body along the normal only; the photo hair's fringe) | solver | hair | numpy | PR #99: `solvers/hair/sheet_flow.py` |
 | Tail lock rods | solver | hair | numpy, scipy | PR #97: `solvers/hair/tail_lock_rods.py` |
 | Join cover (hair combed opposite ways: cover, height, hair under the cap) | gauge | hair | numpy | PR #97: `gauges/hair/join_cover.py` |
 | Face edge (an under layer of the hair drawn onto the cheek: face width and edge tone against the creator's) | gauge | hair | numpy, pillow | PR #99: `gauges/hair/face_edge.py` |

@@ -993,8 +993,8 @@ FRINGE_SOLVE = True          # the fringe by the endpoint solver (below); False:
 FRINGE_ENDS = ((0.20, 0.53), (0.44, 0.47))   # TRACED on John's drawn lines (2026-11-29): where the fringe's ends lie, from the
                              # innermost hair's (distance from the middle, height z) to the outermost's: along the brow to the temple
 FRINGE_END_DIR = 4.0         # degrees below level that an end arrives, heading out (the drawn lines' flat tails)
-FRINGE_M = (95.0, 1.0)       # DRAFT: how long the line keeps its root's direction (mm: the root's stand) and its end's (x the chord)
-FRINGE_WAIST = (0.09, 0.24, 0.63, 0.55, 1.0)   # TRACED on John's drawn lines: the waist's distance from the middle (innermost hair,
+FRINGE_M = (95.0, 1.0)       # RETIRED with the sheet solver: the pinned step at each edge is the column's own spacing
+FRINGE_WAIST = (0.09, 0.24, 0.63, 0.55, 0.03)  # TRACED on John's drawn lines: the waist's distance from the middle (innermost hair,
                              # outermost), its height z; DRAFT: its place along the line (a share) and how hard the line is drawn to it
 FRINGE_FLICK_MM, FRINGE_FLICK_DEG = 7.0, 18.0   # DRAFT: the ends stand this far off the face and leave it at this angle
 FRINGE_ON_HEAD, FRINGE_BACK = 0.27, 0.6   # DRAFT (HH; a slope)
@@ -1002,7 +1002,8 @@ FRINGE_CLEAR_MM = (2.0, 6.0)  # the fringe's stand-off from the skin: the innerm
 
 
 def _solver_src():
-    return open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair', 'endpoint_flow.py')).read()
+    d_ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair')
+    return open(os.path.join(d_, 'endpoint_flow.py')).read() + open(os.path.join(d_, 'sheet_flow.py')).read()
 
 
 def _on_front(xs, zs, surf, clr):
@@ -1019,53 +1020,61 @@ def _on_front(xs, zs, surf, clr):
     return np.c_[xs, ys[j0] + (ys[j] - ys[j0]) * w_, zs]
 
 
+FRINGE_SHEET = dict(columns=20, across=1.0, root_fade=0.5, layer_in=0.15)   # DRAFT: the sheet's columns, the weight of bending across the
+                             # hairs, the share of the length over which a hair's own root joins the sheet, and where its layer's depth is full
+
+
 def fringe_flow(root, layer, surf, sd, seed=3, log=print):
-    """One side's fringe by its START AND END POINTS (John 2026-11-29: "set the start and end points then set a solver to
-    build the smooth flow"). Start: the root, leaving along the skin's normal. End: a point on FRINGE_ENDS, by the root's
-    order from the part outward (so the lines do not cross), a little ragged, arriving level and heading out. The line
-    between is solvers/hair/endpoint_flow.py's: least bending, kept off the skin. Nothing in between is authored."""
+    """One side's fringe as ONE SURFACE in 3D (John 2026-11-29: "you need a 3d solver, treat bangs as surfaces"), with its
+    hairs as lines on it. The surface's root edge is the fringe's roots gathered by their order from the part outward
+    (each column the mean root of its share, leaving along the skin's normal); its end edge is FRINGE_ENDS, stood
+    FRINGE_FLICK_MM off the face; its waist is FRINGE_WAIST. solvers/hair/sheet_flow.py finds the surface of least
+    bending along and across, kept off the skin. A hair is the sheet's line at its own place across it, joined from its
+    own root over the first FRINGE_SHEET['root_fade'] of its length and set in depth by its layer.
+    Before: each hair solved alone (endpoint_flow), which left neighbours free to wobble apart."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair'))
-    import endpoint_flow as EF
+    import sheet_flow as SH
     rng = np.random.default_rng(seed + int(sd > 0))
-    n = len(root)
+    n = len(root); P = FRINGE_SHEET; Nu = P['columns']; N = 48
     t = np.argsort(np.argsort(np.abs(root[:, 0]))) / max(n - 1, 1)
-    t = np.clip(t + 0.08 * rng.normal(size=n), 0, 1)
+    tc = (np.arange(Nu) + 0.5) / Nu
+    col = np.minimum((t * Nu).astype(int), Nu - 1)
+    R0 = np.array([root[col == c].mean(0) if (col == c).any() else root.mean(0) for c in range(Nu)])
+    U0 = R0 - SF.CENTRE; U0 /= np.linalg.norm(U0, axis=1, keepdims=True)
+    R0 = SF.CENTRE + U0 * (surf.radius(U0) + LIFT_MM[0] * MM)[:, None]       # (the column's root, on the skin)
+    clr = np.full(Nu, (FRINGE_CLEAR_MM[0] + 0.5 * FRINGE_CLEAR_MM[1]) * MM)   # (the sheet is the fringe's middle layer)
     (xa, za), (xb, zb) = FRINGE_ENDS
-    xe = sd * (xa + (xb - xa) * t); ze = za + (zb - za) * t + FRINGE_FEATHER * (rng.random(n) - 0.5)
-    clr = (FRINGE_CLEAR_MM[0] + FRINGE_CLEAR_MM[1] * layer) * MM
-    # (where the end rests: on the skin's front under (x, z) while the head is under it, found by walking back from in
-    # front of the face; past FRINGE_ON_HEAD from the middle the head is no longer under it and the end lies out over
-    # the side hair, FRINGE_BACK back for each unit farther out)
+    xe = sd * (xa + (xb - xa) * tc); ze = za + (zb - za) * tc
     xs = np.minimum(np.abs(xe), FRINGE_ON_HEAD) * sd
     P1 = _on_front(xs, ze, surf, clr)
     P1 = np.c_[xe, P1[:, 1] + FRINGE_BACK * (np.abs(xe) - np.abs(xs)), ze]
     U1 = P1 - SF.CENTRE; U1 /= np.linalg.norm(U1, axis=1, keepdims=True)
     a = np.radians(FRINGE_END_DIR)
-    T1 = np.c_[sd * np.cos(a) * np.ones(n), np.zeros(n), -np.sin(a) * np.ones(n)]
+    T1 = np.c_[sd * np.cos(a) * np.ones(Nu), np.zeros(Nu), -np.sin(a) * np.ones(Nu)]
     T1 = T1 - (T1 * U1).sum(1, keepdims=True) * U1; T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
-    T0 = root - SF.CENTRE; T0 /= np.linalg.norm(T0, axis=1, keepdims=True)
-    N = 48
-    cl = np.repeat(clr, N)
-
-    def floor(X):
-        d = X - SF.CENTRE; r = np.linalg.norm(d, axis=1); Ud = d / r[:, None]
-        return SF.CENTRE + Ud * np.maximum(r, surf.radius(Ud) + cl)[:, None]
-    chord = np.linalg.norm(P1 - root, axis=1)
-    # (John 2026-11-29: "why is the solver not tracing an S shape and bending in multiple axis". With two ends it drew one
-    # arc. The S has two turns ACROSS the face (out over the part and down the forehead, then out again at the brow) and
-    # three IN DEPTH (up off the root, in onto the forehead, out again at the ends: "flick the brush away from the
-    # face"). Each turn gets a set point:
-    #   the WAIST, where the line runs steepest down the forehead, close on the skin: FRINGE_WAIST (the distance from the
-    #     middle for the innermost and outermost hair, the height, the place along the line), traced on the drawn lines
-    #   the END, stood FRINGE_FLICK_MM off the face and arriving heading out and away from it)
-    xw = sd * (FRINGE_WAIST[0] + (FRINGE_WAIST[1] - FRINGE_WAIST[0]) * t)
-    Wp = _on_front(xw, np.full(n, FRINGE_WAIST[2]), surf, FRINGE_CLEAR_MM[0] * MM + 0.3 * (clr - FRINGE_CLEAR_MM[0] * MM))
     P1 = P1 + U1 * (FRINGE_FLICK_MM * MM)
     T1 = T1 + U1 * np.tan(np.radians(FRINGE_FLICK_DEG)); T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
-    chord = np.linalg.norm(P1 - root, axis=1)
-    X, rep_ = EF.solve(root, T0, P1, T1, floor, m0=np.full(n, FRINGE_M[0] * MM), m1=FRINGE_M[1] * chord, N=N,
-                       via=((FRINGE_WAIST[3], Wp, FRINGE_WAIST[4]),), log=log)
-    return list(X), rep_
+    xw = sd * (FRINGE_WAIST[0] + (FRINGE_WAIST[1] - FRINGE_WAIST[0]) * tc)
+    Wp = _on_front(xw, np.full(Nu, FRINGE_WAIST[2]), surf, clr)
+    cl = np.repeat(clr, N)
+
+    def gap(X):
+        d = X - SF.CENTRE; r = np.linalg.norm(d, axis=1); Ud = d / r[:, None]
+        return r - (surf.radius(Ud) + cl), Ud
+    sheet, rep_ = SH.solve(R0, U0, P1, T1, gap, Nv=N, across=P['across'], via=((FRINGE_WAIST[3], Wp, FRINGE_WAIST[4]),), log=log)
+    # the hairs: lines on the sheet
+    tj = np.clip(t + 0.02 * rng.normal(size=n), 0, 1)
+    X = SH.lines(sheet, (tj * Nu - 0.5) / (Nu - 1))
+    v = np.linspace(0, 1, N)[None, :, None]
+    X = X + (root - X[:, 0])[:, None, :] * (1 - SF.sm(0.0, P['root_fade'], v)) ** 2          # (from its own root)
+    d = X - SF.CENTRE; r = np.linalg.norm(d, axis=2, keepdims=True); Ud = d / r
+    dep = ((layer - 0.5) * FRINGE_CLEAR_MM[1] * MM)[:, None, None] * SF.sm(0.0, P['layer_in'], v)
+    X = SF.CENTRE + Ud * (r + dep)
+    out = []
+    for i in range(n):                                                  # (point cut: the ends ragged by a few nodes)
+        out.append(X[i, :N - int(rng.integers(0, 4))])
+    rep_['hairs'] = n
+    return out, rep_
 
 
 def _cached(cache, name, key, make, log=print):
@@ -1218,7 +1227,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
         if len(fm) > 3 and FRINGE_SOLVE:
-            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG)) + _solver_src()),
+            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG, sorted(FRINGE_SHEET.items()))) + _solver_src()),
                                lambda: fringe_flow(x['root'][fm], x['layer'][fm], surf, sd, log=log), log)
             for i, l in zip(fm, fl):
                 lines[i] = l
