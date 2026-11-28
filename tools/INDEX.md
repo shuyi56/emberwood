@@ -90,7 +90,7 @@ Status: **main** is on main in this folder; **main (stays)** is on main outside 
 | Join cover (hair combed opposite ways: cover, height, hair under the cap) | gauge | hair | numpy | PR #97: `gauges/hair/join_cover.py` |
 | Face edge (an under layer of the hair drawn onto the cheek: face width and edge tone against the creator's) | gauge | hair | numpy, pillow | PR #99: `gauges/hair/face_edge.py` |
 | Flow smoothness (bend radius of a hair flow against a hair's bending length; reversals) | gauge | hair | numpy | PR #99: `gauges/hair/flow_smooth.py` |
-| Hair from a reference photo (combed lines, falls as a flow field, bangs as one S sheet; draft) | solver | hair | numpy, scipy, pillow | PR #99: `tools/hair/photo_waves.py` |
+| Hair from a reference photo (combed lines lifted onto one outer surface, falls as a flow field, bangs as one S sheet, locks in the falls; render beside the photo) | solver | hair | numpy, scipy, pillow | PR #99: `tools/hair/photo_waves.py`, `tools/hair/photo_render.py` |
 | Solver regression tests | test | cloth | numpy, scipy | main: `solvers/tests/` |
 | Local fabric solver (Python) | solver | cloth | numpy (scipy for MeshBody) | main (stays): `blender/shared/fabric.py`; PR #85 edits it, moves after it lands |
 | Local fabric solver (game) | solver | cloth, hair | node, browser | PR #83: `src/world/fabric-core.js`, `fabric-stiff.js` |

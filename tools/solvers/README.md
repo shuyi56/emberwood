@@ -236,6 +236,37 @@ packing 0.1, the clump and opening amounts.
 
 ---
 
+### Wavy hair from a reference photo: `tools/hair/photo_waves.py`, `tools/hair/photo_render.py` (PR #99)
+
+**Purpose.** Long layered waves with a curtain fringe built from a photo, in the ponytail recipe's order: measure,
+flow field, gauges, look, then hair. `build` combs every root over the scalp (gravity, a push off the part, the
+sides directed diagonally back) and lifts it onto one outer surface (`ENV_MM`) on an arc that leaves the root at an
+angle; `field2` hangs the hair below the head as a front fall and a back fall per side (rank kept, faired, one S wave
+a side by height) and builds each side's bang as one smooth S sheet (`bang_sheet`); `lock_fall` groups the falls'
+lines into locks (about 120 lines each) that gather, take their own share of the wave and open into 3 sub-locks;
+`photo_render.py` draws the lines as fibres with `render.py` and saves the front close-up beside the photo.
+
+**Run.** `python3 tools/hair/photo_render.py HEAD.json.gz OUT --lines 16000 --per-root 2 --size 750 --photo PHOTO`
+(about 10 minutes). The field alone, drawn as lines: `field2` then `draw2` (driver in the project files,
+`hair-rebuild/wavy-photo/field/field2_driver.py`; about 2 minutes at 8,000 lines).
+
+**Trouble looks like.** `smooth_falls` or `smooth_fringe` not ok (`gauges/hair/flow_smooth.py`; it reads the course
+before the S wave, so a waved line under 45 mm is the wave, not a fault); rank moves over 3% above about 2% of a
+fall; `lines_turning_up` over 0; half widths off the photo's (0.45 / 0.54 / 0.63 at z 0.52 / 0.2 / -0.15). On the
+head: a node turning over 20 degrees (the comb steps along the skin and then lifts: `_fair_head` pins the root only).
+A step in height between sections means the lift is not one surface. A bare middle of the forehead: the bang's
+inner end (`BANG_END`) is too far out.
+
+**Grounded in.** Sectioning and direction: NY cosmetology study guide 8.5, Sam Villa, Red Seal 6.4. Lift as an angle
+at the root: SideFX Houdini Lift Guides ("applies a rotation"), Behind the Chair ("overdirect each section to a
+90-degree angle"), Yuksel et al. 2009 Hair Meshes (strands traced through an outer volume, C1 joined). Bend bounds: a
+hair's bending length about 45 mm (Goldstein, Warren, Ball 2012), a fringe dried on a 35 mm brush (ghd). Locks: the
+ponytail recipe's step 6. MEASURED off the photo: widths, the fringe's ends, the front fall's band. Overridden by John
+(2026-11-28): the lift height (32 then 27 mm against the photo's 9), the fringe's depth (66 mm). DRAFT: lock size,
+lock wave depth, copy offset.
+
+---
+
 ## Accessories
 
 ### Chain drop: inside `blender/shared/accessories.py` (stays)

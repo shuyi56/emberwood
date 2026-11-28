@@ -180,7 +180,7 @@ def build(F, surf, n=24000, seed=11, log=print):
             Q = pos[J] + step * d
             qq = Q - SF.CENTRE
             Un = qq / np.linalg.norm(qq, axis=1, keepdims=True)
-            s_mm = it * SEG_MM
+            s_mm = (it + 1) * SEG_MM                                     # (the new node's own length: the first step rises too)
             lift = np.minimum(LIFT_MM[0] + LIFT_PER_MM * s_mm * layer[J], lift_cap[J]) * MM
             # (John 2026-11-28, lines drawn on the photo: "hair from roots shouldn't lie flat on the scalp also should be
             # more curved from top". The stand-off rises from the root as an arc over ROOT_RISE_MM, the lift a round
@@ -513,7 +513,9 @@ BODY_AT_Z = -0.40           # where the tent from the head lands: the mannequin'
                             # to z -0.3; the Warden's collar put the 'shoulder' at -0.15)
 
 
-BANG_END = ((0.17, 0.59), (0.30, 0.44))   # MEASURED (face crop): where the bang's inner hair ends (|x|, z: the brow's outer
+BANG_END = ((0.11, 0.60), (0.30, 0.44))   # where the bang's inner hair ends: |x| 0.11 over the brow's inner end (the first render
+                            # at 0.17 left the middle of the forehead bare against the photo's narrow arch), and the outer
+                            # MEASURED (face crop): where the bang's inner hair ends (|x|, z: the brow's outer
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
@@ -621,6 +623,24 @@ def _join(p, j, half=14, sig=4.0):
     return q
 
 
+HEAD_FAIR = 2.5             # nodes (2.5 mm each) the comb on the head is faired over
+
+
+def _fair_head(p, surf):
+    from scipy.ndimage import gaussian_filter1d
+    if len(p) < 5:
+        return p
+    # (the root is pinned and nothing else: a hold that fades over a few nodes keeps the corner at the root, where the
+    # first step runs along the skin and the lift then turns it out. The line is reflected through the root before
+    # filtering, so the faired line still starts at it with the direction of the lines after it.)
+    ext = np.r_[2 * p[0] - p[1:8][::-1], p]
+    q = gaussian_filter1d(ext, HEAD_FAIR, axis=0, mode='nearest')[7:]
+    q = q + (p[0] - q[0]) * np.exp(-np.arange(len(p)) / 1.0)[:, None]
+    d = q - SF.CENTRE; r = np.linalg.norm(d, axis=1); U = d / r[:, None]
+    floor = surf.radius(U) + LIFT_MM[0] * MM * (np.arange(len(p)) > 0)
+    return SF.CENTRE + U * np.maximum(r, floor)[:, None]
+
+
 def field2(F, surf, depth, n=24000, seed=11, log=print):
     """Returns dict(line: list of (k, 3), basin: per line (0 fringe, 1 face framing, 2 front fall, 3 back fall, -1 lies
     on the head), hairs, root, sec (the line's section, for colour), release (per line: node where it leaves the head),
@@ -653,6 +673,11 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
     lam = WAVE['lam_hh']
     phase = 0.5 * np.sin(2 * a0) + np.where(sg > 0, 0.6, 0.0)           # (one pattern a side, drifting round the head)
     from scipy.ndimage import gaussian_filter1d
+    # (the comb on the head is faired before anything is hung from it: each step is pushed back out to the skin plus
+    # its lift, and the skin's small bumps turned the line by over 20 degrees a node on 8,000 of 7,500 lines' heads,
+    # never gauged because the smoothness gauge starts at the release. Faired over HEAD_FAIR nodes, root held, kept at
+    # least its first stand-off off the skin.)
+    paths = [_fair_head(p, surf) for p in paths]
     lines = [p for p in paths]
     base = {}
     basin = np.where(kind == 1, 0, -1)
@@ -744,6 +769,119 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
     g['ends_z_p5'] = round(float(np.percentile([l[-1, 2] for l in A], 5)), 3)
     log('field2 %s' % g)
     return dict(line=lines, basin=basin, hairs=hairs, root=x['root'], sec=sec, release=hand, kind=kind, gauges=g)
+
+
+
+# ---- locks inside the falls (the ponytail recipe's step 6, for hair that is not tied) ----
+# A fall drawn as offsets from one field is one sheet with a texture. Real hair is a bundle of locks: neighbours on the
+# head gather into a lock below it, each lock carries its own share of the wave (a little ahead of or behind its
+# neighbours, so the locks part in depth), and toward the ends a lock opens into sub-locks. The field stays the shape:
+# a lock's axis is the mean of its own field lines, so the locks fill the field's fall and keep its order.
+LOCK_SIZE = 160             # DRAFT: field lines per lock (16,000 lines: about 45 locks a side; the recipe's tail took 33)
+CLUMP = 0.45                # recipe step 6: a lock gathers to this share of its spread on the head
+CLUMP_Z = 0.25              # HH below the release over which it gathers
+SUBLOCKS, SUB_OPEN, HAIR_OPEN = 3, 1.4, 0.7   # recipe step 6: 3 sub-locks, middles 1.4x farther out at the tip, hairs 0.7x
+END_FADE = 0.08              # HH: a member is weighed out of its lock's axis over this much of its fall's end
+OPEN_FROM = 0.12            # recipe step 6: opening starts 12% down the lock
+LOCK_PHASE = 0.5            # rad: a lock's own wave phase against its side's (wavy_flow's jitter: a twelfth of a wave)
+LOCK_DEPTH_MM = 2.5         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
+
+
+def lock_fall(Fd, seed=5, log=print):
+    """Groups the hanging lines (face framing, front and back falls) into locks and rebuilds each line below the head
+    as its lock's axis plus its own offset, gathered and then opened. Returns (Fd with new lines and 'lock', gauges)."""
+    from scipy.spatial import cKDTree
+    from scipy.ndimage import gaussian_filter1d
+    rng = np.random.default_rng(seed)
+    lines = list(Fd['line']); basin = Fd['basin']; rel = Fd['release']
+    lock = np.full(len(lines), -1)
+    nl = 0
+    zg = -0.05                                                        # (where the locks are read: below the jaw, in the fall)
+    for b in (1, 2, 3):
+        for sd in (1.0, -1.0):
+            m = np.where((basin == b) & (np.array([l[0, 0] for l in lines]) * sd > 0))[0]
+            if len(m) < 4:
+                continue
+            feat = []
+            for i in m:
+                l = lines[i]; r = l[min(rel[i], len(l) - 1)]
+                q = l[np.argmin(np.abs(l[:, 2] - zg))] if l[-1, 2] < zg else l[-1]
+                feat.append(np.r_[r, q])
+            feat = np.array(feat)
+            k = max(1, int(round(len(m) / LOCK_SIZE * (4 if b == 1 else 1))))   # (face framing: finer locks)
+            cen = feat[rng.choice(len(m), k, replace=False)]
+            for _ in range(6):                                            # (a few Lloyd steps: even, compact locks)
+                lab = cKDTree(cen).query(feat)[1]
+                cen = np.array([feat[lab == j].mean(0) if (lab == j).any() else cen[j] for j in range(k)])
+            lock[m] = nl + lab
+            nl += k
+    rep = dict(locks=int(nl), lines_per_lock=round(float((lock >= 0).sum() / max(nl, 1)), 1))
+    step = SEG_MM * MM
+    for j in range(nl):
+        m = np.where(lock == j)[0]
+        if len(m) == 0:
+            continue
+        top = max(lines[i][min(rel[i], len(lines[i]) - 1), 2] for i in m)
+        bot = min(lines[i][-1, 2] for i in m)
+        zz = np.arange(top, bot - step, -step)
+        # each member's fall as x(z), y(z): monotonic in z below its release (gauged: no line turns up)
+        X = np.full((len(m), len(zz), 2), np.nan)
+        for a_, i in enumerate(m):
+            f = lines[i][rel[i]:]
+            if len(f) < 2:
+                continue
+            o = np.argsort(-f[:, 2]); zf = -f[o, 2]
+            ok = (zz <= f[0, 2] + 1e-9) & (zz >= f[-1, 2] - 1e-9)
+            X[a_, ok, 0] = np.interp(-zz[ok], zf, f[o, 0]); X[a_, ok, 1] = np.interp(-zz[ok], zf, f[o, 1])
+        # (each member is held at its last place past its end and weighed out over the last END_FADE of its fall, so
+        # the axis does not jump where a shorter hair ends: a mean that loses a member in one step turns a corner)
+        Xh = X.copy(); Wt = np.zeros(X.shape[:2])
+        for a_ in range(len(m)):
+            ok = ~np.isnan(X[a_, :, 0])
+            if not ok.any():
+                continue
+            last = np.where(ok)[0][-1]; first = np.where(ok)[0][0]
+            Xh[a_, last + 1:] = X[a_, last]; Xh[a_, :first] = X[a_, first]
+            zl = zz[last]
+            Wt[a_] = SF.sm(zl, zl + END_FADE, zz) * (np.arange(len(zz)) >= first)
+        Wt = Wt + 1e-9
+        ax = (Xh * Wt[..., None]).sum(0) / Wt.sum(0)[:, None]
+        for c in range(2):
+            ax[:, c] = gaussian_filter1d(ax[:, c], 4.0, mode='nearest')
+        # the lock's own wave: a phase ahead of or behind its side's, out of the fall (radially from the body's axis)
+        Wv = SF.sm(WAVE['start_z'], WAVE['full_z'], zz) * LOCK_DEPTH_MM * MM
+        ph = rng.normal(0, LOCK_PHASE)
+        psi = 2 * np.pi * (RELEASE_Z - zz) / WAVE['lam_hh']
+        out = ax - np.array(SF.AXIS)[None]
+        out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
+        ax2 = ax + out * (Wv * (np.sin(psi + ph) - np.sin(psi)))[:, None]
+        # sub-locks: by the side of the axis each member lies on at mid-fall
+        mid = len(zz) // 2
+        om = np.nan_to_num(X[:, mid] - ax[mid])
+        ang = np.arctan2(om[:, 1], om[:, 0])
+        sub = np.floor(((ang - ang.min()) / max(np.ptp(ang), 1e-9)) * SUBLOCKS * 0.999).astype(int)
+        for a_, i in enumerate(m):
+            f = lines[i][rel[i]:]
+            if len(f) < 2:
+                continue
+            ok = ~np.isnan(X[a_, :, 0])
+            if ok.sum() < 3:
+                continue
+            zi = zz[ok]; Xi = X[a_, ok]; A = ax[ok]; A2 = ax2[ok]
+            t = np.clip((zi[0] - zi) / max(zi[0] - zi[-1], 1e-6), 0, 1)                  # (0 at the release, 1 at the tip)
+            gather = 1 - (1 - CLUMP) * SF.sm(zi[0], zi[0] - CLUMP_Z, zi)
+            opn = SF.sm(OPEN_FROM, 1.0, t)
+            ss = sub == sub[a_]
+            sc = (((Xh[ss] - ax[None]) * Wt[ss][..., None]).sum(0) / Wt[ss].sum(0)[:, None])[ok]
+            sc = np.c_[[gaussian_filter1d(sc[:, c], 4.0, mode='nearest') for c in range(2)]].T
+            own = (Xi - A) - sc
+            new = A2 + sc * (gather + (SUB_OPEN - 1) * opn * gather)[:, None] + own * (gather * (1 + (HAIR_OPEN) * opn))[:, None]
+            p = np.c_[new, zi]
+            p[:, :2] = p[:, :2] + (lines[i][rel[i], :2] - p[0, :2]) * np.exp(-np.arange(len(p)) / 6.0)[:, None]
+            lines[i] = _join(np.r_[lines[i][:rel[i]], p], rel[i])
+    out_ = dict(Fd); out_['line'] = lines; out_['lock'] = lock
+    log('lock_fall %s' % rep)
+    return out_, rep
 
 
 FCOL = {0: [(217, 138, 31), (180, 100, 10)], 1: [(194, 51, 122), (150, 30, 90)],
