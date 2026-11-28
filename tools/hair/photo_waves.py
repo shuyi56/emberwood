@@ -85,6 +85,13 @@ FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eye
 SIDE_FLOW = dict(w=1.0, min=0.45, max=1.2, fwd=3.0, back=0.12, front=-0.10, in_mm=50.0, twist=1.0)   # DRAFT: how far the sides' comb takes the bangs' flow, the back sweep kept, the slope's cap
 SHAPE_OUT = ((0.56, 0.50, 0.20, -0.15, -0.40, -0.80, -1.20),      # MEASURED on the photo against the field (HH by height z):
              (0.00, 0.03, 0.09, 0.15, 0.14, 0.09, 0.05))          # how much farther out the photo's outline stands
+FRINGE_CURL = ((0.97, 0.88, 0.80, 0.66, 0.60, 0.56, 0.53, 0.50),    # TRACED on John's two drawn fringe lines (2026-11-29, the mean of the
+               (40.0, 30.0, 14.0, 14.0, 30.0, 55.0, 78.0, 86.0))     # two sides, from the part): height z (HH), and the heading there,
+                                                                     # degrees out from straight down: out at the part (the bell's
+                                                                     # shoulder), steep down the forehead to the brow, then a quick
+                                                                     # turn out, flat at the ends
+FRINGE_END = (0.44, 0.42, -0.04)  # TRACED: where the fringe ends: a floor height, the distance from the middle (the temple), and how
+                                  # far back round the head it may run (y)
 BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravity, at the face frame
 FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
@@ -167,6 +174,7 @@ def build(F, surf, n=24000, seed=11, log=print):
     hand = np.full(n, -1)                                              # (the node where a fibre leaves the head)
     lift_cap = np.where(kind == 1, FRINGE_LIFT_MM, LIFT_MM[1]) * layer + LIFT_MM[0]
     side = np.where(root[:, 0] >= 0, 1.0, -1.0)
+    hl_z = float(root[kind == 1, 2].min()) if (kind == 1).any() else 0.8
     crown_y = SF.CENTRE[1] + 0.10                                      # DRAFT: the part ends at the crown
     pos = root.copy()
     live = np.ones(n, bool); free = np.zeros(n, bool)
@@ -233,6 +241,20 @@ def build(F, surf, n=24000, seed=11, log=print):
                 # (the twist itself is a turn of the heading on the skin toward the face: the forward direction laid on
                 # the skin, added at 'twist' times the heading. The front-view heading above cannot do it on the side of
                 # the head, where the skin faces sideways and no depth solves it: tried first, 770 of 16,000 lines moved.)
+                # THE FRINGE (John 2026-11-29, two lines drawn on the photo from the part down the forehead and out to
+                # the temple: "no, orange lines begin at roots, set proper curl to get the fringes"). The fringe is not a
+                # sheet solved apart: it is these same lines, from their roots, with a curl set on them. The curl is the
+                # turn of the heading in the front view by height, read off the drawn line (FRINGE_CURL: degrees from
+                # straight down at each height): steep down the forehead from the part, then turning out, flat at the
+                # ends. The depth is solved on the skin, as for the sides.
+                k1 = kind[J] == 1
+                if BANG_FLOW and k1.any():
+                    ang = np.radians(np.interp(pos[J, 2][k1], FRINGE_CURL[0][::-1], FRINGE_CURL[1][::-1]))
+                    sx = side[J][k1] * np.sin(ang); szz = -np.cos(ang)
+                    Uk = Uo[k1]; uyk = np.minimum(Uk[:, 1], -0.08)
+                    dyk = np.clip(-(sx * Uk[:, 0] + szz * Uk[:, 2]) / uyk, -3.0, 0.6)
+                    dk = np.c_[sx, dyk, szz]
+                    d[k1] = dk / np.linalg.norm(dk, axis=1, keepdims=True)
                 fw = np.zeros_like(d); fw[:, 1] = -1.0
                 fw = fw - (fw * Uo).sum(1, keepdims=True) * Uo
                 d = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9) + SIDE_FLOW['twist'] * wtw[:, None] * fw
@@ -281,6 +303,9 @@ def build(F, surf, n=24000, seed=11, log=print):
             fz = Q[:, 2] - (curtain_z(np.abs(Q[:, 0])) + feather[J])
             lf = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(0.0, 25.0, s_mm) - FRINGE_ARCH_MM[1] * SF.sm(30.0, 75.0, s_mm)
                   + FRINGE_ARCH_MM[2] * SF.sm(0.07, 0.0, fz)) * (0.8 + 0.4 * layer[J]) * MM
+            if BANG_FLOW:                                                # (the fringe's roots stand as every other root does;
+                wsc = SF.sm(hl_z - 0.10, hl_z, Q[:, 2])                  #  past the hairline it comes down onto the forehead)
+                lf = lift * wsc + lf * (1 - wsc)
             lift = np.where(kind[J] == 1, lf, lift)
             Qs = SF.CENTRE + Un * (surf.radius(Un) + lift)[:, None]
             # (below the forehead the fringe hangs as a curtain over the brow and the eye's corner: it does not follow
@@ -300,7 +325,10 @@ def build(F, surf, n=24000, seed=11, log=print):
         for i, x in zip(I, new):
             out[i].append(x)
         ax = np.abs(new[:, 0])
-        done = (new[:, 2] <= z_end[I]) | ((kind[I] == 1) & (new[:, 2] <= curtain_z(ax) + feather[I]))
+        if BANG_FLOW:                                                    # (the curl's own end: the temple, point cut)
+            done = (new[:, 2] <= z_end[I]) | ((kind[I] == 1) & ((new[:, 2] <= FRINGE_END[0] + feather[I]) | (ax >= FRINGE_END[1] - feather[I]) | (new[:, 1] >= FRINGE_END[2])))
+        else:
+            done = (new[:, 2] <= z_end[I]) | ((kind[I] == 1) & (new[:, 2] <= curtain_z(ax) + feather[I]))
         live[I[done]] = False
     paths = [np.array(o) for o in out]
     # the locks: the fibres that hang past the wave's start, gathered by where they pass it, each side on its own
@@ -619,7 +647,7 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
                             # with 12% of the nodes under 17.5 mm; over the first half, 0.8% (and BANG_S[0] 0.10 to 0.06)
 
 
-BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
+BANG_FLOW = True               # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
                                # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
 BANG_BACK = 0.20            # HH
 BANG_BEND = (0.035, 0.06, 0.25)   # DRAFT (HH out, HH up, the outermost lock's share)
@@ -1102,7 +1130,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     # its lift, and the skin's small bumps turned the line by over 20 degrees a node on 8,000 of 7,500 lines' heads,
     # never gauged because the smoothness gauge starts at the release. Faired over HEAD_FAIR nodes, root held, kept at
     # least its first stand-off off the skin.)
-    paths = [_stand_at_part(_root_arc(_fair_head(p, surf), surf, hand[i]) if kind[i] != 1 else _fair_head(p, surf)) for i, p in enumerate(paths)]
+    paths = [_stand_at_part(_root_arc(_fair_head(p, surf), surf, hand[i]) if (kind[i] != 1 or BANG_FLOW) else _fair_head(p, surf)) for i, p in enumerate(paths)]
     paths = _head_clumps(paths, hand, kind, x['root'], surf)
     lines = [p for p in paths]
     base = {}
