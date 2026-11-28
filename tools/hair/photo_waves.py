@@ -97,7 +97,7 @@ TAKE = 1.3                  # CALIBRATED (first solve): the waves and the lie on
                             # hanging length: ends cut for z -0.76 hung at -0.38 to -0.47; at 1.5 the locks splayed over the shoulders
 FRINGE_FEATHER = 0.05       # DRAFT (HH): the fringe's ends are point cut over this much, not a ruled line
 LOCKS_PER_SIDE = 50         # a lock is a stylist's section, 22 to 35 mm of the perimeter (MEASURED ribbon width)
-WAVE = dict(start_z=0.38, full_z=0.12, lam_hh=0.43, amp_hh=0.045)    # TRACED on the photo's two big locks (bulges 100 px apart
+WAVE = dict(start_z=0.56, full_z=0.42, lam_hh=0.43, amp_hh=0.045)    # TRACED on the photo's two big locks (bulges 100 px apart
                             # at 234 px a head: 0.43 HH; swing 13 px: 0.055 HH peak, 0.045 kept). Before: 0.33, 0.04
 
 
@@ -540,6 +540,10 @@ FACE_KEEP = 1.15            # MEASURED (the photo's face crop): beside the face 
 FACE_KEEP_Z = (0.56, 0.20)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
                             # pieces by the face are dried and cut 'flowing away from the face')
 STACK_MM = (1.5, 10.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
+WAVE_OUT_Z = 0.46           # John 2026-11-29: "begin the curve of the sides earlier, first curve begins around the temples". The
+                            # height at which the sides' wave is first fully out (it was at the release, z 0.56, where the wave
+                            # has no size yet, so the first curve seen was a whole wave lower, at the chin); it grows in from
+                            # the release (WAVE start_z) to full by the cheekbone (full_z)
 BODY_AT_Z = -0.40           # where the tent from the head lands: the mannequin's shoulder (its neck is bare from the chin
                             # to z -0.3; the Warden's collar put the 'shoulder' at -0.15)
 
@@ -1013,7 +1017,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
             R = np.maximum(R_s, gaussian_filter1d(Rb(np.c_[sg[q] * a, z]), nf, mode='nearest') + stack[q] - over0 * fade)
         base[i] = _join(np.r_[paths[i][:hand[i]], np.c_[SF.AXIS[0] + R * np.sin(sg[q] * a), SF.AXIS[1] - R * np.cos(sg[q] * a), z]], hand[i])
         Wv = SF.sm(WAVE['start_z'], WAVE['full_z'], z) * WAVE['amp_hh']
-        psi = 2 * np.pi * (RELEASE_Z - z) / lam + phase[q]               # (by height, not by each hair's own start:
+        psi = 2 * np.pi * (WAVE_OUT_Z - z) / lam + phase[q]               # (by height, not by each hair's own start:
                                                                           #  neighbours swing together)
         a = a + Wv * np.sin(psi) / np.maximum(R - stack[q] + np.mean(STACK_MM) * MM, 0.05) * SF.sm(np.pi, np.pi - 0.35, a)   # (the S across the fall; none at the
                                                                           #  back's middle, where the two sides meet)
@@ -1188,8 +1192,8 @@ def lock_fall(Fd, seed=5, log=print):
         ph = rng.normal(0, LOCK_PHASE); lam_l = WAVE['lam_hh'] * (1 + LOCK_LAM * rng.uniform(-1, 1))
         if j in fixed:
             ph, lam_l = fixed[j], WAVE['lam_hh']
-        psi = 2 * np.pi * (RELEASE_Z - zz) / WAVE['lam_hh']
-        psl = 2 * np.pi * (RELEASE_Z - zz) / lam_l + ph
+        psi = 2 * np.pi * (WAVE_OUT_Z - zz) / WAVE['lam_hh']
+        psl = 2 * np.pi * (WAVE_OUT_Z - zz) / lam_l + ph
         out = ax - np.array(SF.AXIS)[None]
         out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
         tan = np.c_[-out[:, 1], out[:, 0]]
