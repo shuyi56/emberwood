@@ -257,6 +257,28 @@ Run it before any textured face render, and with `--hair` whenever cloth framing
 
 ## Hair
 
+### Join cover: `hair/join_cover.py`
+
+**What it is for.** The interface between two sets of hair combed opposite ways (a fringe and the hair swept back from
+it). Both sets leave the line between them, so cover is thinnest there, and hair that lies under the scalp cap is not
+seen at all. A ridge or dark band across the head at a join is usually one of these, not the shading.
+
+**In and out.** A head and a Face Creator strand asset (`bangs_creator_asset.py`). Rows across the join in three slabs,
+each with `cover` (layers of hair over the scalp), `outer` (the surface's height, mm) and `buried` (the share of hair
+under the cap), then the worst cover and the buried share within `--band-mm` of the join.
+```
+python3 tools/gauges/hair/join_cover.py HEAD.json.gz ASSET.json [--cap-mm 0.4] [--band-mm 12]
+```
+
+**Trouble.** Cover under 1 over more than a few mm; buried over 0.1; a step in `outer` over 2 mm between rows. On the
+Warden's swept ponytail: cover 0.30 and buried 0.36 before the join work, 1.10 and 0.001 after.
+
+**Misses.** What the join looks like lit: a covered join can still read as a line if the two directions catch the
+light differently. Check the render from above as well.
+
+**Grounded in.** Counting: cover is root density x distance from a line the hair leaves x a hair's width, so it must
+fall to nothing at an unblended join. The thresholds are DRAFT.
+
 ### Hair surface check: `hair/hair_check.py`
 
 **What it is for.** Catching creases, seams and ledges in the fused hair, and clothes coming through it, before a
