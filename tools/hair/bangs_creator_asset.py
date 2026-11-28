@@ -37,6 +37,10 @@ TAIL_HAIR_SPREAD = 0.7      # DRAFT: and a hair this much farther from its sub-l
 TAIL_SPREAD_FROM = 0.12     # the share of a lock's length where the opening starts
 TAIL_JOIN_MM = 45.0         # a hair passes from the tail's field line to its lock's rod over this length, eased with a
                             # quintic (zero slope and curvature change at both ends: the line stays G2 across the join)
+JOIN_ZIG_MM = 14.0          # DRAFT: the zigzag reaches this far behind the fringe's roots
+JOIN_ZIG_SHARE = 0.65       # DRAFT: the share of root cells taken forward right at the line, falling to none at JOIN_ZIG_MM
+JOIN_CELL_MM = 5.0          # DRAFT: a zigzag tooth's width
+JOIN_MERGE_MM = 45.0        # DRAFT: a taken hair joins its fringe hair's path over this run
 JOIN_DENSITY = 4.0          # DRAFT: at the join the swept-back hair is drawn this many times as dense as elsewhere
 JOIN_BLEND_MM = (8.0, 60.0) # DRAFT: all of that within the first distance of the fringe's roots, none past the second
 TAIL_TIE_SQUEEZE = 0.45     # DRAFT: under the band a lock is pressed to this share of its free radius (the tie's packing)
@@ -256,6 +260,31 @@ def main():
     build = PF.build
     PF.build = lambda h: (lambda B: (BF.apply_side(B, side), B)[1])(build(h))
     paths, hairs, basin, B = PR.fibres(head, per_root=1)
+    if '--join-zigzag' in a:
+        # The join between the fringe and the swept-back hair was a ruled line with the hair leaving it in opposite
+        # directions. A stylist hides a section line with a zigzag parting: locks from behind the line are taken
+        # forward with the fringe. Here, by 5 mm root cell, swept-back roots within JOIN_ZIG_MM of the fringe's roots
+        # take a nearby fringe hair's path, moved to their own root and merging into it over JOIN_MERGE_MM.
+        from scipy.spatial import cKDTree
+        MMj = BF.SF.MM
+        rz = np.random.default_rng(17)
+        r0 = paths[:, 0]
+        fi = np.where(basin == 1)[0]
+        dj, nn = cKDTree(r0[fi]).query(r0, k=8)
+        cell = np.floor(r0 / (JOIN_CELL_MM * MMj)).astype(np.int64)
+        key = (cell[:, 0] * 73856093) ^ (cell[:, 1] * 19349663) ^ (cell[:, 2] * 83492791)
+        uk, inv = np.unique(key, return_inverse=True)
+        u = rz.random(len(uk))[inv]
+        take = (basin == 0) & (u < JOIN_ZIG_SHARE * BF.SF.sm(JOIN_ZIG_MM, 0.0, dj[:, 0] / MMj))
+        for i in np.where(take)[0]:
+            j = fi[nn[i, rz.integers(0, 8)]]
+            pj = paths[j]; ok = ~np.isnan(pj[:, 0])
+            sj = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pj[ok], axis=0), axis=1))] / MMj
+            q = np.full_like(pj, np.nan)
+            q[ok] = pj[ok] + (r0[i] - pj[0])[None, :] * BF.SF.sm(JOIN_MERGE_MM, 0.0, sj)[:, None]
+            paths[i] = q
+        basin = basin.copy(); basin[take] = 1
+        print('join zigzag', dict(taken=int(take.sum()), within_mm=JOIN_ZIG_MM), file=sys.stderr)
     tiltv = comb = layv = None
     if '--volume' in a:                                               # the side hair in layers off the bed (hair_volume.py)
         import hair_volume as HV
