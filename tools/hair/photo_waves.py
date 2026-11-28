@@ -1004,12 +1004,20 @@ FRINGE_CLEAR_MM = (2.0, 6.0)  # the fringe's stand-off from the skin: the innerm
 FRINGE_FROM_BLUE = True      # the sheet's origin is the front fall's lines nearest the forehead (John 2026-11-29), not the fringe's own roots
 
 
+FRINGE_ORIGIN_BACK = 0.5     # DRAFT: a step back along the part counts this much of a step away from it
+FRINGE_APEX = (0.0, 0.15, 0.875, 0.25, 0.1)   # MEASURED on the photo: the two sides meet at the middle of the hairline (z 0.875)
+                             # (innermost, outermost, height z); DRAFT: its share along the line, the weight
+
+
 def _blue_origin(paths, hand, kind, sd, m, surf):
     """The m lines of the front fall (blue in the flow diagram) whose roots lie nearest the forehead on side sd: their roots
     and the direction each leaves in (root to its 5th node, over the skin)."""
     cand = [i for i in range(len(paths)) if kind[i] == 0 and hand[i] >= 0 and paths[i][0, 0] * sd > 0
             and abs(SF.theta(paths[i][:1])[0]) < FALL_SPLIT]
-    cand = sorted(cand, key=lambda i: paths[i][0, 1])[:m]
+    # (nearest the forehead ALONG THE PART: the furthest forward alone sat 17 to 25 mm either side of it, so the two sides
+    # began apart and the opening's top was square; the photo's sides begin together at the part. John 2026-11-29)
+    yf = min(paths[i][0, 1] for i in cand if abs(paths[i][0, 0]) < 0.03)
+    cand = sorted(cand, key=lambda i: abs(paths[i][0, 0]) + FRINGE_ORIGIN_BACK * max(paths[i][0, 1] - yf, 0.0))[:m]
     R = np.array([paths[i][0] for i in cand])
     T = np.array([paths[i][min(5, len(paths[i]) - 1)] - paths[i][0] for i in cand])
     return R, T / np.maximum(np.linalg.norm(T, axis=1, keepdims=True), 1e-9)
@@ -1084,12 +1092,14 @@ def fringe_flow(root, layer, surf, sd, seed=3, log=print, origin=None):
     T1 = T1 + U1 * np.tan(np.radians(FRINGE_FLICK_DEG)); T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
     xw = sd * (FRINGE_WAIST[0] + (FRINGE_WAIST[1] - FRINGE_WAIST[0]) * tc)
     Wp = _on_front(xw, np.full(Nu, FRINGE_WAIST[2]), surf, clr)
+    xa_ = sd * (FRINGE_APEX[0] + (FRINGE_APEX[1] - FRINGE_APEX[0]) * tc)
+    Ap = _on_front(xa_, np.full(Nu, FRINGE_APEX[2]), surf, clr)
     cl = np.repeat(clr, N)
 
     def gap(X):
         d = X - SF.CENTRE; r = np.linalg.norm(d, axis=1); Ud = d / r[:, None]
         return r - (surf.radius(Ud) + cl), Ud
-    sheet, rep_ = SH.solve(R0, U0, P1, T1, gap, Nv=N, across=P['across'], via=((FRINGE_WAIST[3], Wp, FRINGE_WAIST[4]),), log=log)
+    sheet, rep_ = SH.solve(R0, U0, P1, T1, gap, Nv=N, across=P['across'], via=((FRINGE_APEX[3], Ap, FRINGE_APEX[4]), (FRINGE_WAIST[3], Wp, FRINGE_WAIST[4])), log=log)
     # the hairs: lines on the sheet
     tj = np.clip(t + 0.02 * rng.normal(size=n), 0, 1)
     X = SH.lines(sheet, (tj * Nu - 0.5) / (Nu - 1))
@@ -1256,7 +1266,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
         if len(fm) > 3 and FRINGE_SOLVE:
             org = _blue_origin(paths, hand, kind, sd, len(fm), surf) if FRINGE_FROM_BLUE else None
-            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG, sorted(FRINGE_SHEET.items()), FRINGE_FROM_BLUE)) + _solver_src()),
+            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG, sorted(FRINGE_SHEET.items()), FRINGE_FROM_BLUE, FRINGE_APEX, FRINGE_ORIGIN_BACK, _code_key(_blue_origin))) + _solver_src()),
                                lambda: fringe_flow(x['root'][fm], x['layer'][fm], surf, sd, log=log, origin=org), log)
             for i, l in zip(fm, fl):
                 lines[i] = l
