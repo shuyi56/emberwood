@@ -82,15 +82,17 @@ SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length fr
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
                             # and John's line stepping out at eye level): the fall stands out this much (HH) below the
                             # temple, and this much again by the shoulder; the outer layer most
+SIDE_FLOW = dict(w=1.0, min=0.45, max=1.2, fwd=3.0)   # DRAFT: how far the sides' comb takes the bangs' flow, the back sweep kept, the slope's cap
 BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravity, at the face frame
 FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
 FRINGE_DEPTH = 0.30         # DRAFT (HH): the bang section's depth behind the hairline at the part, falling to 0 at FRINGE_RAD. 66 mm (John 2026-11-28: "begin the bangs farther back"; at 22 mm the bang was a thin strip at the hairline, at 44 mm it still started in front of the lift)
-FRAME_RAD, FRAME_DEPTH = 1.45, 0.12     # DRAFT: face framing: in front of the ears, this far behind the hairline
+FRAME_RAD, FRAME_DEPTH = 1.45, 0.20     # DRAFT: face framing: in front of the ears, this far behind the hairline
 LAYER_END = (0.02, -0.30)   # MEASURED on John's drawing over the photo (2026-11-29): the first layer hooks in at the jaw, the
                             # second ends at the shoulder line (z from the chin, HH)
 LAYER_PHASE = (0.6, 2.4)    # DRAFT: each layer's wave phase (rad): the second half a wave on, so it bulges where the first hooks in
+LAYER_HOOK = (12.0, 0.35)    # DRAFT: mm a layer's end turns in, and the share of its fall it turns over
 LAYER_RAG, LAYER_BLEND, LAYER_NEXT = 0.06, 0.10, -0.50   # DRAFT: a tier's ragged ends, and the grade behind the tiers into the lengths
 FRAME_END = (-0.25, 0.08)   # MEASURED: where the face-framing pieces end
 HEM_Z = -0.76               # MEASURED: the ends
@@ -197,6 +199,28 @@ def build(F, surf, n=24000, seed=11, log=print):
             wf = SF.sm(SF.AXIS[1] + 0.04, -0.24, pos[J, 1]) * (kind[J] != 1) * ~behind
             d[:, 1] += BACK_SWEEP * wf * SF.sm(0.0, SWEEP_IN_MM, s_mm)       # ("more curved from top": the line leaves the
                                                                         #  part square to it and bows back as it runs)
+            # (John 2026-11-29, flow lines drawn on the photo from the part over the sides of the head: "try flow lines on
+            # the sides, they follow the same flow as the bangs". In front of the ears the comb's heading in the front view
+            # is the bangs' own: the slope of the traced outer bang line at that height (TRACE_OUT), steep by the part and
+            # turning out toward the temple, laid on the skin. The back sweep there is kept at SIDE_FLOW['back'] of
+            # itself, so the side hair runs beside the bangs instead of crossing under them.)
+            if SIDE_FLOW['w'] > 0:
+                tz = np.array([t_[1] for t_ in TRACE_OUT]); tx = np.array([t_[0] for t_ in TRACE_OUT])
+                zm = 0.5 * (tz[1:] + tz[:-1]); sl = (tx[1:] - tx[:-1]) / (tz[:-1] - tz[1:])
+                slope = np.minimum(np.interp(pos[J, 2], zm[::-1], sl[::-1]), SIDE_FLOW['max'])
+                # (the heading is set in the FRONT view, as the bangs' is, and its depth solved so the step stays on the
+                # skin: over the top of the head a line can only come down in the front view by running forward, so the
+                # sides come forward over the temple beside the bangs. A plain projection sent them sideways off the
+                # part and straight down the side of the head: an inverted U in the front view, drawn in round 23's
+                # first overlay.)
+                slope = np.maximum(slope, SIDE_FLOW['min'])
+                uy = np.minimum(Uo[:, 1], -0.08)
+                dy = np.clip(-(side[J] * slope * Uo[:, 0] - Uo[:, 2]) / uy, -SIDE_FLOW['fwd'], 0.3)
+                df = np.c_[side[J] * slope, dy, -np.ones(len(J))]
+                df /= np.linalg.norm(df, axis=1, keepdims=True)
+                dn_ = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+                wq = (SIDE_FLOW['w'] * wf)[:, None]
+                d = dn_ * (1 - wq) + df * wq
             d = d - (d * Uo).sum(1, keepdims=True) * Uo
             d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
             Q = pos[J] + step * d
@@ -1281,6 +1305,11 @@ def lock_fall(Fd, seed=5, log=print):
             wv_ = (TEX['sub_amp'] * WAVE['amp_hh'] * np.sin(ps_) + TEX['hair_mm'] * MM * np.sin(ph_)) * (en[ok] * (1 + TEX['tip_amp'] * fr[ok]))
             wo_ = 0.5 * (TEX['sub_amp'] * WAVE['amp_hh'] * np.cos(ps_) + TEX['hair_mm'] * MM * np.cos(ph_)) * en[ok]
             new = new + (tan[ok] * wv_[:, None] + out[ok] * wo_[:, None]) * conv[:, None]
+            if bl == 1 and LAYER_HOOK[0] > 0:
+                # (a layer's end turns in toward the neck, the hook John drew at the jaw on the photo: the round
+                # brush's turn at the ends, over the last LAYER_HOOK[1] of the layer's fall)
+                new = new.copy()
+                new[:, 0] -= np.sign(np.mean(ax[:, 0]) + 1e-9) * LAYER_HOOK[0] * MM * SF.sm(1 - LAYER_HOOK[1], 1.0, tl) ** 2
             p = np.c_[new, zi]
             keep = zi >= bot + TIP_CUT * TIP_T * (top - bot) * far[a_]
             if keep.sum() >= 4:
