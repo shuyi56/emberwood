@@ -279,6 +279,27 @@ light differently. Check the render from above as well.
 **Grounded in.** Counting: cover is root density x distance from a line the hair leaves x a hair's width, so it must
 fall to nothing at an unblended join. The thresholds are DRAFT.
 
+### Face edge: `hair/face_edge.py`
+
+**What it is for.** Hair that seems to cut the face or change its shape. An under layer of the strand asset (the
+coverage layer, the mid layer) is drawn "in" from its strand; beside the face "in" is onto the cheek, so the layer
+lies past the top hair as a dark line down each side and the face reads narrower.
+
+**In and out.** Two close-ups of the face from the same camera, the creator's own hair and the groom
+(`creator_shots.cjs PAGE PREFIX STYLE FACE creator|strands face=0/4/22/0.42`). The groom's face width against the
+creator's, each edge's offset, and the tone of the hair right at the skin against the hair farther out.
+```
+python3 tools/gauges/hair/face_edge.py CREATOR-face.png GROOM-face.png
+```
+
+**Trouble.** Face width more than 1 mm under the creator's; the edge band's ratio well under the creator's. On the
+Warden's wavy hair: -2.9 mm before, -0.6 mm after the hair beside the face lost its coverage and mid layers.
+
+**Misses.** Which layer it is: render the layers in false colour for that (swap the strand shader's output per
+layer). The skin test is by colour and assumes the creator's lighting. The mm scale is rough.
+
+**Grounded in.** The creator's own outline as ground truth (the project's hair rule). Thresholds DRAFT.
+
 ### Hair surface check: `hair/hair_check.py`
 
 **What it is for.** Catching creases, seams and ledges in the fused hair, and clothes coming through it, before a

@@ -3,6 +3,8 @@ creator's own hair (the export of face-creator.html: the cap, a grid of points w
 drawn from the same cameras as render.py and laid over the groom's render.
 
     python3 tools/hair/creator_truth.py HEAD.json.gz CREATOR_STYLE.json.gz GROOM_DIR OUT_DIR [--children 24000]
+            [--fibres FIBRES.npz]   (finished fibres instead of the groom's children: wavy_flow.py's fibres.npz,
+                                     `paths` nan-padded in head heights and `hairs` per fibre; GROOM_DIR is then unused)
 
 Writes truth-<view>.png (the groom's render, the creator's outline in red, its flow lines in blue, magenta where the
 creator has hair and the groom does not, cyan where the groom has hair outside the creator's) and truth.json (per
@@ -114,9 +116,13 @@ def main():
     surf = SF.Surface(RD.HEAD_CLOUD)
     F = SF.build(surf)
     body = json.load(gzip.open(head))['bodies']['mannequin']
-    Gm = dict(np.load(os.path.join(gdir, 'groom.npz')))
-    paths, share = RD.grow_children(F, Gm, nch)
-    total = float(Gm['n_hairs'].sum())
+    if '--fibres' in a:
+        z = np.load(a[a.index('--fibres') + 1])
+        paths, share, total = z['paths'].astype(float), z['hairs'] / z['hairs'].sum(), float(z['hairs'].sum())
+    else:
+        Gm = dict(np.load(os.path.join(gdir, 'groom.npz')))
+        paths, share = RD.grow_children(F, Gm, nch)
+        total = float(Gm['n_hairs'].sum())
     P, A, strands = load(style)
     Q = creator_points(P, A, strands)
     rep = {}
