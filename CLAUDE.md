@@ -87,6 +87,9 @@ or a measurement alone.
 6. Then render (`render.py`, `--size 750` keeps it inside memory), bake the cards (`cards.py`), and log each
    rejected look with `rq_reject.py`.
 
+For a ponytail, or any style gathered to a tie, follow `docs/hair/ponytail-recipe.md`: the photo measured, the flow
+field shown to John before any hair, then bangs, the creator asset and the tail's locks.
+
 ## Boots: lessons from the zip ankle boot
 
 See `docs/clothing-solvers/zip-ankle-boot-retrospective.md` for the numbers.
