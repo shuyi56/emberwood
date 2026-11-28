@@ -162,4 +162,6 @@ gauges:
     bangs curl: "0.23% of the sweep tighter than the 19 mm brush on the approved curtain"
     photo gap ear_top_above_chin: "the creator's ear sits 0.083 head higher on its head than the photo's: the two heads, not the hair (README round 6)"
 
-approved: {}        # the field_review gate prints the digest to put here once John has seen the field
+approved:
+  # today's field (the round 6 code on today's scalp), approved by John 2026-11-28 15:45 UTC ("yes")
+  field: 83d6a7f3b517d36f

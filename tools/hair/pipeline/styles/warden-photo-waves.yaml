@@ -136,4 +136,6 @@ gauges:
     rank_moves_front_R: "approved v14"
 
 approved:
-  field: null        # set from the gate's digest; v14 was approved in the wavy thread (John 2026-11-28 'Proceed now')
+  # field v14: John approved it in the wavy thread 2026-11-28 15:04 UTC ("Proceed now") and confirmed this digest for the
+  # runner's field (whose gauges are identical to v14's) on 2026-11-28 15:45 UTC ("yes")
+  field: 063a7d75b230bbcf
