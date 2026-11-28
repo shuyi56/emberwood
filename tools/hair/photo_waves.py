@@ -1001,6 +1001,20 @@ FRINGE_ON_HEAD, FRINGE_BACK = 0.27, 0.6   # DRAFT (HH; a slope)
 FRINGE_CLEAR_MM = (2.0, 6.0)  # the fringe's stand-off from the skin: the innermost layer's, and what the outermost adds
 
 
+FRINGE_FROM_BLUE = True      # the sheet's origin is the front fall's lines nearest the forehead (John 2026-11-29), not the fringe's own roots
+
+
+def _blue_origin(paths, hand, kind, sd, m, surf):
+    """The m lines of the front fall (blue in the flow diagram) whose roots lie nearest the forehead on side sd: their roots
+    and the direction each leaves in (root to its 5th node, over the skin)."""
+    cand = [i for i in range(len(paths)) if kind[i] == 0 and hand[i] >= 0 and paths[i][0, 0] * sd > 0
+            and abs(SF.theta(paths[i][:1])[0]) < FALL_SPLIT]
+    cand = sorted(cand, key=lambda i: paths[i][0, 1])[:m]
+    R = np.array([paths[i][0] for i in cand])
+    T = np.array([paths[i][min(5, len(paths[i]) - 1)] - paths[i][0] for i in cand])
+    return R, T / np.maximum(np.linalg.norm(T, axis=1, keepdims=True), 1e-9)
+
+
 def _solver_src():
     d_ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair')
     return open(os.path.join(d_, 'endpoint_flow.py')).read() + open(os.path.join(d_, 'sheet_flow.py')).read()
@@ -1024,7 +1038,7 @@ FRINGE_SHEET = dict(columns=20, across=1.0, root_fade=0.5, layer_in=0.15)   # DR
                              # hairs, the share of the length over which a hair's own root joins the sheet, and where its layer's depth is full
 
 
-def fringe_flow(root, layer, surf, sd, seed=3, log=print):
+def fringe_flow(root, layer, surf, sd, seed=3, log=print, origin=None):
     """One side's fringe as ONE SURFACE in 3D (John 2026-11-29: "you need a 3d solver, treat bangs as surfaces"), with its
     hairs as lines on it. The surface's root edge is the fringe's roots gathered by their order from the part outward
     (each column the mean root of its share, leaving along the skin's normal); its end edge is FRINGE_ENDS, stood
@@ -1038,10 +1052,24 @@ def fringe_flow(root, layer, surf, sd, seed=3, log=print):
     n = len(root); P = FRINGE_SHEET; Nu = P['columns']; N = 48
     t = np.argsort(np.argsort(np.abs(root[:, 0]))) / max(n - 1, 1)
     tc = (np.arange(Nu) + 0.5) / Nu
+    if origin is not None:
+        # John 2026-11-29: "use the closest blue lines to the forehead as the origin of the solver": the sheet starts where
+        # the front fall's lines nearest the forehead start, leaving as they leave; each fringe hair takes the root of the
+        # origin line of its own rank across
+        oroot, otan = origin
+        oo = np.argsort(np.abs(oroot[:, 0])); oroot, otan = oroot[oo], otan[oo]
+        j = np.minimum((t * len(oroot)).astype(int), len(oroot) - 1)
+        root = oroot[j]
     col = np.minimum((t * Nu).astype(int), Nu - 1)
     R0 = np.array([root[col == c].mean(0) if (col == c).any() else root.mean(0) for c in range(Nu)])
     U0 = R0 - SF.CENTRE; U0 /= np.linalg.norm(U0, axis=1, keepdims=True)
     R0 = SF.CENTRE + U0 * (surf.radius(U0) + LIFT_MM[0] * MM)[:, None]       # (the column's root, on the skin)
+    if origin is not None:
+        jc = np.minimum((tc * len(oroot)).astype(int), len(oroot) - 1)
+        T0 = np.array([otan[col_j].mean(0) for col_j in np.array_split(np.arange(len(oroot)), Nu)])
+        T0 /= np.linalg.norm(T0, axis=1, keepdims=True)
+        R0 = np.array([oroot[col_j].mean(0) for col_j in np.array_split(np.arange(len(oroot)), Nu)])
+        U0 = T0
     clr = np.full(Nu, (FRINGE_CLEAR_MM[0] + 0.5 * FRINGE_CLEAR_MM[1]) * MM)   # (the sheet is the fringe's middle layer)
     (xa, za), (xb, zb) = FRINGE_ENDS
     xe = sd * (xa + (xb - xa) * tc); ze = za + (zb - za) * tc
@@ -1227,8 +1255,9 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
         if len(fm) > 3 and FRINGE_SOLVE:
-            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG, sorted(FRINGE_SHEET.items()))) + _solver_src()),
-                               lambda: fringe_flow(x['root'][fm], x['layer'][fm], surf, sd, log=log), log)
+            org = _blue_origin(paths, hand, kind, sd, len(fm), surf) if FRINGE_FROM_BLUE else None
+            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG, sorted(FRINGE_SHEET.items()), FRINGE_FROM_BLUE)) + _solver_src()),
+                               lambda: fringe_flow(x['root'][fm], x['layer'][fm], surf, sd, log=log, origin=org), log)
             for i, l in zip(fm, fl):
                 lines[i] = l
         elif len(fm) > 3 and not BANG_FLOW:

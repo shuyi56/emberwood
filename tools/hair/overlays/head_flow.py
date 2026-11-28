@@ -1,4 +1,4 @@
-"""Flow diagram of the hair ON THE HEAD only: head_flow.py HEAD CACHE OUT.png [--every 6] ['PW.NAME = value' ...].
+"""Flow diagram of the hair ON THE HEAD only: head_flow.py HEAD CACHE OUT.png [--every 6] [--blue-only] ['PW.NAME = value' ...].
 Every line from its root to where it leaves the head (the bangs to their ends), nothing below. Four panels: front, side
 (face left), above (face down the page), back. Only the half of the head facing the viewer is drawn. Skull grey; the dot
 is the root; fringe orange, face framing magenta, front fall blue, back fall green."""
@@ -13,6 +13,7 @@ hk = md5(head)
 for a_ in sys.argv:
     if a_.startswith('PW.'):
         exec(a_)
+BLUE_ONLY = '--blue-only' in sys.argv; FRINGE_BLUE = PW.FRINGE_FROM_BLUE
 pts = SF.load_head(head)
 surf, F = PW._cached(cache, 'head', (hk, md5(SF.__file__)), lambda: (lambda sf: (sf, SF.build(sf)))(SF.Surface(pts)))
 coll, depth = WF.colliders(surf, json.load(gzip.open(head))['bodies']['mannequin'])
@@ -22,8 +23,8 @@ col = {0: (235, 130, 20), 1: (215, 50, 160), 2: (40, 110, 230), 3: (30, 160, 80)
 R = []
 for i in range(0, len(L), every):
     l = L[i] if int(B[i]) == 0 or H[i] < 0 else L[i][:H[i] + 1]
-    if len(l) > 2:
-        R.append((l, col[int(B[i])]))
+    if len(l) > 2 and (not BLUE_ONLY or int(B[i]) == 2 or (int(B[i]) == 0 and FRINGE_BLUE)):
+        R.append((l, col[2] if BLUE_ONLY else col[int(B[i])]))
 W, Hh = 900, 900; C = SF.CENTRE
 im = Image.new('RGB', (2 * W, 2 * Hh), (250, 250, 248))
 # view: (title, screen x axis and sign, screen y axis and sign, facing test on a point)
