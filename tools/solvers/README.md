@@ -222,7 +222,10 @@ by more than 0.03 HH where the creator's are level (front locks take the creator
 and are cut as well as grown); `locks.hairs_min` far under the median (a thin lock on its own rod dangles alone:
 locks under a quarter of the median join a neighbour). The asset's `look` tints its highlight and glints toward
 the hair's hue (white ones read ashy on a wavy fall), and a lock's far half has its "out" mirrored outward (lit
-by its own lock normal it showed as a black inner layer).
+by its own lock normal it showed as a black inner layer). `curtain` (empty 4 mm cells round the body inside the
+hair's span, by height, and the hem's step): high when the hair hangs as separate ropes. The locks are sections of
+a brushed-out set, not ropes: each hair takes the smooth lines of its nearest locks (`--blend`, default 0.8) and
+its own lock's wave.
 
 **Grounded in.** The creator's wave (main.js `wavyMass`: 0.034 / 0.040 HH axes, wavelength 0.5 + 0.08 x section HH,
 grown in from z 0.3 to -0.05) as ground truth; the settled wave under its own hanging weight A0 / (1 + h / (Lb^3 k^2))
