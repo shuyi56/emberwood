@@ -956,6 +956,53 @@ def _code_key(*fns):
     return out
 
 
+HEAD_CLUMP = dict(n=140, gather=0.55, in_mm=(6.0, 30.0), out_mm=60.0, lift_mm=4.0, groove_mm=2.5)   # DRAFT
+# (John 2026-11-29, the top of the head circled beside the photo: "too rounded and smooth, compare with the photo". The
+# photo's top is combed hair in locks: each lock a lit band with a dark parting beside it, a few lifted over their
+# neighbours. Here every combed line kept its own place, so the top was one even dome of parallel lines. Now the lines on
+# the head gather into HEAD_CLUMP['n'] locks by their roots: each drawn toward its lock's centre line by 'gather' (in
+# from the root over in_mm, so the roots and the hairline stay where they are, and out again over the last out_mm before
+# the hair leaves the head, so the falls start where they did), each lock lifted by its own share of lift_mm, and the
+# hairs at a lock's edge laid groove_mm lower, which leaves the parting between locks.)
+
+
+def _head_clumps(paths, hand, kind, root, surf):
+    from scipy.cluster.vq import kmeans2
+    P = HEAD_CLUMP
+    rng = np.random.default_rng(17)
+    idx = np.where((kind != 1) & (hand > 3))[0]
+    if len(idx) < P['n'] * 4:
+        return paths
+    _, lab = kmeans2(root[idx], P['n'], seed=5, minit='++')
+    out = list(paths)
+    lift = rng.uniform(-0.5, 1.0, P['n'])
+    for c in range(P['n']):
+        mem = idx[lab == c]
+        if len(mem) < 3:
+            continue
+        L = max(hand[i] for i in mem) + 1
+        M = np.zeros((L, 3)); W = np.zeros(L)
+        for i in mem:
+            h = min(hand[i] + 1, len(paths[i]))
+            M[:h] += paths[i][:h]; W[:h] += 1
+        M /= np.maximum(W, 1)[:, None]
+        spread = np.array([np.linalg.norm(paths[i][min(hand[i], len(paths[i]) - 1) // 2] - M[min(hand[i], len(paths[i]) - 1) // 2]) for i in mem])
+        edge = spread / max(spread.max(), 1e-9)
+        for e_, i in zip(edge, mem):
+            h = min(hand[i] + 1, len(paths[i]))
+            p = paths[i].copy()
+            s_mm = np.arange(h) * SEG_MM
+            w = SF.sm(P['in_mm'][0], P['in_mm'][1], s_mm) * SF.sm(s_mm[-1], s_mm[-1] - P['out_mm'], s_mm)
+            q = p[:h] + (M[:h] - p[:h]) * (P['gather'] * w)[:, None]
+            U = q - SF.CENTRE; r = np.linalg.norm(U, axis=1); U /= r[:, None]
+            r0 = np.linalg.norm(p[:h] - SF.CENTRE, axis=1)
+            dr = (lift[c] * P['lift_mm'] - P['groove_mm'] * e_ ** 2) * MM * w
+            r_new = np.maximum(r0 + dr, surf.radius(U) + 0.8 * MM)
+            p[:h] = SF.CENTRE + U * r_new[:, None]
+            out[i] = p
+    return out
+
+
 def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=None):
     """cache: a directory. The comb over the head (build) and the body's radius table are saved there and reused
     while the head (head_key), n, seed, and the code and constants they depend on are unchanged, so a change to the
@@ -997,6 +1044,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     # never gauged because the smoothness gauge starts at the release. Faired over HEAD_FAIR nodes, root held, kept at
     # least its first stand-off off the skin.)
     paths = [_stand_at_part(_fair_head(p, surf)) for p in paths]
+    paths = _head_clumps(paths, hand, kind, x['root'], surf)
     lines = [p for p in paths]
     base = {}
     basin = np.where(kind == 1, 0, -1)
