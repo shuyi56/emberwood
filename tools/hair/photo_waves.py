@@ -906,6 +906,47 @@ def _fair_head(p, surf):
     return SF.CENTRE + U * np.maximum(r, floor)[:, None]
 
 
+ROOT_ARC_MM = 22.0          # DRAFT: the run along the skin over which a root stands and turns over ("the first inch of each section")
+# THE ROOT, redrafted (John 2026-11-29: "read how to do roots properly, right now it looks flat"; "redraft from roots").
+# What the sources say:
+#   the section is held square to the head: "Overdirect each section to a 90-degree angle" (Behind the Chair, 3
+#     volumizing blowout tips); "hold the hair straight up from the scalp or straight-out from the sides" (Dummies,
+#     controlling the volume of your hair); "Lift up and slightly forward at the root", the brush "under the root for
+#     lift", over "the first inch of each section" (ROZ, how to do a blowout)
+#   flat is the opposite hold: "For a smoother, flatter top, blow-drying the hair in the exact direction of the style"
+#     (Dummies). That was this solver: every root set off along the skin in its comb direction and gained height as it
+#     ran, leaving at 47 to 68 degrees and already travelling
+#   the tools: lift is "a target Angle" at the root (Houdini Guide Groom, Lift); where the brush falls short, a root
+#     segment is put in along "the closest normal of the skin" (SideFX forum, separate root lift)
+# So a root LEAVES ALONG THE SKIN'S NORMAL, 90 degrees, with no travel, and turns over through a quarter turn onto the
+# hair's outer surface: run u = a (1 - cos f), height h = T sin f, f from 0 to a quarter turn, a = ROOT_ARC_MM along the
+# skin and T the surface's height where the hair arrives. The comb's course over the skin is kept; only the first a mm
+# of each line is rebuilt, on the same nodes.
+
+
+def _root_arc(p, surf, hand_i):
+    if hand_i < 0:
+        hand_i = len(p) - 1
+    if len(p) < 8 or hand_i < 6:
+        return p
+    d = p - SF.CENTRE; r = np.linalg.norm(d, axis=1); U = d / r[:, None]
+    sk = surf.radius(U)
+    foot = SF.CENTRE + U * sk[:, None]
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(foot, axis=0), axis=1))] / MM
+    lim = min(hand_i, len(p) - 1)
+    J = int(np.searchsorted(s[:lim + 1], ROOT_ARC_MM))
+    if J < 4 or J > lim:
+        return p
+    a = s[J]; T = r[J] - sk[J]; h0 = r[0] - sk[0]
+    f = np.linspace(0, 0.5 * np.pi, J + 1)
+    u = a * (1 - np.cos(f))
+    Un = np.c_[[np.interp(u, s[:J + 1], U[:J + 1, c]) for c in range(3)]].T
+    Un /= np.linalg.norm(Un, axis=1, keepdims=True)
+    q = p.copy()
+    q[:J + 1] = SF.CENTRE + Un * (surf.radius(Un) + h0 + (T - h0) * np.sin(f))[:, None]
+    return q
+
+
 def _cached(cache, name, key, make, log=print):
     """make() once per key: the result is pickled under cache/name-<key>.pkl. cache None: no caching."""
     import hashlib, pickle, time
@@ -926,7 +967,10 @@ def _cached(cache, name, key, make, log=print):
     return v
 
 
-PART_STAND = (18.0, 14.0, 60.0)   # DRAFT (mm): how far the hair by the part stands in toward it, the length over which it
+PART_STAND = (0.0, 14.0, 60.0)    # OFF since the root arc (2026-11-29): pulling a root 18 mm sideways over its first 14 mm laid it
+                                  # down to 41 degrees off the skin and kinked it seen from above; a root that leaves along the normal
+                                  # closes the cleft by itself. Was (18.0, 14.0, 60.0)
+_PART_STAND_WAS = (18.0, 14.0, 60.0)   # DRAFT (mm): how far the hair by the part stands in toward it, the length over which it
                                   # stands up, and the length by which it has leaned back out
 
 
@@ -958,7 +1002,7 @@ def _code_key(*fns):
     return out
 
 
-HEAD_CLUMP = dict(n=140, gather=0.55, in_mm=(6.0, 30.0), out_mm=60.0, lift_mm=4.0, groove_mm=2.5)   # DRAFT
+HEAD_CLUMP = dict(on=False, n=140, gather=0.55, in_mm=(6.0, 30.0), out_mm=60.0, lift_mm=4.0, groove_mm=2.5)   # DRAFT
 # (John 2026-11-29, the top of the head circled beside the photo: "too rounded and smooth, compare with the photo". The
 # photo's top is combed hair in locks: each lock a lit band with a dark parting beside it, a few lifted over their
 # neighbours. Here every combed line kept its own place, so the top was one even dome of parallel lines. Now the lines on
@@ -973,7 +1017,7 @@ def _head_clumps(paths, hand, kind, root, surf):
     P = HEAD_CLUMP
     rng = np.random.default_rng(17)
     idx = np.where((kind != 1) & (hand > 3))[0]
-    if len(idx) < P['n'] * 4:
+    if not P['on'] or len(idx) < P['n'] * 4:                              # (off while the roots are redrafted: it kinked them seen from above)
         return paths
     _, lab = kmeans2(root[idx], P['n'], seed=5, minit='++')
     out = list(paths)
@@ -1045,7 +1089,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     # its lift, and the skin's small bumps turned the line by over 20 degrees a node on 8,000 of 7,500 lines' heads,
     # never gauged because the smoothness gauge starts at the release. Faired over HEAD_FAIR nodes, root held, kept at
     # least its first stand-off off the skin.)
-    paths = [_stand_at_part(_fair_head(p, surf)) for p in paths]
+    paths = [_stand_at_part(_root_arc(_fair_head(p, surf), surf, hand[i]) if kind[i] != 1 else _fair_head(p, surf)) for i, p in enumerate(paths)]
     paths = _head_clumps(paths, hand, kind, x['root'], surf)
     lines = [p for p in paths]
     base = {}
@@ -1062,7 +1106,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
             for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3, side=(cKDTree(sp), sp, st))):
                 # (stood up at the part like the hair beside it, then faired again: the bang's nodes are 4 mm apart and
                 # the stand alone bent 6% of them tighter than the brush)
-                lines[i] = l                                             # (stood at the part inside bang_sheet)
+                lines[i] = _root_arc(l, surf, -1)                        # (the bangs' roots on the same law as every other root)
     sec = np.zeros(n, int)
     step = SEG_MM * MM
     for q, i in enumerate(hang):
