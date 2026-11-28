@@ -81,8 +81,10 @@ BLEND_R_MM = 40.0           # SOURCED: a wave section is 1 to 1.5 in wide (Sam V
                             # the roller); a hair is shared between the locks within one section's width of it
 FLATNESS = 0.5              # DRAFT: a lock's depth (out from the body) at its tip against its width (XGen Flatness)
 SUBLOCKS = 3                # the tail's: a lock parts into sub-locks as it falls
-SUB_SPREAD, HAIR_SPREAD = 0.3, 0.4   # DRAFT (the tail's 1.4 / 0.7; sub-locks at 0.8 parted every lock into three fingers at the hem)
-SPREAD_FROM = 0.15          # the share of a lock's length where the opening starts
+SUB_SPREAD, HAIR_SPREAD = 1.4, 0.7   # the tail's (bangs_creator_asset.py TAIL_SUB_SPREAD / TAIL_HAIR_SPREAD): the locks open
+                            # toward their ends like the ponytail's (John 2026-11-28). 0.3 / 0.4 kept the hem closed
+SPREAD_FROM = 0.5           # the share of a lock's length where the opening starts (the tail: 0.12; here near the ends)
+MID_FRONT_RAD = 1.5         # hanging hair that leaves the head in front of this angle has no mid layer (see main)
 END_STRAIGHT_MM = 25.0      # stylists: about an inch of the ends left out of the wave
 REST_GAIN = 1.0             # CALIBRATED below (the settled wave against the creator's)
 CAP_LIFT_MM = 0.4           # the scalp cap under the roots (PR #97: at 1 mm the roots beside a join lay under it)
@@ -514,6 +516,13 @@ def main():
     if '--no-mid-layer' not in a:
         import hair_layers as HLy
         P, tier, ml = HLy.mid_layer(P)
+        # (the mid layer is thick opaque clumps meant to lie under top hair. Beside the face the curtain is seen
+        # edge on and nothing lies over them: they showed as flat dark paint on the side of the face, John 2026-11-28.
+        # Hanging hair that leaves the head in front of the ears is drawn as top strands only.)
+        th0 = np.array([SF.theta(p[min(len(p) - 1, int(np.argmax(p[:, 2] < HANDOVER_Z)))][None])[0] for p in paths])
+        front_edge = (lock >= 0) & (np.abs(th0) < MID_FRONT_RAD) & (tier > 0)
+        tier = np.where(front_edge, 0, tier)
+        ml['mid_fibres_dropped_beside_face'] = int(front_edge.sum())
         rep['mid_layer'] = ml; log('mid layer %s' % ml)
     if '--noise' in a:
         import noise_round as NR
