@@ -53,11 +53,24 @@ FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'l
 # 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
 # guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
 # No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
-TOP_LIFT_MM, ROOT_RISE_MM = 22.0, 42.0   # the hair's height over the skull at the top, and the length from the root over
+TOP_LIFT_MM, ROOT_RISE_MM = 24.0, 52.0   # the hair's height over the skull at the top, and the length from the root over
                             # which it rises to it. John 2026-11-28: "raise the hair more it's still too flat it should have
                             # more arching at the roots". This overrides the measurement (9 mm, 0.04 HH, read off the photo's
                             # top outline); the rise is longer (30 to 42 mm) so the taller arch bends no tighter
-BACK_LIFT_MM = 12.0         # DRAFT: more again over the crown and the back of the head (John 2026-11-28: "you didn't raise
+# THE ARCH (John 2026-11-28, the crown circled in the side view: "get the proper arch research how to do it properly in
+# procedural hair"). What the sources do:
+#   lift is a ROTATION AT THE ROOT, not a stand-off: Houdini's Lift Guides "applies a rotation, similar to the Set
+#     Direction tool" and its brush has "a target Angle for the lift" (SideFX docs, Guide Process: Lift; Guide Groom)
+#   the hair is a VOLUME of layers stacked on the scalp, each strand traced through corresponding points of every layer
+#     and joined with "C1 Catmull-Rom splines"; the artist shapes only "the external surface of the mesh volume"
+#     (Yuksel, Schaefer, Keyser 2009, Hair Meshes)
+#   the stylist's root lift: "overdirect each section to a 90-degree angle", dried over "a large round brush"
+#     (Behind the Chair, 9 blowout tips); "lift sections of hair upwards as you dry" (Hershesons)
+# So a hair leaves its root AT AN ANGLE and turns over at one constant bend onto the hair's outer surface, landing
+# tangent to it: height T * (1 - (1 - s/L)^2) over the run L. Leaving angle atan(2T/L) = 43 degrees, bend radius
+# L^2/(2T) = 56 mm (a large round brush and the hair's own spring). Before, the rise was a smoothstep: flat on the skin
+# at the root, then a steep ramp, then flat again, three times the bend, so the top read as spikes, not arches.
+BACK_LIFT_MM = 8.0         # DRAFT: more again over the crown and the back of the head (John 2026-11-28: "you didn't raise
                             # the back", the back view circled): the photo does not show the back
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
@@ -174,8 +187,8 @@ def build(F, surf, n=24000, seed=11, log=print):
             # brush gives at the base, to the photo's height: TOP_LIFT_MM over the top, LIFT_MM[1] by the temple. Before,
             # it grew LIFT_PER_MM per mm combed, so the first 50 mm lay on the skin.)
             capz = (TOP_LIFT_MM + (LIFT_MM[1] - TOP_LIFT_MM) * SF.sm(0.95, 0.62, Q[:, 2])) * (0.45 + 0.55 * layer[J])
-            capz = capz + BACK_LIFT_MM * SF.sm(SF.AXIS[1] - 0.02, SF.AXIS[1] + 0.22, Q[:, 1]) * SF.sm(0.45, 0.75, Q[:, 2]) * (0.45 + 0.55 * layer[J])
-            lift = (LIFT_MM[0] + capz * SF.sm(0.0, ROOT_RISE_MM, s_mm)) * MM
+            capz = capz + BACK_LIFT_MM * SF.sm(SF.AXIS[1] - 0.15, SF.AXIS[1] + 0.25, Q[:, 1]) * SF.sm(0.45, 0.75, Q[:, 2]) * (0.45 + 0.55 * layer[J])
+            lift = (LIFT_MM[0] + capz * (1 - (1 - min(s_mm / ROOT_RISE_MM, 1.0)) ** 2)) * MM
             # the fringe bends in two planes (John 2026-11-28: "bangs should also be 3d twisting along 2 planes like the
             # picture"). Out of the forehead: an arch up off the root over the hairline (ghd: "lift at the base", on a
             # 35 mm brush), in again over the forehead, and the end flicked out ("flick the brush away from the face").
