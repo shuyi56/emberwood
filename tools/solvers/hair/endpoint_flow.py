@@ -12,6 +12,10 @@ solve(P0, T0, P1, T1, floor, ...) -> lines [n, N, 3], report
   m0, m1 [n]      how far the line keeps each direction (a length, the Hermite tangent's size): a larger m0 stands the
                   root up longer
   floor(X [k, 3]) -> X pushed out to the body plus its clearance (points already outside are returned unchanged)
+  via             set points on the way, each (fraction along the line, points [n, 3], weight): the line is drawn to pass
+                  them. Two ends alone give ONE arc: the least-bending line between two points and two directions is a
+                  cubic, which turns one way, or two ways only when the directions force it. A shape with more turns (an
+                  S across the face, and in and out of it in depth) needs a set point at each turn.
 Report: iterations, nodes pushed out on the last pass, the worst depth left inside (should be ~0), bend radius min/p1.
 """
 import numpy as np
@@ -30,7 +34,7 @@ def _bend(N):
     return D.T @ D
 
 
-def solve(P0, T0, P1, T1, floor, m0=None, m1=None, N=48, passes=30, hold=6.0, tol=2e-4, log=None):
+def solve(P0, T0, P1, T1, floor, m0=None, m1=None, N=48, passes=30, hold=6.0, tol=2e-4, via=(), log=None):
     n = len(P0)
     chord = np.linalg.norm(P1 - P0, axis=1)
     m0 = chord if m0 is None else np.broadcast_to(m0, (n,)).astype(float)
@@ -50,13 +54,24 @@ def solve(P0, T0, P1, T1, floor, m0=None, m1=None, N=48, passes=30, hold=6.0, to
         # pass. Held to where it was first pushed, the line kept the first pass's dents: bend radius 0.1 mm.)
         target = np.where(active[..., None], F, target)
         rep = dict(passes=it + 1, pushed=int(inside.sum()), worst_inside=float(depth[:, ~fixed].max()))
-        if it and depth[:, ~fixed].max() < tol:
+        if it and depth[:, ~fixed].max() < tol and not via:
             break
         # least bending with the held nodes: (K + hold * A) x = hold * A target, the end rows replaced by their pins
         A = np.broadcast_to(K, (n, N, N)).copy()
         idx = np.arange(N)
         A[:, idx, idx] += hold * active
         B = hold * active[..., None] * target
+        for frac, Wp, wv in via:                                         # (set points on the way: the shape's turns)
+            # (a set point holds the node of the line that is NEAREST it now, found again each pass: held at a fixed
+            # share of the line it met the wrong node and the line jogged sideways to reach it, a corner at the waist.
+            # frac only seeds the first pass.)
+            if it == 0:
+                kv = np.full(n, int(round(frac * (N - 1))))
+            else:
+                dv = np.linalg.norm(X - Wp[:, None], axis=2); dv[:, :3] = 1e9; dv[:, -3:] = 1e9
+                kv = dv.argmin(1)
+            ar = np.arange(n)
+            A[ar, kv, kv] += wv; B[ar, kv] += wv * Wp
         A[:, fixed] = 0.0
         A[:, np.where(fixed)[0], np.where(fixed)[0]] = 1.0
         B[:, fixed] = pin[:, fixed]

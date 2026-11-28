@@ -994,12 +994,29 @@ FRINGE_ENDS = ((0.20, 0.53), (0.44, 0.47))   # TRACED on John's drawn lines (202
                              # innermost hair's (distance from the middle, height z) to the outermost's: along the brow to the temple
 FRINGE_END_DIR = 4.0         # degrees below level that an end arrives, heading out (the drawn lines' flat tails)
 FRINGE_M = (95.0, 1.0)       # DRAFT: how long the line keeps its root's direction (mm: the root's stand) and its end's (x the chord)
+FRINGE_WAIST = (0.09, 0.24, 0.63, 0.55, 1.0)   # TRACED on John's drawn lines: the waist's distance from the middle (innermost hair,
+                             # outermost), its height z; DRAFT: its place along the line (a share) and how hard the line is drawn to it
+FRINGE_FLICK_MM, FRINGE_FLICK_DEG = 7.0, 18.0   # DRAFT: the ends stand this far off the face and leave it at this angle
 FRINGE_ON_HEAD, FRINGE_BACK = 0.27, 0.6   # DRAFT (HH; a slope)
 FRINGE_CLEAR_MM = (2.0, 6.0)  # the fringe's stand-off from the skin: the innermost layer's, and what the outermost adds
 
 
 def _solver_src():
     return open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair', 'endpoint_flow.py')).read()
+
+
+def _on_front(xs, zs, surf, clr):
+    """The point on the head's front under (x, z), stood clr off the skin: found walking back from in front of the face."""
+    n = len(xs); clr = np.broadcast_to(clr, (n,))
+    ys = np.linspace(-0.55, 0.06, 62)
+    G = np.stack([np.c_[xs, np.full(n, y_), zs] for y_ in ys], 1)
+    dG = G - SF.CENTRE; rG = np.linalg.norm(dG, axis=2); UG = dG / rG[..., None]
+    f = rG - (surf.radius(UG.reshape(-1, 3)).reshape(n, -1) + clr[:, None])
+    hit = f <= 0
+    j = np.where(hit.any(1), hit.argmax(1), f.argmin(1))
+    j0 = np.maximum(j - 1, 0); ar = np.arange(n)
+    w_ = np.where(hit.any(1) & (j > 0), f[ar, j0] / np.maximum(f[ar, j0] - f[ar, j], 1e-9), 0.0)
+    return np.c_[xs, ys[j0] + (ys[j] - ys[j0]) * w_, zs]
 
 
 def fringe_flow(root, layer, surf, sd, seed=3, log=print):
@@ -1020,15 +1037,8 @@ def fringe_flow(root, layer, surf, sd, seed=3, log=print):
     # front of the face; past FRINGE_ON_HEAD from the middle the head is no longer under it and the end lies out over
     # the side hair, FRINGE_BACK back for each unit farther out)
     xs = np.minimum(np.abs(xe), FRINGE_ON_HEAD) * sd
-    ys = np.linspace(-0.55, 0.06, 62)
-    G = np.stack([np.c_[xs, np.full(n, y_), ze] for y_ in ys], 1)
-    dG = G - SF.CENTRE; rG = np.linalg.norm(dG, axis=2); UG = dG / rG[..., None]
-    f = rG - (surf.radius(UG.reshape(-1, 3)).reshape(n, -1) + clr[:, None])
-    hit = f <= 0
-    j = np.where(hit.any(1), hit.argmax(1), f.argmin(1))
-    j0 = np.maximum(j - 1, 0); ar = np.arange(n)
-    w_ = np.where(hit.any(1) & (j > 0), f[ar, j0] / np.maximum(f[ar, j0] - f[ar, j], 1e-9), 0.0)
-    P1 = np.c_[xe, ys[j0] + (ys[j] - ys[j0]) * w_ + FRINGE_BACK * (np.abs(xe) - np.abs(xs)), ze]
+    P1 = _on_front(xs, ze, surf, clr)
+    P1 = np.c_[xe, P1[:, 1] + FRINGE_BACK * (np.abs(xe) - np.abs(xs)), ze]
     U1 = P1 - SF.CENTRE; U1 /= np.linalg.norm(U1, axis=1, keepdims=True)
     a = np.radians(FRINGE_END_DIR)
     T1 = np.c_[sd * np.cos(a) * np.ones(n), np.zeros(n), -np.sin(a) * np.ones(n)]
@@ -1041,7 +1051,20 @@ def fringe_flow(root, layer, surf, sd, seed=3, log=print):
         d = X - SF.CENTRE; r = np.linalg.norm(d, axis=1); Ud = d / r[:, None]
         return SF.CENTRE + Ud * np.maximum(r, surf.radius(Ud) + cl)[:, None]
     chord = np.linalg.norm(P1 - root, axis=1)
-    X, rep_ = EF.solve(root, T0, P1, T1, floor, m0=np.full(n, FRINGE_M[0] * MM), m1=FRINGE_M[1] * chord, N=N, log=log)
+    # (John 2026-11-29: "why is the solver not tracing an S shape and bending in multiple axis". With two ends it drew one
+    # arc. The S has two turns ACROSS the face (out over the part and down the forehead, then out again at the brow) and
+    # three IN DEPTH (up off the root, in onto the forehead, out again at the ends: "flick the brush away from the
+    # face"). Each turn gets a set point:
+    #   the WAIST, where the line runs steepest down the forehead, close on the skin: FRINGE_WAIST (the distance from the
+    #     middle for the innermost and outermost hair, the height, the place along the line), traced on the drawn lines
+    #   the END, stood FRINGE_FLICK_MM off the face and arriving heading out and away from it)
+    xw = sd * (FRINGE_WAIST[0] + (FRINGE_WAIST[1] - FRINGE_WAIST[0]) * t)
+    Wp = _on_front(xw, np.full(n, FRINGE_WAIST[2]), surf, FRINGE_CLEAR_MM[0] * MM + 0.3 * (clr - FRINGE_CLEAR_MM[0] * MM))
+    P1 = P1 + U1 * (FRINGE_FLICK_MM * MM)
+    T1 = T1 + U1 * np.tan(np.radians(FRINGE_FLICK_DEG)); T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
+    chord = np.linalg.norm(P1 - root, axis=1)
+    X, rep_ = EF.solve(root, T0, P1, T1, floor, m0=np.full(n, FRINGE_M[0] * MM), m1=FRINGE_M[1] * chord, N=N,
+                       via=((FRINGE_WAIST[3], Wp, FRINGE_WAIST[4]),), log=log)
     return list(X), rep_
 
 
@@ -1195,7 +1218,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
         if len(fm) > 3 and FRINGE_SOLVE:
-            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK)) + _solver_src()),
+            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK, FRINGE_WAIST, FRINGE_FLICK_MM, FRINGE_FLICK_DEG)) + _solver_src()),
                                lambda: fringe_flow(x['root'][fm], x['layer'][fm], surf, sd, log=log), log)
             for i, l in zip(fm, fl):
                 lines[i] = l
