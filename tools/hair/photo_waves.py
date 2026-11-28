@@ -96,7 +96,8 @@ TAKE = 1.3                  # CALIBRATED (first solve): the waves and the lie on
                             # hanging length: ends cut for z -0.76 hung at -0.38 to -0.47; at 1.5 the locks splayed over the shoulders
 FRINGE_FEATHER = 0.05       # DRAFT (HH): the fringe's ends are point cut over this much, not a ruled line
 LOCKS_PER_SIDE = 50         # a lock is a stylist's section, 22 to 35 mm of the perimeter (MEASURED ribbon width)
-WAVE = dict(start_z=0.38, full_z=0.12, lam_hh=0.33, amp_hh=0.04)     # MEASURED
+WAVE = dict(start_z=0.38, full_z=0.12, lam_hh=0.43, amp_hh=0.045)    # TRACED on the photo's two big locks (bulges 100 px apart
+                            # at 234 px a head: 0.43 HH; swing 13 px: 0.055 HH peak, 0.045 kept). Before: 0.33, 0.04
 
 
 def curtain_z(ax):
@@ -680,6 +681,11 @@ def _cached(cache, name, key, make, log=print):
     f = os.path.join(cache, '%s-%s.pkl' % (name, hashlib.md5(repr(key).encode()).hexdigest()[:16]))
     if os.path.exists(f):
         return pickle.load(open(f, 'rb'))
+    # (keep the newest two of a stage: every edit to a constant the stage reads makes a new key, and a comb is 58 MB)
+    old = sorted([g for g in os.listdir(cache) if g.startswith(name + '-') and g.endswith('.pkl')],
+                 key=lambda g: os.path.getmtime(os.path.join(cache, g)))
+    for g in old[:-1]:
+        os.remove(os.path.join(cache, g))
     t = time.time(); v = make()
     pickle.dump(v, open(f + '.tmp', 'wb'), protocol=4); os.replace(f + '.tmp', f)
     log('cache: built %s in %.0f s' % (name, time.time() - t))
@@ -846,7 +852,11 @@ LOCK_SCALE = {1: 0.25, 2: 2.5, 3: 0.7}   # lock size by fall, as a share of LOCK
                             # fewer like the picture for the hair that rests on the chest and thinner ones for the shoulder
                             # locks"): face framing finest, the front fall on the chest 2.5x (the photo shows about 4 or 5
                             # broad locks a side there), the back fall over the shoulders 0.7x
-CLUMP_B = {3: 0.85}         # the back fall barely gathers, and LOCK_PLAY scales its locks' own wave and opening: the back is
+FRONT_TRACE = {1: (0.6,), 2: (2.6, 0.0)}   # TRACED on the photo (hair-rebuild/wavy-photo/photo-lock-trace.png): the front of
+                            # each side is two big locks, the inner one beside the face and down the chest and the outer
+                            # one over the shoulder's front, waving about half a wave apart (the inner bulges where the
+                            # outer draws in); the face-framing pieces ride as one lock. Phase (rad) per lock, inner first
+CLUMP_B = {3: 0.85, 2: 0.7, 1: 0.7}         # the back fall barely gathers, and LOCK_PLAY scales its locks' own wave and opening: the back is
 LOCK_PLAY = {3: 0.3}        # one continuous sheet (John 2026-11-28: "back should be continuous"; gathered, the back's locks
                             # left gaps and a step where they began under the head)
 CLUMP = 0.45                # recipe step 6: a lock gathers to this share of its spread on the head
@@ -872,6 +882,7 @@ def lock_fall(Fd, seed=5, log=print):
     lines = list(Fd['line']); basin = Fd['basin']; rel = Fd['release']
     lock = np.full(len(lines), -1)
     nl = 0
+    fixed = {}
     zg = -0.05                                                        # (where the locks are read: below the jaw, in the fall)
     for b in (1, 2, 3):
         for sd in (1.0, -1.0):
@@ -885,6 +896,18 @@ def lock_fall(Fd, seed=5, log=print):
                 feat.append(np.r_[r, q])
             feat = np.array(feat)
             k = max(1, int(round(len(m) / (LOCK_SIZE * LOCK_SCALE[b]))))
+            if b in FRONT_TRACE:
+                # (traced on the photo, John 2026-11-28: "there are two big ones otherwise it's continuous on the
+                # front": the fall is split by its order round the body into the traced locks, each with the traced
+                # phase, and nothing finer)
+                tr = FRONT_TRACE[b]
+                rk = np.argsort(np.argsort(np.abs(SF.theta(feat[:, 3:6])))) / max(len(m) - 1, 1)
+                lab = np.minimum((rk * len(tr)).astype(int), len(tr) - 1)
+                for j, ph_ in enumerate(tr):
+                    fixed[nl + j] = ph_
+                lock[m] = nl + lab
+                nl += len(tr)
+                continue
             cen = feat[rng.choice(len(m), k, replace=False)]
             for _ in range(6):                                            # (a few Lloyd steps: even, compact locks)
                 lab = cKDTree(cen).query(feat)[1]
@@ -931,6 +954,8 @@ def lock_fall(Fd, seed=5, log=print):
         bl = int(basin[m[0]])
         en = SF.sm(RELEASE_Z, RELEASE_Z - LOCK_IN, zz) * LOCK_PLAY.get(bl, 1.0)                  # (from the release: the locks part high)
         ph = rng.normal(0, LOCK_PHASE); lam_l = WAVE['lam_hh'] * (1 + LOCK_LAM * rng.uniform(-1, 1))
+        if j in fixed:
+            ph, lam_l = fixed[j], WAVE['lam_hh']
         psi = 2 * np.pi * (RELEASE_Z - zz) / WAVE['lam_hh']
         psl = 2 * np.pi * (RELEASE_Z - zz) / lam_l + ph
         out = ax - np.array(SF.AXIS)[None]

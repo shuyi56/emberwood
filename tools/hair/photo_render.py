@@ -10,7 +10,8 @@ cut a little apart at the tip, and share the line's hairs, so the coverage on sc
 With --photo the front close-up is saved beside the reference.
 
 Cached under --cache (default OUT/../photo-cache): the head's scalp field, the comb over the head, the body's radius
-table and every view's clay backdrop. Each is rebuilt only when the head file or the code and constants it depends on
+table. (The clay backdrops are not cached: 3 s each to build, 20 MB each to keep. First timing, 2026-11-28: the
+field, locks and fibres take 44 s; the 18 hair renders take 610 s, 30 to 40 s each, so --quick is the saving.) Each is rebuilt only when the head file or the code and constants it depends on
 change, so a change to the falls, the cut or the locks skips them. --quick draws only the front, side and back
 close-ups in colour (quick.png). render.json's 'seconds' gives the time per stage.
 """
@@ -98,9 +99,8 @@ def main():
     RD.SCALP_F = F
 
     def backdrop(cv, key, mode):
-        # (the clay head and body behind the hair: the same for every hair, so drawn once per view and kept)
-        return PW._cached(cache, 'backdrop', (hk, src(RD), key, mode, size, RD.FILL_SRGB),
-                          lambda: RD.clay_backdrop(cv, surf, body, mode))
+        # (not cached: it builds in 3 s and is 20 MB a view; the time is in the hair, see render.json 'seconds')
+        return RD.clay_backdrop(cv, surf, body, mode)
     rep = dict(locks=lrep, lines=n, fibres=len(paths), hairs=round(float(hairs.sum())), per_root=per, gauges=Fd['gauges'])
     if not quick:
         for mode in ('clay', 'full'):
