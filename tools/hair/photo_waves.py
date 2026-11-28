@@ -53,7 +53,13 @@ FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'l
 # 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
 # guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
 # No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
-BACK_SWEEP = 0.7            # DRAFT: the pull back along the skin against gravity, at the face frame
+TOP_LIFT_MM, ROOT_RISE_MM = 9.0, 30.0   # MEASURED (the photo: hair 0.04 HH over the skull at the top) and DRAFT: the
+                            # length from the root over which the hair rises to it
+SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
+FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
+                            # and John's line stepping out at eye level): the fall stands out this much (HH) below the
+                            # temple, and this much again by the shoulder; the outer layer most
+BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravity, at the face frame
 FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
@@ -125,6 +131,7 @@ def build(F, surf, n=24000, seed=11, log=print):
     step = SEG_MM * MM
     g = np.array([0.0, 0.0, -1.0])
     for it in range(int(3.4 / step)):
+        s_mm = it * SEG_MM
         I = np.where(live)[0]
         if not len(I):
             break
@@ -149,7 +156,8 @@ def build(F, surf, n=24000, seed=11, log=print):
             # section properly, it shouldn't be straight here"; sections and directions in the note above BACK_SWEEP):
             # most at the face frame, none at the ear-to-ear parting, where the crown's pivot takes over
             wf = SF.sm(SF.AXIS[1] + 0.04, -0.24, pos[J, 1]) * (kind[J] != 1) * ~behind
-            d[:, 1] += BACK_SWEEP * wf
+            d[:, 1] += BACK_SWEEP * wf * SF.sm(0.0, SWEEP_IN_MM, s_mm)       # ("more curved from top": the line leaves the
+                                                                        #  part square to it and bows back as it runs)
             d = d - (d * Uo).sum(1, keepdims=True) * Uo
             d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
             Q = pos[J] + step * d
@@ -157,6 +165,12 @@ def build(F, surf, n=24000, seed=11, log=print):
             Un = qq / np.linalg.norm(qq, axis=1, keepdims=True)
             s_mm = it * SEG_MM
             lift = np.minimum(LIFT_MM[0] + LIFT_PER_MM * s_mm * layer[J], lift_cap[J]) * MM
+            # (John 2026-11-28, lines drawn on the photo: "hair from roots shouldn't lie flat on the scalp also should be
+            # more curved from top". The stand-off rises from the root as an arc over ROOT_RISE_MM, the lift a round
+            # brush gives at the base, to the photo's height: TOP_LIFT_MM over the top, LIFT_MM[1] by the temple. Before,
+            # it grew LIFT_PER_MM per mm combed, so the first 50 mm lay on the skin.)
+            capz = (TOP_LIFT_MM + (LIFT_MM[1] - TOP_LIFT_MM) * SF.sm(0.95, 0.62, Q[:, 2])) * (0.45 + 0.55 * layer[J])
+            lift = (LIFT_MM[0] + capz * SF.sm(0.0, ROOT_RISE_MM, s_mm)) * MM
             # the fringe bends in two planes (John 2026-11-28: "bangs should also be 3d twisting along 2 planes like the
             # picture"). Out of the forehead: an arch up off the root over the hairline (ghd: "lift at the base", on a
             # 35 mm brush), in again over the forehead, and the end flicked out ("flick the brush away from the face").
@@ -613,9 +627,11 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
         a = ah + (a1[q] - ah) * g
         t = np.clip((rel[q, 2] - z) / max(rel[q, 2] - BODY_AT_Z, 1e-6), 0, 1)
         tent = r0[q] + (land[q] - r0[q]) * t
+        flare = (FLARE[0] * SF.sm(RELEASE_Z, RELEASE_Z - 0.16, z) + FLARE[1] * SF.sm(0.25, -0.15, z)) * (0.35 + 0.65 * d[q]) \
+            * (1 - 0.6 * SF.sm(-0.2, -0.6, z)) * np.clip(np.sin(a), 0, 1) ** 2       # (at the sides: not on the chest, not down the back)
         floor = Rb(np.c_[sg[q] * a, z]) + stack[q]
         over0 = max(float(floor[0] - r0[q]), 0.0)                        # (the floor meets the head where the hair leaves it)
-        R = np.maximum(floor - over0 * np.exp(-np.arange(len(z)) / (FAIR_MM / SEG_MM)), tent)
+        R = np.maximum(floor - over0 * np.exp(-np.arange(len(z)) / (FAIR_MM / SEG_MM)), tent + flare)
         # one eased course (John 2026-11-28: "needs to be smoother"): the eases above meet in corners (behind the cheek,
         # at the collarbone), so the course is faired over FAIR_MM along the hair, held at the head end, and kept off
         # the body. gauges/hair/flow_smooth.py reads the bend radius of this course against a hair's bending length.
