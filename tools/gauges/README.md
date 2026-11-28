@@ -499,3 +499,18 @@ All on open PRs; they land here under `gauges/face/` and `gauges/measuring/`.
   differ.
 - `rq_flags.py` (PR #57): post-render artifact flags on every finished job.
 - `rq_reject.py`: log every rejection before fixing it (project rule).
+
+### Part cleft and bang seam: `hair/part_profile.py`, `hair/crown_step.py`
+
+**Measures.** `part_profile.py`: the 95th percentile of the hair's height over the skull (mm) in 4 mm bands of distance
+from the centre part, on top of the head and behind it. A cleft shows as a low first band. `crown_step.py`: where a
+bang hair and a hair of the falls lie within 4 mm of each other on top of the head, the difference in their heights
+over the skull (median, 10th and 90th percentile, mm). A seam shows as a step.
+
+**Run.** `python3 tools/gauges/hair/part_profile.py HEAD.json.gz CACHE_DIR` and
+`python3 tools/gauges/hair/crown_step.py HEAD.json.gz CACHE_DIR` (the photo field, `photo_waves.field2`, 16,000 lines).
+
+**Read.** 2026-11-29, wavy photo hair: the cleft was 8 mm at the part against 25 mm 24 mm away (17 mm deep, two humps
+in the front and back outlines); with the roots stood up at the part (`photo_waves._stand_at_part`) 17.7 against 24 mm.
+The bang seam: 0.0 mm median once the bang's root lift used the falls' arc and envelope. Look at the crown as well
+(`photo_render.py --crown`): the numbers do not show a ragged edge.

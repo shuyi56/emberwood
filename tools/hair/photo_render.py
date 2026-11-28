@@ -3,7 +3,7 @@ render.py's fibre renderer (clay and shaded turnarounds and close-ups). No groom
 recipe's step 3, the field as it stands seen as hair, so its faults show before any locks are built.
 
     python3 tools/hair/photo_render.py HEAD.json.gz OUT_DIR [--lines 16000] [--per-root 2] [--size 750]
-        [--tone 7e4c34] [--photo reference.jpg] [--no-locks] [--quick] [--draft] [--cache DIR | --no-cache]
+        [--tone 7e4c34] [--photo reference.jpg] [--no-locks] [--quick] [--draft] [--crown] [--cache DIR | --no-cache]
 
 Each line is drawn --per-root times; the copies sit a little apart across the hair (square to it, COPY_MM) and are
 cut a little apart at the tip, and share the line's hairs, so the coverage on screen is the field's own hair count.
@@ -30,6 +30,7 @@ import render as RD  # noqa: E402
 
 NODES = 160                 # nodes per drawn fibre, even by length
 COPY_MM = 1.5               # DRAFT: a copy's offset from its line, square to it (a field line stands for a few hundred hairs)
+CROWN_SIGN = 1.0            # which way the crown views tip (up toward the camera)
 CUT_JIT = (0.08, 0.04)      # tips end within the last 8% of the length (falls), 4% (fringe)
 
 
@@ -132,6 +133,21 @@ def main():
     if quick:                                                             # (front, side and back in one strip)
         Image.fromarray(np.concatenate([full[k] for k in ('closeup-front', 'closeup-side', 'closeup-back')], 1)).save(
             os.path.join(out, 'quick.png'))
+    if '--crown' in a:
+        # (the crown from above, in clay and colour: ridges and seams between sections do not show from the front)
+        import math
+        row = []
+        for az, el in ((0, 60), (40, 45)):
+            for mode in ('clay', 'full'):
+                cv = RD.Canvas(size, az, (-0.75, 0.75, -0.75, 0.75))
+                e = math.radians(el); up, fw = cv.up.copy(), cv.fwd.copy()
+                cv.up = up * math.cos(e) + fw * math.sin(e) * CROWN_SIGN; cv.fwd = fw * math.cos(e) - up * math.sin(e) * CROWN_SIGN
+                c0 = np.array([0.0, 0.06, 0.95]); o = (c0 @ cv.right, c0 @ cv.up)      # (centred on the top of the head)
+                cv.box = (o[0] - 0.75, o[0] + 0.75, o[1] - 0.75, o[1] + 0.75)
+                bg, zb = backdrop(cv, ('crown', az, el), mode)
+                row.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
+        Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'crown.png'))
+        lap('crown')
     if '--photo' in a:
         fr = full['closeup-front']
         ph = Image.open(a[a.index('--photo') + 1]).convert('RGB')

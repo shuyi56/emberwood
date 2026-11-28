@@ -54,7 +54,7 @@ FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'l
 # 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
 # guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
 # No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
-TOP_LIFT_MM, ROOT_RISE_MM = 27.0, 36.0   # the hair's height over the skull at the top, and the length from the root over
+TOP_LIFT_MM, ROOT_RISE_MM = 27.0, 14.0   # the hair's height over the skull at the top, and the length from the root over
                             # which it rises to it. John 2026-11-28: "raise the hair more it's still too flat it should have
                             # more arching at the roots". This overrides the measurement (9 mm, 0.04 HH, read off the photo's
                             # top outline); the rise is longer (30 to 42 mm) so the taller arch bends no tighter
@@ -74,6 +74,7 @@ TOP_LIFT_MM, ROOT_RISE_MM = 27.0, 36.0   # the hair's height over the skull at t
 ENV_Z = (1.00, 0.75)        # the surface eases from the top's height to the side's over this height, ending at the head's widest (at 0.62:
                             # round 4's outline had two lobes on top and pinched in at the ears)
 OUTLINE_Z, OUTLINE_MAX_MM = 0.75, 12.0   # the side outline is held out from the head's widest (z 0.75) down, by at most this
+PART_DIP, PART_WIDE_MM = 1.0, 45.0   # DRAFT: the outer surface's height at the part (a share), and where it is full
 ENV_MM = (25.0, 14.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
                             # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden). By the
                             # temple 12 (it was 23): "sides are too thick and not smooth curves" (John 2026-11-28)
@@ -197,6 +198,13 @@ def build(F, surf, n=24000, seed=11, log=print):
             # gap between them). Its height depends on the height on the head alone: ENV_MM[0] over the top, ENV_MM[1] by the
             # temple, the same in front, over the ears and behind. A hair's layer sets how deep under it the hair lies.
             capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(*ENV_Z, Q[:, 2])) * (0.45 + 0.55 * layer[J])
+            # (John 2026-11-29, circling the top of the head from the front and from behind: "fix these ridges". The
+            # outer surface stood at its full height right up to the part, where the hair starts on the skin: two humps
+            # and a cleft 17 mm deep within 12 mm of the part (measured, tools/gauges/hair/part_profile.py; a shorter
+            # root rise barely changed it, 36 to 14 to 7 mm, because a hair cannot rise faster than straight up).
+            # The surface now comes down toward the part by itself: PART_DIP of its height at the part, full height
+            # PART_WIDE_MM to the side, one shallow saddle and no step.)
+            capz = capz * (PART_DIP + (1 - PART_DIP) * SF.sm(0.0, PART_WIDE_MM, np.abs(Q[:, 0]) / MM))
             # (one smooth outline down the sides: below the head's widest the skull narrows to the ear, and the hair
             # laid on it at a set height followed it in, so the outline pinched at ear height (round 4: 4.6 mm in from
             # z 0.75 to 0.55). The hair over the sides is lifted by that narrowing, so the outline falls straight.)
@@ -745,6 +753,7 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
         # middle of the layers beside it), and comes down from it to the forehead as before.)
         s_mm = np.c_[np.zeros(m), np.cumsum(np.linalg.norm(np.diff(P, axis=1), axis=2), axis=1)] / MM
         capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(*ENV_Z, P[..., 2])) * BANG_ENV
+        capz = capz * (PART_DIP + (1 - PART_DIP) * SF.sm(0.0, PART_WIDE_MM, np.abs(P[..., 0]) / MM))
         lift = (LIFT_MM[0] + capz * (1 - (1 - np.minimum(s_mm / ROOT_RISE_MM, 1.0)) ** 2) * (1 - down)[None, :]
                 + FRINGE_ARCH_MM[1] * down[None, :]) * MM
     lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
@@ -848,6 +857,28 @@ def _cached(cache, name, key, make, log=print):
     return v
 
 
+PART_STAND = (12.0, 14.0, 60.0)   # DRAFT (mm): how far the hair by the part stands in toward it, the length over which it
+                                  # stands up, and the length by which it has leaned back out
+
+
+def _stand_at_part(p):
+    """The roots by the part stand up before they lean out (the blow-dry's lift at the base: the section is
+    overdirected, dried standing, and falls back over). Each line on top of the head is held in toward the part over
+    its first PART_STAND[1] mm and let out again by PART_STAND[2], never across the part. Without it the outer surface
+    was two humps with a cleft between them 17 mm deep (a hair that leaves the part sideways is 14 mm away from it by
+    the time it has risen); lowering the surface toward the part (PART_DIP) only made the cleft a wide valley, seen
+    2026-11-29."""
+    if len(p) < 3 or p[0, 2] < 0.78:
+        return p
+    s = np.r_[0, np.cumsum(np.linalg.norm(np.diff(p, axis=0), axis=1))] / MM
+    b = SF.sm(0.0, PART_STAND[1], s) * SF.sm(PART_STAND[2], PART_STAND[1], s) * SF.sm(0.78, 0.88, p[0, 2])
+    sg = 1.0 if p[min(len(p) - 1, 8), 0] >= 0 else -1.0
+    xa = np.abs(p[:, 0])
+    q = p.copy()
+    q[:, 0] = sg * np.maximum(xa - PART_STAND[0] * MM * b, np.minimum(xa, 0.5 * MM))
+    return q
+
+
 def _code_key(*fns):
     """What a function's result depends on in this module: its own source and the module constants it names."""
     import inspect
@@ -898,7 +929,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     # its lift, and the skin's small bumps turned the line by over 20 degrees a node on 8,000 of 7,500 lines' heads,
     # never gauged because the smoothness gauge starts at the release. Faired over HEAD_FAIR nodes, root held, kept at
     # least its first stand-off off the skin.)
-    paths = [_fair_head(p, surf) for p in paths]
+    paths = [_stand_at_part(_fair_head(p, surf)) for p in paths]
     lines = [p for p in paths]
     base = {}
     basin = np.where(kind == 1, 0, -1)
@@ -912,7 +943,11 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
             sp = np.concatenate([p_[2 * len(p_) // 3:] for p_ in sm_]); st = np.concatenate([np.gradient(p_, axis=0)[2 * len(p_) // 3:] for p_ in sm_])
             st /= np.maximum(np.linalg.norm(st, axis=1, keepdims=True), 1e-9)
             for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3, side=(cKDTree(sp), sp, st))):
-                lines[i] = l
+                # (stood up at the part like the hair beside it, then faired again: the bang's nodes are 4 mm apart and
+                # the stand alone bent 6% of them tighter than the brush)
+                q_ = _stand_at_part(l)
+                qs_ = gaussian_filter1d(q_, 2.0, axis=0, mode='nearest')
+                lines[i] = qs_ + (q_[:1] - qs_[:1]) * np.exp(-np.arange(len(q_)) / 2.0)[:, None]
     sec = np.zeros(n, int)
     step = SEG_MM * MM
     for q, i in enumerate(hang):
