@@ -134,6 +134,11 @@ bound primary carries through. A stage that has no `main` gets a small driver in
 today's tools, not the 2026-11-25 `field6` folder, which was solved before later scalp changes (76,462 hairs then,
 76,601 now; see the PR).
 
+The bangs changed on purpose after the field was approved: `bangs_flow.brush` holds set hair to the round brush it was
+dried on (`BRUSH_R_MM`, 19 mm, read over 10 mm as `flow_smooth` reads it). The crest of the fringe's lift on the convex
+brow had bent 2.4% of the curtain's nodes to 12 to 17 mm; now none is under 17.5 mm (tightest 19.8). The brush moves a
+line at most 2.1 mm (0.6 mm on average); the photo's fringe edge and side ends read the same (-0.003 and +0.013 head).
+
 ## Sources for the model
 
 - Two perpendicular sinusoids with a phase offset: a circular helix is the rest shape of a Kirchhoff rod of constant

@@ -232,8 +232,8 @@ def _asset_gauges(ctx, ins, d):
     import join_cover as JC
     jc = JC.gauge(ins['head'], ins['asset'], cap_mm=ctx.style.get('finish.cap_lift_mm', 0.4), log=lambda t: None)
     s = {k: v for k, v in jc.items() if k != 'slabs'}
-    cs = [check('join cover (layers)', s.get('cover_min'), (s.get('cover_min') or 0) >= 1.0, 1.0),
-          check('join buried share', s.get('buried_max'), (s.get('buried_max') or 0) <= 0.1, 0.1)]
+    cs = [check('join cover (layers)', s.get('cover_min_in_band'), (s.get('cover_min_in_band') or 0) >= 1.0, 1.0),
+          check('join buried share', s.get('buried_share_in_band'), (s.get('buried_share_in_band') or 0) <= 0.1, 0.1)]
     log_p = os.path.join(os.path.dirname(ins['asset']), 'bangs_creator_asset.log')
     return dict(result=dict(checks=cs, join=s, log=log_p))
 
