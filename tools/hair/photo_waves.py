@@ -555,6 +555,7 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
 
 BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
                                # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
+BANG_TAPER, BANG_RAG = 0.30, 0.16   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
 BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
 
@@ -625,7 +626,9 @@ def bang_sheet(root, surf, seed=3, k=44):
         Uq = q / rr[:, :, None]
         sk = surf.radius(Uq.reshape(-1, 3)).reshape(rr.shape) + 1.0 * MM
         P = SF.CENTRE + Uq * np.maximum(rr, sk)[:, :, None]
-    cut = (k * (1 - FRINGE_FEATHER * 2 * rng.random(m))).astype(int)                     # (point cut)
+    # (John 2026-11-28: "edges are not curved, the ends should taper off". The lower edge is a curve, longest in the
+    # middle of the sheet and shorter toward both edges (BANG_TAPER), the ends cut ragged so they thin out.)
+    cut = (k * (1 - BANG_TAPER * (2 * u - 1) ** 2 - BANG_RAG * rng.random(m))).astype(int)
     return [P[i, :max(cut[i], 4)] for i in range(m)]
 
 
