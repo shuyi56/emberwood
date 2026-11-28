@@ -94,9 +94,12 @@ WAVE_TAKE = 1.15            # DRAFT: hair length per unit of hang along a waved 
                             # taken up by the wave; the hang here also runs forward over the shoulder)
 LOOK_HUE = 0.8              # STYLE: the highlight and the glints this far toward the hair's hue (hair-fidelity.js asset.look:
                             # glints are TRT light and carry the pigment, Marschner et al. 2003; white ones read ashy)
-LOOK_LIGHT_FLOOR, LOOK_INNER_DARK, LOOK_MID_DARK = 0.4, 0.85, 0.92   # STYLE (swatches, John 2026-11-28): the least light
+LOOK_LIGHT_FLOOR, LOOK_INNER_DARK, LOOK_MID_DARK = 0.25, 0.85, 0.92   # STYLE (swatches, John 2026-11-28): the least light
                             # under other hair and the two inner-layer tones (hair-fidelity.js asset.look); at the
                             # shader's 0, 0.65 and 0.8 every inner lock read as a hard shadow on this fall
+LOOK_TONE = dict(strand_light=0.4, glint=0.15, spec1=0.05, spec2=0.15, scatter=3.0, kk_gain=1.5)   # CALIBRATED against
+                            # the creator's own hair from the same cameras (median sRGB 45/29/22 front; the shader's
+                            # defaults gave 109/73/55, these 71/46/36), John 2026-11-28: "too light". Light floor 0.4 to 0.25.
 MIN_LOCK_SHARE = 0.25       # DRAFT: a lock with under this share of the median lock's hair joins its nearest neighbour
 LOCK_ROUND = 0.8            # the tail's TAIL_LOCK_ROUND: a hanging hair's "out" is mostly its lock's own
 
@@ -587,7 +590,7 @@ def main():
                               out=CA.b64(np.round(outv * 127), 'i1'), iso=CA.b64(np.round(iso * 255), 'u1'),
                               **({'tier': CA.b64(tier[keep], 'u1')} if tier is not None else {})),
                  look=dict(spec1_hue=LOOK_HUE, glint_hue=LOOK_HUE, light_floor=LOOK_LIGHT_FLOOR, inner_dark=LOOK_INNER_DARK,
-                           mid_dark=LOOK_MID_DARK, view_side=True, cast_shadow=True),
+                           mid_dark=LOOK_MID_DARK, view_side=True, cast_shadow=True, **LOOK_TONE),
                  body=dict(name='warden', sections=bodies['warden'], cy=0.04, p=3),
                  source=dict(groom=os.path.abspath(gdir), fibres=int(len(P)), builder='tools/hair/wavy_flow.py'))
     json.dump(asset, open(os.path.join(out, 'asset-wavyFull.json'), 'w'))

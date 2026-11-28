@@ -326,6 +326,12 @@ function buildStyle(asset, tone, creatorMat) {
   // over every wave, a half-white primary read as white ashy hair (John, 2026-11-28). The defaults keep the looks
   // that were accepted before (the ponytail).
   const look = asset.look || {}, spec1Hue = look.spec1_hue === undefined ? 0.5 : look.spec1_hue;
+  // (and how light the hair is: dark hair absorbs most of the light that enters it, so its coloured highlight, its
+  // glints and its scattered light are weak (the TT and TRT lobes fall with absorption, Marschner et al. 2003; the
+  // multiple scattering with the albedo, Zinke et al. 2008). The hue-normalised highlights above keep their full
+  // strength whatever the hair's tone, so a dark style states its own amounts. Measured against the creator's own
+  // hair from the same cameras. Defaults are the constants.)
+  const LK = Object.assign({ spec1: SPEC1, spec2: SPEC2, glint: GLINT, scatter: SCATTER, kk_gain: KK_GAIN, strand_light: STRAND_LIGHT }, look);
   const hueGLSL = 'diffuseColor.rgb / max( max( diffuseColor.r, diffuseColor.g ), 0.001 )';
   const glintCol = look.glint_hue === undefined ? 'vec3( 1.0, 0.97, 0.92 )' : 'mix( vec3( 1.0 ), ' + hueGLSL + ', ' + look.glint_hue.toFixed(3) + ' )';
   const compile = cover => sh => {
@@ -352,7 +358,7 @@ function buildStyle(asset, tone, creatorMat) {
         'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= max( vLight[ i ], ' + LIGHT_FLOOR.toFixed(3) + ' );'))
       .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n\t{ float sAmb = max( vLight.w, ' + SC_DF.toFixed(3) + ' * pow( max( vLight.w, 0.004 ), ' + SC_EXP.toFixed(3) + ' ) ); reflectedLight.indirectDiffuse *= sAmb; reflectedLight.indirectSpecular *= sAmb; }' +
         (cover ? ' reflectedLight.directSpecular *= 0.0; reflectedLight.indirectSpecular *= 0.0;' : ''))     // (no sheen of its own on the coverage layer: at grazing angles it showed as grey patches on the tail)
-      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + STRAND_LIGHT.toFixed(3) + ';\n' +
+      .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + LK.strand_light.toFixed(3) + ';\n' +
         '\t{ float fz = ' + FUZZ_A.toFixed(3) + ' * ( 1.0 - vSide * vSide );\n' +
         '\t  float hn = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) + vStrandOcc.y );\n' +
         (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + ';\n\t  if ( min( 1.6 * ( 1.0 - vSide * vSide ), 1.0 - smoothstep( ' + COVER_END.toFixed(3) + ', 0.98, vTip ) ) * ( 1.0 - smoothstep( 0.15, 0.6, vIso ) ) < hn ) discard; }' :
@@ -380,7 +386,7 @@ function buildStyle(asset, tone, creatorMat) {
         '    float s2 = smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), ' + f(SPEC2_EXP) + ' );',
         '    float dg = dot( sT, sH ), sg = pow( max( 0.0, 1.0 - dg * dg ), ' + f(GLINT_EXP / 2) + ' );',
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
-        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * ' + glintCol + ' );',
+        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(LK.spec1) + ' * s1 * sWarm + ' + f(LK.spec2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(LK.glint) + ' * gOn * sg * vLight[ i ] * ' + glintCol + ' );',
         // forward-scattered light on the part the direct light does not reach: lit along the strand (Kajiya-Kay
         // sin(T, L)), wrapped wide round the head instead of cut off at the surface normal (Karis's wrapped Lambert)
         '    float sTf = ' + f(SC_DF) + ' * pow( max( vLight[ i ], 0.004 ), ' + f(SC_EXP) + ' ) * ( 1.0 - vLight[ i ] );',
@@ -394,8 +400,8 @@ function buildStyle(asset, tone, creatorMat) {
         '    sKK += directionalLights[ i ].color * max( vLight[ i ], ' + f(LIGHT_FLOOR) + ' ) * max( 0.0, sSin * clamp( ( sNL + ' + f(KK_WRAP) + ' ) / ' + f(1 + KK_WRAP) + ', 0.0, 1.0 ) - clamp( sNL, 0.0, 1.0 ) );',
         '  }',
         '' + (cover ? '' : '  outgoingLight += ( 1.0 - vTier ) * sGl * mix( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( 1.0, 0.97, 0.92 ), ' + f(GLOW_WHITE) + ' ) * vStrandOcc.x;'),
-        '  outgoingLight += ( ' + f(KK_GAIN) + ' * RECIPROCAL_PI * sKK + ' + f(SC_SPEC) + ' * ( 0.4 + 1.2 * vStrandOcc.y ) * sScS ) * diffuseColor.rgb * vStrandOcc.x;',
-        '  outgoingLight += ' + f(SCATTER) + ' * RECIPROCAL_PI * sSc * diffuseColor.rgb * pow( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( ' + f(SC_SAT) + ' ) ) * mix( 1.0, vStrandOcc.x, 0.5 );',
+        '  outgoingLight += ( ' + f(LK.kk_gain) + ' * RECIPROCAL_PI * sKK + ' + f(SC_SPEC) + ' * ( 0.4 + 1.2 * vStrandOcc.y ) * sScS ) * diffuseColor.rgb * vStrandOcc.x;',
+        '  outgoingLight += ' + f(LK.scatter) + ' * RECIPROCAL_PI * sSc * diffuseColor.rgb * pow( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( ' + f(SC_SAT) + ' ) ) * mix( 1.0, vStrandOcc.x, 0.5 );',
         '  sAcc *= ( 1.0 - ' + f(SPEC_EDGE) + ' * vSide * vSide ) / ( 1.0 + ' + f(SPEC_SOFT) + ' * dot( sAcc, vec3( 0.2126, 0.7152, 0.0722 ) ) );',
         '  outgoingLight += ' + (cover ? COVER_SPEC.toFixed(3) + ' * ' : '') + 'mix( 1.0, ' + MID_SPEC.toFixed(3) + ', vTier ) * mix( 1.0, ' + LOOSE_SPEC.toFixed(3) + ', vIso ) * sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
