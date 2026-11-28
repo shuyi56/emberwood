@@ -542,10 +542,10 @@ BANG_END = ((0.11, 0.60), (0.30, 0.44))   # where the bang's inner hair ends: |x
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
-TRACE_IN = ((0.085, 0.757), (0.13, 0.612), (0.20, 0.50), (0.30, 0.42), (0.41, 0.385))   # (John's line, 2026-11-29) # TRACED on the photo (|x| HH, z HH,
+TRACE_IN = ((0.05, 0.86), (0.10, 0.72), (0.155, 0.625), (0.23, 0.58), (0.31, 0.585), (0.375, 0.615))   # (John 2026-11-29: 'bend it so the diagonal lifts up': down to the brow, along it, the tip rising at the temple) # (John's line, 2026-11-29) # TRACED on the photo (|x| HH, z HH,
                             # the bang's inner edge from the hairline down to the brow's inner end; photo px (x - 262) / 232,
                             # (348 - y) / 232, both sides averaged)
-TRACE_OUT = ((0.27, 0.72), (0.30, 0.62), (0.35, 0.52), (0.41, 0.455), (0.46, 0.43))   # (the old V's outer edge, bent out at the end) # the outer edge: out over the temple and down to the outer end
+TRACE_OUT = ((0.27, 0.75), (0.325, 0.685), (0.385, 0.66), (0.44, 0.675))   # (the old V's outer edge, bent out at the end) # the outer edge: out over the temple and down to the outer end
 BANG_INNER = (0.4, 0.25)    # DRAFT: the innermost hair's first handle: this share of the sideways reach, and this share of its
                             # drop downward (the outermost: all sideways, none down)
 BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
