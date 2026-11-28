@@ -80,7 +80,7 @@ BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravit
 FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
-FRINGE_DEPTH = 0.20         # DRAFT (HH, 22 mm: a thin curtain; at 44 mm it hung as a dark slab over the eyes): its depth behind the hairline at the part, falling to 0 at FRINGE_RAD
+FRINGE_DEPTH = 0.30         # DRAFT (HH): the bang section's depth behind the hairline at the part, falling to 0 at FRINGE_RAD. 66 mm (John 2026-11-28: "begin the bangs farther back"; at 22 mm the bang was a thin strip at the hairline, at 44 mm it still started in front of the lift)
 FRAME_RAD, FRAME_DEPTH = 1.45, 0.12     # DRAFT: face framing: in front of the ears, this far behind the hairline
 FRAME_END = (-0.25, 0.08)   # MEASURED: where the face-framing pieces end
 HEM_Z = -0.76               # MEASURED: the ends
@@ -522,6 +522,10 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
                             # with 12% of the nodes under 17.5 mm; over the first half, 0.8% (and BANG_S[0] 0.10 to 0.06)
 
 
+BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
+                               # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
+
+
 def bang_sheet(root, surf, seed=3, k=44):
     """One side's bang as ONE smooth surface (John 2026-11-28: "build the bangs as one smooth shape that produces that s
     curve in the picture"). The surface is S(u, t): u across it (0 the hair nearest the part, 1 the outermost, by the
@@ -572,6 +576,17 @@ def bang_sheet(root, surf, seed=3, k=44):
     lift = lift - (0.6 * FRINGE_ARCH_MM[1] * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
     lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
     P = SF.CENTRE + U * (r + lift)[:, :, None]
+    # (faired along the hair over BANG_FAIR nodes, the root held, as the falls are: a bang rooted far back runs over the
+    # top of the head, where the front projection's cubic and the stand-off's turns meet in corners tighter than the
+    # brush. Then kept a millimetre off the skin.)
+    if BANG_FAIR > 0:
+        Ps = gaussian_filter1d(P, BANG_FAIR, axis=1, mode='nearest')
+        hold = np.exp(-np.arange(k) / max(BANG_FAIR, 1.0))[None, :, None]
+        P = Ps + (P[:, :1] - Ps[:, :1]) * hold
+        q = P - SF.CENTRE; rr = np.linalg.norm(q, axis=2)
+        Uq = q / rr[:, :, None]
+        sk = surf.radius(Uq.reshape(-1, 3)).reshape(rr.shape) + 1.0 * MM
+        P = SF.CENTRE + Uq * np.maximum(rr, sk)[:, :, None]
     cut = (k * (1 - FRINGE_FEATHER * 2 * rng.random(m))).astype(int)                     # (point cut)
     return [P[i, :max(cut[i], 4)] for i in range(m)]
 
