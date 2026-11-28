@@ -37,7 +37,7 @@ SEG_MM = 2.5
 N_HAIRS = 90000.0           # DRAFT: hairs on the scalp (the older grooms' budget; a scalp carries about 100,000, Robbins)
 RELEASE_Z = SF.CENTRE[2]    # the skin turns under below the skull's centre height: the hair leaves the head there
 PART_PUSH = 0.45            # DRAFT: the push away from the part against gravity along the skin (1: equal)
-FRINGE_ARCH_MM = (16.0, 6.0, 7.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
+FRINGE_ARCH_MM = (26.0, 8.0, 7.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
                             # flick at the end (a 35 mm brush's radius is 17.5)
 FRINGE_PUSH = (0.45, 2.20)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
                             # the part to the brow at |x| 0.12 and on out to the cheekbone at 0.30 (MEASURED)
@@ -53,7 +53,7 @@ FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'l
 # 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
 # guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
 # No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
-TOP_LIFT_MM, ROOT_RISE_MM = 24.0, 52.0   # the hair's height over the skull at the top, and the length from the root over
+TOP_LIFT_MM, ROOT_RISE_MM = 32.0, 60.0   # the hair's height over the skull at the top, and the length from the root over
                             # which it rises to it. John 2026-11-28: "raise the hair more it's still too flat it should have
                             # more arching at the roots". This overrides the measurement (9 mm, 0.04 HH, read off the photo's
                             # top outline); the rise is longer (30 to 42 mm) so the taller arch bends no tighter
@@ -67,13 +67,11 @@ TOP_LIFT_MM, ROOT_RISE_MM = 24.0, 52.0   # the hair's height over the skull at t
 #   the stylist's root lift: "overdirect each section to a 90-degree angle", dried over "a large round brush"
 #     (Behind the Chair, 9 blowout tips); "lift sections of hair upwards as you dry" (Hershesons)
 # So a hair leaves its root AT AN ANGLE and turns over at one constant bend onto the hair's outer surface, landing
-# tangent to it: height T * (1 - (1 - s/L)^2) over the run L. Leaving angle atan(2T/L) = 43 degrees, bend radius
+# tangent to it: height T * (1 - (1 - s/L)^2) over the run L. Leaving angle atan(2T/L) = 47 degrees, bend radius
 # L^2/(2T) = 56 mm (a large round brush and the hair's own spring). Before, the rise was a smoothstep: flat on the skin
 # at the root, then a steep ramp, then flat again, three times the bend, so the top read as spikes, not arches.
-FRONT_LIFT_MM = 12.0        # and over the front of the head, from the ear-to-ear line to the front hairline, for every layer
-                            # there (John 2026-11-28, the front view circled: "you only lifted the back and not the front")
-BACK_LIFT_MM = 8.0         # DRAFT: more again over the crown and the back of the head (John 2026-11-28: "you didn't raise
-                            # the back", the back view circled): the photo does not show the back
+ENV_MM = (32.0, 28.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
+                            # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden)
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
                             # and John's line stepping out at eye level): the fall stands out this much (HH) below the
@@ -82,7 +80,7 @@ BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravit
 FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
-FRINGE_DEPTH = 0.10         # DRAFT (HH, 22 mm: a thin curtain; at 44 mm it hung as a dark slab over the eyes): its depth behind the hairline at the part, falling to 0 at FRINGE_RAD
+FRINGE_DEPTH = 0.20         # DRAFT (HH, 22 mm: a thin curtain; at 44 mm it hung as a dark slab over the eyes): its depth behind the hairline at the part, falling to 0 at FRINGE_RAD
 FRAME_RAD, FRAME_DEPTH = 1.45, 0.12     # DRAFT: face framing: in front of the ears, this far behind the hairline
 FRAME_END = (-0.25, 0.08)   # MEASURED: where the face-framing pieces end
 HEM_Z = -0.76               # MEASURED: the ends
@@ -188,10 +186,11 @@ def build(F, surf, n=24000, seed=11, log=print):
             # more curved from top". The stand-off rises from the root as an arc over ROOT_RISE_MM, the lift a round
             # brush gives at the base, to the photo's height: TOP_LIFT_MM over the top, LIFT_MM[1] by the temple. Before,
             # it grew LIFT_PER_MM per mm combed, so the first 50 mm lay on the skin.)
-            capz = (TOP_LIFT_MM + (LIFT_MM[1] - TOP_LIFT_MM) * SF.sm(0.95, 0.62, Q[:, 2])) * (0.45 + 0.55 * layer[J])
-            capz = capz + BACK_LIFT_MM * SF.sm(SF.AXIS[1] - 0.15, SF.AXIS[1] + 0.25, Q[:, 1]) * SF.sm(0.45, 0.75, Q[:, 2]) * (0.45 + 0.55 * layer[J])
-            fr = SF.sm(SF.AXIS[1] + 0.05, SF.AXIS[1] - 0.25, Q[:, 1]) * SF.sm(0.45, 0.75, Q[:, 2])
-            capz = capz * (1 + fr * (1.0 / (0.45 + 0.55 * layer[J]) - 1)) + FRONT_LIFT_MM * fr
+            # ONE outer surface over the whole head (John 2026-11-28: "why is the light blue lifted so much more than dark
+            # blue": the lift was a base and two patches, front +12 mm and back +8 mm, and the section over the ear sat in the
+            # gap between them). Its height depends on the height on the head alone: ENV_MM[0] over the top, ENV_MM[1] by the
+            # temple, the same in front, over the ears and behind. A hair's layer sets how deep under it the hair lies.
+            capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(0.95, 0.62, Q[:, 2])) * (0.45 + 0.55 * layer[J])
             lift = (LIFT_MM[0] + capz * (1 - (1 - min(s_mm / ROOT_RISE_MM, 1.0)) ** 2)) * MM
             # the fringe bends in two planes (John 2026-11-28: "bangs should also be 3d twisting along 2 planes like the
             # picture"). Out of the forehead: an arch up off the root over the hairline (ghd: "lift at the base", on a
@@ -563,12 +562,14 @@ def bang_sheet(root, surf, seed=3, k=44):
     r = gaussian_filter1d(maximum_filter1d(np.linalg.norm(q, axis=2), 9, axis=1, mode='nearest'), 4.0, axis=1, mode='nearest')
     U = q / np.linalg.norm(q, axis=2, keepdims=True)
     tt = t[0]
-    lift = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(*BANG_SPAN[0], tt) - FRINGE_ARCH_MM[1] * SF.sm(*BANG_SPAN[1], tt)
-            )[None, :] * MM
-    # (the flick at the end is the inner hairs'; the outer edge lies down along the temple into the side hair, so the
-    #  bang joins the side and does not stand off it: the recipe's bangs take the side flow's direction at their edge)
+    # (John 2026-11-28: "bangs need to begin from roots and be lifted as well". The bang is part of the same hair: it
+    # leaves its root on the same arc as the hair behind it, at an angle and over at one bend, up to FRINGE_ARCH_MM[0]
+    # under the outer surface, and from there comes down over the forehead to FRINGE_ARCH_MM[1] off the brow.)
+    rise = 1 - (1 - np.clip(tt / BANG_SPAN[0][1], 0, 1)) ** 2
+    down = SF.sm(*BANG_SPAN[1], tt)
+    lift = (1.0 + FRINGE_ARCH_MM[0] * rise * (1 - down) + FRINGE_ARCH_MM[1] * down)[None, :] * MM
     lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
-    lift = lift - ((FRINGE_ARCH_MM[0] - FRINGE_ARCH_MM[1]) * 0.6 * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
+    lift = lift - (0.6 * FRINGE_ARCH_MM[1] * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
     lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
     P = SF.CENTRE + U * (r + lift)[:, :, None]
     cut = (k * (1 - FRINGE_FEATHER * 2 * rng.random(m))).astype(int)                     # (point cut)
