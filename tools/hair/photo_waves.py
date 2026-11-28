@@ -82,7 +82,7 @@ SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length fr
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
                             # and John's line stepping out at eye level): the fall stands out this much (HH) below the
                             # temple, and this much again by the shoulder; the outer layer most
-SIDE_FLOW = dict(w=1.0, min=0.45, max=1.2, fwd=3.0)   # DRAFT: how far the sides' comb takes the bangs' flow, the back sweep kept, the slope's cap
+SIDE_FLOW = dict(w=1.0, min=0.45, max=1.2, fwd=3.0, back=0.12, front=-0.10, in_mm=50.0, twist=1.0)   # DRAFT: how far the sides' comb takes the bangs' flow, the back sweep kept, the slope's cap
 SHAPE_OUT = ((0.56, 0.50, 0.20, -0.15, -0.40, -0.80, -1.20),      # MEASURED on the photo against the field (HH by height z):
              (0.00, 0.03, 0.09, 0.15, 0.14, 0.09, 0.05))          # how much farther out the photo's outline stands
 BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravity, at the face frame
@@ -221,8 +221,21 @@ def build(F, surf, n=24000, seed=11, log=print):
                 df = np.c_[side[J] * slope, dy, -np.ones(len(J))]
                 df /= np.linalg.norm(df, axis=1, keepdims=True)
                 dn_ = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+                # (John 2026-11-29, on the head's flow diagram: "the bangs not be separate, they come from the blue lines
+                # twisting". One flow: a line leaves the part square to it, as all the top does, and TWISTS forward into
+                # the bangs' heading as it runs (over 'in_mm' of its length), the more the farther forward it is rooted
+                # ('back' to 'front', the root's depth on the head). Before, the twist went by where the line was, not
+                # where it was rooted, and was full only at the hairline, so the sides beside the bangs ran off sideways
+                # and the bangs were a section of their own.)
+                wtw = SF.sm(SIDE_FLOW['back'], SIDE_FLOW['front'], root[J, 1]) * SF.sm(0.0, SIDE_FLOW['in_mm'], s_mm) * (kind[J] != 1) * ~behind
                 wq = (SIDE_FLOW['w'] * wf)[:, None]
                 d = dn_ * (1 - wq) + df * wq
+                # (the twist itself is a turn of the heading on the skin toward the face: the forward direction laid on
+                # the skin, added at 'twist' times the heading. The front-view heading above cannot do it on the side of
+                # the head, where the skin faces sideways and no depth solves it: tried first, 770 of 16,000 lines moved.)
+                fw = np.zeros_like(d); fw[:, 1] = -1.0
+                fw = fw - (fw * Uo).sum(1, keepdims=True) * Uo
+                d = d / np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9) + SIDE_FLOW['twist'] * wtw[:, None] * fw
             d = d - (d * Uo).sum(1, keepdims=True) * Uo
             d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
             Q = pos[J] + step * d
