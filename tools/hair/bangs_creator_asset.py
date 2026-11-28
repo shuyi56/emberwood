@@ -37,8 +37,10 @@ TAIL_HAIR_SPREAD = 0.7      # DRAFT: and a hair this much farther from its sub-l
 TAIL_SPREAD_FROM = 0.12     # the share of a lock's length where the opening starts
 TAIL_JOIN_MM = 45.0         # a hair passes from the tail's field line to its lock's rod over this length, eased with a
                             # quintic (zero slope and curvature change at both ends: the line stays G2 across the join)
-JOIN_ZIG_MM = 14.0          # DRAFT: the zigzag reaches this far behind the fringe's roots
-JOIN_ZIG_SHARE = 0.65       # DRAFT: the share of root cells taken forward right at the line, falling to none at JOIN_ZIG_MM
+CAP_LIFT_MM = 0.4           # the scalp cap this far over the skin (cards.py's default is 1.0: hair lying closer than that,
+                            # as it does at its roots along the fringe join, was buried and the bare cap showed as a band)
+JOIN_ZIG_MM = 16.0          # DRAFT: the zigzag reaches this far to each side of the line between the two root sets
+JOIN_ZIG_SHARE = 0.5        # DRAFT: the share of root cells that cross over right at the line, falling to none at JOIN_ZIG_MM
 JOIN_CELL_MM = 5.0          # DRAFT: a zigzag tooth's width
 JOIN_MERGE_MM = 45.0        # DRAFT: a taken hair joins its fringe hair's path over this run
 JOIN_DENSITY = 4.0          # DRAFT: at the join the swept-back hair is drawn this many times as dense as elsewhere
@@ -269,22 +271,27 @@ def main():
         MMj = BF.SF.MM
         rz = np.random.default_rng(17)
         r0 = paths[:, 0]
-        fi = np.where(basin == 1)[0]
-        dj, nn = cKDTree(r0[fi]).query(r0, k=8)
+        b0 = basin.copy(); src = paths.copy()
         cell = np.floor(r0 / (JOIN_CELL_MM * MMj)).astype(np.int64)
         key = (cell[:, 0] * 73856093) ^ (cell[:, 1] * 19349663) ^ (cell[:, 2] * 83492791)
         uk, inv = np.unique(key, return_inverse=True)
         u = rz.random(len(uk))[inv]
-        take = (basin == 0) & (u < JOIN_ZIG_SHARE * BF.SF.sm(JOIN_ZIG_MM, 0.0, dj[:, 0] / MMj))
-        for i in np.where(take)[0]:
-            j = fi[nn[i, rz.integers(0, 8)]]
-            pj = paths[j]; ok = ~np.isnan(pj[:, 0])
-            sj = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pj[ok], axis=0), axis=1))] / MMj
-            q = np.full_like(pj, np.nan)
-            q[ok] = pj[ok] + (r0[i] - pj[0])[None, :] * BF.SF.sm(JOIN_MERGE_MM, 0.0, sj)[:, None]
-            paths[i] = q
-        basin = basin.copy(); basin[take] = 1
-        print('join zigzag', dict(taken=int(take.sum()), within_mm=JOIN_ZIG_MM), file=sys.stderr)
+        taken = {}
+        for mine_b, other_b in ((0, 1), (1, 0)):       # swept-back roots taken forward, and fringe roots taken back:
+            oi = np.where(b0 == other_b)[0]            # the two directions interleave on both sides of the old line
+            dj, nn = cKDTree(r0[oi]).query(r0, k=8)
+            p = JOIN_ZIG_SHARE * BF.SF.sm(JOIN_ZIG_MM, 0.0, dj[:, 0] / MMj)
+            take = (b0 == mine_b) & ((u < p) if mine_b == 0 else (1 - u < p))
+            for i in np.where(take)[0]:
+                j = oi[nn[i, rz.integers(0, 8)]]
+                pj = src[j]; ok = ~np.isnan(pj[:, 0])
+                sj = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(pj[ok], axis=0), axis=1))] / MMj
+                q = np.full_like(pj, np.nan)
+                q[ok] = pj[ok] + (r0[i] - pj[0])[None, :] * BF.SF.sm(JOIN_MERGE_MM, 0.0, sj)[:, None]
+                paths[i] = q
+            basin = basin.copy(); basin[take] = other_b
+            taken[other_b] = int(take.sum())
+        print('join zigzag', dict(taken_forward=taken[1], taken_back=taken[0], within_mm=JOIN_ZIG_MM), file=sys.stderr)
     tiltv = comb = layv = None
     if '--volume' in a:                                               # the side hair in layers off the bed (hair_volume.py)
         import hair_volume as HV
@@ -366,7 +373,7 @@ def main():
     centre = np.array([0.0, 0.0, 0.0])
     cap_dir = os.path.join(os.path.dirname(os.path.abspath(out)), 'cap')
     os.makedirs(cap_dir, exist_ok=True)
-    CD.scalp_cap(head, cap_dir)
+    CD.scalp_cap(head, cap_dir, lift_mm=CAP_LIFT_MM)
     print('cap done', file=sys.stderr)
     V, _, Fc = CA.read_obj(os.path.join(cap_dir, 'scalp-cap.obj'))
     centre = V.mean(0) - np.array([0, 0, 0.15])

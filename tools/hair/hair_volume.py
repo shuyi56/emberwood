@@ -42,7 +42,7 @@ CAP_MM = 9.0            # DRAFT
 LOCK_MM = 7.0
 LOCK_VAR = 0.18         # DRAFT (0.35 made 7 mm cells of unequal height: a bristly crest on the top outline from the front)
 ROOT_MM = 2.0           # DRAFT
-ROOT_OVER_MM = 8.0      # DRAFT
+ROOT_OVER_MM = 5.0      # DRAFT (was 8.0)
 BED_OVER_MM = 12.0      # DRAFT
 BED_MAX_MM = 5.0        # DRAFT
 LOCKS = 46              # DRAFT: comb locks round the tie
@@ -144,7 +144,8 @@ def layer(paths, sel, shell, tie_c, tie_r, tie_axis=None, seed=3, junction=None)
         eth -= (eth * Nn).sum(1, keepdims=True) * Nn
         eth /= np.maximum(np.linalg.norm(eth, axis=1, keepdims=True), 1e-12)
         tilt = -(slope * win)[:, None] * eth
-    h = np.maximum(np.maximum(h + furrow, 0.3 * h) * front, hj) * win
+    stand = ROOT_MM * SF.sm(0.0, ROOT_OVER_MM, Sf)     # (the root's own stand is kept beside the fringe: without it the hair
+    h = np.maximum(np.maximum(np.maximum(h + furrow, 0.3 * h) * front, stand), hj) * win      # lay under the scalp cap)
     bed = np.clip((rb - r) / MM, 0.0, BED_MAX_MM) * SF.sm(0.0, BED_OVER_MM, Sf) * np.minimum(1.0, win * 4)
     D = (U * (bed * MM)[:, None] + Nn * (h * MM)[:, None]).reshape(n, m, 3)
     for _ in range(4):                                 # (eased along the hair, the root held: no kinks where a window ends)
