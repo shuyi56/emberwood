@@ -88,6 +88,10 @@ FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
 FRINGE_DEPTH = 0.30         # DRAFT (HH): the bang section's depth behind the hairline at the part, falling to 0 at FRINGE_RAD. 66 mm (John 2026-11-28: "begin the bangs farther back"; at 22 mm the bang was a thin strip at the hairline, at 44 mm it still started in front of the lift)
 FRAME_RAD, FRAME_DEPTH = 1.45, 0.12     # DRAFT: face framing: in front of the ears, this far behind the hairline
+LAYER_END = (0.02, -0.30)   # MEASURED on John's drawing over the photo (2026-11-29): the first layer hooks in at the jaw, the
+                            # second ends at the shoulder line (z from the chin, HH)
+LAYER_PHASE = (0.6, 2.4)    # DRAFT: each layer's wave phase (rad): the second half a wave on, so it bulges where the first hooks in
+LAYER_RAG, LAYER_BLEND, LAYER_NEXT = 0.06, 0.10, -0.50   # DRAFT: a tier's ragged ends, and the grade behind the tiers into the lengths
 FRAME_END = (-0.25, 0.08)   # MEASURED: where the face-framing pieces end
 HEM_Z = -0.76               # MEASURED: the ends
 TOP_SHORTER, GRADE, RAGGED = 0.22, 0.25, 0.08   # DRAFT (HH): the top layer ends this much higher (layers), the pieces by the
@@ -140,7 +144,18 @@ def build(F, surf, n=24000, seed=11, log=print):
     kind[(kind == 0) & (np.abs(th) < FRAME_RAD) & (d_hl < FRAME_DEPTH)] = 2
     high = root[:, 2] > np.median(root[(kind == 0) & (root[:, 2] > RELEASE_Z), 2])     # the top layer: rooted above the under layer
     z_end = HEM_Z + TOP_SHORTER * high + RAGGED * rng.random(n)
-    z_end[kind == 2] = rng.uniform(*FRAME_END, (kind == 2).sum())
+    # (John 2026-11-29: "read up more on layering", with the photo's layers drawn: a bulge to the jaw that hooks in, a
+    # second to the shoulder. A layered cut is over-directed forward: "the hair pulled from gets longer", so the lengths
+    # grow going back from the face. The face frame starts "between the cheekbone and the jawline" and the section
+    # behind it is cut "to about the length of the base of the neck" (Sam Villa, long layering and face framing); the
+    # centre back keeps the perimeter. So the ends are tiers by the root's distance behind the front hairline, each
+    # tier ragged by LAYER_RAG, and the hair behind the tiers grades into the full length over LAYER_BLEND.)
+    m2 = kind == 2
+    tier = np.minimum((d_hl[m2] / FRAME_DEPTH * len(LAYER_END)).astype(int), len(LAYER_END) - 1)
+    z_end[m2] = np.array(LAYER_END)[tier] + LAYER_RAG * (rng.random(m2.sum()) - 0.5)
+    m0 = (kind == 0) & (np.abs(th) < FRAME_RAD) & (d_hl < FRAME_DEPTH + LAYER_BLEND)
+    w_ = SF.sm(FRAME_DEPTH, FRAME_DEPTH + LAYER_BLEND, d_hl[m0])
+    z_end[m0] = LAYER_NEXT + (z_end[m0] - LAYER_NEXT) * w_
     z_end = RELEASE_Z - (RELEASE_Z - z_end) * TAKE
     feather = FRINGE_FEATHER * rng.random(n)
     z_end[kind == 1] = -9.0                                            # (cut on the curtain line below)
@@ -1143,6 +1158,14 @@ def lock_fall(Fd, seed=5, log=print):
                 tr = FRONT_TRACE[b]
                 rk = np.argsort(np.argsort(np.abs(SF.theta(feat[:, 3:6])))) / max(len(m) - 1, 1)
                 lab = np.minimum((rk * len(tr)).astype(int), len(tr) - 1)
+                if b == 1 and len(LAYER_END) > 1:
+                    # (the face frame's layers are locks by where they end, not by their place round the body: each
+                    # layer draws to its own tip at its own height, so the layers' ends show one above the other)
+                    tr = LAYER_PHASE
+                    ez = np.array([lines[i][-1, 2] for i in m])
+                    cutz = RELEASE_Z - (RELEASE_Z - 0.5 * (LAYER_END[0] + LAYER_END[1])) * TAKE
+                    cutz = RELEASE_Z - (RELEASE_Z - cutz) / TAKE
+                    lab = (ez < cutz).astype(int)
                 for j, ph_ in enumerate(tr):
                     fixed[nl + j] = ph_
                 lock[m] = nl + lab
