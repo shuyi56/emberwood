@@ -70,8 +70,9 @@ TOP_LIFT_MM, ROOT_RISE_MM = 27.0, 36.0   # the hair's height over the skull at t
 # tangent to it: height T * (1 - (1 - s/L)^2) over the run L. Leaving angle atan(2T/L) = 47 degrees, bend radius
 # L^2/(2T) = 56 mm (a large round brush and the hair's own spring). Before, the rise was a smoothstep: flat on the skin
 # at the root, then a steep ramp, then flat again, three times the bend, so the top read as spikes, not arches.
-ENV_MM = (27.0, 23.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
-                            # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden)
+ENV_MM = (27.0, 12.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
+                            # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden). By the
+                            # temple 12 (it was 23): "sides are too thick and not smooth curves" (John 2026-11-28)
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
                             # and John's line stepping out at eye level): the fall stands out this much (HH) below the
@@ -508,7 +509,7 @@ FACE_KEEP = 1.15            # MEASURED (the photo's face crop): beside the face 
                             # head of the cheekbone's back edge, just in front of the ear (the ear's middle is at 1.57)
 FACE_KEEP_Z = (0.56, 0.20)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
                             # pieces by the face are dried and cut 'flowing away from the face')
-STACK_MM = (2.0, 18.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
+STACK_MM = (1.5, 10.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
 BODY_AT_Z = -0.40           # where the tent from the head lands: the mannequin's shoulder (its neck is bare from the chin
                             # to z -0.3; the Warden's collar put the 'shoulder' at -0.15)
 
@@ -519,6 +520,8 @@ BANG_END = ((0.11, 0.60), (0.30, 0.44))   # where the bang's inner hair ends: |x
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
+BANG_INNER = (0.4, 0.25)    # DRAFT: the innermost hair's first handle: this share of the sideways reach, and this share of its
+                            # drop downward (the outermost: all sideways, none down)
 BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
                             # (flow_smooth, set hair, 35 mm brush): a 12 mm arch risen over the first quarter bent at 8.8 mm
                             # with 12% of the nodes under 17.5 mm; over the first half, 0.8% (and BANG_S[0] 0.10 to 0.06)
@@ -548,8 +551,14 @@ def bang_sheet(root, surf, seed=3, k=44):
     # sideways, rounds over and comes down to the brow, then runs out to the temple. So the curve starts AT the root:
     # the hair leaves it square to the part, heading out, turns down over the forehead, and arrives at its end heading
     # down and out. Before, the first handle pointed straight down and the first half of every hair was a straight drop.)
-    bx = [root[:, 0:1], root[:, 0:1] + sgn * BANG_S[0], x3[:, None] - sgn * BANG_S[2], x3[:, None]]
-    bz = [root[:, 2:3], root[:, 2:3] + 0.0 * drop, z3[:, None] + BANG_S[1] * drop, z3[:, None]]
+    # (the inner edge is the photo's narrow arch: the hairs next to the part leave it heading down and only a little out,
+    # so the bare forehead under the part is an arch from the part to the brow's inner end, not a wide window; the outer
+    # hairs leave it sideways, over the lift, as John's line does. The first render, every hair leaving sideways, left
+    # a bare forehead 0.24 HH wide from the hairline down.)
+    uu = u[:, None]
+    bx = [root[:, 0:1], root[:, 0:1] + sgn * BANG_S[0] * (BANG_INNER[0] + (1 - BANG_INNER[0]) * uu),
+          x3[:, None] - sgn * BANG_S[2], x3[:, None]]
+    bz = [root[:, 2:3], root[:, 2:3] - BANG_INNER[1] * (1 - uu) * drop, z3[:, None] + BANG_S[1] * drop, z3[:, None]]
     w = [(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3]
     X = sum(a * b for a, b in zip(w, bx)); Z = sum(a * b for a, b in zip(w, bz))
     # the skin in front at each (x, z): bisection on y
@@ -779,12 +788,15 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
 # a lock's axis is the mean of its own field lines, so the locks fill the field's fall and keep its order.
 LOCK_SIZE = 160             # DRAFT: field lines per lock (16,000 lines: about 45 locks a side; the recipe's tail took 33)
 CLUMP = 0.45                # recipe step 6: a lock gathers to this share of its spread on the head
-CLUMP_Z = 0.25              # HH below the release over which it gathers
+CLUMP_Z = 0.10              # HH below the release over which it gathers
 SUBLOCKS, SUB_OPEN, HAIR_OPEN = 3, 1.4, 0.7   # recipe step 6: 3 sub-locks, middles 1.4x farther out at the tip, hairs 0.7x
 END_FADE = 0.08              # HH: a member is weighed out of its lock's axis over this much of its fall's end
-OPEN_FROM = 0.12            # recipe step 6: opening starts 12% down the lock
-LOCK_PHASE = 0.5            # rad: a lock's own wave phase against its side's (wavy_flow's jitter: a twelfth of a wave)
-LOCK_DEPTH_MM = 2.5         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
+OPEN_FROM = 0.0            # recipe step 6: opening starts 12% down the lock
+LOCK_IN = 0.20              # HH below the release over which a lock's own wave grows in (John 2026-11-28: "separate locks
+                            # earlier"; it grew in with the side's wave, from z 0.38 to 0.12, so the locks parted only low)
+LOCK_LAM = 0.12            # DRAFT: a lock's wavelength within this share of its side's
+LOCK_PHASE = 0.9            # rad: a lock's own wave phase against its side's (wavy_flow's jitter: a twelfth of a wave)
+LOCK_DEPTH_MM = 4.0         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
 
 
 def lock_fall(Fd, seed=5, log=print):
@@ -849,12 +861,18 @@ def lock_fall(Fd, seed=5, log=print):
         for c in range(2):
             ax[:, c] = gaussian_filter1d(ax[:, c], 4.0, mode='nearest')
         # the lock's own wave: a phase ahead of or behind its side's, out of the fall (radially from the body's axis)
-        Wv = SF.sm(WAVE['start_z'], WAVE['full_z'], zz) * LOCK_DEPTH_MM * MM
-        ph = rng.normal(0, LOCK_PHASE)
+        # (the side's wave is replaced by the lock's own: its phase and wavelength a little off its side's, the swing
+        # across the fall as large as the side's and LOCK_DEPTH_MM out of it. With the side's wave alone every lock
+        # waved in step and the fall read as one rippled sheet in the first render.)
+        en = SF.sm(RELEASE_Z, RELEASE_Z - LOCK_IN, zz)                  # (from the release: the locks part high)
+        ph = rng.normal(0, LOCK_PHASE); lam_l = WAVE['lam_hh'] * (1 + LOCK_LAM * rng.uniform(-1, 1))
         psi = 2 * np.pi * (RELEASE_Z - zz) / WAVE['lam_hh']
+        psl = 2 * np.pi * (RELEASE_Z - zz) / lam_l + ph
         out = ax - np.array(SF.AXIS)[None]
         out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
-        ax2 = ax + out * (Wv * (np.sin(psi + ph) - np.sin(psi)))[:, None]
+        tan = np.c_[-out[:, 1], out[:, 0]]
+        ax2 = ax + out * (en * LOCK_DEPTH_MM * MM * np.sin(psl + 0.5 * np.pi))[:, None] \
+            + tan * (en * WAVE['amp_hh'] * (np.sin(psl) - np.sin(psi)))[:, None] * np.sign(np.mean(ax[:, 0]) + 1e-9)
         # sub-locks: by the side of the axis each member lies on at mid-fall
         mid = len(zz) // 2
         om = np.nan_to_num(X[:, mid] - ax[mid])
