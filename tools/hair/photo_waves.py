@@ -556,7 +556,8 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
 BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
                                # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
 BANG_BACK = 0.20            # HH
-BANG_RIBS, BANG_RIB_MM, BANG_FLICK_MM = 3, 6.0, 4.0   # DRAFT: locks across one side's bang, their depth, the ends' lift off the cheek
+BANG_BEND = (0.035, 0.06, 0.25)   # DRAFT (HH out, HH up, the outermost lock's share)
+BANG_RIBS, BANG_RIB_MM, BANG_FLICK_MM = 6, 4.0, 4.0   # DRAFT: locks across one side's bang, their depth, the ends' lift off the cheek
 BANG_TAPER, BANG_RAG = 0.10, 0.22   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
 BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
@@ -588,7 +589,15 @@ def bang_sheet(root, surf, seed=3, k=44):
     a_ = np.abs(root[:, 0]); r_in = root[np.argmin(a_)]; r_out = root[np.argmax(a_)]
     cin = curve(np.r_[[[abs(r_in[0]), r_in[2]]], np.array(TRACE_IN)], t[0])
     cout = curve(np.r_[[[abs(r_out[0]), r_out[2]]], np.array(TRACE_OUT)], t[0])
-    B = (1 - u)[:, None, None] * cin[None] + u[:, None, None] * cout[None]
+    # (each of the BANG_RIBS locks draws to a tip: its hairs move onto the lock's centre line over the last 45%)
+    vr = (u * BANG_RIBS) % 1.0 - 0.5
+    uc = np.clip((np.floor(u * BANG_RIBS) + 0.5) / BANG_RIBS, 0, 1)
+    u2 = (u[:, None] + (uc - u)[:, None] * BANG_TIP * SF.sm(0.55, 1.0, t[0])[None, :])[..., None]
+    B = (1 - u2) * cin[None] + u2 * cout[None]
+    # (John 2026-11-29: "inside locks bend more than outside ones". Each lock's end turns out and up by BANG_BEND
+    # (HH), in full for the lock nearest the part and falling to BANG_BEND[2] of it for the outermost.)
+    bend = ((1 - (1 - BANG_BEND[2]) * uc)[:, None] * SF.sm(0.55, 1.0, t[0])[None, :] ** 2)
+    B = B + bend[..., None] * np.array([BANG_BEND[0], BANG_BEND[1]])[None, None, :]
     B = B + (np.c_[np.abs(root[:, 0]), root[:, 2]] - B[:, 0])[:, None, :] * (1 - SF.sm(0.0, 0.4, t[0]))[None, :, None]
     X = sgn * B[..., 0]; Z = B[..., 1]
     # the skin in front at each (x, z): bisection on y
@@ -640,7 +649,7 @@ def bang_sheet(root, surf, seed=3, k=44):
         P = SF.CENTRE + Uq * np.maximum(rr, sk)[:, :, None]
     # (John 2026-11-28: "edges are not curved, the ends should taper off". The lower edge is a curve, longest in the
     # middle of the sheet and shorter toward both edges (BANG_TAPER), the ends cut ragged so they thin out.)
-    cut = (k * (1 - BANG_TAPER * (2 * u - 1) ** 2 - BANG_RAG * rng.random(m))).astype(int)
+    cut = (k * (1 - BANG_TAPER * (2 * u - 1) ** 2 - BANG_RAG * np.abs(2 * vr) * (0.6 + 0.4 * rng.random(m)))).astype(int)
     return [P[i, :max(cut[i], 4)] for i in range(m)]
 
 
@@ -769,7 +778,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
         if len(fm) > 3 and not BANG_FLOW:
-            for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3 + int(sd))):
+            for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3)):
                 lines[i] = l
     sec = np.zeros(n, int)
     step = SEG_MM * MM
@@ -893,6 +902,11 @@ LOCK_PHASE = 0.5            # rad: a lock's own wave phase against its side's (w
 LOCK_DEPTH_MM = 3.0         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
 
 
+TIP_T, TIP_K, TIP_CUT = 0.22, 0.85, 0.7   # DRAFT: the share of a lock's fall over which it draws to a tip, how far in, and how much
+                                          # earlier its outermost hairs end
+BANG_TIP = 0.8                            # DRAFT: how far a bang lock's hairs draw onto its centre line at the end
+
+
 def lock_fall(Fd, seed=5, log=print):
     """Groups the hanging lines (face framing, front and back falls) into locks and rebuilds each line below the head
     as its lock's axis plus its own offset, gathered and then opened. Returns (Fd with new lines and 'lock', gauges)."""
@@ -987,6 +1001,7 @@ def lock_fall(Fd, seed=5, log=print):
         mid = len(zz) // 2
         om = np.nan_to_num(X[:, mid] - ax[mid])
         ang = np.arctan2(om[:, 1], om[:, 0])
+        far = np.linalg.norm(om, axis=1); far = np.argsort(np.argsort(far)) / max(len(far) - 1, 1)
         sub = np.floor(((ang - ang.min()) / max(np.ptp(ang), 1e-9)) * SUBLOCKS * 0.999).astype(int)
         for a_, i in enumerate(m):
             f = lines[i][rel[i]:]
@@ -1003,8 +1018,16 @@ def lock_fall(Fd, seed=5, log=print):
             sc = (((Xh[ss] - ax[None]) * Wt[ss][..., None]).sum(0) / Wt[ss].sum(0)[:, None])[ok]
             sc = np.c_[[gaussian_filter1d(sc[:, c], 4.0, mode='nearest') for c in range(2)]].T
             own = (Xi - A) - sc
-            new = A2 + sc * (gather + (SUB_OPEN - 1) * opn * gather)[:, None] + own * (gather * (1 + (HAIR_OPEN) * opn))[:, None]
+            # (John 2026-11-29: "make all locks to a tip like the picture". Over the last TIP_T of the lock's fall its
+            # hairs draw in onto the axis (by TIP_K), and the hairs farthest from the axis end first (up to TIP_CUT of
+            # that stretch earlier), so the lock ends in a point, not a cut edge.)
+            tl = np.clip((top - zi) / max(top - bot, 1e-6), 0, 1)
+            conv = 1 - TIP_K * SF.sm(1 - TIP_T, 1.0, tl)
+            new = A2 + (sc * (gather + (SUB_OPEN - 1) * opn * gather)[:, None] + own * (gather * (1 + (HAIR_OPEN) * opn))[:, None]) * conv[:, None]
             p = np.c_[new, zi]
+            keep = zi >= bot + TIP_CUT * TIP_T * (top - bot) * far[a_]
+            if keep.sum() >= 4:
+                p = p[keep]
             p[:, :2] = p[:, :2] + (lines[i][rel[i], :2] - p[0, :2]) * np.exp(-np.arange(len(p)) / 6.0)[:, None]
             lines[i] = _join(np.r_[lines[i][:rel[i]], p], rel[i])
     out_ = dict(Fd); out_['line'] = lines; out_['lock'] = lock
