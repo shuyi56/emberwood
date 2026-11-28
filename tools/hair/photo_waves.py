@@ -578,7 +578,8 @@ BANG_AXES = dict(side0=0.10, side0u=0.55, side1=3.2, up=0.95, field=0.3, to=0.8,
                             # by side1 toward the tip), and up at the tip (gravity cancelled by this share)
 BANG_HOLD = (0.30, 0.55)    # DRAFT: the share of a bang hair's length held on the head, and where it is fully free
 BANG_OVER_MM = 20.0
-BANG_FULL, BANG_THICK_MM, BANG_ENV = 0.55, 6.0, 0.8   # DRAFT
+BANG_FULL, BANG_THICK_MM, BANG_ENV = 0.55, 6.0, 0.45   # DRAFT
+BANG_DROP = (0.0, 0.12)      # DRAFT (HH): the bang leaves the outer surface from the hairline to this far below it
 BANG_END_AT = 0.86           # the locks' tips: this share along the traced lines (past it the tips stood out beyond the side hair as spikes, 2026-11-29)
 BANG_TRACED_FLOW = True      # the 3D flow steered along the traced lines in the front view (False: by BANG_AXES' weights)
 BANG_CURL = (2.5, 60.0, 0.8)   # DRAFT: a lock's wave (mm), its wavelength (mm), and each hair's own wave (mm)
@@ -732,6 +733,7 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
         B0 = (1 - u)[:, None, None] * cin[None] + u[:, None, None] * cout[None]
         B0 = B0 + (np.c_[np.abs(root[:, 0]), root[:, 2]] - B0[:, 0])[:, None, :] * (1 - SF.sm(0.0, 0.4, t[0]))[None, :, None]
         P = _bang_march(root, surf, u, uc, sgn, k, side, front=B0 if BANG_TRACED_FLOW else None)
+        P = np.array([_stand_at_part(p_) for p_ in P])                  # (stood up at the part, as the hair beside it)
     # (the stand-off is measured from a skin eased along the hair, so the sheet bridges the brow and does not dip)
     from scipy.ndimage import gaussian_filter1d
     q = P - SF.CENTRE
@@ -754,8 +756,8 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
         s_mm = np.c_[np.zeros(m), np.cumsum(np.linalg.norm(np.diff(P, axis=1), axis=2), axis=1)] / MM
         capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(*ENV_Z, P[..., 2])) * BANG_ENV
         capz = capz * (PART_DIP + (1 - PART_DIP) * SF.sm(0.0, PART_WIDE_MM, np.abs(P[..., 0]) / MM))
-        lift = (LIFT_MM[0] + capz * (1 - (1 - np.minimum(s_mm / ROOT_RISE_MM, 1.0)) ** 2) * (1 - down)[None, :]
-                + FRINGE_ARCH_MM[1] * down[None, :]) * MM
+        scalp_lift = (LIFT_MM[0] + capz * (1 - (1 - np.minimum(s_mm / ROOT_RISE_MM, 1.0)) ** 2)) * MM
+        lift = np.full((m, k), FRINGE_ARCH_MM[1] * MM)
     lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
     lift = lift - (0.6 * FRINGE_ARCH_MM[1] * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
     lift = lift + ((BANG_THICK_MM if BANG_3D else 3.0) * rng.random(m))[:, None] * MM * (SF.sm(0.0, 0.3, tt) * (1 - SF.sm(0.6, 1.0, tt) * (1.0 if BANG_3D else 0.0)))[None, :]     # (its thickness: 3 mm, closing at a 3D lock's tip)
@@ -769,6 +771,21 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
     rib = 0.5 - 0.5 * np.cos(2 * np.pi * BANG_RIBS * u)
     lift = lift + (BANG_RIB_MM * rib)[:, None] * MM * SF.sm(0.05, 0.45, tt)[None, :]
     lift = lift + (BANG_FLICK_MM * SF.sm(0.62, 1.0, tt) ** 2)[None, :] * MM
+    if BANG_3D:
+        # (John 2026-11-29, circling where the bang meets the side hair: "get the joint correct". The bang came down
+        # off the outer surface by its length, from 30% along, while still over the scalp, so along the joint it lay
+        # under the hair beside it: 9.5 mm at the median (tools/gauges/hair/crown_step.py), a crease with a shadow in
+        # it. It now stays on the outer surface, at the depth of its place in the hair (BANG_ENV to 1 of the height,
+        # as the layers beside it), for as long as it is over the scalp, and comes down to the forehead only past the
+        # hairline: over BANG_DROP below the lowest root at its distance from the part.)
+        ax_ = np.abs(root[:, 0]); o_ = np.argsort(ax_)
+        nb = max(4, m // 25)
+        hx = np.array([ax_[o_[i:i + nb]].mean() for i in range(0, m - nb + 1, nb)])
+        hz = np.array([root[o_[i:i + nb], 2].min() for i in range(0, m - nb + 1, nb)])
+        hl = np.interp(np.abs(P[..., 0]), hx, hz)
+        dn2 = np.maximum.accumulate(SF.sm(hl + BANG_DROP[0], hl - BANG_DROP[1], P[..., 2]), axis=1)
+        dep = BANG_ENV + (1 - BANG_ENV) * rng.random(m)[:, None]
+        lift = scalp_lift * dep / BANG_ENV * (1 - dn2) + lift * dn2
     P = SF.CENTRE + U * (r + lift)[:, :, None]
     # (faired along the hair over BANG_FAIR nodes, the root held, as the falls are: a bang rooted far back runs over the
     # top of the head, where the front projection's cubic and the stand-off's turns meet in corners tighter than the
@@ -781,6 +798,13 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
         Uq = q / rr[:, :, None]
         sk = surf.radius(Uq.reshape(-1, 3)).reshape(rr.shape) + 1.0 * MM
         P = SF.CENTRE + Uq * np.maximum(rr, sk)[:, :, None]
+        if BANG_3D:
+            # (John 2026-11-29: "the bangs should begin with the same roots as everywhere else". The fairing along
+            # the hair had flattened the root's arc: the bang reached 10 mm over the skull 20 mm from its root, the hair
+            # beside it 15 mm (measured). Over the scalp the bang's height is put back to the falls' own law after
+            # the fairing: the same arc off the root (ROOT_RISE_MM) to the same surface (ENV_MM), at the same spread of
+            # depths under it (0.45 to 1, as build's layers).)
+            P = SF.CENTRE + Uq * (np.maximum(rr, sk) * dn2 + (sk - 1.0 * MM + lift) * (1 - dn2))[:, :, None]
     # (John 2026-11-28: "edges are not curved, the ends should taper off". The lower edge is a curve, longest in the
     # middle of the sheet and shorter toward both edges (BANG_TAPER), the ends cut ragged so they thin out.)
     cut = (k * (1 - BANG_TAPER * (2 * u - 1) ** 2 - BANG_RAG * np.abs(2 * vr) * (0.6 + 0.4 * rng.random(m)))).astype(int)
@@ -945,9 +969,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
             for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3, side=(cKDTree(sp), sp, st))):
                 # (stood up at the part like the hair beside it, then faired again: the bang's nodes are 4 mm apart and
                 # the stand alone bent 6% of them tighter than the brush)
-                q_ = _stand_at_part(l)
-                qs_ = gaussian_filter1d(q_, 2.0, axis=0, mode='nearest')
-                lines[i] = qs_ + (q_[:1] - qs_[:1]) * np.exp(-np.arange(len(q_)) / 2.0)[:, None]
+                lines[i] = l                                             # (stood at the part inside bang_sheet)
     sec = np.zeros(n, int)
     step = SEG_MM * MM
     for q, i in enumerate(hang):
@@ -1023,7 +1045,15 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     import flow_smooth as FS
     bi = sorted(base)
     g['smooth_falls'] = FS.gauge([base[i] for i in bi], [hand[i] for i in bi], 'free')
-    g['smooth_fringe'] = FS.gauge([lines[i] for i in np.where(basin == 0)[0]], None, 'set')
+    # (the fringe is gauged in two parts since it took the falls' root: past the root's arc against the brush, as before,
+    # and the arc itself reported apart: a root stood up by the dryer leaves the skin over ROOT_RISE_MM, tighter than
+    # any brush, and the falls' roots, the same arc, were never in this gauge: theirs starts where they leave the head)
+    def _past(l):
+        s_ = np.r_[0, np.cumsum(np.linalg.norm(np.diff(l, axis=0), axis=1))] / MM
+        return l[s_ >= ROOT_RISE_MM + 8.0]
+    fr_ = [lines[i] for i in np.where(basin == 0)[0]]
+    g['smooth_fringe'] = FS.gauge([p_ for p_ in map(_past, fr_) if len(p_) > 4], None, 'set')
+    g['smooth_fringe_with_root'] = {k_: v_ for k_, v_ in FS.gauge(fr_, None, 'set').items() if k_ in ('share_under_bound', 'radius_mm_min', 'ok')}
     tot = hairs.sum()
     g['basin_share_pct'] = {nm: round(100 * float(hairs[basin == b].sum() / tot), 1) for nm, b in
                             (('fringe', 0), ('face framing', 1), ('front fall', 2), ('back fall', 3), ('on the head', -1))}
