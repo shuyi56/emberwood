@@ -84,6 +84,7 @@ SUBLOCKS = 3                # the tail's: a lock parts into sub-locks as it fall
 SUB_SPREAD, HAIR_SPREAD = 1.4, 0.7   # the tail's (bangs_creator_asset.py TAIL_SUB_SPREAD / TAIL_HAIR_SPREAD): the locks open
                             # toward their ends like the ponytail's (John 2026-11-28). 0.3 / 0.4 kept the hem closed
 SPREAD_FROM = 0.5           # the share of a lock's length where the opening starts (the tail: 0.12; here near the ends)
+BESIDE_FACE_Z = 0.45        # head heights above the chin: hair in front of the ears that reaches below this lies beside the face
 MID_FRONT_RAD = 1.5         # hanging hair that leaves the head in front of this angle has no mid layer (see main)
 END_STRAIGHT_MM = 25.0      # stylists: about an inch of the ends left out of the wave
 REST_GAIN = 1.0             # CALIBRATED below (the settled wave against the creator's)
@@ -513,14 +514,20 @@ def main():
     for i, p in enumerate(paths):
         P[i, :len(p)] = p; LO[i, :len(p)] = lock_out[i]
     tier = None
+    # the hair that hangs beside the face: it leaves the head in front of MID_FRONT_RAD. It has no mid layer and no
+    # coverage layer under it (both lie "in" from the strand, which there is onto the face)
+    th0 = np.array([SF.theta(p[min(len(p) - 1, int(np.argmax(p[:, 2] < HANDOVER_Z)))][None])[0] for p in paths])
+    zmin = np.array([p[:, 2].min() for p in paths])
+    front_hang = (np.abs(th0) < MID_FRONT_RAD) & ((lock >= 0) | (zmin < BESIDE_FACE_Z))   # (and the combed face-framing
+                                                                                          #  pieces that reach the cheek)
+    rep['beside_face_fibres'] = int(front_hang.sum())
     if '--no-mid-layer' not in a:
         import hair_layers as HLy
         P, tier, ml = HLy.mid_layer(P)
         # (the mid layer is thick opaque clumps meant to lie under top hair. Beside the face the curtain is seen
         # edge on and nothing lies over them: they showed as flat dark paint on the side of the face, John 2026-11-28.
         # Hanging hair that leaves the head in front of the ears is drawn as top strands only.)
-        th0 = np.array([SF.theta(p[min(len(p) - 1, int(np.argmax(p[:, 2] < HANDOVER_Z)))][None])[0] for p in paths])
-        front_edge = (lock >= 0) & (np.abs(th0) < MID_FRONT_RAD) & (tier > 0)
+        front_edge = front_hang & (tier > 0)
         tier = np.where(front_edge, 0, tier)
         ml['mid_fibres_dropped_beside_face'] = int(front_edge.sum())
         rep['mid_layer'] = ml; log('mid layer %s' % ml)
@@ -597,6 +604,7 @@ def main():
                               hairs_per_strand=round(share_d, 2), ao=CA.b64(np.round(sao * 255), 'u1'), ids=CA.b64(ids, 'u1'),
                               light=CA.b64(np.round(np.clip(occ, 0, 1) * 255), 'u1'), light_order='key,rim,fill,ambient',
                               out=CA.b64(np.round(outv * 127), 'i1'), iso=CA.b64(np.round(iso * 255), 'u1'),
+                              nocover=CA.b64(front_hang[keep].astype('u1'), 'u1'),
                               **({'tier': CA.b64(tier[keep], 'u1')} if tier is not None else {})),
                  look=dict(spec1_hue=LOOK_HUE, glint_hue=LOOK_HUE, light_floor=LOOK_LIGHT_FLOOR, inner_dark=LOOK_INNER_DARK,
                            mid_dark=LOOK_MID_DARK, view_side=True, cast_shadow=True, **LOOK_TONE),

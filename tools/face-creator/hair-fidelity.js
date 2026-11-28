@@ -272,12 +272,17 @@ function buildStyle(asset, tone, creatorMat) {
   // hair past the first layers is light scattered many times and from the open sides (Zinke et al. 2008), which the
   // one-direction bake does not hold; Sadeghi & Tamstorf 2010 leave its strength to the artist. STYLE amounts.)
   const lk = asset.look || {}, lFloor = lk.light_floor || 0, innerDark = lk.inner_dark === undefined ? INNER_DARK : lk.inner_dark, midDark = lk.mid_dark === undefined ? MID_DARK : lk.mid_dark;
+  // strands.nocover (per strand, optional): no coverage layer under this strand. The coverage layer lies COVER_IN mm
+  // "in" along the strand's normal, which is under the top hair on the head and inside a hanging mass, but for hair
+  // hanging beside the face "in" points at the face: the layer lay on the cheek past the top hair, a dark line down
+  // each side that changed the face's shape (traced in false colour, John 2026-11-28).
+  const sNC = S.nocover ? new Uint8Array(bytes(S.nocover)) : null, ncA = new Float32Array(np * 2);
   const sIso = S.iso ? new Uint8Array(bytes(S.iso)) : null, isoA = new Float32Array(np * 2);   // how alone the hair is
   const sArc = new Float32Array(np * 2);          // per vertex: mm along the strand
   const occ = new Float32Array(np * 4);            // per vertex: the baked AO, and the strand's own random value
   let k = 0, si = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (const c of cnt) {
-    const mid = sTier ? sTier[si] : 0;
+    const mid = sTier ? sTier[si] : 0, nc = sNC ? sNC[si] : 0;
     const lay = (mid ? midDark : 1) * (sLay ? LAYER_DARK + (1 - LAYER_DARK) * sLay[si] / 255 : 1);
     const jit = rnd(), tl0 = sID ? sID[2 * si] / 250 - 0.5 : 0, tc0 = sID ? sID[2 * si + 1] / 250 - 0.5 : 0; si++;
     const b = lay * (1 - STRAND_TONE + 2 * STRAND_TONE * rnd()) * (1 + 2 * LOCK_TONE * tl0) * (1 + 2 * CLUMP_TONE * tc0), twist = (2 * rnd() - 1) * STRAND_TWIST;
@@ -303,7 +308,7 @@ function buildStyle(asset, tone, creatorMat) {
         nrm[3 * v] = ox2; nrm[3 * v + 1] = oy2; nrm[3 * v + 2] = oz2;
         side[v] = e ? 1 : -1; wid[v] = wHair * fine * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
         vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit; tierA[v] = mid + 0.45 * t;      // (the tier, and under it the share of the length: 0..0.45)
-        sArc[v] = sj * HEAD_MM / HH; isoA[v] = sIso ? sIso[q] / 255 : 0;
+        ncA[v] = nc; sArc[v] = sj * HEAD_MM / HH; isoA[v] = sIso ? sIso[q] / 255 : 0;
         if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = lFloor + (1 - lFloor) * sL[4 * q + c4] / 255;
       }
       if (j < c - 1) idx.push(2 * q, 2 * q + 1, 2 * q + 3, 2 * q, 2 * q + 3, 2 * q + 2);
@@ -315,7 +320,7 @@ function buildStyle(asset, tone, creatorMat) {
   sg.setAttribute('strandT', new THREE.BufferAttribute(tan, 3)); sg.setAttribute('strandSide', new THREE.BufferAttribute(side, 1));
   sg.setAttribute('strandW', new THREE.BufferAttribute(wid, 1)); sg.setAttribute('color', new THREE.BufferAttribute(vc, 3));
   sg.setAttribute('strandOcc', new THREE.BufferAttribute(occ, 2)); sg.setAttribute('strandArc', new THREE.BufferAttribute(sArc, 1)); sg.setAttribute('strandTier', new THREE.BufferAttribute(tierA, 1));
-  sg.setAttribute('strandLight', new THREE.BufferAttribute(lit, 4)); sg.setAttribute('strandIso', new THREE.BufferAttribute(isoA, 1));
+  sg.setAttribute('strandLight', new THREE.BufferAttribute(lit, 4)); sg.setAttribute('strandIso', new THREE.BufferAttribute(isoA, 1)); sg.setAttribute('strandNC', new THREE.BufferAttribute(ncA, 1));
   sg.setIndex(new THREE.BufferAttribute(new Uint32Array(idx), 1));
   sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
   const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: STRAND_ROUGH,
@@ -337,7 +342,7 @@ function buildStyle(asset, tone, creatorMat) {
   const compile = cover => sh => {
     sh.uniforms.pxWorld = PX_WORLD; sh.uniforms.coverIn = { value: cover ? COVER_IN * HH / HEAD_MM : 0 }; sh.uniforms.coverW = { value: cover ? COVER_W : 1 };
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\nuniform float coverIn;\nuniform float coverW;\n' +
-      'attribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\nattribute float strandArc;\nvarying float vArc;\nattribute float strandTier;\nvarying float vTier;\nvarying float vTip;\nattribute float strandIso;\nvarying float vIso;\nvarying float vThin;\n' +
+      'attribute float strandNC;\nvarying float vNC;\nattribute vec2 strandOcc;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nattribute vec4 strandLight;\nvarying vec4 vLight;\nvarying float vSide;\nattribute float strandArc;\nvarying float vArc;\nattribute float strandTier;\nvarying float vTier;\nvarying float vTip;\nattribute float strandIso;\nvarying float vIso;\nvarying float vThin;\n' +
       sh.vertexShader.replace('#include <project_vertex>', [
         'vec4 mvPosition = modelViewMatrix * vec4( transformed - ( coverIn + floor( strandTier + 0.01 ) * ' + (MID_IN * HH / HEAD_MM).toFixed(5) + ' ) * normal, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
@@ -347,11 +352,11 @@ function buildStyle(asset, tone, creatorMat) {
         'vec3 sdc = cross( tv, normalize( -mvPosition.xyz ) ); float sdl = length( sdc );',
         'vec3 sd = sdc / max( sdl, 1e-4 );',
         'float wTrue = strandW * coverW * smoothstep( 0.0, ' + END_ON.toFixed(2) + ', sdl ), wPx = -mvPosition.z * pxWorld;',
-        'vIso = strandIso; vThin = clamp( wTrue / wPx, 0.0, 1.0 );',
+        'vNC = strandNC; vIso = strandIso; vThin = clamp( wTrue / wPx, 0.0, 1.0 );',
         'mvPosition.xyz += sd * ( 0.5 * max( wTrue, wPx ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
-    sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\nvarying float vTier;\nvarying float vTip;\nvarying float vIso;\nvarying float vThin;\n' + sh.fragmentShader
+    sh.fragmentShader = 'varying float vNC;\nvarying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\nvarying float vTier;\nvarying float vTip;\nvarying float vIso;\nvarying float vThin;\n' + sh.fragmentShader
       // each light by the hair's own transmittance toward it (the lights in the scene's order: key, rim, fill; the key
       // casts the only shadow, so it stays first), the ambient by the hair's averaged transmittance
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );',
@@ -361,7 +366,7 @@ function buildStyle(asset, tone, creatorMat) {
       .replace('#include <color_fragment>', '#include <color_fragment>\n\tdiffuseColor.rgb *= ' + LK.strand_light.toFixed(3) + ';\n' +
         '\t{ float fz = ' + FUZZ_A.toFixed(3) + ' * ( 1.0 - vSide * vSide );\n' +
         '\t  float hn = fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) + vStrandOcc.y );\n' +
-        (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + ';\n\t  if ( min( 1.6 * ( 1.0 - vSide * vSide ), 1.0 - smoothstep( ' + COVER_END.toFixed(3) + ', 0.98, vTip ) ) * ( 1.0 - smoothstep( 0.15, 0.6, vIso ) ) < hn ) discard; }' :
+        (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + ';\n\t  if ( vNC > 0.5 ) discard;\n\t  if ( min( 1.6 * ( 1.0 - vSide * vSide ), 1.0 - smoothstep( ' + COVER_END.toFixed(3) + ', 0.98, vTip ) ) * ( 1.0 - smoothstep( 0.15, 0.6, vIso ) ) < hn ) discard; }' :
           '\t  diffuseColor.rgb *= 1.0 + ' + LOOSE_LIFT.toFixed(3) + ' * vIso;\n\t  if ( vTier < 0.5 && fz < hn ) discard;\n' +
           '\t  if ( mix( 1.0, max( vThin, ' + LOOSE_MIN.toFixed(3) + ' ), vIso ) < fract( hn + 0.618 ) ) discard; }'))
       // (look.view_side: hair seen from its inner side, the back hair behind the neck seen from the front, has an
