@@ -63,6 +63,12 @@ corner (it looks like shoulder pads), a step, or a notch. Rules:
   into her cape from the side and back. Keep the colours in harmony too: slate blue against brown hair
   clashed, and forest green read badly (and vanished on the grass), so her robe and cape are a deep plum. Check the cape against the hair in the side and back views.
 
+## A new hairstyle is a parameter file
+
+Build a new hairstyle as a style file in `tools/hair/pipeline/styles/` and run it with `tools/hair/pipeline/run.py`
+(README there). Put the style's numbers in its file with a flag and a source, never in a tool's constants: the tools
+keep their defaults, so one style's change cannot move another's.
+
 ## Hair grooms: the Face Creator's lines are the ground truth
 
 Build and check every groom (`tools/hair/`) against the creator's own hairstyle, not against a look

@@ -1,0 +1,141 @@
+# The Warden's long layered waves with a centre part and a curtain fringe, grown from a reference photo
+# (hair-rebuild/wavy-photo/reference.jpg; PR #99, photo_waves.py). Every value is the tools' value at field v14
+# (approved by John 2026-11-28), so this file reproduces field v14 exactly.
+schema: emberwood-hair-style/1
+style: warden-photo-waves
+family: loose
+title: Long layered waves, centre part, curtain fringe
+
+inputs:
+  head: hair-rebuild/wavy-photo/field/head-v14.json.gz      # the creator export field v14 was built on
+  # reference: no refmeasure sheet yet: the photo was measured by hand on a 20 px grid (ratios below)
+
+reference:
+  ratios:
+    _flag: MEASURED
+    _src: "reference.jpg, by hand on a 20 px grid, head 240 px (photo_waves.py docstring)"
+    half_width_at_0.52: 0.45
+    half_width_at_0.2: 0.54
+    half_width_at_-0.15: 0.63
+    front_inner_edge_at_-0.15: 0.2
+    ends_z: -0.76
+
+hairs:
+  on_scalp: {v: 90000.0, flag: DRAFT, src: "the older grooms' budget; a scalp carries about 100,000 (Robbins)"}
+
+part:
+  line: centre       # on the midline, from the front hairline to the crown (MEASURED, photo)
+  push: {v: 0.45, flag: DRAFT, src: "push away from the part against gravity along the skin"}
+
+root_lift:
+  # One outer surface for the lift; a hair leaves its root at an angle and bends once onto it (Houdini Lift Guides,
+  # Yuksel 2009 hair meshes, Behind the Chair blowout). Either outer_mm or emergence_deg (+ temple_share) may be given.
+  outer_mm:
+    top: {v: 27.0, flag: JOHN, src: "John 2026-11-28 'raise the hair more' (the photo's own top outline reads 9 mm, overridden)"}
+    temple: {v: 23.0, flag: JOHN, src: "the same, by the temple"}
+  relax_mm: {v: 36.0, flag: JOHN, src: "v13: each side reaches its height 36 mm from the part (narrow part between the humps)"}
+  top_partner_mm: {v: 27.0, flag: DERIVED, src: "photo_waves TOP_LIFT_MM, kept equal to outer_mm.top"}
+  base_mm: {v: [1.0, 28.0], flag: MEASURED, src: "photo: 9 mm off the skull at the top, about 24 mm at the eyes"}
+  per_mm: {v: 0.12, flag: DRAFT, src: "lift gained per mm combed (older rise, still read by the fringe cap)"}
+
+fall:
+  hem_z: {v: -0.76, flag: MEASURED, src: "photo: the ends"}
+  top_shorter_hh: {v: 0.22, flag: DRAFT, src: "the top layer ends this much higher (layers)"}
+  grade_hh: {v: 0.25, flag: DRAFT, src: "Sam Villa: short in the front and long in the back"}
+  ragged_hh: {v: 0.08, flag: DRAFT, src: "each hair up to this much short of its layer's line"}
+  take: {v: 1.3, flag: CALIBRATED, src: "first solve: the waves and the shoulder lie take up a quarter of the hang"}
+  flare_hh: {v: [0.055, 0.08], flag: MEASURED, src: "photo half widths 0.45 / 0.54 / 0.63 and John's line at eye level"}
+  back_sweep: {v: 0.9, flag: DRAFT, src: "pull back along the skin at the face frame (NY study guide 8.5: sides over-directed back)"}
+  sweep_in_mm: {v: 70.0, flag: DRAFT, src: "the back sweep grows in over this length"}
+  carry_hh: {v: 0.12, flag: DRAFT, src: "below the head the hair keeps turning the way it left"}
+  split_rad: {v: 2.2, flag: DRAFT, src: "where the hair parts over the shoulder, well behind the ear"}
+  front_band_rad: {v: [0.55, 1.3], flag: MEASURED, src: "photo: the front fall on the chest, x 0.2 to 0.6 at the collarbone"}
+  back_band_rad: {v: [2.3, 3.141592653589793], flag: DRAFT, src: "inside the shoulder blades"}
+  fair_mm: {v: 25.0, flag: DRAFT, src: "half a bending length (GWB12 ~5 cm)"}
+  gather_z: {v: [0.5, -0.5], flag: JOHN, src: "the falls start for their places at the cheek and are there at the collarbone"}
+  face_keep_rad: {v: 1.15, flag: MEASURED, src: "photo face crop: the hair's front edge beside the face"}
+  face_keep_z: {v: [0.56, 0.2], flag: SOURCED, src: "ghd, Sam Villa: the face frame swings back between temple and cheekbone"}
+  stack_mm: {v: [2.0, 18.0], flag: DRAFT, src: "the fall's thickness, innermost and outermost stand-off"}
+  body_at_z: {v: -0.40, flag: MEASURED, src: "the mannequin's shoulder"}
+
+framing:
+  section_rad: {v: 1.45, flag: DRAFT, src: "face framing in front of the ears"}
+  depth_hh: {v: 0.12, flag: DRAFT, src: "this far behind the hairline"}
+  end_z: {v: [-0.25, 0.08], flag: MEASURED, src: "photo: the face-framing pieces end between chin and collarbone"}
+
+wave:
+  # Two perpendicular sinusoids (wave.py): across the fall A_side sin(k z + phi), out of it A_out cos(...): an
+  # elliptical helix with twist 90 deg. Neighbours share the phase (by height, one pattern a side).
+  start_z: {v: 0.38, flag: MEASURED, src: "photo: straight to the cheek"}
+  full_z: {v: 0.12, flag: MEASURED, src: "photo: the full wave by the jaw"}
+  length_hh: {v: 0.33, flag: MEASURED, src: "photo: loose S waves about 0.33 long"}
+  amp_side_hh: {v: 0.04, flag: MEASURED, src: "photo: about 0.04 high"}
+  amp_out_hh: {v: 0.02, flag: DERIVED, src: "field2 lays the out wave at half the side wave"}
+  twist_deg: {v: 90, flag: DERIVED, src: "field2 lays the out wave a quarter wave on"}
+  locks_per_side: {v: 50, flag: MEASURED, src: "a stylist's section, 22 to 35 mm of the perimeter (photo ribbons)"}
+
+bangs:
+  section_rad: {v: 0.70, flag: DRAFT, src: "the fringe section's half-angle round the head"}
+  depth_hh: {v: 0.30, flag: JOHN, src: "John 2026-11-28 'begin the bangs farther back': 66 mm behind the hairline at the part"}
+  hang_z: {v: 0.66, flag: DRAFT, src: "below the forehead's bulge the fringe hangs free"}
+  arch_mm: {v: [22.0, 8.0, 7.0], flag: DRAFT, src: "the arch off the root, in again, and the flick (a 35 mm brush, ghd)"}
+  push: {v: [0.45, 2.20], flag: MEASURED, src: "inner edge from the part to the brow at |x| 0.12, out to the cheekbone at 0.30"}
+  lift_mm: {v: 12.0, flag: DRAFT, src: "ghd 'lift at the base'; the photo shows its shadow"}
+  feather_hh: {v: 0.05, flag: DRAFT, src: "point cut over this much"}
+  curve:
+    end: {v: [[0.17, 0.59], [0.30, 0.44]], flag: MEASURED, src: "face crop: the inner hair ends at the brow's outer half, the outer at the temple"}
+    handles: {v: [0.06, 0.45, 0.05], flag: DRAFT, src: "the S's handles: out from the root, up from the end, in from the end"}
+    span: {v: [[0.0, 0.45], [0.3, 0.95], [0.6, 1.0]], flag: CALIBRATED, src: "flow_smooth (set hair, 35 mm brush)"}
+    fair_nodes: {v: 3.0, flag: CALIBRATED, src: "flow_smooth: unfaired 2.2% of nodes under 17.5 mm, faired 0.3%"}
+
+field:
+  lines: {v: 8000, flag: TOOL, src: "field v14 was drawn with 8000 lines (16000 gives the same widths)"}
+  seed: {v: 11, flag: TOOL, src: "field2's default"}
+  body: mannequin    # v9 on: the bare mannequin (the Warden's collar pushed the falls out)
+
+locks:
+  volume_mm: {v: 30.0, flag: DRAFT, src: "a hanging lock keeps its stand-off up to this"}
+  section_blend: {v: 0.8, flag: DRAFT, src: "XGen Clump Copy: a hair takes its neighbours' lines"}
+  blend_radius_mm: {v: 40.0, flag: SOURCED, src: "Sam Villa, Red Seal: a wave section is 1 to 1.5 in wide"}
+  flatness: {v: 0.5, flag: DRAFT, src: "XGen Flatness"}
+  end_straight_mm: {v: 25.0, flag: SOURCED, src: "stylists leave about an inch of the ends (tymobeauty, behindthechair)"}
+  rest_gain: {v: 1.0, flag: CALIBRATED, src: "the settled wave against the creator's (wave_height)"}
+
+finish:
+  fibres: {v: 24000, flag: TOOL, src: "wavy_flow default"}
+  strands: {v: 16000, flag: TOOL, src: "wavy_flow default"}
+  noise: {v: 1.0, flag: STYLE, src: "noise_round.py at its draft amounts"}
+  cap_lift_mm: {v: 0.4, flag: CALIBRATED, src: "PR #97: at 1 mm the roots beside a join lay under the cap"}
+
+shading:
+  hue: {v: 0.8, flag: STYLE, src: "Marschner 2003: glints are TRT light and carry the pigment"}
+  light_floor: {v: 0.25, flag: JOHN, src: "swatches, John 2026-11-28 'too light'"}
+  inner_dark: {v: 0.85, flag: JOHN, src: "swatches, John 2026-11-28"}
+  mid_dark: {v: 0.92, flag: JOHN, src: "swatches, John 2026-11-28"}
+  tone:
+    _flag: CALIBRATED
+    _src: "against the creator's own hair from the same cameras (median sRGB 45/29/22 front)"
+    strand_light: 0.4
+    glint: 0.15
+    spec1: 0.05
+    spec2: 0.15
+    scatter: 3.0
+    kk_gain: 1.5
+
+gauges:
+  rank_moves_share: {v: 0.03, flag: DRAFT, src: "field2's own: rank moves over 3% of the lines"}
+  width_tol_hh: {v: 0.03, flag: DRAFT, src: "6.6 mm, a reading's error on a 240 px head"}
+  wave_tol_share: {v: 0.25, flag: DRAFT, src: "the fall's wave rides a curving course; a quarter of the style's"}
+  neighbour_phase_step_deg: {v: 30, flag: DRAFT, src: "a twelfth of a wave: photo_waves' per-lock jitter"}
+  wave_every: {v: 4, flag: TOOL, src: "every 4th fall line measured"}
+  allow_fail:
+    reference measured with refmeasure: "the photo was measured by hand on a 20 px grid; a refmeasure sheet is still to make (project rule)"
+    half width at z -0.15: "field v14 0.566 against the photo's 0.63 at the shoulders: John approved v14 with it"
+    front fall inner edge: "field v14 0.35 against the photo's 0.2: John approved v14 with it"
+    rank_moves_front_L: "approved v14"
+    rank_moves_front_R: "approved v14"
+
+approved:
+  # field v14: John approved it in the wavy thread 2026-11-28 15:04 UTC ("Proceed now") and confirmed this digest for the
+  # runner's field (whose gauges are identical to v14's) on 2026-11-28 15:45 UTC ("yes")
+  field: 063a7d75b230bbcf

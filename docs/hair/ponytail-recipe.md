@@ -9,6 +9,11 @@ number and rejection, is in the project files: `hair-rebuild/ponytail-flow/READM
 The order matters and does not change: **measure, field, gauge, look, then hair**. Nothing is groomed until John has
 seen the flow field.
 
+**Run it from a style file.** Every step below runs from one parameter file through one runner:
+`python3 tools/hair/pipeline/run.py tools/hair/pipeline/styles/warden-ponytail.yaml OUT`. A new ponytail is a copy
+of that file with the new photo's ratios and the style's own numbers; the commands below are what the runner runs.
+See `tools/hair/pipeline/README.md`.
+
 ## 0. Inputs
 
 - The head: the Face Creator's export, `HEAD.json.gz`, from

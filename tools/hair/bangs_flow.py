@@ -70,6 +70,8 @@ ROOT_EXIT_STEPS = int(ROOT_EXIT_MM / PF.CURL_STEP_MM)
 LIFT_MM = (1.0, 20.0)           # the root's and the tips' lift, and the most the fringe stands off the forehead:
                                 # MEASURED, the photo's fringe front against the forehead (fitted through the nose
                                 # tip): 26, 19.5, 13 and 2.6 mm at 230, 260, 282 and 306 px, the tips on the brow
+BRUSH_READ_MM = 10.0            # the length a bend is read over (flow_smooth's STEP_MM)
+BRUSH_PASSES = 60
 BANG_EDGE_MM = 66.0             # the bangs section's outer edge, u at ponytail_flow's BANG_TH on this head
 B_K = 64                        # the side-flow nodes read per point
 B_SIGMA_MM = 10.0               # DRAFT: their Gaussian weight's width (wider than the lines' spacing, so the field
@@ -346,8 +348,37 @@ def trace(B, SFL, roots, prm, max_mm=170.0):
         v = np.clip((z_hl - p[:, 2]) / max(z_hl - zend[i], 1e-3), 0, 1)
         base = 1.0 + 5.0 * sm(0.0, 15.0, smm) * (1 - v)
         lift = (base + (lmax - base) * np.sin(np.pi * v ** 0.7) ** 2) * MM
-        out.append(p + Nn * lift[:, None])
+        out.append(brush(p + Nn * lift[:, None], surf, lift[0]))
     return out, stag, stop_len
+
+
+def brush(q, surf, floor):
+    """The round brush: set hair bends no tighter than the barrel it was dried on. Where the line, read over
+    BRUSH_READ_MM, turns tighter than BRUSH_R_MM, ease that node toward its neighbours' midpoint (the root held,
+    the line kept FLOOR off the skin). The fringe's C keeps its shape and loses only the corner the sum of the
+    skull's curve and the lift's crest made (2.4% of the nodes, 12 to 17 mm, before this)."""
+    q = q.copy()
+    k = max(int(round(0.5 * BRUSH_READ_MM / STEP_MM)), 1)
+    if len(q) < 2 * k + 3:
+        return q
+    for _ in range(BRUSH_PASSES):
+        a, b, c = q[:-2 * k], q[k:-k], q[2 * k:]
+        ab, bc, ca = (np.linalg.norm(x, axis=1) for x in (b - a, c - b, a - c))
+        area = 0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1)
+        r = ab * bc * ca / np.maximum(4 * area, 1e-12) / MM
+        tight = np.zeros(len(q), bool)
+        tight[k:-k] = r < BRUSH_R_MM * 1.05
+        tight[0] = False
+        if not tight.any():
+            break
+        m = np.zeros_like(q)
+        m[1:-1] = 0.5 * (q[:-2] + q[2:])
+        m[-1] = q[-1]
+        q = np.where(tight[:, None], q + 0.5 * (m - q), q)
+        U = unit(q - SF.CENTRE)
+        low = surf.depth(q) > -floor
+        q[low] = surf.point(U[low]) + surf.normals(U[low]) * floor
+    return q
 
 
 # --------------------------------------------------------------------------------------------- the photo
