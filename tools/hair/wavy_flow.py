@@ -244,7 +244,7 @@ def creator_front(strands):
     return np.array(th), np.array(fr), np.array(at), np.array(end)
 
 
-def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None, blend=None):
+def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None, blend=None, volume=None):
     """The hair below the hand-over as wave locks solved in 3D (see the module's note 2 and 3). paths: list of (k, 3)
     head-height lines at SEG_OUT_MM. Returns the new lines, each line's lock (-1: none), each point's lock "out"
     (zero off a lock) and the report."""
@@ -313,7 +313,18 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
     # front of the shoulder, the lock heads for the creator's own place there and is as long as the creator's
     front = np.zeros(nl, bool); grow = np.ones(n)
     frac = 0.85 + 0.15 * rng.random(n)                                 # (each hair's share of a front lock's length)
-    if creator is not None:
+    if callable(creator):
+        # (a style with no creator strands, photo_waves.py: each lock is only headed for the place the function names)
+        thk = SF.theta(roots)
+        for k in range(nl):
+            r_ = creator(roots[k], thk[k])
+            if r_ is not None:
+                tv = r_[0] - roots[k]
+                tang[k] = tv / np.linalg.norm(tv)
+                front[k] = True
+        log('locks headed for the front %d of %d' % (front.sum(), nl))
+        front[:] = False                                                # (their lengths stay their own)
+    elif creator is not None:
         cth, cfr, cat, cend = creator
         thk = SF.theta(roots)
         for k in range(nl):
@@ -374,6 +385,16 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
         return rest_gain * kap * Wc * end * pre, tsign / np.sqrt(A_mm ** 2 + c[:, 0] ** 2), phi
     log('locks %d, hairs per lock median %.0f, lock radius median %.1f mm, length median %.0f mm, bending length %.0f mm'
         % (nl, np.median(nh), np.median(lock_r), np.median(length), np.median(Lb3 ** (1 / 3))))
+    if volume:
+        # the hair's thickness: a lock keeps the stand-off from the skin it leaves the head with, up to `volume` mm
+        # (it lies on the hair under it, which the rods do not carry), gone by the shoulders, where the hair lies flat on the body
+        extra = np.clip(-coll(roots / MM, np.zeros(nl))[0], 0.0, volume)
+        skin = coll
+
+        def coll(pts, rad):
+            e = np.repeat(extra, len(pts) // nl) * (1 - 0.9 * SF.sm(0.10, -0.20, pts[:, 2] * MM))
+            return skin(pts, rad + e)
+        log('volume: stand-off kept mm median %.1f, 90th pct %.1f' % (np.median(extra), np.percentile(extra, 90)))
     out = TR.solve(roots / MM, frames, length, nh, lock_r, head=coll, seed=seed, rest=rest,
                    log=lambda t: log('  rods: ' + t))
     X, Rr, rs = out['x'] * MM, out['R'], out['s']
@@ -478,27 +499,43 @@ def main():
     F = SF.build(surf)
     bodies = json.load(gzip.open(head))['bodies']
     body = GR.character_body(bodies['warden'], bodies['mannequin'])
-    Gm = dict(np.load(os.path.join(gdir, 'groom.npz')))
-    paths0, share = RD.grow_children(F, Gm, nfib)
-    near = cKDTree(Gm['roots']).query(paths0[:, 0])[1]
-    lockkey = Gm['lock'][near].astype(int) * 1000 + Gm['clump'][near].astype(int)
-    hairs = share * float(Gm['n_hairs'].sum())
-    paths = [resample(p[~np.isnan(p[:, 0])], SEG_OUT_MM * MM) for p in paths0]
-    log('fibres %d, %.1f hairs each (median)' % (len(paths), np.median(hairs)))
-    # the creator's wave, measured
-    import creator_truth as CT
-    _, _, cstr = CT.load(style)
-    rep['wave_creator_mm'] = wave_height([s['p'] for s in cstr if s['p'][:, 2].min() < 0.0])
-    rep['wave_groom_before_mm'] = wave_height([p for p in paths if p[:, 2].min() < 0.0][::4])
-    log('wave height, creator %s; old groom %s' % (rep['wave_creator_mm'], rep['wave_groom_before_mm']))
     coll, depth = colliders(surf, body)
     gain = opt('--rest-gain', REST_GAIN)
-    cf = creator_front([s_['p'] for s_ in cstr]) if '--no-front' not in a else None
-    paths, lock, lock_out, rr, rods = hang_locks(paths, lockkey, hairs, coll, gain, log, creator=cf, blend=opt('--blend', SECTION_BLEND))
+    photo = gdir == 'photo'
+    kind = None
+    if photo:
+        # a style grown from a reference photo's measurements (photo_waves.py): no groom and no creator strand is read
+        import photo_waves as PW
+        globals().update(HANDOVER_Z=PW.WAVE['start_z'], WAVE_FULL_Z=PW.WAVE['full_z'], WAVE_OUT_HH=PW.WAVE['amp_hh'],
+                         WAVE_SIDE_HH=PW.WAVE['amp_hh'], creator_wave=PW.wave)
+        paths, hairs, lockkey, kind = PW.build(F, surf, nfib, log=log)
+        rep['photo'] = dict(wave=PW.WAVE, fringe=int((kind == 1).sum()), framing=int((kind == 2).sum()))
+        paths, lock, lock_out, rr, rods = hang_locks(paths, lockkey, hairs, coll, gain, log, creator=PW.aim(coll),
+                                                     blend=opt('--blend', SECTION_BLEND), volume=opt('--volume', PW.VOLUME_MM))
+        rep['sides'] = dict(hair=side_gauge(paths, hairs))
+    else:
+        Gm = dict(np.load(os.path.join(gdir, 'groom.npz')))
+        paths0, share = RD.grow_children(F, Gm, nfib)
+        near = cKDTree(Gm['roots']).query(paths0[:, 0])[1]
+        lockkey = Gm['lock'][near].astype(int) * 1000 + Gm['clump'][near].astype(int)
+        hairs = share * float(Gm['n_hairs'].sum())
+        paths = [resample(p[~np.isnan(p[:, 0])], SEG_OUT_MM * MM) for p in paths0]
+        log('fibres %d, %.1f hairs each (median)' % (len(paths), np.median(hairs)))
+        # the creator's wave, measured
+        import creator_truth as CT
+        _, _, cstr = CT.load(style)
+        rep['wave_creator_mm'] = wave_height([s['p'] for s in cstr if s['p'][:, 2].min() < 0.0])
+        rep['wave_groom_before_mm'] = wave_height([p for p in paths if p[:, 2].min() < 0.0][::4])
+        log('wave height, creator %s; old groom %s' % (rep['wave_creator_mm'], rep['wave_groom_before_mm']))
+        cf = creator_front([s_['p'] for s_ in cstr]) if '--no-front' not in a else None
+        paths, lock, lock_out, rr, rods = hang_locks(paths, lockkey, hairs, coll, gain, log, creator=cf, blend=opt('--blend', SECTION_BLEND))
+        rep['sides'] = dict(creator=side_gauge([s_['p'] for s_ in cstr]), hair=side_gauge(paths, hairs))
     rep['rods'] = rr
     rep['wave_locks_mm'] = wave_height([x for x in rods['X']])
     rep['wave_groom_after_mm'] = wave_height([p for p in paths if p[:, 2].min() < 0.0][::4])
-    rep['sides'] = dict(creator=side_gauge([s_['p'] for s_ in cstr]), hair=side_gauge(paths, hairs))
+    rep['half_width'] = {str(z): round(float(np.percentile([abs(p[int(np.argmin(np.abs(p[:, 2] - z))), 0]) for p in paths
+                                                             if p[:, 2].min() < z < p[:, 2].max()], 98)), 3) for z in (0.85, 0.52, 0.2, -0.15)}
+    log('half-width by height %s' % rep['half_width'])
     log('sides %s' % rep['sides'])
     rep['curtain'] = curtain_gauge(paths, hairs)
     log('curtain %s' % rep['curtain'])
@@ -520,6 +557,8 @@ def main():
     zmin = np.array([p[:, 2].min() for p in paths])
     front_hang = (np.abs(th0) < MID_FRONT_RAD) & ((lock >= 0) | (zmin < BESIDE_FACE_Z))   # (and the combed face-framing
                                                                                           #  pieces that reach the cheek)
+    if kind is not None:
+        front_hang |= kind > 0                                          # (the fringe lies on the forehead: nothing under it)
     rep['beside_face_fibres'] = int(front_hang.sum())
     if '--no-mid-layer' not in a:
         import hair_layers as HLy
@@ -609,7 +648,7 @@ def main():
                  look=dict(spec1_hue=LOOK_HUE, glint_hue=LOOK_HUE, light_floor=LOOK_LIGHT_FLOOR, inner_dark=LOOK_INNER_DARK,
                            mid_dark=LOOK_MID_DARK, view_side=True, cast_shadow=True, **LOOK_TONE),
                  body=dict(name='warden', sections=bodies['warden'], cy=0.04, p=3),
-                 source=dict(groom=os.path.abspath(gdir), fibres=int(len(P)), builder='tools/hair/wavy_flow.py'))
+                 source=dict(groom=gdir if photo else os.path.abspath(gdir), fibres=int(len(P)), builder='tools/hair/wavy_flow.py'))
     json.dump(asset, open(os.path.join(out, 'asset-wavyFull.json'), 'w'))
     rep['strands'] = dict(n=int(len(ps)), hairs_each=round(share_d, 1), loose_points_share=round(float((iso > 0.5).mean()), 4))
     # the gauges on the finished hair: the hairline invariant (hairline_gap.py) and the join between the bangs and the
