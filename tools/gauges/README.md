@@ -512,5 +512,5 @@ over the skull (median, 10th and 90th percentile, mm). A seam shows as a step.
 
 **Read.** 2026-11-29, wavy photo hair: the cleft was 8 mm at the part against 25 mm 24 mm away (17 mm deep, two humps
 in the front and back outlines); with the roots stood up at the part (`photo_waves._stand_at_part`) 17.7 against 24 mm.
-The bang seam: 0.0 mm median once the bang's root lift used the falls' arc and envelope. Look at the crown as well
+The bang seam: 9.5 mm median once the bang's root lift used the falls' arc and envelope. Look at the crown as well
 (`photo_render.py --crown`): the numbers do not show a ragged edge.

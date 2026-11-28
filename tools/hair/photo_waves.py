@@ -1109,6 +1109,10 @@ TIP_T, TIP_K, TIP_CUT = 0.22, 0.85, 0.7   # DRAFT: the share of a lock's fall ov
 BANG_TIP = 1.0                            # DRAFT: how far a bang lock's hairs draw onto its centre line at the end
 
 
+TEX = dict(amp=0.25, lam=0.10, tip_amp=0.35, tip_lam=0.15, sub_amp=0.22, sub_lam=0.55, hair_mm=1.2, layer_lam=0.8)   # DRAFT
+LOCK_LONG = 1.2             # HH: the longest locks' fall (release to tip), against which a lock is 'short'
+
+
 def lock_fall(Fd, seed=5, log=print):
     """Groups the hanging lines (face framing, front and back falls) into locks and rebuilds each line below the head
     as its lock's axis plus its own offset, gathered and then opened. Returns (Fd with new lines and 'lock', gauges)."""
@@ -1193,12 +1197,34 @@ def lock_fall(Fd, seed=5, log=print):
         if j in fixed:
             ph, lam_l = fixed[j], WAVE['lam_hh']
         psi = 2 * np.pi * (WAVE_OUT_Z - zz) / WAVE['lam_hh']
-        psl = 2 * np.pi * (WAVE_OUT_Z - zz) / lam_l + ph
+        # (John 2026-11-29: "read how to vary frequency, amplitude and wave length to get layering and texture". What the
+        # grooming tools do, and what is done here:
+        #  - a clump has its own noise, "Noise Frequency" in "cycles per-clump", and "Noise Correlation" keeps
+        #    "neighboring hairs" together (Maya XGen Clump modifier): each lock has its own wavelength and size
+        #    (TEX['lam'], TEX['amp']: a share either way), its hairs waving with it;
+        #  - "Noise Scale" is a ramp from root to tip and a curl's radius runs from "Factor Start" to "Factor End", its
+        #    "Frequency" free to "vary for different points of the same curve" (XGen; Blender Curl Hair Curves): the
+        #    wave grows toward the tip (TEX['tip_amp']) and its wavelength shortens (TEX['tip_lam']), as a curl
+        #    tightens where the hair is lighter;
+        #  - clumps are stacked, a secondary Clump at a higher "Density" under the primary (XGen workflow tips), and a
+        #    curl takes a "Random Offset per curve": each sub-lock carries a smaller, shorter wave of its own
+        #    (TEX['sub_amp'], TEX['sub_lam']) and each hair a small one about its sub-lock's (TEX['hair_mm']);
+        #  - layers: a shorter lock's wave is also shorter (its wavelength scaled toward TEX['layer_lam'] by how much
+        #    shorter than the longest it is), so the layers do not wave in step and each reads apart.)
+        fr = np.clip((top - zz) / max(top - bot, 1e-6), 0, 1)
+        short = float(np.clip(1 - (top - bot) / LOCK_LONG, 0, 1))
+        amp_l = (1 + TEX['amp'] * rng.uniform(-1, 1)) * (1 + TEX['tip_amp'] * fr)
+        lam_l = lam_l * (1 + TEX['lam'] * rng.uniform(-1, 1)) * (1 - (1 - TEX['layer_lam']) * short)
+        if j in fixed:
+            amp_l, lam_l = 1 + TEX['tip_amp'] * fr, WAVE['lam_hh']
+        lam_z = lam_l * (1 - TEX['tip_lam'] * fr)
+        psl = 2 * np.pi * (WAVE_OUT_Z - top) / lam_l + ph + np.cumsum(2 * np.pi * step / lam_z)
+        ph_sub = rng.uniform(0, 2 * np.pi, SUBLOCKS)
         out = ax - np.array(SF.AXIS)[None]
         out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
         tan = np.c_[-out[:, 1], out[:, 0]]
-        ax2 = ax + out * (en * LOCK_DEPTH_MM * MM * np.sin(psl + 0.5 * np.pi))[:, None] \
-            + tan * (en * LOCK_SWING * WAVE['amp_hh'] * (np.sin(psl) - np.sin(psi)))[:, None] * np.sign(np.mean(ax[:, 0]) + 1e-9)
+        ax2 = ax + out * (en * amp_l * LOCK_DEPTH_MM * MM * np.sin(psl + 0.5 * np.pi))[:, None] \
+            + tan * (en * LOCK_SWING * WAVE['amp_hh'] * (amp_l * np.sin(psl) - np.sin(psi)))[:, None] * np.sign(np.mean(ax[:, 0]) + 1e-9)
         # sub-locks: by the side of the axis each member lies on at mid-fall
         mid = len(zz) // 2
         om = np.nan_to_num(X[:, mid] - ax[mid])
@@ -1226,6 +1252,12 @@ def lock_fall(Fd, seed=5, log=print):
             tl = np.clip((top - zi) / max(top - bot, 1e-6), 0, 1)
             conv = 1 - TIP_K * SF.sm(1 - TIP_T, 1.0, tl)
             new = A2 + (sc * (gather + (SUB_OPEN - 1) * opn * gather)[:, None] + own * (gather * (1 + (HAIR_OPEN) * opn))[:, None]) * conv[:, None]
+            # (the sub-lock's own wave and the hair's, across the fall and out of it a quarter wave on)
+            ps_ = psl[ok] * (1.0 / TEX['sub_lam']) + ph_sub[sub[a_]]
+            ph_ = ps_ * 1.3 + 2 * np.pi * ((i * 0.6180339) % 1.0)
+            wv_ = (TEX['sub_amp'] * WAVE['amp_hh'] * np.sin(ps_) + TEX['hair_mm'] * MM * np.sin(ph_)) * (en[ok] * (1 + TEX['tip_amp'] * fr[ok]))
+            wo_ = 0.5 * (TEX['sub_amp'] * WAVE['amp_hh'] * np.cos(ps_) + TEX['hair_mm'] * MM * np.cos(ph_)) * en[ok]
+            new = new + (tan[ok] * wv_[:, None] + out[ok] * wo_[:, None]) * conv[:, None]
             p = np.c_[new, zi]
             keep = zi >= bot + TIP_CUT * TIP_T * (top - bot) * far[a_]
             if keep.sum() >= 4:
