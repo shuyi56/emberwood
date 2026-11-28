@@ -37,7 +37,7 @@ SEG_MM = 2.5
 N_HAIRS = 90000.0           # DRAFT: hairs on the scalp (the older grooms' budget; a scalp carries about 100,000, Robbins)
 RELEASE_Z = SF.CENTRE[2]    # the skin turns under below the skull's centre height: the hair leaves the head there
 PART_PUSH = 0.45            # DRAFT: the push away from the part against gravity along the skin (1: equal)
-FRINGE_ARCH_MM = (26.0, 8.0, 7.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
+FRINGE_ARCH_MM = (22.0, 8.0, 7.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
                             # flick at the end (a 35 mm brush's radius is 17.5)
 FRINGE_PUSH = (0.45, 2.20)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
                             # the part to the brow at |x| 0.12 and on out to the cheekbone at 0.30 (MEASURED)
@@ -53,7 +53,7 @@ FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'l
 # 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
 # guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
 # No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
-TOP_LIFT_MM, ROOT_RISE_MM = 32.0, 60.0   # the hair's height over the skull at the top, and the length from the root over
+TOP_LIFT_MM, ROOT_RISE_MM = 27.0, 36.0   # the hair's height over the skull at the top, and the length from the root over
                             # which it rises to it. John 2026-11-28: "raise the hair more it's still too flat it should have
                             # more arching at the roots". This overrides the measurement (9 mm, 0.04 HH, read off the photo's
                             # top outline); the rise is longer (30 to 42 mm) so the taller arch bends no tighter
@@ -70,7 +70,7 @@ TOP_LIFT_MM, ROOT_RISE_MM = 32.0, 60.0   # the hair's height over the skull at t
 # tangent to it: height T * (1 - (1 - s/L)^2) over the run L. Leaving angle atan(2T/L) = 47 degrees, bend radius
 # L^2/(2T) = 56 mm (a large round brush and the hair's own spring). Before, the rise was a smoothstep: flat on the skin
 # at the root, then a steep ramp, then flat again, three times the bend, so the top read as spikes, not arches.
-ENV_MM = (32.0, 28.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
+ENV_MM = (27.0, 23.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
                             # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden)
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
@@ -517,7 +517,7 @@ BANG_END = ((0.17, 0.59), (0.30, 0.44))   # MEASURED (face crop): where the bang
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
-BANG_SPAN = ((0.0, 0.5), (0.45, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
+BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
                             # (flow_smooth, set hair, 35 mm brush): a 12 mm arch risen over the first quarter bent at 8.8 mm
                             # with 12% of the nodes under 17.5 mm; over the first half, 0.8% (and BANG_S[0] 0.10 to 0.06)
 
