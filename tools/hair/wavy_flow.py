@@ -587,7 +587,7 @@ def main():
                               out=CA.b64(np.round(outv * 127), 'i1'), iso=CA.b64(np.round(iso * 255), 'u1'),
                               **({'tier': CA.b64(tier[keep], 'u1')} if tier is not None else {})),
                  look=dict(spec1_hue=LOOK_HUE, glint_hue=LOOK_HUE, light_floor=LOOK_LIGHT_FLOOR, inner_dark=LOOK_INNER_DARK,
-                           mid_dark=LOOK_MID_DARK, view_side=True),
+                           mid_dark=LOOK_MID_DARK, view_side=True, cast_shadow=True),
                  body=dict(name='warden', sections=bodies['warden'], cy=0.04, p=3),
                  source=dict(groom=os.path.abspath(gdir), fibres=int(len(P)), builder='tools/hair/wavy_flow.py'))
     json.dump(asset, open(os.path.join(out, 'asset-wavyFull.json'), 'w'))

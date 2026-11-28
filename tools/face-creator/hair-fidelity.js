@@ -423,6 +423,25 @@ function buildStyle(asset, tone, creatorMat) {
   coverMat.color = strandMat.color; coverMat.onBeforeCompile = compile(true); coverMat.customProgramCacheKey = () => 'strand-cover' + JSON.stringify(look);
   const cover = new THREE.Mesh(sg, coverMat); cover.frustumCulled = false; cover.name = 'groom-coverage';
   parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.add(cover); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
+  // look.cast_shadow: the hair's shadow on the skin. Without it the skin beside and under the hair is as bright as the
+  // open face, and the hair reads as lying in the face's own plane, cutting it (John, 2026-11-28): what sets hair off
+  // the face is its shadow on it (Yuksel & Keyser 2008 on hair shadows giving the hair its depth; the creator's own
+  // hair casts one). The ribbons have no width until the vertex shader gives it, so the shadow pass widens them the
+  // same way, toward the lamp. The hair does not take this shadow itself: its own is the baked light.
+  if (look.cast_shadow) {
+    const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide });
+    dm.onBeforeCompile = sh => {
+      sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\n' +
+        sh.vertexShader.replace('#include <project_vertex>', [
+          'vec4 mvPosition = modelViewMatrix * vec4( transformed, 1.0 );',
+          'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
+          'vec3 sdc = cross( tv, vec3( 0.0, 0.0, 1.0 ) ); vec3 sd = sdc / max( length( sdc ), 1e-4 );',
+          'mvPosition.xyz += sd * ( 0.5 * strandW * ' + (look.shadow_width || 1).toFixed(2) + ' * strandSide );',
+          'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
+    };
+    dm.customProgramCacheKey = () => 'strand-depth' + JSON.stringify(look);
+    parts.strands.customDepthMaterial = dm; parts.strands.castShadow = true;
+  }
   group.add(parts.strands);
   const segs = idx.length / 6;
   return { group, parts, cardMat, capMat, strandMat, segs, tone };
