@@ -1023,6 +1023,37 @@ def _blue_origin(paths, hand, kind, sd, m, surf):
     return R, T / np.maximum(np.linalg.norm(T, axis=1, keepdims=True), 1e-9)
 
 
+TIP_FLICK = dict(fringe=(22.0, 75.0), fall=(45.0, 110.0))   # DRAFT (John 2026-11-29: "add a final upward bend to the bangs and the
+                             # sides and back"): the length of the tip that bends (mm) and how far it turns (degrees), out from the
+                             # head and up. The fall's tip, hanging straight down, ends 20 degrees above level
+
+
+def _tip_flick(l, mm, deg):
+    """The line's last mm bent out from the head and upward by deg in all, at one even curvature (a radius of mm / the
+    angle): each segment of the tip is turned about the axis square to the tip's own direction and the outward level
+    direction there, and the tip is laid out again from where the bend begins."""
+    if len(l) < 6 or deg <= 0:
+        return l
+    seg = np.diff(l, axis=0); ln = np.linalg.norm(seg, axis=1)
+    back = (np.cumsum(ln[::-1])[::-1] - ln) / MM                         # (each segment's start, measured back from the tip)
+    j0 = int(np.argmax(back + ln / MM <= mm)) if (back + ln / MM <= mm).any() else len(seg)
+    if len(seg) - j0 < 3:
+        return l
+    d0 = seg[j0] / max(ln[j0], 1e-12)
+    w = np.r_[l[-1, :2] - SF.AXIS[:2], 0.0]; w /= max(np.linalg.norm(w), 1e-9)
+    ax = np.cross(d0, w); na = np.linalg.norm(ax)
+    if na < 1e-6:
+        return l
+    ax /= na
+    th = np.radians(deg) * (np.arange(1, len(seg) - j0 + 1) / (len(seg) - j0))
+    out = l.copy(); q = l[j0].copy()
+    for k_, t_ in enumerate(th):
+        v = seg[j0 + k_]
+        v = v * np.cos(t_) + np.cross(ax, v) * np.sin(t_) + ax * (ax @ v) * (1 - np.cos(t_))
+        q = q + v; out[j0 + k_ + 1] = q
+    return out
+
+
 def _solver_src():
     d_ = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair')
     return open(os.path.join(d_, 'endpoint_flow.py')).read() + open(os.path.join(d_, 'sheet_flow.py')).read()
@@ -1382,6 +1413,9 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
                                                                 if b == 2 and l[-1, 2] < -0.15], 2)), 3)
     g['ends_z_p5'] = round(float(np.percentile([l[-1, 2] for l in A], 5)), 3)
     log('field2 %s' % g)
+    # (the tips' final upward bend, after the gauges: 'lines_turning_up' counts faults in the fall, and this turn is meant)
+    lines = [_tip_flick(l, *(TIP_FLICK['fringe'] if basin[i] == 0 else TIP_FLICK['fall'])) if basin[i] >= 0 else l
+             for i, l in enumerate(lines)]
     return dict(line=lines, basin=basin, hairs=hairs, root=x['root'], sec=sec, release=hand, kind=kind, gauges=g)
 
 

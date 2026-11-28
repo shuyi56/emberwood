@@ -1,4 +1,4 @@
-"""Flow diagram of the hair ON THE HEAD only: head_flow.py HEAD CACHE OUT.png [--every 6] [--blue-only] [--solid] ['PW.NAME = value' ...].
+"""Flow diagram of the hair ON THE HEAD only: head_flow.py HEAD CACHE OUT.png [--every 6] [--blue-only] [--solid [--whole]] ['PW.NAME = value' ...].
 Every line from its root to where it leaves the head (the bangs to their ends), nothing below. Four panels: front, side
 (face left), above (face down the page), back. Only the half of the head facing the viewer is drawn. Skull grey; the dot
 is the root; fringe orange, face framing magenta, front fall blue, back fall green."""
@@ -34,8 +34,9 @@ views = [('FRONT', (0, 1), (2, 1), lambda q: q[:, 1] < C[1] + 0.02, (0.0, 0.70))
          ('BACK', (0, -1), (2, 1), lambda q: q[:, 1] > C[1] - 0.02, (0.0, 0.70))]
 k = 950
 if SOLID:                                                             # (the head AND NECK as a shaded solid under the lines)
-    k = 700
-    views = [(t_, ax_, ay_, f_, (c_[0], 0.50 if ay_[0] == 2 else c_[1])) for t_, ax_, ay_, f_, c_ in views]
+    WHOLE = '--whole' in sys.argv                                      # (--whole: out to the tips of the long hair)
+    k = 420 if WHOLE else 700
+    views = [(t_, ax_, ay_, f_, (c_[0], (0.12 if WHOLE else 0.50) if ay_[0] == 2 else c_[1])) for t_, ax_, ay_, f_, c_ in views]
 
 
 def solid(pim, P, face, dax, dsg):
