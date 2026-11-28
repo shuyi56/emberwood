@@ -79,7 +79,9 @@ const GLINT = 0.5, GLINT_EXP = 110, GLINT_MM = 24, GLINT_DUTY = 0.35, STRAND_TON
 // inner hair is what many hairs let through (Zinke et al. 2008, dual scattering: T = d a^n for n hairs in front,
 // d 0.7 in Sadeghi and Tamstorf's implementation), dark and without a highlight of its own.
 // SOURCED: the layer and its job. STYLE: the three amounts.
-const COVER_IN = 2.8, COVER_W = 1.8, COVER_DARK = 0.78, COVER_SPEC = 0.35, COVER_END = 0.72;
+// (COVER_DARK 0.78 and COVER_SPEC 0.35 until the fringe's face was checked in debug colours: between its locks most of
+// what shows is this layer, and at that tone it stood as black patches on a face the light reaches in full.)
+const COVER_IN = 2.8, COVER_W = 1.8, COVER_DARK = 0.92, COVER_SPEC = 0.8, COVER_END = 0.72;
 // (0.6 with no highlight read as a flat black band wherever the layer shows past the top hair: under the fringe's
 // edge, along the lower side. So it is hair there too: COVER_DARK of the tone, COVER_SPEC of the highlights, its
 // ribbons' edges broken like the strands', and it stops short of each hair's end (fading out from COVER_END of the
