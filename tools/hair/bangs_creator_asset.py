@@ -37,6 +37,8 @@ TAIL_HAIR_SPREAD = 0.7      # DRAFT: and a hair this much farther from its sub-l
 TAIL_SPREAD_FROM = 0.12     # the share of a lock's length where the opening starts
 TAIL_JOIN_MM = 45.0         # a hair passes from the tail's field line to its lock's rod over this length, eased with a
                             # quintic (zero slope and curvature change at both ends: the line stays G2 across the join)
+FRINGE_EASE_REACH_MM = 80.0 # DRAFT: a fringe hair's highest point is looked for within this run from its root
+FRINGE_EASE_MIN_MM = 6.0    # DRAFT: hairs that never stand this far off the head are left alone
 CAP_LIFT_MM = 0.4           # the scalp cap this far over the skin (cards.py's default is 1.0: hair lying closer than that,
                             # as it does at its roots along the fringe join, was buried and the bare cap showed as a band)
 JOIN_ZIG_MM = 16.0          # DRAFT: the zigzag reaches this far to each side of the line between the two root sets
@@ -292,6 +294,31 @@ def main():
             basin = basin.copy(); basin[take] = other_b
             taken[other_b] = int(take.sum())
         print('join zigzag', dict(taken_forward=taken[1], taken_back=taken[0], within_mm=JOIN_ZIG_MM), file=sys.stderr)
+    if '--fringe-ease' in a:
+        # The fringe lay 4 to 5 mm off the head for its first 25 mm and then stepped out to its full stand-off (15 to
+        # 17 mm, from the photo's 26 / 19.5 / 13 mm) within 20 mm: a crest across the fringe that catches the light. In
+        # the photo the fringe rises from the head in one arc. Each fringe hair's height over the head, from its root
+        # to its highest point, is raised to an ease-out arc of that same height (never lowered).
+        shl = BF.Shell(B['surf']); MMe = BF.SF.MM
+        ne = 0; gain = []
+        for i in np.where(basin == 1)[0]:
+            ok = ~np.isnan(paths[i][:, 0]); P1 = paths[i][ok]
+            if len(P1) < 4:
+                continue
+            s1 = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(P1, axis=0), axis=1))] / MMe
+            U1 = P1 - BF.SF.CENTRE; r1 = np.linalg.norm(U1, axis=1); U1 = U1 / r1[:, None]
+            h1 = (r1 - shl.radius(U1)) / MMe
+            win = s1 <= FRINGE_EASE_REACH_MM
+            kp = int(np.argmax(np.where(win, h1, -1e9)))
+            if kp < 2 or h1[kp] < FRINGE_EASE_MIN_MM:
+                continue
+            t = np.clip(s1[:kp + 1] / s1[kp], 0, 1)
+            arc = h1[0] + (h1[kp] - h1[0]) * t * (2 - t)
+            up = np.maximum(arc - h1[:kp + 1], 0.0)
+            P1[:kp + 1] += shl.normals(U1[:kp + 1]) * (up * MMe)[:, None]
+            q = paths[i].copy(); q[ok] = P1; paths[i] = q
+            ne += 1; gain.append(up.max())
+        print('fringe ease', dict(hairs=ne, raised_mm_median=round(float(np.median(gain)), 1) if gain else 0, raised_mm_max=round(float(np.max(gain)), 1) if gain else 0), file=sys.stderr)
     tiltv = comb = layv = None
     if '--volume' in a:                                               # the side hair in layers off the bed (hair_volume.py)
         import hair_volume as HV
