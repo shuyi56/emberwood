@@ -135,8 +135,109 @@ repeated on more than one garment. The reviewer applies them once John merges th
 - **Fix:** Find the numbers on the swatch bench first (a strip of the cloth, rendered in seconds), cite the bending
   length it shows, and only then render the garment.
 
+## R004 Foot and toe meshes with inward normals or a melted forefoot
+
+- **Seen:** 3 rejections on the foot thread (2026-11-21, 06:56 to 07:47Z): toes flat and melted into a plate, a dark
+  notch at the toes' base in profile and 3/4, and a sheet of skin between the shins with inward normals on folded
+  forefoot sections.
+- **Spot:** The diff rebuilds or smooths the forefoot, toes or heel (SDF fillet, section lofts) and no normals or
+  toe-separation check is in the build output.
+- **Fix:** Check that every section loft has outward normals and no folded sections before the fillet, and render
+  the profile and 3/4 crop of the toes (the notch and the plate show there first).
+
+## R005 Render framing that does not match the request
+
+- **Seen:** 3 rejections in the day: `--zoom` read as closeness when it is the view's width (the lips came out about
+  100 px across), a body left unparented so every angle showed one side, and a figure rebuilt with the wrong parts
+  because a module-level set was lost when the worker reused the module.
+- **Spot:** A view or crop request that sets `--zoom`, takes a part off the rig, or relies on a module-level setting
+  made at import.
+- **Fix:** State the visible width in the request and check the first frame's size; keep the body parented to the
+  rig; set per-figure parts inside the build, not at import.
+
+## R006 Free lace ends longer than the reference line
+
+- **Seen:** 2 rejections on the boot thread (2026-11-21, 02:25 and 02:38Z): free ends of 22/17 cm ran past the sole
+  and hung in the air, and after the first fix 15/12 cm still ran below the mid-shin line John drew on the front view.
+- **Spot:** The diff sets a free end length (bow tails, tie ends) as a fixed number, or sets it without a line to
+  compare against on the garment.
+- **Fix:** Derive the length from a landmark on the garment (mid-shin, hem, knee), put that line on the clay view,
+  and check the ends against it in the first round, not after John's circle.
+
+## R007 Lapels and collars laid on, not cut from the front
+
+- **Seen:** 2 rejections from John on the redingote (2026-11-20, 14:37 and 15:47Z): lapels added as ready-shaped
+  triangles laid on the chest, and a bodice front fold that came out as a flat striped flap with ragged cut edges.
+- **Spot:** The diff adds a lapel, collar or revers as its own flat piece placed over the chest instead of
+  drafting it as part of the front panel with a fold line.
+- **Fix:** Draft the lapel as the folded-back part of the front panel (roll line, break point, return), solve the
+  fold, and check the 3/4 view for a flap standing off the chest before sending it.
+
 ## P015 Colours that touch but do not separate
 
 - **Seen:** 2026-11-20: a near-black lace darkened the tongue; a first linen replacement matched the brass eyelets' hue
 - **Spot:** Run tools/render-review/colorcheck.py FIGURE before a render that changes a material colour: it flags touching parts with a small lightness gap and the same hue, and a cord darker than the shadow of what it lies on
 - **Fix:** Pick the colour from the check's table, not by eye: keep dL 12+ or dE 25+, and 20 degrees of hue when the values are close; a lace over a dark opening must be lighter than the surface's shadow tone
+
+## R008 Hair guides placed or combed without a check against the scalp and the face
+
+- **Seen:** 11 of the day's 17 hair rejections, all on one thread (2026-11-21, 18:38 to 20:21Z, logged by the thread
+  itself): guides rooted behind the crown that flipped forward over the face, bang guides planted on bare skin in front
+  of it, sideburn guides whose first segment ended 5 mm inside the head, and four bang rounds (hung straight like a
+  sheet, then swept out like antennae, then the inner tips still over the pupil, then dipped 15 mm into the eye socket).
+- **Spot:** The diff plants, combs or sets hair guides (a bang section, a part, a sideburn, a framing lock) and the
+  first render of the round is the first time anyone looks at where they ended up.
+- **Fix:** Before the render, check each guide numerically: its root lies inside the hair-bearing scalp mask, its first
+  segment clears the skin, and no node lies inside the eye socket; for bangs compare the inner tip's |x| with the pupil's
+  and the bang's outward angle with the head's width at that height, and fix the set in one pass from a styled target
+  shape instead of one parameter per round.
+
+## R009 Hair face-frame ends cut square, rolled, or hooked
+
+- **Seen:** 3 rejections on the Ranger hair (2026-11-22, 11:26Z, logged by the thread itself): the face frame cut
+  straight across read as a shelf at the cheek, ends rolled outward flicked into wings at the jaw, and cut ends hooked
+  out where the push-back had bent them.
+- **Spot:** The diff cuts or styles the ends of the face-framing locks (a cut height, a roll, a push-back) and the
+  first render of the round is the first look at the ends in front, 3/4 and profile.
+- **Fix:** Point cut the ends with a 2 cm stagger instead of a straight line, leave the ends unrolled, let a cut end hang
+  toward plumb, and check the ends at the jaw in the 3/4 and profile views before the front view.
+
+## R010 A collar's end or a lapel's gorge patched after the cloth is laid
+
+- **Seen:** 5 rejections on the lapel and collar solver (2026-11-24, 00:08 to 03:35Z, logged by the thread itself): dragging
+  the laid collar's end onto the lapel's top edge gave a 90 degree tip fold, moving the seam inside the build left the
+  outline gap at 0.081 and 0.068 against 0.055, moving part of the end after it was laid tore it, a gorge laid flush point
+  by point tore into a knot (91 degrees), and a gorge drafted to each point's own lapel normal zigzagged (176 degrees).
+  Four parameter searches around the collar on 2026-11-23 never moved the crease or the knot either.
+- **Spot:** The diff moves, drags, flushes or relaxes part of a collar's end, stand or the gorge after the fall is laid, or
+  adds one more collar parameter to a search while the same crease or fold persists.
+- **Fix:** Build the collar's end and the lapel's gorge as one surface from the draft, with the seam crossing the roll line
+  and running on under the fold; check tip fold and outline gap after each change, and stop after two rounds without gain.
+
+## R011 Side and temple hair built from separate locks or one slope
+
+- **Seen:** 7 rejections on the Warden hair (2026-11-24, 10:20 to 22:38Z, 5 logged by the thread itself, 2 by John), plus
+  3 on the ponytail's temple lock (23:24 to 23:39Z): the hair behind a draped side left a bare V over the shoulder, a side
+  swept back at one slope streamed out behind the back, combing only toward the hair behind the ear moved nothing, curtain
+  bangs gathered into three separate locks left the cheek and ear bare, the hairline left 10 to 15 mm of scalp at both
+  temples, the hair behind the ear hooked back along the neck, and the temple lock hung plumb instead of following the
+  fringe.
+- **Spot:** The diff builds or combs the side hair, a curtain, a temple lock or the hair behind the ear, and the first
+  render of the round is the first look at the side in profile and 3/4.
+- **Fix:** Define the side as one solid shape in front of the ear and feed the temple and sideburn hair into it; turn the
+  drape from forward to back over a range of roots, not at one slope; sweep back only to below the shoulder's top, then
+  plumb; cap the backward fall per unit of drop; and run the hairline-gap gauge before the render (bare scalp at the
+  hairline's edge, a bare wedge between the front lock and the back hair).
+
+## R012 Hair strand noise, glints or coverage set in one large step
+
+- **Seen:** 3 rejections on the hair rebuild (2026-11-25, 21:02 to 22:48Z, logged by the thread itself): lock noise of 3 mm
+  with a third harmonic and per-hair noise turned straight hair into frizzy curl, glints at 9 mm cycles and strength 1.1
+  read as glitter or dandruff specks over the whole head, and a coverage layer 1.2 mm under the strands, 3 times wide at
+  tone 0.42, buried the detail strands so the hair read near black. Each was fixed in the next round by going the other
+  way (longer quieter noise, 24 mm glints at strength 0.5, a deeper narrower lighter coverage).
+- **Spot:** The diff adds or retunes strand noise, glints or a coverage and darkening layer, and the first render of the
+  round is the first look at the whole head at full strength.
+- **Fix:** Start each of these at the quiet end (no short harmonic, per-hair noise near zero, glints as short streaks
+  inside the highlight band, coverage deeper, narrower and lighter than the detail layer), render one close-up from the side
+  and the back, and raise one parameter at a time.

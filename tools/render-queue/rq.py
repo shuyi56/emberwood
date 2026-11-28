@@ -43,11 +43,11 @@ Batching rules (John, 2026-11-19)
     open intent could join (same figure, or a piece of the same set) is held for it: the collation window, 5 minutes
     (READY_CUTOFF_S) from the first piece ready (its request). When it ends the batch renders with whichever pieces
     are ready; a slower piece goes in the next batch. When every announced piece has come, it starts at once.
-  * Without an intent a job still waits WINDOW_S (45 s) after its newest request for a related one, never longer.
+  * Without an intent a job still waits WINDOW_S (22 s) after its newest request for a related one, never longer.
   * Caps: at most MAX_BATCH (4) branches in a merged commit and MAX_MERGE (6) requests in a combined job. A combined
     job that fails (not one killed at 30 minutes) is retried with each of its requests on its own.
 """
-import argparse, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time
+import argparse, functools, glob, ast, hashlib, json, os, re, shlex, shutil, signal, statistics, subprocess, sys, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("RQ_HOME", HERE)   # queue.json, results/, events.jsonl: next to the code unless RQ_HOME says
@@ -63,9 +63,14 @@ NOT_INPUTS = ("blender/facecheck/",)
 RENDERED = ("blender/ranger/ranger-blender.png",)   # the pngs the queue itself renders
 REQUESTABLE = ("frames", "views", "glb")
 PRIORITY = {"frames": 0, "views": 0, "glb": 1, "sheet": 9}
+# John, 2026-11-19: a thread that asks for the same views again and again loses priority each time. The request that
+# repeats the previous one (same thread, same views, same quality, not interrupted by a different request, and not
+# more than `quiet_s` after it) is `repeat` steps behind, up to `max`; each `age_s` it waits wins one step back, so
+# it is never starved, and an idle queue runs it at once. Hogging warnings stay as they were.
+PEN = {"quiet_s": 2700, "max": 3, "age_s": 600}
 MAX_BATCH = int(os.environ.get("RQ_MAX_BATCH", "4"))      # branches merged into one commit
 MAX_MERGE = int(os.environ.get("RQ_MAX_MERGE", "6"))      # requests in one combined views.py job
-WINDOW_S = int(os.environ.get("RQ_WINDOW", "45"))         # a job waits this long after its newest request
+WINDOW_S = int(os.environ.get("RQ_WINDOW", "15"))         # a job waits this long after its newest request
 READY_CUTOFF_S = int(os.environ.get("RQ_READY_CUTOFF", "300"))   # John: a 5-minute collation window from the first piece ready
 INTENT_TTL_S = 1800                                       # an intent nobody followed lapses after its ETA + this
 VIEWS_PY = "blender/base/views.py"
@@ -89,6 +94,7 @@ def sets():
     return {}
 
 
+@functools.lru_cache(maxsize=None)
 def ts(t):
     import calendar
     return calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%SZ"))
@@ -280,43 +286,249 @@ def git(*a, check=True, cwd=REPO):
     return r
 
 
-def load():
+LOCK = os.path.join(DATA, "queue.lock")
+INBOX = os.path.join(DATA, "inbox")   # threads drop one new file per add or cancel here; only the serving machine writes queue.json
+SERVING = False
+_lock_depth = 0
+
+
+class qlock:
+    """One writer at a time for queue.json, across processes (an O_EXCL lock file; a lock older than 60 s is a
+    dead process's and is broken). Re-entrant, so a locked command can call save()."""
+    def __enter__(self):
+        global _lock_depth
+        if _lock_depth == 0:
+            end = time.time() + 45
+            while True:
+                try:
+                    fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    os.write(fd, f"{os.getpid()} {now()}".encode()); os.close(fd)
+                    break
+                except FileExistsError:
+                    try:
+                        if time.time() - os.path.getmtime(LOCK) > 60:
+                            os.unlink(LOCK)
+                            continue
+                    except OSError:
+                        pass
+                    if time.time() > end:
+                        break                      # never block the queue for good: go on without the lock
+                    time.sleep(0.05)
+        _lock_depth += 1
+        return self
+
+    def __exit__(self, *e):
+        global _lock_depth
+        _lock_depth -= 1
+        if _lock_depth == 0:
+            try:
+                os.unlink(LOCK)
+            except OSError:
+                pass
+
+
+def locked(fn):
+    @functools.wraps(fn)
+    def w(*a, **k):
+        with qlock():
+            return fn(*a, **k)
+    return w
+
+
+_LISTS = ("requests", "intents")
+
+
+def _clean(o):
+    return json.dumps({k: v for k, v in o.items() if not k.startswith("_")}, sort_keys=True)
+
+
+def load(raw=False):
     try:
         with open(STATE) as f:
             s = json.load(f)
     except FileNotFoundError:
         s = {"next": 1, "requests": []}
+    if SERVING:
+        # the serving machine reads the shared folder through a mount that lags its own writes (2026-11-21: a stale
+        # read numbered two requests #337 and the first one vanished): its own latest copy wins when it is newer
+        try:
+            with open(os.path.join(WORK, "queue.local.json")) as f:
+                loc = json.load(f)
+            if loc.get("seq", 0) > s.get("seq", 0):
+                s = loc
+        except (OSError, ValueError):
+            pass
     s.setdefault("ready", []); s.setdefault("sheet_due", False); s.setdefault("sheets_done", {})
+    # what this process saw, so save() can tell its own changes from other processes' (a three-way merge)
+    s["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in s.get(k, [])} for k in _LISTS},
+                  "top": {k: json.dumps(v, sort_keys=True) for k, v in s.items() if k not in _LISTS and not k.startswith("_")}}
+    if not raw and not SERVING:
+        _merge_inbox(s)
     return s
+
+
+def _inbox_ops():
+    ops = []
+    for f in glob.glob(os.path.join(INBOX, "*.json")):
+        try:
+            with open(f) as fh:
+                ops.append((f, json.load(fh)))
+        except (OSError, ValueError):
+            pass                                     # (half-written or just taken: next time)
+    ops.sort(key=lambda x: (x[1].get("created", ""), x[1].get("token", "")))
+    return ops
+
+
+def _merge_inbox(s):
+    """A read-only view: requests threads have dropped in the inbox but the serving machine has not taken yet show
+    up as pending, marked _inbox so that save() never writes them."""
+    have = {r.get("token") for r in s["requests"] if r.get("token")}
+    nxt = max([s["next"]] + [r["id"] + 1 for r in s["requests"]])
+    for f, d in _inbox_ops():
+        if d.get("op") == "add":
+            r = dict(d["request"])
+            if r.get("token") in have:
+                continue
+            have.add(r.get("token"))
+            r["id"] = nxt; nxt += 1; r["_inbox"] = True
+            s["requests"].append(r)
+        elif d.get("op") == "cancel":
+            for r in s["requests"]:
+                if (d.get("token") and r.get("token") == d["token"]) or (not d.get("token") and r["id"] == d.get("id")):
+                    r["state"] = "cancelled"
+
+
+def admit(s, r):
+    """Put a request that arrived in the inbox into the queue: number it, drop a waiting request it replaces, mark the
+    intent it answers."""
+    r["id"] = max([s["next"]] + [o["id"] + 1 for o in s["requests"]])
+    s["next"] = r["id"]
+    outs = r["outputs"]
+    for o in s["requests"]:   # coalescing: a newer request for the same piece replaces one still waiting
+        # (the same thread and branch following the branch tip, or the same branch asking for the same views and
+        #  cells at another commit, pinned or not: the stale one is dropped, never rendered)
+        if o["state"] in ("pending", "conflict") and o["branch"] == r["branch"] and o["outputs"] == outs and (
+                (o["thread"] == r["thread"] and not r.get("sha") and not o.get("sha"))
+                or (sorted(o.get("views") or []) == sorted(r["views"]) and o.get("cells") == r["cells"]
+                    and o.get("quality") == r["quality"])):
+            o["state"] = f"superseded by {r['id']}"
+            event("coalesced", None, dropped=o["id"], by=r["id"], branch=r["branch"])
+    figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
+    for i in s.get("intents", []):    # the request an intent announced has come
+        if i["state"] == "open" and i["branch"] == r["branch"] and (i["piece"] in figs or not figs):
+            i["state"] = f"sent as #{r['id']}"
+    s["next"] += 1
+    s["requests"].append(r)
+
+
+def ingest():
+    """Only the serving machine runs this: take what threads dropped in the inbox into queue.json. Threads never
+    write queue.json for an add or a cancel, so no other machine's write can lose theirs (2026-11-21: three adds
+    and a cancel vanished that way, each thread seeing the shared folder through its own mount)."""
+    ops = _inbox_ops()
+    if not ops:
+        return 0
+    with qlock():
+        s = load(raw=True)
+        toks = {r.get("token") for r in s["requests"] if r.get("token")}
+        for f, d in ops:
+            if d.get("op") == "add":
+                r = dict(d["request"])
+                if r.get("token") not in toks:
+                    toks.add(r.get("token")); admit(s, r)
+            elif d.get("op") == "cancel":
+                for r in s["requests"]:
+                    if (d.get("token") and r.get("token") == d["token"]) or (not d.get("token") and r["id"] == d.get("id")):
+                        r["state"] = "cancelled"
+        save(s)
+        for f, d in ops:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+    return len(ops)
+
+
+def drop_in_inbox(op):
+    os.makedirs(INBOX, exist_ok=True)
+    name = f"{op['op']}-{op['created'].replace(':', '')}-{op.get('token') or uuid.uuid4().hex[:8]}.json"
+    tmp = os.path.join(INBOX, "." + name)
+    with open(tmp, "w") as f:
+        json.dump(op, f); f.flush(); os.fsync(f.fileno())
+    os.rename(tmp, os.path.join(INBOX, name))
+
+
+def merge_disk(s, disk):
+    """s is this process's copy (loaded some time ago, perhaps before a slow step); disk is the file now.
+    Keep what this process changed, and take everything else from the file: a request another thread added, a
+    cancel, a state another process set. Without this the last writer won and lost the others' changes."""
+    base = s.get("_base")
+    if base is None:
+        return s
+    out = {k: v for k, v in s.items() if not k.startswith("_")}
+    for k, v in disk.items():
+        if k in _LISTS or k.startswith("_"):
+            continue
+        if k in ("next", "next_intent"):
+            out[k] = max(out.get(k, 1), v)
+        elif k not in out or json.dumps(out[k], sort_keys=True) == base["top"].get(k):
+            out[k] = v                                   # unchanged here: the file's value is newer
+    for k in _LISTS:
+        if k not in s and k not in disk:
+            continue
+        b = base["lists"].get(k, {})
+        mine = {o["id"]: o for o in s.get(k, [])}
+        theirs = {o["id"]: o for o in disk.get(k, [])}
+        merged = []
+        for i in sorted(set(mine) | set(theirs)):
+            m, d = mine.get(i), theirs.get(i)
+            if m is not None and (i not in b or _clean(m) != b[i]):
+                if (k == "requests" and d is not None and d.get("state") == "cancelled" and i in b
+                        and json.loads(b[i]).get("state") != "cancelled" and m.get("state") in ("pending", "rendering", "conflict")):
+                    merged.append(d)                     # cancelled meanwhile: the cancel stands
+                else:
+                    merged.append(m)                     # changed or added here
+            elif d is not None:
+                merged.append(d)                         # unchanged here, or added elsewhere: the file's version
+            elif m is not None and i not in b:
+                merged.append(m)
+        out[k] = merged
+    return out
 
 
 def save(s):
     """Compact JSON, written and then read back: the shared folder is a network mount, and a replace on it once
-    left the file cut short. A local copy is kept too."""
-    s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]]}
+    left the file cut short. A local copy is kept too. Under the lock, merged with what the file holds now."""
+    orig = s
+    base = s.get("_base")
+    s = {**s, "requests": [{k: v for k, v in r.items() if not k.startswith("_")} for r in s["requests"]
+                           if not r.get("_inbox")]}
     os.makedirs(WORK, exist_ok=True)
     for _ in range(5):
-        # (keep requests another process added since s was loaded: plan() holds s through slow git merges; read
-        # again on every try, since an add that lands between the write and the check is what made it fail)
-        try:
+        with qlock():
+            try:
+                with open(STATE) as f:
+                    disk = json.load(f)
+                s = merge_disk({**s, "_base": base}, disk)
+                if s["requests"]:
+                    s["next"] = max(s["next"], max(r["id"] for r in s["requests"]) + 1)
+            except (OSError, ValueError, KeyError):
+                pass
+            s["seq"] = s.get("seq", 0) + 1
+            data = json.dumps({k: v for k, v in s.items() if not k.startswith("_")}, separators=(",", ":"))
+            with open(os.path.join(WORK, "queue.local.json"), "w") as f:
+                f.write(data)
+            with open(STATE, "w") as f:
+                f.write(data); f.flush(); os.fsync(f.fileno())
+            time.sleep(0.2)
             with open(STATE) as f:
-                disk = json.load(f)
-            have = {r["id"] for r in s["requests"]}
-            extra = [r for r in disk.get("requests", []) if r["id"] not in have and r["id"] >= min(have | {10 ** 9})]
-            if extra:
-                s["requests"] = sorted(s["requests"] + extra, key=lambda r: r["id"])
-                s["next"] = max(s["next"], disk.get("next", 1))
-        except (OSError, ValueError, KeyError):
-            pass
-        data = json.dumps(s, separators=(",", ":"))
-        with open(os.path.join(WORK, "queue.local.json"), "w") as f:
-            f.write(data)
-        with open(STATE, "w") as f:
-            f.write(data); f.flush(); os.fsync(f.fileno())
-        time.sleep(0.5)
-        with open(STATE) as f:
-            if f.read() == data:
-                return
+                if f.read() == data:
+                    w = json.loads(data)        # what the file holds now is this process's new base
+                    orig["seq"] = w["seq"]
+                    orig["_base"] = {"lists": {k: {o["id"]: _clean(o) for o in w.get(k, [])} for k in _LISTS},
+                                     "top": {k: json.dumps(v, sort_keys=True) for k, v in w.items()
+                                             if k not in _LISTS and not k.startswith("_")}}
+                    return
     sys.exit(f"could not write {STATE} intact; the local copy is in {WORK}/queue.local.json")
 
 
@@ -522,6 +734,11 @@ def plan(fetch=True):
         tip = r["sha"] or git("rev-parse", "--verify", "--quiet", f"origin/{r['branch']}", check=False).stdout.strip()
         if not tip:
             r["state"], r["why"] = "conflict", "branch not found on origin"; held.append(r); continue
+        if r["sha"] and git("cat-file", "-e", f"{tip}^{{commit}}", check=False).returncode:
+            # (2026-11-21: a pinned sha that is not in the repository crashed serve in merge-tree and every waiting
+            #  request stood still for 25 min: hold that request with the reason, the others go on)
+            r["state"], r["why"] = "conflict", f"commit {tip[:10]} is not on origin: push it, or the sha is mistyped"
+            held.append(r); continue
         r["tip"] = tip
         # a request keeps the main it was first planned on, so a merge to main mid-request does not re-render it
         if r.get("base_for") != tip:
@@ -607,6 +824,7 @@ def plan(fetch=True):
             bjobs.append({"kind": kind, "param": param, "commit": b["commit"], "requests": [r["id"] for r in rs],
                           "combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"]} for r in b["requests"]],
                           "key": job_key(b["commit"], kind, param), "prio": PRIORITY[kind],
+                          "pen": min(eff_penalty(r) for r in rs),
                           "order": min(r["id"] for r in rs)})
         jobs += combine_views(bjobs, solo)
     # identical jobs (the same key) from different batches are one job for all their requests
@@ -614,6 +832,7 @@ def plan(fetch=True):
     for j in jobs:
         if j["key"] in seen:
             seen[j["key"]]["requests"] = sorted(set(seen[j["key"]]["requests"]) | set(j["requests"]))
+            seen[j["key"]]["pen"] = min(seen[j["key"]].get("pen", 0), j.get("pen", 0))
             seen[j["key"]]["dups"] = seen[j["key"]].get("dups", 0) + 1
         else:
             seen[j["key"]] = j
@@ -634,7 +853,7 @@ def plan(fetch=True):
     for j in jobs:
         j["cached"] = cached(j["key"])
     # cheap drafts before expensive finals
-    jobs.sort(key=lambda j: (j["prio"], 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
+    jobs.sort(key=lambda j: (j["prio"] + j.get("pen", 0), 0 if (j["param"] or "").endswith(CHECK) else 1, j["order"]))
     save(s)
     return main, held, batches, jobs
 
@@ -646,7 +865,7 @@ def show(main, held, batches, jobs):
         "batches": [{"combines": [{"id": r["id"], "branch": r["branch"], "sha": r["tip"][:9], "changes": r["_footprint"],
                                    "not_combined_with": r.get("not_combined_with")} for r in b["requests"]]}
                     for b in batches],
-        "jobs": [{k: j[k] for k in ("key", "kind", "param", "prio", "requests", "cached")} for j in jobs]}, indent=2))
+        "jobs": [{k: j[k] for k in ("key", "kind", "param", "prio", "pen", "requests", "cached")} for j in jobs]}, indent=2))
 
 
 # ------------------------------------------------------------------ running
@@ -879,13 +1098,229 @@ def job_gb(job):
     p = job.get("param") or ""
     if "OUTFIT=" in p:
         return min(6.0, 2.0 + 0.6 * len(re.search(r"OUTFIT=(\S+)", p)[1].split(",")))
+    if "HABIT_PIECES" in p or "habit_all" in p or "petticoat" in p:
+        return 7.0                  # (nightly 2026-11-20: two habit/petticoat builds side by side, #255 and #256, one killed at 142 s)
     if "--mannequin" in p:
         return 2.0                                     # (no head, face or hair: a light build)
     return 7.6 if "warden" in p else 4.0
 
 
+# ------------------------------------------------------------------ John's PC as a second render machine
+# (John, 2026-11-21: "split some rendering tasks to my local".) A pull worker on his PC (Task Scheduler, every minute)
+# renders the jobs listed in jobs.jsonl on the render-jobs branch and pushes <key>/ folders to render-results; it
+# answers READY or BUSY in worker/status.json (free memory under 9 GB or a game running is BUSY). Only light jobs go
+# (a mannequin build peaks at 2 GB), only while the cloud is busy or when a request says --where desktop, and a job
+# the PC does not start or finish in time runs in the cloud instead. Off unless DATA/desktop.on exists.
+DESK_ON = os.path.join(DATA, "desktop.on")
+DESK_BACKOFF = os.path.join(WORK, "desk.backoff")
+DESK_HEAVY = re.compile(r"hose|boot|heel|habit|skirt|petticoat|doublet|vest|chemise|dress|cape|cloak|robe", re.I)
+DESK_PICKUP_S = 4 * 60      # the PC has not started a job by then: run it in the cloud
+DESK_WAIT_S = 12 * 60       # it has not finished by then: run it in the cloud
+DESK_ENV = dict(os.environ, GIT_AUTHOR_NAME="Claude", GIT_AUTHOR_EMAIL="noreply@anthropic.com",
+                GIT_COMMITTER_NAME="Claude", GIT_COMMITTER_EMAIL="noreply@anthropic.com")
+
+
+def _gitenv(*a, env=None, inp=None, check=True):
+    r = subprocess.run(["git", "-C", REPO, *a], capture_output=True, text=True, env=env or DESK_ENV, input=inp)
+    if check and r.returncode:
+        raise RuntimeError(f"git {' '.join(a)}: {r.stderr.strip()[:300]}")
+    return r
+
+
+def desk_fetch():
+    return git("fetch", "--quiet", "origin", "render-results", "render-jobs", check=False).returncode == 0
+
+
+def desk_status():
+    r = git("show", "origin/render-results:worker/status.json", check=False)
+    if r.returncode:
+        return None
+    try:
+        return json.loads(r.stdout.lstrip("﻿"))
+    except ValueError:
+        return None
+
+
+def desk_words(job):
+    """The script and arguments the PC worker takes (it adds --out itself), or None when it cannot run this job."""
+    try:
+        cmd = command(job, "/OUT")
+        if cmd.startswith("env ") or " -- " not in cmd:
+            return None
+        w = shlex.split(cmd.split(" -- ", 1)[1])
+        if w[-2:] != ["--out", "/OUT"]:
+            return None
+        w = w[:-2]
+    except (ValueError, KeyError):
+        return None
+    if not w or not re.match(r"^blender/[\w/-]+\.py$", w[0]):
+        return None
+    for t in w[1:]:
+        if not re.match(r"^[\w.,=:/+-]+$", t) or ".." in t or t == "--out":
+            return None
+    return w
+
+
+def desk_eligible(job, s, busy):
+    if not os.path.exists(DESK_ON) or job["kind"] != "views" or job.get("pieces"):
+        return None
+    p = job.get("param") or ""
+    if not p.endswith(CHECK) or job_gb(job) > 2.5 or len({c["branch"] for c in job["combines"]}) != 1:
+        return None
+    if DESK_HEAVY.search(p):
+        return None                                           # clothes builds take 10+ min on the PC (2026-11-21 tests)
+    reqs = [r for r in s["requests"] if r["id"] in job["requests"]]
+    if any(r.get("where") == "cloud" for r in reqs):
+        return None
+    if not (busy or any(r.get("where") == "desktop" for r in reqs)):
+        return None                                           # overflow only, unless a request asks for the PC
+    try:
+        if time.time() < float(open(DESK_BACKOFF).read()):
+            return None
+    except (OSError, ValueError):
+        pass
+    if not desk_fetch():
+        return None
+    st = desk_status()
+    if not st or not str(st.get("state", "")).startswith("READY") or st.get("pending") or st.get("job"):
+        return None
+    return desk_words(job)
+
+
+def desk_prepare(job):
+    """A commit of the exact tree the cloud would render (the merged commit plus the queue's own helper scripts)."""
+    idx = os.path.join(WORK, "index.desk")
+    if os.path.exists(idx):
+        os.remove(idx)
+    env = dict(DESK_ENV, GIT_INDEX_FILE=idx)
+    _gitenv("read-tree", job["commit"], env=env)
+    if job["kind"] == "views" and (RQ_VIEWS in (job["param"] or "") or VIEWS_PY in (job["param"] or "")):
+        blob = _gitenv("hash-object", "-w", RQ_VIEWS_SRC).stdout.strip()
+        _gitenv("update-index", "--add", "--cacheinfo", f"100644,{blob},{RQ_VIEWS}", env=env)
+    tree = _gitenv("write-tree", env=env).stdout.strip()
+    return _gitenv("commit-tree", tree, "-p", job["commit"], "-m", f"rq: {job['key']} prepared for the PC",
+                   check=True).stdout.strip()
+
+
+def desk_jobs():
+    r = git("show", "origin/render-jobs:jobs.jsonl", check=False)
+    return [l for l in r.stdout.splitlines() if l.strip()] if r.returncode == 0 else []
+
+
+def desk_push(lines, extra_parent=None):
+    """The new jobs.jsonl on the render-jobs branch; a prepared commit rides along as a second parent so the PC's
+    fetch of the branch brings its objects."""
+    tip = _gitenv("rev-parse", "origin/render-jobs").stdout.strip()
+    blob = _gitenv("hash-object", "-w", "--stdin", inp="".join(l + "\n" for l in lines)).stdout.strip()
+    tree = _gitenv("mktree", inp=f"100644 blob {blob}\tjobs.jsonl\n").stdout.strip()
+    ps = ["-p", tip] + (["-p", extra_parent] if extra_parent else [])
+    c = _gitenv("commit-tree", tree, *ps, "-m", "render-jobs: job list for the PC worker (never merged)").stdout.strip()
+    r = _gitenv("push", "--quiet", "origin", f"{c}:refs/heads/render-jobs", check=False)
+    if r.returncode:
+        raise RuntimeError("push render-jobs: " + r.stderr.strip()[:300])
+    git("fetch", "--quiet", "origin", "render-jobs", check=False)
+
+
+class RemoteProc:
+    """Stands in for the subprocess of a job that runs on the PC: poll() is None while it waits, 0 when its pictures
+    are copied in, and a job the PC cannot finish is started in the cloud in its place (the run dict is swapped)."""
+    pid = None
+
+    def __init__(self, run, prepared, line):
+        self.run, self.prepared, self.line = run, prepared, line
+        self.t = time.time(); self.last = 0; self.started = None; self.returncode = None
+
+    def _log(self, msg):
+        self.run["log"].write(f"[pc] {msg}\n"); self.run["log"].flush()
+        print(f"{now()} pc {self.run['job']['key']}: {msg}", flush=True)
+
+    def _drop_line(self):
+        try:
+            desk_fetch()
+            desk_push([l for l in desk_jobs() if json.loads(l).get("key") != self.run["job"]["key"]])
+        except Exception as e:
+            self._log(f"could not clear the job line: {e}")
+
+    def _fallback(self, why, backoff=False):
+        self._log(f"{why}: running it in the cloud")
+        if backoff:
+            open(DESK_BACKOFF, "w").write(str(time.time() + 3600))
+        self._drop_line()
+        job = self.run["job"]
+        self.run["log"].close()
+        local = start(job)
+        t0 = self.run["t0"]
+        self.run.clear(); self.run.update(local); self.run["t0"] = t0
+        event("desktop_fallback", job["key"], why=why)
+        return None
+
+    def poll(self):
+        if self.returncode is not None:
+            return self.returncode
+        key, age = self.run["job"]["key"], time.time() - self.t
+        if time.time() - self.last >= 20:
+            self.last = time.time()
+            if not desk_fetch():
+                return None
+            ls = git("ls-tree", "-r", "--name-only", "origin/render-results", f"{key}/", check=False).stdout.split()
+            if ls:
+                for f in ls:
+                    rel = f[len(key) + 1:]
+                    data = subprocess.run(["git", "-C", REPO, "show", f"origin/render-results:{f}"], capture_output=True).stdout
+                    if rel == "render.log":
+                        self.run["log"].write(data.decode("utf-8", "replace")); self.run["log"].flush()
+                    else:
+                        dst = os.path.join(self.run["out"], rel); os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        open(dst, "wb").write(data)
+                self._log(f"done on the PC in {age:.0f}s, {len(ls)} files")
+                self.returncode = 0
+                self._drop_line()
+                return 0
+            st = desk_status() or {}
+            for rec in st.get("recent") or []:
+                if rec.get("key") == key and rec.get("sha", "")[:7] == self.prepared[:7] and rec.get("outcome") in (
+                        "failed", "killed", "aborted"):
+                    return self._fallback(f"the PC reports {rec.get('outcome')}: {rec.get('reason')}", backoff=False)
+            if str(st.get("state", "")).startswith("RUNNING " + key) and not self.started:
+                self.started = time.time(); self._log("the PC started it")
+        if not self.started and age > DESK_PICKUP_S:
+            return self._fallback("the PC did not start it in time", backoff=True)
+        if age > DESK_WAIT_S:
+            return self._fallback("the PC took too long")
+        return None
+
+    def wait(self, *a):
+        return self.returncode
+
+
+def desk_or_start(job, s, busy):
+    """Start a job where it runs: on John's PC when it is eligible and the PC is READY, else in the cloud."""
+    try:
+        words = desk_eligible(job, s, busy)
+        if words:
+            prepared = desk_prepare(job)
+            line = json.dumps({"key": job["key"], "branch": "render-jobs", "sha": prepared, "quality": "check",
+                               "command": words}, separators=(",", ":"))
+            desk_push(desk_jobs() + [line], prepared)
+            tmp_out = os.path.join(WORK, "out-" + job["key"])
+            shutil.rmtree(tmp_out, ignore_errors=True); os.makedirs(tmp_out)
+            log = open(os.path.join(tmp_out, "render.log"), "w")
+            log.write(f"$ (on John's PC) {' '.join(words)}\n"); log.flush()
+            run = {"log": log, "wt": os.path.join(WORK, "wt-none"), "out": tmp_out, "t0": time.time(), "job": job}
+            run["proc"] = RemoteProc(run, prepared, line)
+            print(f"{now()} pc {job['key']}: sent to John's PC ({prepared[:10]})", flush=True)
+            event("desktop", job["key"], sha=prepared[:12])
+            return run
+    except Exception as e:
+        print(f"{now()} pc: not used ({e})", flush=True)
+    return start(job)
+
+
+
 def cmd_serve(a):
     """Run jobs in priority order until a request (or a sheet) finishes, then exit so the thread can deliver."""
+    global SERVING
+    SERVING = True      # (this process sees only what ingest() has taken into queue.json)
     os.makedirs(WORK, exist_ok=True)
     lock = os.path.join(WORK, "serve.pid")
     if os.path.exists(lock):
@@ -900,6 +1335,7 @@ def cmd_serve(a):
     waits_seen = {}   # key -> what a job was held for (the batching stats)
     try:
         while True:
+            ingest()
             main, held, batches, jobs = plan(fetch=not running)
             s = load()
             fin = settle(s)
@@ -949,7 +1385,7 @@ def cmd_serve(a):
                         r["batch_commit"] = job["commit"]      # (its batch is closed: see plan)
                 save(s)
                 print(f"{now()} start {job['key']} for {[c['branch'] for c in job['combines']]}", flush=True)
-                running[job["key"]] = start(job)
+                running[job["key"]] = desk_or_start(job, s, bool(running))
                 event("start", job["key"], requests=job["requests"], param=job["param"],
                       parallel=len(running), waiting=len(todo))
                 if job["kind"] != "sheet":
@@ -1060,6 +1496,7 @@ def open_intents(s):
             and i["eta"] + INTENT_TTL_S > t]
 
 
+@locked
 def cmd_intent(a):
     """A thread says what it is about to send, before it does the work, so the queue can hold a related job for it."""
     s = load()
@@ -1092,6 +1529,7 @@ def cmd_intents(a):
                   f"eta {time.strftime('%H:%M:%SZ', time.gmtime(i['eta']))}  {i['branch']}  {i.get('note') or ''}")
 
 
+@locked
 def cmd_drop_intent(a):
     s = load()
     for i in s.get("intents", []):
@@ -1176,28 +1614,40 @@ def cmd_add(a):
     a.view = [expand_view(v) for v in (a.view or [])] or None
     if a.quality is None:     # crops and pose strips are cheap drafts unless the request says final
         a.quality = "check" if a.view and all(is_extra(v) for v in a.view) else "final"
+    unreviewed = False
     if a.quality == "final" and not a.reviewed:
-        sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'). "
-                 "A check-quality request you can add yourself: add --quality check")
+        # John, 2026-11-19: with nothing rendering or waiting, a request may skip the reviewer (a crash costs nobody a wait)
+        busy = [o["id"] for o in s["requests"] if o["state"] in ("pending", "rendering", "conflict")]
+        if busy:
+            sys.exit("a final-quality request goes through the reviewer thread (see the README, 'How to ask for a render'), "
+                     f"unless the queue is idle; #{', #'.join(map(str, busy))} is rendering or waiting now. "
+                     "A check-quality request you can add yourself: add --quality check")
+        unreviewed = True
     before_only_from_cache(a, outs)
-    r = {"id": s["next"], "thread": a.thread, "branch": a.branch, "sha": a.sha, "outputs": outs,
-         "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending", "created": now(),
-         "quality": a.quality}
-    for o in s["requests"]:   # coalescing: a newer request for the same piece replaces one still waiting
-        # (the same thread and branch following the branch tip, or the same branch asking for the same views and
-        #  cells at another commit, pinned or not: the stale one is dropped, never rendered)
-        if o["state"] in ("pending", "conflict") and o["branch"] == a.branch and o["outputs"] == outs and (
-                (o["thread"] == a.thread and not a.sha and not o.get("sha"))
-                or (sorted(o.get("views") or []) == sorted(r["views"]) and o.get("cells") == r["cells"]
-                    and o.get("quality") == r["quality"])):
-            o["state"] = f"superseded by {r['id']}"
-            event("coalesced", None, dropped=o["id"], by=r["id"], branch=a.branch)
-    figs = {f for v in r["views"] for f in re.findall(r"--figure\s+(\S+)", v)}
-    for i in s.get("intents", []):    # the request an intent announced has come
-        if i["state"] == "open" and i["branch"] == a.branch and (i["piece"] in figs or not figs):
-            i["state"] = f"sent as #{r['id']}"
-    s["next"] += 1; s["requests"].append(r); save(s)
+    tentative = max([s["next"]] + [o["id"] + 1 for o in s["requests"]])
+    r = {"id": tentative, "token": uuid.uuid4().hex[:12], "thread": a.thread, "branch": a.branch, "sha": a.sha,
+         "outputs": outs, "views": a.view or [], "cells": a.cells, "mode": a.mode, "note": a.note, "state": "pending",
+         "created": now(), "quality": a.quality, "where": a.where}
+    r["repeat"] = repeat_count(s, a.thread, r["views"], r["quality"], time.time()) if r["views"] else 0
+    for w in hog_warnings(s, thread=a.thread):     # (the requesting thread hears it in the add's answer)
+        print(f"rq warning: {w['text']}", flush=True)
+        event("hog", None, thread=a.thread, rule=w["rule"], value=w["value"], request=r["id"])
+    # One new file in the inbox, never a write to queue.json: the serving machine takes it in within seconds and
+    # numbers it. (Each thread sees the shared folder through its own mount, and a write to queue.json from here lost
+    # to another machine's three times on 2026-11-21.)
+    drop_in_inbox({"op": "add", "created": r["created"], "token": r["token"], "request": r})
+    if unreviewed:
+        event("unreviewed", None, thread=a.thread, request=r["id"])
+        print("rq note: the queue was idle, so this final request skipped the reviewer", flush=True)
     print(json.dumps(r, indent=2))
+    print(f"rq note: queued (token {r['token']}). The renderer takes it into the queue within seconds and numbers it; the "
+          f"id above can change, so read the real id by ping. To cancel before then: cancel {r['id']} --token {r['token']}", flush=True)
+    if r["repeat"]:
+        steps = min(r["repeat"], PEN["max"])
+        print(f"rq note: this is repeat {r['repeat']} of the same views: it runs {steps} step{'s' * (steps > 1)} behind other "
+              f"requests (each {PEN['age_s'] // 60} minutes it waits wins one step back; an idle queue runs it at once; "
+              f"a different request, or {PEN['quiet_s'] // 60} quiet minutes, resets it)", flush=True)
+        event("penalty", None, thread=a.thread, request=r["id"], repeat=r["repeat"], steps=steps)
     lp = last_ping(a.thread)
     if lp is None or time.time() - lp > PING_FRESH_S:
         print(f"rq note: no ping from this thread in the last {PING_FRESH_S // 60} minutes. Before the next request, run "
@@ -1219,19 +1669,53 @@ HOG = {"wait_s": 120, "hour_share": 0.5, "hour_min_s": 600,     # over half the 
        "streak": 5}                              # 5 submissions in a row while another thread had one waiting
 
 
+_SECS = {}      # job key -> (seconds, requests it served): a finished job's manifest never changes
+
+
+def _job_seconds(k):
+    if k in _SECS:
+        return _SECS[k]
+    for d in (k, k + "-failed"):
+        mp = os.path.join(RESULTS, d, "manifest.json")
+        if os.path.exists(mp):
+            try:
+                m = json.load(open(mp))
+            except ValueError:
+                return (0.0, 1)        # (being written: not cached, read again next time)
+            _SECS[k] = (m.get("seconds", 0), max(1, len(m.get("requests") or [1])))
+            return _SECS[k]
+    return (0.0, 1)
+
+
 def request_seconds(r):
     """A request's share of render time: each of its jobs' seconds, split among the requests that job served."""
     t = 0.0
     for k in r.get("jobs") or []:
-        for d in (k, k + "-failed"):
-            mp = os.path.join(RESULTS, d, "manifest.json")
-            if os.path.exists(mp):
-                try:
-                    m = json.load(open(mp))
-                except ValueError:
-                    break
-                t += m.get("seconds", 0) / max(1, len(m.get("requests") or [1])); break
+        sec, n = _job_seconds(k)
+        t += sec / n
     return t
+
+
+def repeat_count(s, thread, views, quality, at):
+    """How many requests in a row, just before this one, this thread sent for the same views at the same quality.
+    A different request from the thread, or a gap over PEN["quiet_s"], ends the run."""
+    key = (sorted(views or []), quality)
+    n, prev = 0, at
+    for o in sorted((o for o in s["requests"] if o["thread"] == thread and o.get("created")), key=lambda o: -o["id"]):
+        if o["state"].startswith(("superseded", "cancelled")):
+            continue
+        if (sorted(o.get("views") or []), o.get("quality")) != key or prev - ts(o["created"]) > PEN["quiet_s"]:
+            break
+        n += 1; prev = ts(o["created"])
+    return n
+
+
+def eff_penalty(r, at=None):
+    """The steps a request is behind now: its repeat count (at most PEN["max"]) less one for every PEN["age_s"] waited."""
+    n = min(r.get("repeat", 0), PEN["max"])
+    if not n or r["state"] not in ("pending", "conflict") or not r.get("created"):
+        return n if r["state"] in ("pending", "conflict") else 0
+    return max(0, n - int(((at or time.time()) - ts(r["created"])) // PEN["age_s"]))
 
 
 HOG_RULES = ("over {hour_share:.0%} of the last hour's render time (at least {hour_min_s} s) or {day_share:.0%} of the "
@@ -1308,9 +1792,11 @@ def hog_warnings(s, at=None, thread=None):
     run, best = [], {}
     for r in subs:
         run = run + [r] if run and run[-1]["thread"] == r["thread"] else [r]
-        lo, hi = ts(run[0]["created"]), ts(r["created"])
-        others = any(o["thread"] != r["thread"] and ts(o["created"]) < hi and
-                     (not o.get("finished") or ts(o["finished"]) > lo) for o in srt)
+        hi = ts(r["created"])
+        # (another thread had a request waiting or rendering at the moment one of the run's requests was sent)
+        others = any(o["thread"] != r["thread"] and o.get("created") and not o["state"].startswith(("cancelled", "superseded"))
+                     and ts(o["created"]) <= ts(x["created"]) and
+                     (not o.get("finished") or ts(o["finished"]) > ts(x["created"])) for o in srt for x in run)
         if len(run) >= HOG["streak"] and others and hi > at - 3600 * HOG["repeat_h"]:
             best[r["thread"]] = [x["id"] for x in run]
     for t, ids in best.items():
@@ -1336,10 +1822,16 @@ PING_FRESH_S = 900    # a request sent without a ping from its thread in the las
 
 
 def _est_seconds(r, done):
-    """About how long a request will render: the median of the last finished requests like it (same quality and
-    the same kind of render), else of the same quality, else 3 minutes."""
+    """About how long a request will render: the median of the last finished requests like it (same quality, kind
+    of render and figure), else the same figure, else the same kind, else the same quality, else 3 minutes."""
     kind = tuple(_view_kinds(r.get("views"), r.get("outputs") or []))
-    for pick in (lambda o: o.get("quality") == r.get("quality") and tuple(_view_kinds(o.get("views"), o.get("outputs") or [])) == kind,
+    figs = tuple(sorted(_figures(r.get("views"))))
+    kind_of = lambda o: tuple(_view_kinds(o.get("views"), o.get("outputs") or []))     # noqa: E731
+    fig_of = lambda o: tuple(sorted(_figures(o.get("views"))))                           # noqa: E731
+    # 2026-11-22: the same figure first (a heeled boot builds in 6 to 13 min, a bare mannequin in 3), then the same kind
+    for pick in (lambda o: o.get("quality") == r.get("quality") and kind_of(o) == kind and fig_of(o) == figs,
+                 lambda o: bool(figs) and o.get("quality") == r.get("quality") and fig_of(o) == figs,
+                 lambda o: o.get("quality") == r.get("quality") and kind_of(o) == kind,
                  lambda o: o.get("quality") == r.get("quality")):
         xs = [x for x in (request_seconds(o) for o in done[-60:] if pick(o)) if x > 0]
         if len(xs) >= 3:
@@ -1363,10 +1855,11 @@ def queue_state(s, thread=None, at=None):
         elif r["state"] == "pending" or r["state"] == "conflict":
             waiting.append({"id": r["id"], "thread": name(r["thread"]), "mine": r["thread"] == thread,
                             "state": r["state"], "waited_s": round(at - ts(r["created"])), "est_s": round(_est_seconds(r, done)),
+                            "penalty": eff_penalty(r, at), "repeat": r.get("repeat", 0),
                             "views": r.get("views"), "note": r.get("note")})
     # (a rough clock: PARALLEL slots, each job taking its estimate; the queue starts jobs in id order)
     slots = sorted([x["left_s"] for x in rendering] + [0] * max(0, PARALLEL - len(rendering)))[:PARALLEL] or [0]
-    for w in waiting:
+    for w in sorted(waiting, key=lambda w: (w["penalty"], w["id"])):    # (the queue starts the least penalised first)
         if w["state"] != "pending":
             continue
         i = min(range(len(slots)), key=slots.__getitem__)
@@ -1393,10 +1886,18 @@ def queue_state(s, thread=None, at=None):
         if out["you"]["rendering"] or out["you"]["waiting"]:
             adv.append(f"you already have #{', #'.join(map(str, out['you']['rendering'] + out['you']['waiting']))} in the queue: "
                        "wait for it, or send a newer request for the same views, which replaces a waiting one")
+        pens = [w for w in waiting if w["mine"] and w["penalty"]]
+        if pens:
+            adv.append("your waiting request is behind others because it repeats the same views: " +
+                       ", ".join(f"#{w['id']} by {w['penalty']}" for w in pens) +
+                       "; change the views, or wait, and it moves up one step every "
+                       f"{PEN['age_s'] // 60} minutes")
         if out["you"]["warnings"]:
             adv.append("you are flagged for hogging: send a cheaper crop or check that your edit changes the build before the next full render")
         if busy == "busy":
             adv.append(f"the queue is busy: a new request would start in about {fmt_s(new_wait)}; prefer a check-quality crop")
+        if busy == "idle":
+            adv.append("the queue is idle: a final-quality request can skip the reviewer, add it yourself with rq.py add")
         out["you"]["advice"] = adv or ["the queue has room: go ahead"]
     return out
 
@@ -1442,7 +1943,8 @@ def cmd_ping(a):
         print(f"  rendering #{x['id']} {x['thread']}: {fmt_s(x['running_s'])} in, about {fmt_s(x['left_s'])} left  {x['note'] or ''}")
     for w in st["waiting"]:
         when = f"starts in about {fmt_s(w['starts_in_s'])}" if "starts_in_s" in w else w["state"]
-        print(f"  waiting   #{w['id']} {w['thread']}: {when}  {w['note'] or ''}")
+        pen = f" (priority -{w['penalty']}: repeat {w['repeat']})" if w["penalty"] else ""
+        print(f"  waiting   #{w['id']} {w['thread']}: {when}{pen}  {w['note'] or ''}")
     if st["open_intents"]:
         print("  announced: " + "; ".join(f"intent #{i['id']} {i['thread']} ({i['piece']})" for i in st["open_intents"]))
     if st["sheet_due"]:
@@ -1458,6 +1960,7 @@ def cmd_ping(a):
             print(f"  advice: {v}")
 
 
+@locked
 def cmd_ready(a):
     s = load()
     if a.branch not in s["ready"]:
@@ -1465,6 +1968,7 @@ def cmd_ready(a):
     save(s)
 
 
+@locked
 def cmd_sheet_due(a):
     s = load(); s["sheet_due"] = True; save(s)
 
@@ -1573,6 +2077,10 @@ def cmd_export(a):
             "warnings": (f"{len(r['warnings'])} undefined name(s) after the merge" if r.get("warnings") else ""),
             "piece": ", ".join(_figures(r.get("views"))),
             "quality": r.get("quality") or ("final" if "views" in r["outputs"] else ""),
+            "repeat": r["repeat"] if "repeat" in r else (repeat_count({"requests": [o for o in s["requests"] if o["id"] < r["id"]]},
+                                                                       r["thread"], r.get("views"), r.get("quality"), ts(r["created"]))
+                                                        if r.get("views") and r.get("created") else 0),
+            "priority": -eff_penalty(r) if state in ("pending", "conflict") else 0,
             "kind": ", ".join(_view_kinds(r.get("views"), r["outputs"])),
             "combined": "set" if any(k in sets_of for k in r.get("jobs") or []) else
                         ("shared" if any(k in shared for k in r.get("jobs") or []) else "alone"),
@@ -1592,11 +2100,7 @@ def cmd_export(a):
 
 
 def cmd_cancel(a):
-    s = load()
-    for r in s["requests"]:
-        if r["id"] == a.id:
-            r["state"] = "cancelled"
-    save(s)
+    drop_in_inbox({"op": "cancel", "created": now(), "id": a.id, "token": a.token})
 
 
 def cmd_resolve(a):
@@ -1638,6 +2142,9 @@ def main():
     q.add_argument("--mode", choices=("combined", "isolated"), default="combined"); q.add_argument("--note")
     q.add_argument("--quality", choices=("final", "check"), default=None, help="default: check for crops and pose strips alone, final otherwise")
     q.add_argument("--reviewed", action="store_true", help="the reviewer thread passed this request (needed for final quality)")
+    q.add_argument("--where", choices=("auto", "cloud", "desktop"), default="auto",
+                   help="light check renders may go to John's PC when it is free (auto: only while the cloud is busy; "
+                        "desktop: prefer the PC; cloud: never)")
     q = sub.add_parser("intent")
     q.add_argument("--thread", required=True); q.add_argument("--branch", required=True)
     q.add_argument("--piece", help="the figure module (blender/<piece>/<piece>.py) the render will be of")
@@ -1653,7 +2160,9 @@ def main():
         sub.add_parser(n)
     for n in ("resolve", "resolved"):
         sub.add_parser(n).add_argument("branch")
-    sub.add_parser("cancel").add_argument("id", type=int)
+    cp = sub.add_parser("cancel")
+    cp.add_argument("id", type=int)
+    cp.add_argument("--token", default=None, help="the token add printed, when the id may have changed")
     sub.add_parser("export").add_argument("out")
     sub.add_parser("hogs")
     q = sub.add_parser("ping", help="what the queue is doing now, and where your own requests stand (read-only)")

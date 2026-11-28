@@ -123,7 +123,8 @@ def compute(hours=None, names=None):
 
     # job intervals: finished jobs from the manifests, running ones from start events with no end yet
     ended = {e["key"] for e in events if e["ev"] in ("done", "failed", "killed", "stopped")}
-    running = {e["key"]: e for e in events if e["ev"] == "start" and e["key"] not in ended and e["key"] not in jobs}
+    running = {e["key"]: e for e in events if e["ev"] == "start" and e["key"] not in ended and e["key"] not in jobs
+               and now - ts(e["t"]) < 7200}   # a job is killed at 30 min: an older start with no end is a lost event, not a job still running
     iv = [(j["start"], j["end"]) for j in jobs.values()] + [(ts(e["t"]), now) for e in running.values()]
     busy = union(clip(iv, lo, now))
 
@@ -137,8 +138,8 @@ def compute(hours=None, names=None):
         c, f = ts(r["created"]), ts(r.get("finished"))
         js = per_req.get(r["id"], [])
         first = min((j["start"] for j in js), default=None)
-        if r["state"] == "cancelled":
-            continue
+        if r["state"] == "cancelled" or r["state"].startswith("superseded"):
+            continue                                    # (never rendered: not a request that waited)
         if first is None and f is not None:
             first = c                                   # answered from the cache
         if first is not None and first < c:
@@ -243,7 +244,17 @@ def hogging(lo, now, events):
             n = rq.THREAD_NAMES.get(e.get("thread", ""), e.get("thread", "")[-6:])
             d = pings if e["ev"] == "ping" else unpinged
             d[n] = d.get(n, 0) + 1
-    return {"rules": rq.HOG, "pings": pings, "unpinged": unpinged,
+    pen = {}      # the priority penalty: requests that ran behind others, and the most steps, per thread
+    for r in s["requests"]:
+        if r.get("created") and lo <= ts(r["created"]) <= now and r.get("views"):
+            rep = r["repeat"] if "repeat" in r else rq.repeat_count(          # (older requests: counted afterwards)
+                {"requests": [o for o in s["requests"] if o["id"] < r["id"]]}, r["thread"], r["views"], r.get("quality"), ts(r["created"]))
+            if not rep:
+                continue
+            n = rq.THREAD_NAMES.get(r["thread"], r["thread"][-6:])
+            d = pen.setdefault(n, {"requests": 0, "steps": 0, "max_repeat": 0})
+            d["requests"] += 1; d["steps"] += min(rep, rq.PEN["max"]); d["max_repeat"] = max(d["max_repeat"], rep)
+    return {"rules": rq.HOG, "penalty_rules": rq.PEN, "penalised": pen, "pings": pings, "unpinged": unpinged,
             "share": {k: round(v / tot, 2) for k, v in sorted(secs.items(), key=lambda kv: -kv[1])},
             "seconds": {k: round(v) for k, v in secs.items()},
             "warnings": [dict(v, first=dt.datetime.fromtimestamp(v["first"], dt.timezone.utc).strftime("%H:%MZ"),
@@ -507,6 +518,9 @@ def report(st):
         out += [f"  {w['thread']}: {w['rule']} from {w['first']} to {w['last']}, peak {w['peak']}" for w in h["warnings"]] \
             or ["  no thread passed a warning"]
         out.append(f"  warnings told to threads at request time: {h['told'] or 'none'}; rules {h['rules']}")
+        out.append("  repeat penalty (requests that ran behind others, total steps, longest repeat run): "
+                   + ("; ".join(f"{k}: {v['requests']}, {v['steps']}, {v['max_repeat']}" for k, v in h["penalised"].items()) or "none")
+                   + f"; rules {h['penalty_rules']}")
         out.append(f"  pings by thread: {h['pings'] or 'none'}; requests sent without a recent ping: {h['unpinged'] or 'none'}")
     out += ["", f"Blocked right now: {len(st['blocked_now'])}"]
     out += [f"  #{r['id']} {r['thread']} {r['state']}, waiting {fmt(r['wait'])}" for r in st["blocked_now"]]
