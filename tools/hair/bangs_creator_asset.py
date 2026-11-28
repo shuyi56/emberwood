@@ -14,6 +14,7 @@ import ponytail_render as PR
 import bangs_flow as BF
 import creator_asset as CA
 import cards as CD
+import strand_iso as SI
 
 
 TIE_FROM_MM = 20.0          # the tie is looked for past the hand-over from the head's hair (r90 peaks at 20 mm)
@@ -478,6 +479,7 @@ def main():
                             hairs_per_strand=round(share, 2), ao=CA.b64(np.round(sao * 255), 'u1'), ids=CA.b64(ids, 'u1'),
                             light=CA.b64(np.round(np.clip(occ, 0, 1) * 255), 'u1'), light_order='key,rim,fill,ambient',
                             out=CA.b64(np.round(outv * 127), 'i1'),
+                            iso=CA.b64(np.round(SI.iso(P / BF.MM, np.asarray(counts, int))[0] * 255), 'u1'),   # how alone each hair is: the page draws loose hairs by it
                             **({'layer': CA.b64(np.round(layv[keep] * 255), 'u1')} if layv is not None else {}),
                             **({'tier': CA.b64(tier[keep], 'u1')} if tier is not None else {})),
                source=dict(bangs=os.path.abspath(bdir), fibres=int(len(paths))))
