@@ -570,6 +570,7 @@ BANG_AXES = dict(side0=0.10, side0u=0.55, side1=3.2, up=0.95, field=0.3, to=0.8,
                             # by side1 toward the tip), and up at the tip (gravity cancelled by this share)
 BANG_HOLD = (0.30, 0.55)    # DRAFT: the share of a bang hair's length held on the head, and where it is fully free
 BANG_OVER_MM = 20.0
+BANG_FULL, BANG_THICK_MM, BANG_ENV = 0.55, 6.0, 0.8   # DRAFT
 BANG_END_AT = 0.86           # the locks' tips: this share along the traced lines (past it the tips stood out beyond the side hair as spikes, 2026-11-29)
 BANG_TRACED_FLOW = True      # the 3D flow steered along the traced lines in the front view (False: by BANG_AXES' weights)
 BANG_CURL = (2.5, 60.0, 0.8)   # DRAFT: a lock's wave (mm), its wavelength (mm), and each hair's own wave (mm)
@@ -660,7 +661,9 @@ def _bang_march(root, surf, u, uc, sgn, k, side=None, front=None):
     wv = wv + BANG_CURL[2] * np.sin(2 * np.pi * sarc / (0.6 * lml) + rc.uniform(0, 2 * np.pi, (m, 1))) * SF.sm(0.05, 0.3, tt_)
     P = P + lat * (wv * MM)[..., None]
     # (each lock draws to a tip: its hairs move onto the lock's mean line over the last 45%)
-    w = (BANG_TIP * SF.sm(0.35, BANG_END_AT, np.linspace(0, 1, k)) ** 0.7)[None, :, None]
+    # (John 2026-11-29: "keep the ends same, increase thickness overall of each lock": the lock keeps its full width to
+    # BANG_FULL of its length and closes to the same tip from there)
+    w = (BANG_TIP * SF.sm(BANG_FULL, BANG_END_AT, np.linspace(0, 1, k)))[None, :, None]
     for j in range(BANG_RIBS):
         mm = lk == j
         if mm.sum() > 1:
@@ -734,9 +737,19 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
     rise = 1 - (1 - np.clip(tt / BANG_SPAN[0][1], 0, 1)) ** 2
     down = SF.sm(*BANG_SPAN[1], tt)
     lift = (1.0 + FRINGE_ARCH_MM[0] * rise * (1 - down) + FRINGE_ARCH_MM[1] * down)[None, :] * MM
+    if BANG_3D:
+        # (John 2026-11-29: "fix the crown, the root lift does not agree with the bangs' root lift, it causes ridges on
+        # the head". The bang rose to 22 mm over the first 45% of its length, about 80 mm; the hair beside it rises to
+        # the one outer surface (ENV_MM by height) over ROOT_RISE_MM, 36 mm: two surfaces side by side with a step
+        # between. The bang now leaves its root on the same arc to the same surface (at BANG_ENV of its height, the
+        # middle of the layers beside it), and comes down from it to the forehead as before.)
+        s_mm = np.c_[np.zeros(m), np.cumsum(np.linalg.norm(np.diff(P, axis=1), axis=2), axis=1)] / MM
+        capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(*ENV_Z, P[..., 2])) * BANG_ENV
+        lift = (LIFT_MM[0] + capz * (1 - (1 - np.minimum(s_mm / ROOT_RISE_MM, 1.0)) ** 2) * (1 - down)[None, :]
+                + FRINGE_ARCH_MM[1] * down[None, :]) * MM
     lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
     lift = lift - (0.6 * FRINGE_ARCH_MM[1] * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
-    lift = lift + (3.0 * rng.random(m))[:, None] * MM * (SF.sm(0.0, 0.3, tt) * (1 - SF.sm(0.6, 1.0, tt) * (1.0 if BANG_3D else 0.0)))[None, :]     # (its thickness: 3 mm, closing at a 3D lock's tip)
+    lift = lift + ((BANG_THICK_MM if BANG_3D else 3.0) * rng.random(m))[:, None] * MM * (SF.sm(0.0, 0.3, tt) * (1 - SF.sm(0.6, 1.0, tt) * (1.0 if BANG_3D else 0.0)))[None, :]     # (its thickness: 3 mm, closing at a 3D lock's tip)
     if BANG_3D:                                                          # (the layers: each lock over the next one out)
         lk_ = np.minimum((u * BANG_RIBS).astype(int), BANG_RIBS - 1)
         lift = lift + (BANG_LAYER_MM * (BANG_RIBS - 1 - lk_))[:, None] * MM * SF.sm(0.2, 0.5, tt)[None, :]
