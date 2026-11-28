@@ -39,7 +39,7 @@ RELEASE_Z = SF.CENTRE[2]    # the skin turns under below the skull's centre heig
 PART_PUSH = 0.45            # DRAFT: the push away from the part against gravity along the skin (1: equal)
 FRINGE_ARCH_MM = (15.0, 7.0, 9.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
                             # flick at the end (a 35 mm brush's radius is 17.5)
-FRINGE_PUSH = (0.30, 1.60)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
+FRINGE_PUSH = (0.45, 2.20)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
                             # the part to the brow at |x| 0.12 and on out to the cheekbone at 0.30 (MEASURED)
 VOLUME_MM = 30.0            # DRAFT: a hanging lock keeps its stand-off from the skin and body up to this (hair lies on the
                             # hair under it); wavy_flow.hang_locks' `volume`
@@ -134,7 +134,7 @@ def build(F, surf, n=24000, seed=11, log=print):
             behind = pos[J, 1] > crown_y
             rb = pos[J][:, :2] - np.array([0.0, crown_y]); rb /= np.maximum(np.linalg.norm(rb, axis=1, keepdims=True), 1e-9)
             b[behind, 0] = rb[behind, 0]; b[behind, 1] = rb[behind, 1]
-            push = np.where(kind[J] == 1, FRINGE_PUSH[0] + (FRINGE_PUSH[1] - FRINGE_PUSH[0]) * SF.sm(0.72, 0.52, pos[J, 2]), PART_PUSH)
+            push = np.where(kind[J] == 1, FRINGE_PUSH[0] + (FRINGE_PUSH[1] - FRINGE_PUSH[0]) * SF.sm(0.80, 0.56, pos[J, 2]), PART_PUSH)
             d = g[None] + push[:, None] * b
             d[kind[J] == 1, 1] -= 1.0                                   # (the fringe is combed forward over the hairline)
             d = d - (d * Uo).sum(1, keepdims=True) * Uo
@@ -450,10 +450,10 @@ FRONT_BAND = (0.42, 0.85)   # MEASURED: the front fall on the chest (x 0.2 to 0.
 BACK_BAND = (2.30, np.pi)   # DRAFT: the back fall, down the back inside the shoulder blades (at 1.95 it draped over the
                             # shoulders' tops)
 GATHER_Z = (0.12, -0.25)    # DRAFT: the falls take their places between the jaw and the collarbone
-FACE_KEEP = 1.30            # MEASURED (the photo's face crop): beside the face the hair's front edge is at the face's own
+FACE_KEEP = 1.25            # MEASURED (the photo's face crop): beside the face the hair's front edge is at the face's own
                             # outline, back by the ear (an earring shows): no hair lies on the cheek. The angle round the
                             # head of the cheekbone's back edge, just in front of the ear (the ear's middle is at 1.57)
-FACE_KEEP_Z = (0.56, 0.32)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
+FACE_KEEP_Z = (0.56, 0.22)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
                             # pieces by the face are dried and cut 'flowing away from the face')
 STACK_MM = (2.0, 18.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
 BODY_AT_Z = -0.15           # where the tent from the head lands (the photo's shoulder line)
