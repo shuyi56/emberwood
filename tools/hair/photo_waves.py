@@ -1087,7 +1087,7 @@ FRONT_TRACE = {1: (0.6,), 2: (2.6, 0.0)}   # TRACED on the photo (hair-rebuild/w
                             # each side is two big locks, the inner one beside the face and down the chest and the outer
                             # one over the shoulder's front, waving about half a wave apart (the inner bulges where the
                             # outer draws in); the face-framing pieces ride as one lock. Phase (rad) per lock, inner first
-CLUMP_B = {3: 0.85, 2: 0.7, 1: 0.7}         # the back fall barely gathers, and LOCK_PLAY scales its locks' own wave and opening: the back is
+CLUMP_B = {3: 0.85, 2: 0.5, 1: 0.6}         # the back fall barely gathers, and LOCK_PLAY scales its locks' own wave and opening: the back is
 LOCK_PLAY = {3: 0.3}        # one continuous sheet (John 2026-11-28: "back should be continuous"; gathered, the back's locks
                             # left gaps and a step where they began under the head)
 CLUMP = 0.45                # recipe step 6: a lock gathers to this share of its spread on the head
@@ -1101,7 +1101,9 @@ LOCK_SWING = 0.5            # DRAFT: a lock's swing across the fall off its side
                             # phase sd 0.9 and the wavelength 12% off, round 4 read as crimp, not loose waves)
 LOCK_LAM = 0.04            # DRAFT: a lock's wavelength within this share of its side's
 LOCK_PHASE = 0.5            # rad: a lock's own wave phase against its side's (wavy_flow's jitter: a twelfth of a wave)
-LOCK_DEPTH_MM = 3.0         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
+LOCK_CARVE = {1: 2, 2: 4}   # DRAFT: locks carved from each traced front lock (8 a side on the chest, 2 beside the face)
+CARVE_PHASE = 0.45          # rad: a carved lock's phase off its traced lock's
+LOCK_DEPTH_MM = 5.0         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
 
 
 TIP_T, TIP_K, TIP_CUT = 0.22, 0.85, 0.7   # DRAFT: the share of a lock's fall over which it draws to a tip, how far in, and how much
@@ -1122,7 +1124,7 @@ def lock_fall(Fd, seed=5, log=print):
     lines = list(Fd['line']); basin = Fd['basin']; rel = Fd['release']
     lock = np.full(len(lines), -1)
     nl = 0
-    fixed = {}
+    fixed = {}; carved = {}
     zg = -0.05                                                        # (where the locks are read: below the jaw, in the fall)
     for b in (1, 2, 3):
         for sd in (1.0, -1.0):
@@ -1143,10 +1145,18 @@ def lock_fall(Fd, seed=5, log=print):
                 tr = FRONT_TRACE[b]
                 rk = np.argsort(np.argsort(np.abs(SF.theta(feat[:, 3:6])))) / max(len(m) - 1, 1)
                 lab = np.minimum((rk * len(tr)).astype(int), len(tr) - 1)
+                # (John 2026-11-29: "carve more locks now so we can see it": each traced lock is carved into LOCK_CARVE
+                # locks by the same order round the body. They keep the traced lock's phase, a little off it
+                # (CARVE_PHASE), and take their own size and wavelength from TEX, so the two big shapes stay and the
+                # locks inside them read apart.)
+                C = LOCK_CARVE.get(b, 1)
+                lab = np.minimum((rk * len(tr) * C).astype(int), len(tr) * C - 1)
                 for j, ph_ in enumerate(tr):
-                    fixed[nl + j] = ph_
+                    for c in range(C):
+                        fixed[nl + j * C + c] = ph_ + (rng.normal(0, CARVE_PHASE) if C > 1 else 0.0)
+                        carved[nl + j * C + c] = C > 1
                 lock[m] = nl + lab
-                nl += len(tr)
+                nl += len(tr) * C
                 continue
             cen = feat[rng.choice(len(m), k, replace=False)]
             for _ in range(6):                                            # (a few Lloyd steps: even, compact locks)
@@ -1215,7 +1225,7 @@ def lock_fall(Fd, seed=5, log=print):
         short = float(np.clip(1 - (top - bot) / LOCK_LONG, 0, 1))
         amp_l = (1 + TEX['amp'] * rng.uniform(-1, 1)) * (1 + TEX['tip_amp'] * fr)
         lam_l = lam_l * (1 + TEX['lam'] * rng.uniform(-1, 1)) * (1 - (1 - TEX['layer_lam']) * short)
-        if j in fixed:
+        if j in fixed and not carved.get(j):
             amp_l, lam_l = 1 + TEX['tip_amp'] * fr, WAVE['lam_hh']
         lam_z = lam_l * (1 - TEX['tip_lam'] * fr)
         psl = 2 * np.pi * (WAVE_OUT_Z - top) / lam_l + ph + np.cumsum(2 * np.pi * step / lam_z)
