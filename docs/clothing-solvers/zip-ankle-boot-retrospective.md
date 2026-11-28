@@ -76,6 +76,15 @@ The hip turn-out is on for both (`boot.TURNOUT_AT_HIP`); the heeled boot also ta
 (`heelboot.BEND_AT_BALL`, `heelboot.SEAT_WALL`). The laced boots keep their own ease: they are laced, not sock-fit,
 so the clearance-by-height and the stretch cut were not applied.
 
+### The laced toe (follow-up, 2026-11-22)
+
+The laced boots' last was pushed out to the gap over each toe and never turned as one box, so the toes' ridges and
+spikes showed through the toe cap. `boot.TOE_SHELL` 150 turns on the zip boot's smooth toe shell for both laced
+boots (the round toe kept: no square `toe_box`). On the heeled laced boot the toe cap's total curvature fell from
+21.6 to 10.1 rad, its creased points from 181 to 36 and its fold 99th percentile from 67 to 31 degrees. The vamp's
+area squeezed over 5% in the pose rose from 10% to 35%: the smoother box bends as one, so the squeeze collects on
+the vamp behind it. Watch it.
+
 ## Do differently
 
 1. Gauge before and after every shape, weight or pose change, and read the numbers before the render.
