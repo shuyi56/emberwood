@@ -53,8 +53,12 @@ FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'l
 # 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
 # guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
 # No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
-TOP_LIFT_MM, ROOT_RISE_MM = 9.0, 30.0   # MEASURED (the photo: hair 0.04 HH over the skull at the top) and DRAFT: the
-                            # length from the root over which the hair rises to it
+TOP_LIFT_MM, ROOT_RISE_MM = 22.0, 42.0   # the hair's height over the skull at the top, and the length from the root over
+                            # which it rises to it. John 2026-11-28: "raise the hair more it's still too flat it should have
+                            # more arching at the roots". This overrides the measurement (9 mm, 0.04 HH, read off the photo's
+                            # top outline); the rise is longer (30 to 42 mm) so the taller arch bends no tighter
+BACK_LIFT_MM = 12.0         # DRAFT: more again over the crown and the back of the head (John 2026-11-28: "you didn't raise
+                            # the back", the back view circled): the photo does not show the back
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
 FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eyes, 0.54 at the mouth, 0.63 at the shoulders,
                             # and John's line stepping out at eye level): the fall stands out this much (HH) below the
@@ -170,6 +174,7 @@ def build(F, surf, n=24000, seed=11, log=print):
             # brush gives at the base, to the photo's height: TOP_LIFT_MM over the top, LIFT_MM[1] by the temple. Before,
             # it grew LIFT_PER_MM per mm combed, so the first 50 mm lay on the skin.)
             capz = (TOP_LIFT_MM + (LIFT_MM[1] - TOP_LIFT_MM) * SF.sm(0.95, 0.62, Q[:, 2])) * (0.45 + 0.55 * layer[J])
+            capz = capz + BACK_LIFT_MM * SF.sm(SF.AXIS[1] - 0.02, SF.AXIS[1] + 0.22, Q[:, 1]) * SF.sm(0.45, 0.75, Q[:, 2]) * (0.45 + 0.55 * layer[J])
             lift = (LIFT_MM[0] + capz * SF.sm(0.0, ROOT_RISE_MM, s_mm)) * MM
             # the fringe bends in two planes (John 2026-11-28: "bangs should also be 3d twisting along 2 planes like the
             # picture"). Out of the forehead: an arch up off the root over the hairline (ghd: "lift at the base", on a
@@ -475,24 +480,30 @@ def draw(Fd, rods, head_pts, depth, path, views=((0, 4, 'front'), (40, 6, 'three
 FALL_SPLIT = 2.20           # DRAFT: |theta| where the hair parts over the shoulder: well behind the ear, so that some of
                             # the back hair runs diagonally forward over the shoulder (John 2026-11-28; at 1.75 only the
                             # hair in front of the ear came forward, 38% of it)
-FRONT_BAND = (0.42, 1.00)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
+FRONT_BAND = (0.55, 1.30)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
 BACK_BAND = (2.30, np.pi)   # DRAFT: the back fall, down the back inside the shoulder blades (at 1.95 it draped over the
                             # shoulders' tops)
 FAIR_MM = 25.0              # DRAFT: the course is faired over this length (half a bending length)
-GATHER_Z = (0.30, -0.45)    # DRAFT: the falls take their places between the jaw and the collarbone
+GATHER_Z = (0.50, -0.50)    # the falls start for their places at the cheek and ear and are there at the collarbone (John
+                            # 2026-11-28: "twist more at the cheeks and ear section so it's less of a sharp turn in the chin
+                            # and neck area"; from 0.30 the hair dropped straight past the ear and cut forward under the jaw)
 FACE_KEEP = 1.15            # MEASURED (the photo's face crop): beside the face the hair's front edge is at the face's own
                             # outline, back by the ear (an earring shows): no hair lies on the cheek. The angle round the
                             # head of the cheekbone's back edge, just in front of the ear (the ear's middle is at 1.57)
 FACE_KEEP_Z = (0.56, 0.20)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
                             # pieces by the face are dried and cut 'flowing away from the face')
 STACK_MM = (2.0, 18.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
-BODY_AT_Z = -0.15           # where the tent from the head lands (the photo's shoulder line)
+BODY_AT_Z = -0.40           # where the tent from the head lands: the mannequin's shoulder (its neck is bare from the chin
+                            # to z -0.3; the Warden's collar put the 'shoulder' at -0.15)
 
 
 BANG_END = ((0.17, 0.59), (0.30, 0.44))   # MEASURED (face crop): where the bang's inner hair ends (|x|, z: the brow's outer
                             # half) and its outer hair (the temple, outside the eye's corner)
-BANG_S = (0.50, 0.40)       # DRAFT: the S's two handles, as shares of the hair's drop: it leaves the root heading down and
-                            # arrives heading down, and between the two it runs out to the side (the photo's S)
+BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
+                            # the hair's drop) and in from the end (HH): out, round and down, then out again
+BANG_SPAN = ((0.0, 0.5), (0.45, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
+                            # (flow_smooth, set hair, 35 mm brush): a 12 mm arch risen over the first quarter bent at 8.8 mm
+                            # with 12% of the nodes under 17.5 mm; over the first half, 0.8% (and BANG_S[0] 0.10 to 0.06)
 
 
 def bang_sheet(root, surf, seed=3, k=44):
@@ -511,8 +522,12 @@ def bang_sheet(root, surf, seed=3, k=44):
     z3 = BANG_END[0][1] + (BANG_END[1][1] - BANG_END[0][1]) * u
     t = np.linspace(0, 1, k)[None, :]
     drop = (root[:, 2] - z3)[:, None]
-    bx = [root[:, 0:1], root[:, 0:1], x3[:, None], x3[:, None]]
-    bz = [root[:, 2:3], root[:, 2:3] - BANG_S[0] * drop, z3[:, None] + BANG_S[1] * drop, z3[:, None]]
+    # (John 2026-11-28: "bangs should begin from the roots and curve properly"; his line on the photo leaves the part
+    # sideways, rounds over and comes down to the brow, then runs out to the temple. So the curve starts AT the root:
+    # the hair leaves it square to the part, heading out, turns down over the forehead, and arrives at its end heading
+    # down and out. Before, the first handle pointed straight down and the first half of every hair was a straight drop.)
+    bx = [root[:, 0:1], root[:, 0:1] + sgn * BANG_S[0], x3[:, None] - sgn * BANG_S[2], x3[:, None]]
+    bz = [root[:, 2:3], root[:, 2:3] + 0.0 * drop, z3[:, None] + BANG_S[1] * drop, z3[:, None]]
     w = [(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3]
     X = sum(a * b for a, b in zip(w, bx)); Z = sum(a * b for a, b in zip(w, bz))
     # the skin in front at each (x, z): bisection on y
@@ -531,11 +546,11 @@ def bang_sheet(root, surf, seed=3, k=44):
     r = gaussian_filter1d(maximum_filter1d(np.linalg.norm(q, axis=2), 9, axis=1, mode='nearest'), 4.0, axis=1, mode='nearest')
     U = q / np.linalg.norm(q, axis=2, keepdims=True)
     tt = t[0]
-    lift = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(0.0, 0.40, tt) - FRINGE_ARCH_MM[1] * SF.sm(0.35, 0.85, tt)
+    lift = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(*BANG_SPAN[0], tt) - FRINGE_ARCH_MM[1] * SF.sm(*BANG_SPAN[1], tt)
             )[None, :] * MM
     # (the flick at the end is the inner hairs'; the outer edge lies down along the temple into the side hair, so the
     #  bang joins the side and does not stand off it: the recipe's bangs take the side flow's direction at their edge)
-    lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(0.65, 1.0, tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
+    lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
     lift = lift - ((FRINGE_ARCH_MM[0] - FRINGE_ARCH_MM[1]) * 0.6 * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
     lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
     P = SF.CENTRE + U * (r + lift)[:, :, None]
@@ -589,8 +604,16 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
     lo = float(np.percentile(a0, 1))
     front = a0 < FALL_SPLIT
     # each line's place in its fall: linear in its angle, so the order round the head is the order in the fall
-    a1 = np.where(front, FRONT_BAND[0] + (FRONT_BAND[1] - FRONT_BAND[0]) * np.clip((a0 - lo) / (FALL_SPLIT - lo), 0, 1),
-                  BACK_BAND[0] + (BACK_BAND[1] - BACK_BAND[0]) * (a0 - FALL_SPLIT) / (np.pi - FALL_SPLIT))
+    a1 = BACK_BAND[0] + (BACK_BAND[1] - BACK_BAND[0]) * (a0 - FALL_SPLIT) / (np.pi - FALL_SPLIT)
+    # (the front fall fills its band by the hairs' order, not by their angle: the lengths, swept back on the head, all
+    # leave it behind the temple, and placed by angle they left the band's inner part to the short face-framing
+    # pieces alone: an inner edge 0.42 from the midline at the collarbone against the photo's 0.2)
+    kh = kind[hang]
+    for s_ in (1.0, -1.0):
+        for kk, band in ((0, FRONT_BAND), (2, (FRONT_BAND[0], FRONT_BAND[0] + 0.25))):
+            m = np.where(front & (sg == s_) & (kh == kk))[0]
+            if len(m) > 1:
+                a1[m] = band[0] + (band[1] - band[0]) * np.argsort(np.argsort(a0[m])) / (len(m) - 1)
     d = np.clip((layer[hang] - 0.2) / 0.8, 0, 1)
     stack = (STACK_MM[0] + (STACK_MM[1] - STACK_MM[0]) * d) * MM
     land = Rb(np.c_[np.clip(sg * a1, -np.pi, np.pi), np.full(len(hang), BODY_AT_Z)]) + stack
