@@ -313,6 +313,14 @@ function buildStyle(asset, tone, creatorMat) {
   sg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CENTRE[1], 0), 2 * HH);
   const strandMat = new THREE.MeshStandardMaterial({ color: col, vertexColors: true, side: THREE.DoubleSide, roughness: STRAND_ROUGH,
     metalness: 0, envMapIntensity: 0.15 });
+  // The asset's own look (asset.look, optional): how far the primary highlight and the glints take the hair's hue.
+  // Glints are part of the TRT light, which has crossed the fibre twice and carries its pigment (Marschner et al. 2003,
+  // sect. 5.2.3), so a near-white glint is wrong for dark hair; and on a long wavy fall, where the highlight is broken
+  // over every wave, a half-white primary read as white ashy hair (John, 2026-11-28). The defaults keep the looks
+  // that were accepted before (the ponytail).
+  const look = asset.look || {}, spec1Hue = look.spec1_hue === undefined ? 0.5 : look.spec1_hue;
+  const hueGLSL = 'diffuseColor.rgb / max( max( diffuseColor.r, diffuseColor.g ), 0.001 )';
+  const glintCol = look.glint_hue === undefined ? 'vec3( 1.0, 0.97, 0.92 )' : 'mix( vec3( 1.0 ), ' + hueGLSL + ', ' + look.glint_hue.toFixed(3) + ' )';
   const compile = cover => sh => {
     sh.uniforms.pxWorld = PX_WORLD; sh.uniforms.coverIn = { value: cover ? COVER_IN * HH / HEAD_MM : 0 }; sh.uniforms.coverW = { value: cover ? COVER_W : 1 };
     sh.vertexShader = 'attribute vec3 strandT;\nattribute float strandSide;\nattribute float strandW;\nuniform float pxWorld;\nuniform float coverIn;\nuniform float coverW;\n' +
@@ -351,7 +359,7 @@ function buildStyle(asset, tone, creatorMat) {
         '  vec3 t1 = normalize( sT + ' + f(SPEC1_SHIFT) + ' * normal );',
         '  vec3 t2 = normalize( sT + ( ' + f(SPEC2_SHIFT) + ' + ' + f(SPEC_JITTER) + ' * ( vStrandOcc.y - 0.5 ) ) * normal );',
         // (the primary half-way to the hair's hue: pure light colour on single strands read as grey hairs. STYLE: Scheuermann's is untinted)
-        '  vec3 sWarm = mix( vec3( 1.0 ), diffuseColor.rgb / max( max( diffuseColor.r, diffuseColor.g ), 0.001 ), 0.5 );',
+        '  vec3 sWarm = mix( vec3( 1.0 ), ' + hueGLSL + ', ' + spec1Hue.toFixed(3) + ' );',
         '  float gPh = 6.2832 * ( vArc / ( ' + f(GLINT_MM) + ' * ( 0.6 + 0.8 * vStrandOcc.y ) ) + 17.0 * vStrandOcc.y );',
         '  float gOn = smoothstep( ' + f(1 - 2 * GLINT_DUTY) + ', 1.0, 0.6 * sin( gPh ) + 0.4 * sin( 2.7 * gPh + 40.0 * vStrandOcc.y ) );',
         '  for ( int i = 0; i < NUM_DIR_LIGHTS; i ++ ) {',
@@ -361,7 +369,7 @@ function buildStyle(asset, tone, creatorMat) {
         '    float s2 = smoothstep( -1.0, 0.0, d2 ) * pow( sqrt( max( 0.0, 1.0 - d2 * d2 ) ), ' + f(SPEC2_EXP) + ' );',
         '    float dg = dot( sT, sH ), sg = pow( max( 0.0, 1.0 - dg * dg ), ' + f(GLINT_EXP / 2) + ' );',
         '    float wrap = max( 0.0, 0.75 * dot( normal, sL ) + 0.25 );',
-        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * vec3( 1.0, 0.97, 0.92 ) );',
+        '    sAcc += directionalLights[ i ].color * max( vLight[ i ], ' + f(0.5 * LIGHT_FLOOR) + ' ) * wrap * ( ' + f(SPEC1) + ' * s1 * sWarm + ' + f(SPEC2) + ' * s2 * ( 0.4 + 1.2 * vStrandOcc.y ) * diffuseColor.rgb + ' + f(GLINT) + ' * gOn * sg * vLight[ i ] * ' + glintCol + ' );',
         // forward-scattered light on the part the direct light does not reach: lit along the strand (Kajiya-Kay
         // sin(T, L)), wrapped wide round the head instead of cut off at the surface normal (Karis's wrapped Lambert)
         '    float sTf = ' + f(SC_DF) + ' * pow( max( vLight[ i ], 0.004 ), ' + f(SC_EXP) + ' ) * ( 1.0 - vLight[ i ] );',
@@ -399,9 +407,9 @@ function buildStyle(asset, tone, creatorMat) {
     }
     group.add(parts.tie);
   }
-  strandMat.onBeforeCompile = compile(false); strandMat.customProgramCacheKey = () => 'strand';
+  strandMat.onBeforeCompile = compile(false); strandMat.customProgramCacheKey = () => 'strand' + JSON.stringify(look);
   const coverMat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: 0 });
-  coverMat.color = strandMat.color; coverMat.onBeforeCompile = compile(true); coverMat.customProgramCacheKey = () => 'strand-cover';
+  coverMat.color = strandMat.color; coverMat.onBeforeCompile = compile(true); coverMat.customProgramCacheKey = () => 'strand-cover' + JSON.stringify(look);
   const cover = new THREE.Mesh(sg, coverMat); cover.frustumCulled = false; cover.name = 'groom-coverage';
   parts.strands = new THREE.Mesh(sg, strandMat); parts.strands.add(cover); parts.strands.frustumCulled = false; parts.strands.castShadow = false;
   group.add(parts.strands);

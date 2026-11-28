@@ -76,6 +76,9 @@ FRONT_DTH = 0.12            # rad
 FRONT_AT_Z = -0.15          # where a front lock is aimed: the creator's strands' median point at this height
 WAVE_TAKE = 1.15            # DRAFT: hair length per unit of hang along a waved lock (the Warden round measured about 20%
                             # taken up by the wave; the hang here also runs forward over the shoulder)
+LOOK_HUE = 0.8              # STYLE: the highlight and the glints this far toward the hair's hue (hair-fidelity.js asset.look:
+                            # glints are TRT light and carry the pigment, Marschner et al. 2003; white ones read ashy)
+MIN_LOCK_SHARE = 0.25       # DRAFT: a lock with under this share of the median lock's hair joins its nearest neighbour
 LOCK_ROUND = 0.8            # the tail's TAIL_LOCK_ROUND: a hanging hair's "out" is mostly its lock's own
 
 
@@ -140,6 +143,33 @@ def wave_height(lines, zbands=((0.3, 0.0), (0.0, -0.3), (-0.3, -0.6), (-0.6, -0.
     return out
 
 
+def side_gauge(lines, hairs=None):
+    """Left against right below the jaw: per side (her left is +x), the hair in front of the shoulder line (y under the
+    head's axis) at z -0.3 and -0.5 (hairs crossing), the front tips' height (median, 5th pct) and the half-width of
+    all the hair at z -0.3 (98th pct of |x|). A style that is the same on both sides should match within a lock."""
+    hairs = np.ones(len(lines)) if hairs is None else hairs
+    out = {}
+    for name, sg in (('left', 1.0), ('right', -1.0)):
+        tips, wt, cross, half = [], [], {-0.3: 0.0, -0.5: 0.0}, []
+        for p, h in zip(lines, hairs):
+            p = p[~np.isnan(p[:, 0])]
+            if len(p) < 2 or p[-1, 2] > 0.0 or p[-1, 0] * sg <= 0:
+                continue
+            j = int(np.argmin(np.abs(p[:, 2] + 0.3)))
+            if abs(p[j, 2] + 0.3) < 0.02:
+                half.append(abs(p[j, 0]))
+            if p[-1, 1] < SF.AXIS[1]:
+                tips.append(p[-1, 2]); wt.append(h)
+                for z in cross:
+                    if p[-1, 2] < z:
+                        cross[z] += h
+        out[name] = dict(front_hairs=int(sum(wt)), tip_z_median=round(float(np.median(tips)), 3) if tips else None,
+                         tip_z_p5=round(float(np.percentile(tips, 5)), 3) if tips else None,
+                         front_hairs_at={str(z): int(v) for z, v in cross.items()},
+                         half_width_at_m03=round(float(np.percentile(half, 98)), 3) if half else None)
+    return out
+
+
 def creator_front(strands):
     """The creator's strands that hang below its hand-over: each one's angle round the head where it passes z
     HANDOVER_Z, whether it hangs in front of the shoulder, its point at FRONT_AT_Z and its lowest height."""
@@ -165,6 +195,7 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
         if len(below) and (len(p) - below[0]) * SEG_OUT_MM > MIN_HANG_MM:
             h_i[i] = below[0]
     on = np.where(h_i >= 0)[0]
+    pull = np.zeros((n, 3))                                            # (a merged hair's shift onto its new lock)
     H = np.array([paths[i][h_i[i]] for i in on])
     # the locks: the groom's wave locks (the creator's 88), split where one is wider than a lock at the hand-over
     key = lockkey[on]
@@ -181,12 +212,35 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
             lab = np.zeros(len(mem), int)
         for c in np.unique(lab):
             lock[on[mem[lab == c]]] = nl; nl += 1
+    # a lock of a few hairs is no lock: on its own rod it hangs alone, clear of the mass (the dangling lock over the
+    # collar, 13 fibres; John, 2026-11-28). It joins the nearest full lock on its side, and its hairs are drawn in to
+    # that lock's own spread.
+    Hall = np.full((n, 3), np.nan); Hall[on] = H
+    cnt = np.array([hairs[lock == k].sum() for k in range(nl)])
+    small = cnt < MIN_LOCK_SHARE * np.median(cnt)
+    if small.any() and (~small).any():
+        cen = np.array([Hall[lock == k].mean(0) for k in range(nl)])
+        big = np.where(~small)[0]
+        for k in np.where(small)[0]:
+            same = big[np.sign(cen[big, 0]) == np.sign(cen[k, 0])]
+            cand = same if len(same) else big
+            j = cand[np.argmin(np.linalg.norm(cen[cand] - cen[k], axis=1))]
+            host = np.where(lock == j)[0]
+            rad = np.percentile(np.linalg.norm(Hall[host] - cen[j], axis=1), 90)
+            for i in np.where(lock == k)[0]:
+                d = Hall[i] - cen[j]; dn = np.linalg.norm(d)
+                pull[i] = cen[j] + d * min(1.0, rad / max(dn, 1e-9)) - Hall[i]
+                lock[i] = j
+        remap = np.cumsum(~small) - 1
+        lock[lock >= 0] = remap[lock[lock >= 0]]
+        nl = int((~small).sum())
+        log('small locks merged %d (under %.0f hairs), locks now %d' % (small.sum(), MIN_LOCK_SHARE * np.median(cnt), nl))
     # each lock's rod: its root the members' middle at the hand-over, heading as they head over their next 30 mm
     roots = np.zeros((nl, 3)); tang = np.zeros((nl, 3)); length = np.zeros(nl); nh = np.zeros(nl)
     srel_max = {}
     for k in range(nl):
         mem = np.where(lock == k)[0]
-        roots[k] = np.mean([paths[i][h_i[i]] for i in mem], 0)
+        roots[k] = np.mean([paths[i][h_i[i]] + pull[i] for i in mem], 0)
         j = int(30.0 / SEG_OUT_MM)
         tv = np.mean([paths[i][min(len(paths[i]) - 1, h_i[i] + j)] - paths[i][h_i[i]] for i in mem], 0)
         tang[k] = tv / max(np.linalg.norm(tv), 1e-12)
@@ -200,20 +254,26 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
         cth, cfr, cat, cend = creator
         thk = SF.theta(roots)
         for k in range(nl):
-            c = (np.abs(cth - thk[k]) < FRONT_DTH) & (np.sign(cth) == np.sign(thk[k]))
+            # (the creator's two sides pooled, the far side mirrored: its wavy style is the same left and right below
+            # the jaw (half-widths 0.60 and 0.61 HH at z -0.3), and taking each side's own strands gave the two sides
+            # different targets and lengths: front tips at z -0.39 on her right against -0.27 on her left, John 2026-11-28)
+            c = np.abs(np.abs(cth) - abs(thk[k])) < FRONT_DTH
             if c.sum() >= 3 and cfr[c].mean() > FRONT_SHARE:
                 c &= cfr
-                tgt = np.median(cat[c], 0)
+                sgn = 1.0 if thk[k] >= 0 else -1.0
+                m = cat[c].copy(); m[:, 0] = sgn * np.abs(m[:, 0])
+                tgt = np.median(m, 0)
                 tv = tgt - roots[k]; tv /= np.linalg.norm(tv)
                 tang[k] = tv
                 L = (np.linalg.norm(tgt - roots[k]) + (FRONT_AT_Z - np.median(cend[c]))) / MM * WAVE_TAKE
                 mem = np.where(lock == k)[0]
                 for i in mem:                                           # (each hair to its share of the new length)
                     own = (len(paths[i]) - 1 - h_i[i]) * SEG_OUT_MM
-                    grow[i] = max(1.0, L * (0.85 + 0.15 * rng.random()) / max(own, 1.0))
-                length[k] = max(length[k], L)
+                    grow[i] = L * (0.85 + 0.15 * rng.random()) / max(own, 1.0)   # (cut as well as grown: a side
+                length[k] = L                                           #  left at its own longer length hung lower)
                 front[k] = True
-        log('front locks %d of %d (%d hairs lengthened)' % (front.sum(), nl, int((grow > 1.0).sum())))
+        log('front locks %d of %d (%d left, %d right; %d hairs lengthened, %d cut)' % (front.sum(), nl, (front & (thk > 0)).sum(),
+            (front & (thk < 0)).sum(), int((grow > 1.0).sum()), int((grow < 1.0).sum())))
     out_h = roots.copy(); out_h[:, 2] = 0; out_h[:, 0] -= SF.AXIS[0]; out_h[:, 1] -= SF.AXIS[1]
     d1 = out_h - (out_h * tang).sum(1, keepdims=True) * tang
     d1 /= np.maximum(np.linalg.norm(d1, axis=1, keepdims=True), 1e-12)
@@ -262,7 +322,7 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
     for k in range(nl):
         mem = np.where(lock == k)[0]
         R0 = frames[k]
-        offs = np.array([paths[i][h_i[i]] - roots[k] for i in mem])
+        offs = np.array([paths[i][h_i[i]] + pull[i] - roots[k] for i in mem])
         a0, b0 = offs @ R0[:, 0], offs @ R0[:, 1]
         sub = (((np.arctan2(b0 - b0.mean(), a0 - a0.mean()) + sub_ph[k]) % (2 * np.pi)) / (2 * np.pi / SUBLOCKS)).astype(int) % SUBLOCKS
         for si in range(SUBLOCKS):
@@ -272,7 +332,9 @@ def hang_locks(paths, lockkey, hairs, coll, rest_gain, log, seed=9, creator=None
             qa, qb = a0[ms].mean(), b0[ms].mean()
             for i, a, b in zip(mem[ms], a0[ms], b0[ms]):
                 p = paths[i]; j0 = h_i[i]
-                srel = np.arange(int(round((len(p) - j0) * grow[i]))) * SEG_OUT_MM
+                srel = np.arange(max(2, int(round((len(p) - j0) * grow[i])))) * SEG_OUT_MM
+                if len(srel) < len(p) - j0:                             # (a cut hair)
+                    p = p[:j0 + len(srel)]
                 if len(srel) > len(p) - j0:                             # (a lengthened hair: its head line runs on
                     p = np.r_[p, p[-1] + (p[-1] - p[-2])[None] * np.arange(1, len(srel) - (len(p) - j0) + 1)[:, None]]   # straight,
                                                                         #  then rides its lock like the rest)
@@ -338,6 +400,11 @@ def main():
     rep['rods'] = rr
     rep['wave_locks_mm'] = wave_height([x for x in rods['X']])
     rep['wave_groom_after_mm'] = wave_height([p for p in paths if p[:, 2].min() < 0.0][::4])
+    rep['sides'] = dict(creator=side_gauge([s_['p'] for s_ in cstr]), hair=side_gauge(paths, hairs))
+    log('sides %s' % rep['sides'])
+    nlk = lock.max() + 1
+    sz = np.array([hairs[lock == k].sum() for k in range(nlk)])
+    rep['locks'] = dict(n=int(nlk), hairs_median=int(np.median(sz)), hairs_min=int(sz.min()))
     log('rods %s' % rr)
     log('wave height: rods %s; hairs %s' % (rep['wave_locks_mm'], rep['wave_groom_after_mm']))
     # into one nan-padded array for the finishing passes
@@ -408,6 +475,12 @@ def main():
     oh /= np.maximum(np.linalg.norm(oh, axis=1, keepdims=True), 1e-9)
     wl = np.linalg.norm(LOc, axis=1)
     lo_u = LOc / np.maximum(wl[:, None], 1e-9)
+    # (a lock's far half is seen through the hair in front of it, between the next locks: lit by the lock's own "out"
+    # it faced away from every lamp and showed as a black inner layer (John, 2026-11-28). A fibre is lit from all round
+    # its axis (Kajiya & Kay 1989) and what darkens the far half is the hair in front, which the baked transmittance
+    # holds: so the far half's "out" is mirrored to the outside. The ponytail, one bundle, never shows its far side.)
+    inward = np.minimum((lo_u * oh).sum(1, keepdims=True), 0.0)
+    lo_u = lo_u - 2 * inward * oh
     ol = LOCK_ROUND * lo_u + (1 - LOCK_ROUND) * oh
     outv = oh * (1 - wl)[:, None] + ol * wl[:, None]
     outv /= np.maximum(np.linalg.norm(outv, axis=1, keepdims=True), 1e-9)
@@ -419,6 +492,7 @@ def main():
                               light=CA.b64(np.round(np.clip(occ, 0, 1) * 255), 'u1'), light_order='key,rim,fill,ambient',
                               out=CA.b64(np.round(outv * 127), 'i1'), iso=CA.b64(np.round(iso * 255), 'u1'),
                               **({'tier': CA.b64(tier[keep], 'u1')} if tier is not None else {})),
+                 look=dict(spec1_hue=LOOK_HUE, glint_hue=LOOK_HUE),
                  body=dict(name='warden', sections=bodies['warden'], cy=0.04, p=3),
                  source=dict(groom=os.path.abspath(gdir), fibres=int(len(P)), builder='tools/hair/wavy_flow.py'))
     json.dump(asset, open(os.path.join(out, 'asset-wavyFull.json'), 'w'))

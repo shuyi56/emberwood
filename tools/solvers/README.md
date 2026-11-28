@@ -217,7 +217,12 @@ scalp cap. Writes the Face Creator asset (`asset-wavyFull.json`), the fibres (`f
 
 **Trouble looks like.** `wave_groom_after_mm` off the creator's `wave_creator_mm` by more than 1.5 mm in a band (the
 rest gain is calibrated: re-calibrate when the body, the cut or the lock count changes); rods `residual_mm` over 0.5;
-`kinks.faired` over 20 deg; hairline bare cells; join cover under 1.
+`kinks.faired` over 20 deg; hairline bare cells; join cover under 1; `sides.hair` left and right front tips apart
+by more than 0.03 HH where the creator's are level (front locks take the creator's strands of both sides, mirrored,
+and are cut as well as grown); `locks.hairs_min` far under the median (a thin lock on its own rod dangles alone:
+locks under a quarter of the median join a neighbour). The asset's `look` tints its highlight and glints toward
+the hair's hue (white ones read ashy on a wavy fall), and a lock's far half has its "out" mirrored outward (lit
+by its own lock normal it showed as a black inner layer).
 
 **Grounded in.** The creator's wave (main.js `wavyMass`: 0.034 / 0.040 HH axes, wavelength 0.5 + 0.08 x section HH,
 grown in from z 0.3 to -0.05) as ground truth; the settled wave under its own hanging weight A0 / (1 + h / (Lb^3 k^2))
