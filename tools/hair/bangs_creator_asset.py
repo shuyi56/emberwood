@@ -41,6 +41,7 @@ FRINGE_EASE_REACH_MM = 80.0 # DRAFT: a fringe hair's highest point is looked for
 FRINGE_EASE_MIN_MM = 6.0    # DRAFT: hairs that never stand this far off the head are left alone
 CAP_LIFT_MM = 0.4           # the scalp cap this far over the skin (cards.py's default is 1.0: hair lying closer than that,
                             # as it does at its roots along the fringe join, was buried and the bare cap showed as a band)
+JOIN_REAR_COS = 0.6         # the zigzag acts only where the other set's nearest root lies within about 53 degrees of straight behind (or in front)
 JOIN_ZIG_MM = 16.0          # DRAFT: the zigzag reaches this far to each side of the line between the two root sets
 JOIN_ZIG_SHARE = 0.5        # DRAFT: the share of root cells that cross over right at the line, falling to none at JOIN_ZIG_MM
 JOIN_CELL_MM = 5.0          # DRAFT: a zigzag tooth's width
@@ -283,7 +284,9 @@ def main():
             oi = np.where(b0 == other_b)[0]            # the two directions interleave on both sides of the old line
             dj, nn = cKDTree(r0[oi]).query(r0, k=8)
             p = JOIN_ZIG_SHARE * BF.SF.sm(JOIN_ZIG_MM, 0.0, dj[:, 0] / MMj)
-            take = (b0 == mine_b) & ((u < p) if mine_b == 0 else (1 - u < p))
+            vy = (r0[oi[nn[:, 0]]] - r0)[:, 1] / np.maximum(dj[:, 0], 1e-9)      # +1: the other set's nearest root lies straight behind
+            rear = (vy < -JOIN_REAR_COS) if mine_b == 0 else (vy > JOIN_REAR_COS)     # (only across the rear join: at the fringe's
+            take = (b0 == mine_b) & rear & ((u < p) if mine_b == 0 else (1 - u < p))  # side corners a hair taken back ran through the fringe)
             for i in np.where(take)[0]:
                 j = oi[nn[i, rz.integers(0, 8)]]
                 pj = src[j]; ok = ~np.isnan(pj[:, 0])
