@@ -553,6 +553,8 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
                             # with 12% of the nodes under 17.5 mm; over the first half, 0.8% (and BANG_S[0] 0.10 to 0.06)
 
 
+BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
+                               # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
 BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
 
@@ -751,7 +753,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     basin = np.where(kind == 1, 0, -1)
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
-        if len(fm) > 3:
+        if len(fm) > 3 and not BANG_FLOW:
             for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3 + int(sd))):
                 lines[i] = l
     sec = np.zeros(n, int)
