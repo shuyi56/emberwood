@@ -458,8 +458,10 @@ def draw(Fd, rods, head_pts, depth, path, views=((0, 4, 'front'), (40, 6, 'three
 # A line is (angle round the body, height): its angle moves from where it leaves the head to its place in the fall by
 # a map that is monotonic in the angle (rank kept), its radius is the tent from the head to the body and then the body
 # itself plus its depth in the stack, and the S wave is one pattern a side whose phase changes slowly round the head.
-FALL_SPLIT = 1.75           # DRAFT: |theta| behind the ear where the hair parts over the shoulder
-FRONT_BAND = (0.42, 0.85)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
+FALL_SPLIT = 2.20           # DRAFT: |theta| where the hair parts over the shoulder: well behind the ear, so that some of
+                            # the back hair runs diagonally forward over the shoulder (John 2026-11-28; at 1.75 only the
+                            # hair in front of the ear came forward, 38% of it)
+FRONT_BAND = (0.42, 1.00)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
 BACK_BAND = (2.30, np.pi)   # DRAFT: the back fall, down the back inside the shoulder blades (at 1.95 it draped over the
                             # shoulders' tops)
 FAIR_MM = 25.0              # DRAFT: the course is faired over this length (half a bending length)
@@ -473,7 +475,7 @@ STACK_MM = (2.0, 18.0)      # DRAFT: the fall's thickness: the innermost hair's 
 BODY_AT_Z = -0.15           # where the tent from the head lands (the photo's shoulder line)
 
 
-BANG_END = ((0.17, 0.59), (0.27, 0.47))   # MEASURED (face crop): where the bang's inner hair ends (|x|, z: the brow's outer
+BANG_END = ((0.17, 0.59), (0.30, 0.44))   # MEASURED (face crop): where the bang's inner hair ends (|x|, z: the brow's outer
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.50, 0.40)       # DRAFT: the S's two handles, as shares of the hair's drop: it leaves the root heading down and
                             # arrives heading down, and between the two it runs out to the side (the photo's S)
@@ -516,7 +518,11 @@ def bang_sheet(root, surf, seed=3, k=44):
     U = q / np.linalg.norm(q, axis=2, keepdims=True)
     tt = t[0]
     lift = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(0.0, 0.40, tt) - FRINGE_ARCH_MM[1] * SF.sm(0.35, 0.85, tt)
-            + FRINGE_ARCH_MM[2] * SF.sm(0.65, 1.0, tt))[None, :] * MM
+            )[None, :] * MM
+    # (the flick at the end is the inner hairs'; the outer edge lies down along the temple into the side hair, so the
+    #  bang joins the side and does not stand off it: the recipe's bangs take the side flow's direction at their edge)
+    lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(0.65, 1.0, tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
+    lift = lift - ((FRINGE_ARCH_MM[0] - FRINGE_ARCH_MM[1]) * 0.6 * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
     lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
     P = SF.CENTRE + U * (r + lift)[:, :, None]
     cut = (k * (1 - FRINGE_FEATHER * 2 * rng.random(m))).astype(int)                     # (point cut)
