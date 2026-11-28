@@ -16,7 +16,7 @@ for a_ in sys.argv:
 pts = SF.load_head(head)
 surf, F = PW._cached(cache, 'head', (hk, md5(SF.__file__)), lambda: (lambda sf: (sf, SF.build(sf)))(SF.Surface(pts)))
 coll, depth = WF.colliders(surf, json.load(gzip.open(head))['bodies']['mannequin'])
-Fd = PW.field2(F, surf, depth, 16000, cache=cache, head_key=hk, log=lambda *a: None)
+Fd = PW.field2(F, surf, depth, 16000, cache=cache, head_key=hk, log=lambda *a: print(*[str(v)[:400] for v in a]) if 'endpoint' in str(a[0]) else None)
 L, B, H = Fd['line'], Fd['basin'], Fd['release']
 col = {0: (235, 130, 20), 1: (215, 50, 160), 2: (40, 110, 230), 3: (30, 160, 80), -1: (120, 120, 120)}
 R = []

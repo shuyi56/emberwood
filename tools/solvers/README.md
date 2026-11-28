@@ -284,6 +284,35 @@ pendant) in front. The pendant hangs from the chain's lowest point and turns abo
 
 ## Hair
 
+### Endpoint flow: `hair/endpoint_flow.py` (PR #99)
+
+**What it is for.** A hair line from a set start to a set end: the smoothest line between a root (a point and the way
+it leaves the skin) and an end (a point and the way it arrives), kept off the head. It was written for the photo hair's
+fringe, which had been a sheet solved apart from the rest of the flow and then a heading authored by height; with the
+two ends set, nothing in between is authored.
+
+**In and out.** `solve(P0, T0, P1, T1, floor, m0, m1, N)`: start and end points `[n, 3]`, unit directions there, how
+far the line keeps each direction (`m0`, `m1`, lengths), and `floor(X)`, which returns points pushed out to the body
+plus its clearance. Out: lines `[n, N, 3]` and a report (`passes`, `pushed`, `worst_inside`, `bend_radius_min`,
+`bend_radius_p1`, `bend_radius_median`, in the caller's units). The line minimises the summed squared second
+differences with two nodes held at each end; nodes inside the floor are held softly to the floor under them and the
+line solved again, the targets sliding along the body from pass to pass.
+
+**Run.** `photo_waves.fringe_flow(root, layer, surf, side)` sets the ends (`FRINGE_ENDS`, `FRINGE_END_DIR`, `FRINGE_M`)
+and calls it; `field2` caches each side's result (`fringe+1`, `fringe-1`). Look at it with
+`python3 tools/hair/overlays/head_flow.py HEAD CACHE OUT.png`.
+
+**Trouble looks like.** `bend_radius_min` far under the median with a sampled (voxel) body: the hold is too hard and the
+line is copying the body's bumps (a hard snap gave 0.03 mm); `worst_inside` larger than the clearance can spare; lines
+crossing the middle: `m1` too large (2.2 x the chord closed the curtain; 1.0 is right).
+
+**Use it when.** A styled piece has a known resting place: a fringe, a face-framing piece, a tucked lock. Not for hair
+that hangs free: that is the falls' flow field.
+
+**Grounded in.** The minimiser of the bending energy with both ends' points and directions fixed is the cubic Hermite
+curve; contact is an active set on top of it. John 2026-11-29: "set the start and end points then set a solver to build
+the smooth flow".
+
 ### Tail lock rods: `hair/tail_lock_rods.py` (PR #97)
 
 **Purpose.** The locks of a ponytail in 3D: each lock is one Kirchhoff rod clamped at the tie and free at the tip,

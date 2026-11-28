@@ -28,6 +28,7 @@ How a fibre is combed (a head line; the lengths are then hung and waved by wavy_
 """
 import math
 import os
+import sys
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -988,6 +989,62 @@ def _root_arc(p, surf, hand_i):
     return q
 
 
+FRINGE_SOLVE = True          # the fringe by the endpoint solver (below); False: the comb's own lines with FRINGE_CURL
+FRINGE_ENDS = ((0.20, 0.53), (0.44, 0.47))   # TRACED on John's drawn lines (2026-11-29): where the fringe's ends lie, from the
+                             # innermost hair's (distance from the middle, height z) to the outermost's: along the brow to the temple
+FRINGE_END_DIR = 4.0         # degrees below level that an end arrives, heading out (the drawn lines' flat tails)
+FRINGE_M = (95.0, 1.0)       # DRAFT: how long the line keeps its root's direction (mm: the root's stand) and its end's (x the chord)
+FRINGE_ON_HEAD, FRINGE_BACK = 0.27, 0.6   # DRAFT (HH; a slope)
+FRINGE_CLEAR_MM = (2.0, 6.0)  # the fringe's stand-off from the skin: the innermost layer's, and what the outermost adds
+
+
+def _solver_src():
+    return open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair', 'endpoint_flow.py')).read()
+
+
+def fringe_flow(root, layer, surf, sd, seed=3, log=print):
+    """One side's fringe by its START AND END POINTS (John 2026-11-29: "set the start and end points then set a solver to
+    build the smooth flow"). Start: the root, leaving along the skin's normal. End: a point on FRINGE_ENDS, by the root's
+    order from the part outward (so the lines do not cross), a little ragged, arriving level and heading out. The line
+    between is solvers/hair/endpoint_flow.py's: least bending, kept off the skin. Nothing in between is authored."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'solvers', 'hair'))
+    import endpoint_flow as EF
+    rng = np.random.default_rng(seed + int(sd > 0))
+    n = len(root)
+    t = np.argsort(np.argsort(np.abs(root[:, 0]))) / max(n - 1, 1)
+    t = np.clip(t + 0.08 * rng.normal(size=n), 0, 1)
+    (xa, za), (xb, zb) = FRINGE_ENDS
+    xe = sd * (xa + (xb - xa) * t); ze = za + (zb - za) * t + FRINGE_FEATHER * (rng.random(n) - 0.5)
+    clr = (FRINGE_CLEAR_MM[0] + FRINGE_CLEAR_MM[1] * layer) * MM
+    # (where the end rests: on the skin's front under (x, z) while the head is under it, found by walking back from in
+    # front of the face; past FRINGE_ON_HEAD from the middle the head is no longer under it and the end lies out over
+    # the side hair, FRINGE_BACK back for each unit farther out)
+    xs = np.minimum(np.abs(xe), FRINGE_ON_HEAD) * sd
+    ys = np.linspace(-0.55, 0.06, 62)
+    G = np.stack([np.c_[xs, np.full(n, y_), ze] for y_ in ys], 1)
+    dG = G - SF.CENTRE; rG = np.linalg.norm(dG, axis=2); UG = dG / rG[..., None]
+    f = rG - (surf.radius(UG.reshape(-1, 3)).reshape(n, -1) + clr[:, None])
+    hit = f <= 0
+    j = np.where(hit.any(1), hit.argmax(1), f.argmin(1))
+    j0 = np.maximum(j - 1, 0); ar = np.arange(n)
+    w_ = np.where(hit.any(1) & (j > 0), f[ar, j0] / np.maximum(f[ar, j0] - f[ar, j], 1e-9), 0.0)
+    P1 = np.c_[xe, ys[j0] + (ys[j] - ys[j0]) * w_ + FRINGE_BACK * (np.abs(xe) - np.abs(xs)), ze]
+    U1 = P1 - SF.CENTRE; U1 /= np.linalg.norm(U1, axis=1, keepdims=True)
+    a = np.radians(FRINGE_END_DIR)
+    T1 = np.c_[sd * np.cos(a) * np.ones(n), np.zeros(n), -np.sin(a) * np.ones(n)]
+    T1 = T1 - (T1 * U1).sum(1, keepdims=True) * U1; T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
+    T0 = root - SF.CENTRE; T0 /= np.linalg.norm(T0, axis=1, keepdims=True)
+    N = 48
+    cl = np.repeat(clr, N)
+
+    def floor(X):
+        d = X - SF.CENTRE; r = np.linalg.norm(d, axis=1); Ud = d / r[:, None]
+        return SF.CENTRE + Ud * np.maximum(r, surf.radius(Ud) + cl)[:, None]
+    chord = np.linalg.norm(P1 - root, axis=1)
+    X, rep_ = EF.solve(root, T0, P1, T1, floor, m0=np.full(n, FRINGE_M[0] * MM), m1=FRINGE_M[1] * chord, N=N, log=log)
+    return list(X), rep_
+
+
 def _cached(cache, name, key, make, log=print):
     """make() once per key: the result is pickled under cache/name-<key>.pkl. cache None: no caching."""
     import hashlib, pickle, time
@@ -1137,7 +1194,12 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     basin = np.where(kind == 1, 0, -1)
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
-        if len(fm) > 3 and not BANG_FLOW:
+        if len(fm) > 3 and FRINGE_SOLVE:
+            fl, frep = _cached(cache, 'fringe%+d' % sd, (head_key, n, seed, _code_key(build, curtain_z, fringe_flow), repr((FRINGE_ENDS, FRINGE_END_DIR, FRINGE_M, FRINGE_CLEAR_MM, FRINGE_ON_HEAD, FRINGE_BACK)) + _solver_src()),
+                               lambda: fringe_flow(x['root'][fm], x['layer'][fm], surf, sd, log=log), log)
+            for i, l in zip(fm, fl):
+                lines[i] = l
+        elif len(fm) > 3 and not BANG_FLOW:
             # the side field for this side's bang: the combed lines of the hair beside it (face framing and front fall)
             from scipy.spatial import cKDTree
             sm_ = [paths[i][:max(hand[i], 2) + 1] for i in np.where((kind != 1) & (x['root'][:, 0] * sd > 0) & (hand >= 0))[0]
