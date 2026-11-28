@@ -37,6 +37,8 @@ TAIL_HAIR_SPREAD = 0.7      # DRAFT: and a hair this much farther from its sub-l
 TAIL_SPREAD_FROM = 0.12     # the share of a lock's length where the opening starts
 TAIL_JOIN_MM = 45.0         # a hair passes from the tail's field line to its lock's rod over this length, eased with a
                             # quintic (zero slope and curvature change at both ends: the line stays G2 across the join)
+JOIN_DENSITY = 4.0          # DRAFT: at the join the swept-back hair is drawn this many times as dense as elsewhere
+JOIN_BLEND_MM = (8.0, 60.0) # DRAFT: all of that within the first distance of the fringe's roots, none past the second
 TAIL_TIE_SQUEEZE = 0.45     # DRAFT: under the band a lock is pressed to this share of its free radius (the tie's packing)
 TAIL_LOCK_ROUND = 0.8       # DRAFT: how much a tail hair's "out" is its lock's own (each lock lit as a round bundle)
 
@@ -288,9 +290,29 @@ def main():
     print('fibres', paths.shape, file=sys.stderr)
     rng = np.random.default_rng(5)
     keep = np.arange(len(paths))
-    if len(keep) > nmax:                               # (a share of the fibres, each standing for more hairs)
+    dup = None
+    if len(keep) > nmax and '--join-blend' in a:
+        # The join between the fringe and the swept-back hair. The fringe's roots stand about 4.5 times as dense as
+        # the swept-back hair's (measured: 1.5 against 0.33 fibres per mm2), so a uniform draw left a step in cover
+        # along the join. Draw the swept-back hair denser toward the join, with copies set a little to the side,
+        # so the cover falls off over JOIN_BLEND_MM instead of at a line.
+        from scipy.spatial import cKDTree
+        r0 = paths[:, 0]
+        dj = cKDTree(r0[basin == 1]).query(r0)[0] / BF.SF.MM
+        w = np.where(basin == 0, 1 + (JOIN_DENSITY - 1) * BF.SF.sm(JOIN_BLEND_MM[1], JOIN_BLEND_MM[0], dj), 1.0)
+        exp = w * nmax / w.sum()
+        cnt = np.floor(exp).astype(int) + (rng.random(len(exp)) < exp - np.floor(exp))
+        keep = np.repeat(np.arange(len(paths)), cnt)
+        dup = np.r_[False, keep[1:] == keep[:-1]]
+        print('join blend', dict(strands=int(len(keep)), copies=int(dup.sum()), boosted_fibres=int((w > 1.05).sum())), file=sys.stderr)
+    elif len(keep) > nmax:                             # (a share of the fibres, each standing for more hairs)
         keep = np.sort(rng.choice(keep, nmax, replace=False))
     ps = [p[~np.isnan(p[:, 0])] for p in paths[keep]]
+    if dup is not None:
+        for k in np.where(dup)[0]:                     # a copy: beside its fibre, in the scalp's plane at the root
+            nrm = ps[k][0] - BF.SF.CENTRE; nrm /= np.linalg.norm(nrm)
+            off = rng.normal(size=3); off -= (off @ nrm) * nrm
+            ps[k] = ps[k] + off / np.linalg.norm(off) * rng.uniform(0.6, 1.4) * BF.SF.MM
     ok = [k for k, p in enumerate(ps) if len(p) >= 2]
     ps = [ps[k] for k in ok]
     keep = keep[ok]
