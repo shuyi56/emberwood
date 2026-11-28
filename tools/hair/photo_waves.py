@@ -563,7 +563,68 @@ BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: r
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
 
 
-def bang_sheet(root, surf, seed=3, k=44):
+BANG_3D = True              # John 2026-11-29: "get the bangs correct by using 3d flow solver where it's being pulled by the side
+                            # along multiple axis". False: the two traced edges blended in the front view (TRACE_IN, TRACE_OUT)
+BANG_AXES = dict(side0=0.45, side1=3.0, up=0.95, field=0.3, to=0.8, along=0.2)   # DRAFT: the pulls on a bang hair, as weights against gravity's 1:
+                            # forward off the crown (dying over the first third), to the side (side0 from the root, growing
+                            # by side1 toward the tip), and up at the tip (gravity cancelled by this share)
+BANG_HOLD = (0.30, 0.55)    # DRAFT: the share of a bang hair's length held on the head, and where it is fully free
+BANG_OVER_MM = 20.0
+BANG_LEN = (1.0, 0.62)     # DRAFT (HH): a bang hair's length, nearest the part and outermost (from the traced lines)
+
+
+def _bang_march(root, surf, u, uc, sgn, k, side=None):
+    """The bang as a flow in 3D. Every hair is marched from its root over the head: at each step its heading is the
+    sum of the pulls on it (gravity down; forward, off the crown; to the side, growing along the hair, as a round brush
+    draws a curtain bang away from the part; up at the tip, where the blow-dry turns the end), with the part normal to
+    the head taken out so that the hair slides over the skin, and the step is then put back on the skin. The locks
+    nearest the part are pulled most (BANG_BEND[2] the outermost's share). The sheet's stand-off, fairing and cut
+    are bang_sheet's. Returns (m, k, 3)."""
+    m = len(root)
+    ds = ((BANG_LEN[0] + (BANG_LEN[1] - BANG_LEN[0]) * u) / (k - 1))[:, None]
+    inner = 1 - (1 - BANG_BEND[2]) * uc
+    P = np.zeros((m, k, 3)); p = root.astype(float).copy(); P[:, 0] = p
+    for j in range(1, k):
+        t = (j - 0.5) / (k - 1)
+        q = p - SF.CENTRE; n = q / np.linalg.norm(q, axis=1, keepdims=True)
+        # the pulls seen from the front: gravity down (let go at the tip by 'up') and the pull to the side, which
+        # grows along the hair. The hair lies on the head, so its heading front to back is whatever keeps it on the
+        # skin: over the crown that is forward, on the forehead down, at the temple back.
+        down = 1 - BANG_AXES['up'] * inner * SF.sm(0.72, 1.0, t) ** 2
+        sx = sgn * (BANG_AXES['side0'] * SF.sm(0.0, 0.2, t) + BANG_AXES['side1'] * inner * SF.sm(0.45, 0.95, t) ** 1.3)
+        ny = np.where(np.abs(n[:, 1]) < 0.15, -0.15, n[:, 1])
+        d = np.c_[sx, np.clip(-(sx * n[:, 0] - down * n[:, 2]) / ny, -3.0, 3.0), -down]
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+        if side is not None:
+            # (the side field: the hair beside the bang where it leaves the head at the temple. Toward its end the
+            # bang is drawn to that hair (BANG_AXES['to']) and along its heading (BANG_AXES['along']), in all three
+            # axes, so the ends turn into the side hair's flow.)
+            g = BANG_AXES['field'] * SF.sm(0.5, 1.0, t)
+            dist, ix = side[0].query(p, k=12)
+            to = side[1][ix].mean(1) - p
+            to /= np.maximum(np.linalg.norm(to, axis=1, keepdims=True), 1e-6)
+            al = side[2][ix].mean(1); al /= np.maximum(np.linalg.norm(al, axis=1, keepdims=True), 1e-6)
+            al[:, 2] *= down[:, None][:, 0]                                # (the tip's lift is kept)
+            d = d + g * (BANG_AXES['to'] * to + BANG_AXES['along'] * al)
+        d = d - (d * n).sum(1, keepdims=True) * n
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+        p = p + d * ds
+        q = p - SF.CENTRE; r = np.linalg.norm(q, axis=1, keepdims=True); U = q / r
+        # (toward its end the bang rides over the side hair, BANG_OVER_MM off the skin: on the bare skin it could not
+        # reach the photo's width, the head being narrower than the hair)
+        p = SF.CENTRE + U * (surf.radius(U)[:, None] + (1.0 + BANG_OVER_MM * SF.sm(0.45, 0.9, t)) * MM)
+        P[:, j] = p
+    # (each lock draws to a tip: its hairs move onto the lock's mean line over the last 45%)
+    w = (BANG_TIP * SF.sm(0.55, 1.0, np.linspace(0, 1, k)))[None, :, None]
+    lk = np.minimum((u * BANG_RIBS).astype(int), BANG_RIBS - 1)
+    for j in range(BANG_RIBS):
+        mm = lk == j
+        if mm.sum() > 1:
+            P[mm] = P[mm] + (P[mm].mean(0, keepdims=True) - P[mm]) * w
+    return P
+
+
+def bang_sheet(root, surf, seed=3, k=44, side=None):
     """One side's bang as ONE smooth surface (John 2026-11-28: "build the bangs as one smooth shape that produces that s
     curve in the picture"). The surface is S(u, t): u across it (0 the hair nearest the part, 1 the outermost, by the
     roots' order, so the order is kept) and t along the hair. Seen from the front every hair is a cubic that leaves its
@@ -612,6 +673,8 @@ def bang_sheet(root, surf, seed=3, k=44):
     # to the head's centre: the ends wrapped round to the ear and showed from behind. Seen 2026-11-29 in the side and
     # back views. The sheet stays in front of the temple: no farther back than BANG_BACK in front of the centre.)
     P = np.stack([X, np.minimum(0.5 * (lo + hi), SF.CENTRE[1] - BANG_BACK), Z], -1)
+    if BANG_3D:
+        P = _bang_march(root, surf, u, uc, sgn, k, side)
     # (the stand-off is measured from a skin eased along the hair, so the sheet bridges the brow and does not dip)
     from scipy.ndimage import gaussian_filter1d
     q = P - SF.CENTRE
@@ -778,7 +841,13 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
     for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
         fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
         if len(fm) > 3 and not BANG_FLOW:
-            for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3)):
+            # the side field for this side's bang: the combed lines of the hair beside it (face framing and front fall)
+            from scipy.spatial import cKDTree
+            sm_ = [paths[i][:max(hand[i], 2) + 1] for i in np.where((kind != 1) & (x['root'][:, 0] * sd > 0) & (hand >= 0))[0]
+                   if abs(SF.theta(paths[i][:1])[0]) < FALL_SPLIT]
+            sp = np.concatenate([p_[2 * len(p_) // 3:] for p_ in sm_]); st = np.concatenate([np.gradient(p_, axis=0)[2 * len(p_) // 3:] for p_ in sm_])
+            st /= np.maximum(np.linalg.norm(st, axis=1, keepdims=True), 1e-9)
+            for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3, side=(cKDTree(sp), sp, st))):
                 lines[i] = l
     sec = np.zeros(n, int)
     step = SEG_MM * MM
