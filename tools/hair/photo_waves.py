@@ -990,13 +990,13 @@ def _root_arc(p, surf, hand_i):
 
 
 FRINGE_SOLVE = True          # the fringe by the endpoint solver (below); False: the comb's own lines with FRINGE_CURL
-FRINGE_ENDS = ((0.20, 0.53), (0.44, 0.47))   # TRACED on John's drawn lines (2026-11-29): where the fringe's ends lie, from the
+FRINGE_ENDS = ((0.24, 0.53), (0.34, 0.41))   # MEASURED on the photo (2026-11-29, John: "it should end at the cheeks like in the picture"; was ((0.20, 0.53), (0.44, 0.47)), out past the face): where the fringe's ends lie, from the
                              # innermost hair's (distance from the middle, height z) to the outermost's: along the brow to the temple
-FRINGE_END_DIR = 4.0         # degrees below level that an end arrives, heading out (the drawn lines' flat tails)
+FRINGE_END_DIR = (50.0, 72.0)   # MEASURED on the photo, innermost to outermost; was 4.0, level, which ran every end along the end edge into one cusp.         # degrees below level that an end arrives, heading out (the drawn lines' flat tails)
 FRINGE_M = (95.0, 1.0)       # RETIRED with the sheet solver: the pinned step at each edge is the column's own spacing
-FRINGE_WAIST = (0.09, 0.24, 0.63, 0.55, 0.03)  # TRACED on John's drawn lines: the waist's distance from the middle (innermost hair,
+FRINGE_WAIST = (0.13, 0.27, 0.62, 0.55, 0.03)  # TRACED on John's drawn lines: the waist's distance from the middle (innermost hair,
                              # outermost), its height z; DRAFT: its place along the line (a share) and how hard the line is drawn to it
-FRINGE_FLICK_MM, FRINGE_FLICK_DEG = 7.0, 18.0   # DRAFT: the ends stand this far off the face and leave it at this angle
+FRINGE_FLICK_MM, FRINGE_FLICK_DEG = 3.0, 8.0    # DRAFT: the ends stand this far off the face and leave it at this angle
 FRINGE_ON_HEAD, FRINGE_BACK = 0.27, 0.6   # DRAFT (HH; a slope)
 FRINGE_CLEAR_MM = (2.0, 6.0)  # the fringe's stand-off from the skin: the innermost layer's, and what the outermost adds
 
@@ -1077,8 +1077,8 @@ def fringe_flow(root, layer, surf, sd, seed=3, log=print, origin=None):
     P1 = _on_front(xs, ze, surf, clr)
     P1 = np.c_[xe, P1[:, 1] + FRINGE_BACK * (np.abs(xe) - np.abs(xs)), ze]
     U1 = P1 - SF.CENTRE; U1 /= np.linalg.norm(U1, axis=1, keepdims=True)
-    a = np.radians(FRINGE_END_DIR)
-    T1 = np.c_[sd * np.cos(a) * np.ones(Nu), np.zeros(Nu), -np.sin(a) * np.ones(Nu)]
+    a = np.radians(np.interp(tc, [0, 1], np.broadcast_to(FRINGE_END_DIR, (2,))))   # (one angle, or innermost to outermost)
+    T1 = np.c_[sd * np.cos(a), np.zeros(Nu), -np.sin(a)]
     T1 = T1 - (T1 * U1).sum(1, keepdims=True) * U1; T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
     P1 = P1 + U1 * (FRINGE_FLICK_MM * MM)
     T1 = T1 + U1 * np.tan(np.radians(FRINGE_FLICK_DEG)); T1 /= np.linalg.norm(T1, axis=1, keepdims=True)
