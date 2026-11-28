@@ -37,13 +37,16 @@ SEG_MM = 2.5
 N_HAIRS = 90000.0           # DRAFT: hairs on the scalp (the older grooms' budget; a scalp carries about 100,000, Robbins)
 RELEASE_Z = SF.CENTRE[2]    # the skin turns under below the skull's centre height: the hair leaves the head there
 PART_PUSH = 0.45            # DRAFT: the push away from the part against gravity along the skin (1: equal)
-FRINGE_PUSH = (0.55, 1.25)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
+FRINGE_ARCH_MM = (15.0, 7.0, 9.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
+                            # flick at the end (a 35 mm brush's radius is 17.5)
+FRINGE_PUSH = (0.30, 1.60)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
                             # the part to the brow at |x| 0.12 and on out to the cheekbone at 0.30 (MEASURED)
 VOLUME_MM = 30.0            # DRAFT: a hanging lock keeps its stand-off from the skin and body up to this (hair lies on the
                             # hair under it); wavy_flow.hang_locks' `volume`
 LIFT_MM = (1.0, 28.0)       # MEASURED (photo): hair stands 9 mm off the skull at the top and about 24 mm at the eyes
 LIFT_PER_MM = 0.12          # DRAFT: lift gained per mm combed
-FRINGE_LIFT_MM = 5.0        # DRAFT: the fringe lies close over the forehead
+FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'lift at the base'; the photo shows its shadow
+                            # under it). At 5 mm it lay on the skin
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
 FRINGE_DEPTH = 0.10         # DRAFT (HH, 22 mm: a thin curtain; at 44 mm it hung as a dark slab over the eyes): its depth behind the hairline at the part, falling to 0 at FRINGE_RAD
@@ -62,7 +65,9 @@ WAVE = dict(start_z=0.38, full_z=0.12, lam_hh=0.33, amp_hh=0.04)     # MEASURED
 
 def curtain_z(ax):
     """The fringe's cut line: where a fringe hair at |x| ends (MEASURED: brow at 0.12, cheekbone at 0.30)."""
-    return np.clip(0.60 - (ax - 0.14) / 0.16 * 0.18, 0.40, 0.62)       # (DRAFT: 0.03 out from the photo's, clear of the eyes)
+    return np.clip(0.59 - (ax - 0.17) / 0.10 * 0.12, 0.47, 0.62)       # (re-MEASURED on the face crop: the inner ends at the
+                                                                       #  brow's outer half, |x| 0.17, z 0.59; the outer at the
+                                                                       #  temple, |x| 0.27, z 0.47, outside the eye's corner)
 
 
 def wave(th, rng=None):
@@ -129,7 +134,7 @@ def build(F, surf, n=24000, seed=11, log=print):
             behind = pos[J, 1] > crown_y
             rb = pos[J][:, :2] - np.array([0.0, crown_y]); rb /= np.maximum(np.linalg.norm(rb, axis=1, keepdims=True), 1e-9)
             b[behind, 0] = rb[behind, 0]; b[behind, 1] = rb[behind, 1]
-            push = np.where(kind[J] == 1, FRINGE_PUSH[0] + (FRINGE_PUSH[1] - FRINGE_PUSH[0]) * SF.sm(0.64, 0.50, pos[J, 2]), PART_PUSH)
+            push = np.where(kind[J] == 1, FRINGE_PUSH[0] + (FRINGE_PUSH[1] - FRINGE_PUSH[0]) * SF.sm(0.72, 0.52, pos[J, 2]), PART_PUSH)
             d = g[None] + push[:, None] * b
             d[kind[J] == 1, 1] -= 1.0                                   # (the fringe is combed forward over the hairline)
             d = d - (d * Uo).sum(1, keepdims=True) * Uo
@@ -139,6 +144,14 @@ def build(F, surf, n=24000, seed=11, log=print):
             Un = qq / np.linalg.norm(qq, axis=1, keepdims=True)
             s_mm = it * SEG_MM
             lift = np.minimum(LIFT_MM[0] + LIFT_PER_MM * s_mm * layer[J], lift_cap[J]) * MM
+            # the fringe bends in two planes (John 2026-11-28: "bangs should also be 3d twisting along 2 planes like the
+            # picture"). Out of the forehead: an arch up off the root over the hairline (ghd: "lift at the base", on a
+            # 35 mm brush), in again over the forehead, and the end flicked out ("flick the brush away from the face").
+            # Round the head: down first, then out to the temple (the push below). The two together are a twisting S.
+            fz = Q[:, 2] - (curtain_z(np.abs(Q[:, 0])) + feather[J])
+            lf = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(0.0, 25.0, s_mm) - FRINGE_ARCH_MM[1] * SF.sm(30.0, 75.0, s_mm)
+                  + FRINGE_ARCH_MM[2] * SF.sm(0.07, 0.0, fz)) * (0.8 + 0.4 * layer[J]) * MM
+            lift = np.where(kind[J] == 1, lf, lift)
             Qs = SF.CENTRE + Un * (surf.radius(Un) + lift)[:, None]
             # (below the forehead the fringe hangs as a curtain over the brow and the eye's corner: it does not follow
             # the skin into the socket, it only stays clear of it)
@@ -436,7 +449,12 @@ FALL_SPLIT = 1.75           # DRAFT: |theta| behind the ear where the hair parts
 FRONT_BAND = (0.42, 0.85)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
 BACK_BAND = (2.30, np.pi)   # DRAFT: the back fall, down the back inside the shoulder blades (at 1.95 it draped over the
                             # shoulders' tops)
-GATHER_Z = (0.25, -0.20)    # DRAFT: the falls take their places between the jaw and the collarbone (the face stays framed)
+GATHER_Z = (0.12, -0.25)    # DRAFT: the falls take their places between the jaw and the collarbone
+FACE_KEEP = 1.30            # MEASURED (the photo's face crop): beside the face the hair's front edge is at the face's own
+                            # outline, back by the ear (an earring shows): no hair lies on the cheek. The angle round the
+                            # head of the cheekbone's back edge, just in front of the ear (the ear's middle is at 1.57)
+FACE_KEEP_Z = (0.56, 0.32)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
+                            # pieces by the face are dried and cut 'flowing away from the face')
 STACK_MM = (2.0, 18.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
 BODY_AT_Z = -0.15           # where the tent from the head lands (the photo's shoulder line)
 
@@ -490,7 +508,11 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
         if len(z) < 3:
             continue
         g = SF.sm(GATHER_Z[0], GATHER_Z[1], z)
-        a = a0[q] + (a1[q] - a0[q]) * g
+        ah = a0[q]
+        if front[q]:                                                     # (beside the face: the whole front fall drawn back
+            keep = lo + (max(FACE_KEEP, lo) - lo) * SF.sm(FACE_KEEP_Z[0], FACE_KEEP_Z[1], z)   # behind the cheek, order kept)
+            ah = keep + (a0[q] - lo) * (FALL_SPLIT - keep) / (FALL_SPLIT - lo)
+        a = ah + (a1[q] - ah) * g
         t = np.clip((rel[q, 2] - z) / max(rel[q, 2] - BODY_AT_Z, 1e-6), 0, 1)
         tent = r0[q] + (land[q] - r0[q]) * t
         tent_mid = tent - stack[q] * t
