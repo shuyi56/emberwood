@@ -542,10 +542,10 @@ BANG_END = ((0.11, 0.60), (0.30, 0.44))   # where the bang's inner hair ends: |x
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
-TRACE_IN = ((0.05, 0.86), (0.10, 0.72), (0.155, 0.625), (0.23, 0.58), (0.31, 0.585), (0.375, 0.615))   # (John 2026-11-29: 'bend it so the diagonal lifts up': down to the brow, along it, the tip rising at the temple) # (John's line, 2026-11-29) # TRACED on the photo (|x| HH, z HH,
+TRACE_IN = ((0.085, 0.757), (0.13, 0.612), (0.20, 0.50), (0.30, 0.42), (0.41, 0.385))   # (John's drawn line, 2026-11-29: 'the lines you drew are correct') # (John's line, 2026-11-29) # TRACED on the photo (|x| HH, z HH,
                             # the bang's inner edge from the hairline down to the brow's inner end; photo px (x - 262) / 232,
                             # (348 - y) / 232, both sides averaged)
-TRACE_OUT = ((0.27, 0.75), (0.325, 0.685), (0.385, 0.66), (0.44, 0.675))   # (the old V's outer edge, bent out at the end) # the outer edge: out over the temple and down to the outer end
+TRACE_OUT = ((0.27, 0.72), (0.30, 0.62), (0.35, 0.52), (0.41, 0.455), (0.46, 0.43))   # (the old V's outer edge, bent out at the end) # the outer edge: out over the temple and down to the outer end
 BANG_INNER = (0.4, 0.25)    # DRAFT: the innermost hair's first handle: this share of the sideways reach, and this share of its
                             # drop downward (the outermost: all sideways, none down)
 BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
@@ -555,7 +555,9 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
 
 BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
                                # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
-BANG_TAPER, BANG_RAG = 0.10, 0.16   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
+BANG_BACK = 0.20            # HH
+BANG_RIBS, BANG_RIB_MM, BANG_FLICK_MM = 3, 6.0, 4.0   # DRAFT: locks across one side's bang, their depth, the ends' lift off the cheek
+BANG_TAPER, BANG_RAG = 0.10, 0.22   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
 BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
 
@@ -597,7 +599,10 @@ def bang_sheet(root, surf, seed=3, k=44):
         r = np.linalg.norm(q, axis=1)
         inside = (r < surf.radius(q / r[:, None])).reshape(X.shape)
         hi = np.where(inside, mid, hi); lo = np.where(inside, lo, mid)
-    P = np.stack([X, 0.5 * (lo + hi), Z], -1)
+    # (where a traced line runs out past the head's outline there is no skin in front of it and the search fell back
+    # to the head's centre: the ends wrapped round to the ear and showed from behind. Seen 2026-11-29 in the side and
+    # back views. The sheet stays in front of the temple: no farther back than BANG_BACK in front of the centre.)
+    P = np.stack([X, np.minimum(0.5 * (lo + hi), SF.CENTRE[1] - BANG_BACK), Z], -1)
     # (the stand-off is measured from a skin eased along the hair, so the sheet bridges the brow and does not dip)
     from scipy.ndimage import gaussian_filter1d
     q = P - SF.CENTRE
@@ -614,6 +619,13 @@ def bang_sheet(root, surf, seed=3, k=44):
     lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
     lift = lift - (0.6 * FRINGE_ARCH_MM[1] * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
     lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
+    # (John 2026-11-29: "the lines you drew are correct but the render is flat ... the inflection near the ends and
+    # it's bending up". Seen from the front the lines were right, but the sheet lay at one stand-off, a plate: now it is
+    # ribbed across into BANG_RIBS locks (each a lit crest and a dark crease, BANG_RIB_MM deep, growing from the root),
+    # and past the inflection the ends lift off the cheek by BANG_FLICK_MM, the outward bend carried into depth.)
+    rib = 0.5 - 0.5 * np.cos(2 * np.pi * BANG_RIBS * u)
+    lift = lift + (BANG_RIB_MM * rib)[:, None] * MM * SF.sm(0.05, 0.45, tt)[None, :]
+    lift = lift + (BANG_FLICK_MM * SF.sm(0.62, 1.0, tt) ** 2)[None, :] * MM
     P = SF.CENTRE + U * (r + lift)[:, :, None]
     # (faired along the hair over BANG_FAIR nodes, the root held, as the falls are: a bang rooted far back runs over the
     # top of the head, where the front projection's cubic and the stand-off's turns meet in corners tighter than the
