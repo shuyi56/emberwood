@@ -265,13 +265,20 @@ function buildStyle(asset, tone, creatorMat) {
   const wHair = (S.hairs_per_strand || 1) * HAIR_MM * HH / HEAD_MM;
   const pos = new Float32Array(np * 6), tan = new Float32Array(np * 6), nrm = new Float32Array(np * 6);
   const side = new Float32Array(np * 2), wid = new Float32Array(np * 2), vc = new Float32Array(np * 6), idx = [];
+  // (the asset's own look, see below at `compile`. light_floor: the least of each lamp's light that reaches a hair
+  // under other hair; inner_dark and mid_dark: this asset's INNER_DARK and MID_DARK. On a long loose fall the baked
+  // light is all or nothing a lock down (median transmittance 0.01), and with the two layer tones on top the hair
+  // between the outer locks went near black: every inner lock read as a hard shadow (John, 2026-11-28). Light in
+  // hair past the first layers is light scattered many times and from the open sides (Zinke et al. 2008), which the
+  // one-direction bake does not hold; Sadeghi & Tamstorf 2010 leave its strength to the artist. STYLE amounts.)
+  const lk = asset.look || {}, lFloor = lk.light_floor || 0, innerDark = lk.inner_dark === undefined ? INNER_DARK : lk.inner_dark, midDark = lk.mid_dark === undefined ? MID_DARK : lk.mid_dark;
   const sIso = S.iso ? new Uint8Array(bytes(S.iso)) : null, isoA = new Float32Array(np * 2);   // how alone the hair is
   const sArc = new Float32Array(np * 2);          // per vertex: mm along the strand
   const occ = new Float32Array(np * 4);            // per vertex: the baked AO, and the strand's own random value
   let k = 0, si = 0, seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   for (const c of cnt) {
     const mid = sTier ? sTier[si] : 0;
-    const lay = (mid ? MID_DARK : 1) * (sLay ? LAYER_DARK + (1 - LAYER_DARK) * sLay[si] / 255 : 1);
+    const lay = (mid ? midDark : 1) * (sLay ? LAYER_DARK + (1 - LAYER_DARK) * sLay[si] / 255 : 1);
     const jit = rnd(), tl0 = sID ? sID[2 * si] / 250 - 0.5 : 0, tc0 = sID ? sID[2 * si + 1] / 250 - 0.5 : 0; si++;
     const b = lay * (1 - STRAND_TONE + 2 * STRAND_TONE * rnd()) * (1 + 2 * LOCK_TONE * tl0) * (1 + 2 * CLUMP_TONE * tc0), twist = (2 * rnd() - 1) * STRAND_TWIST;
     const tc = Math.cos(twist), ts = Math.sin(twist), fineR = rnd(), fine = mid ? FUZZ_W * MID_W : fineR < FINE_SHARE ? FINE_W : FUZZ_W;
@@ -289,7 +296,7 @@ function buildStyle(asset, tone, creatorMat) {
       const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
       const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
       const ol = 1; const ox2 = nx * tc + bx * ts, oy2 = ny * tc + by * ts, oz2 = nz * tc + bz * ts;
-      const ao = sL ? 1 : sAO ? sAO[q] / 255 : 1, shade = b * shadeAt(sj, t) * ao * (sL ? INNER_DARK + (1 - INNER_DARK) * sstep(sL[4 * q + 3] / 128) : 1);
+      const ao = sL ? 1 : sAO ? sAO[q] / 255 : 1, shade = b * shadeAt(sj, t) * ao * (sL ? innerDark + (1 - innerDark) * sstep(sL[4 * q + 3] / 128) : 1);
       for (let e = 0; e < 2; e++) {
         const v = 2 * q + e;
         pos.set(P.subarray(3 * q, 3 * q + 3), 3 * v); tan[3 * v] = tx; tan[3 * v + 1] = ty; tan[3 * v + 2] = tz;
@@ -297,7 +304,7 @@ function buildStyle(asset, tone, creatorMat) {
         side[v] = e ? 1 : -1; wid[v] = wHair * fine * (1 - 0.6 * Math.max(0, (t - 0.85) / 0.15));      // (thinning over the last 15%)
         vc[3 * v] = vc[3 * v + 1] = vc[3 * v + 2] = shade; occ[2 * v] = ao; occ[2 * v + 1] = jit; tierA[v] = mid + 0.45 * t;      // (the tier, and under it the share of the length: 0..0.45)
         sArc[v] = sj * HEAD_MM / HH; isoA[v] = sIso ? sIso[q] / 255 : 0;
-        if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = sL[4 * q + c4] / 255;
+        if (sL) for (let c4 = 0; c4 < 4; c4++) lit[4 * v + c4] = lFloor + (1 - lFloor) * sL[4 * q + c4] / 255;
       }
       if (j < c - 1) idx.push(2 * q, 2 * q + 1, 2 * q + 3, 2 * q, 2 * q + 3, 2 * q + 2);
     }
@@ -351,7 +358,11 @@ function buildStyle(asset, tone, creatorMat) {
         (cover ? '\t  diffuseColor.rgb *= ' + COVER_DARK.toFixed(3) + ';\n\t  if ( min( 1.6 * ( 1.0 - vSide * vSide ), 1.0 - smoothstep( ' + COVER_END.toFixed(3) + ', 0.98, vTip ) ) * ( 1.0 - smoothstep( 0.15, 0.6, vIso ) ) < hn ) discard; }' :
           '\t  diffuseColor.rgb *= 1.0 + ' + LOOSE_LIFT.toFixed(3) + ' * vIso;\n\t  if ( vTier < 0.5 && fz < hn ) discard;\n' +
           '\t  if ( mix( 1.0, max( vThin, ' + LOOSE_MIN.toFixed(3) + ' ), vIso ) < fract( hn + 0.618 ) ) discard; }'))
-      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );')
+      // (look.view_side: hair seen from its inner side, the back hair behind the neck seen from the front, has an
+      // "out" that faces away from the viewer and every lamp and came out black. A fibre has no inner side (Kajiya &
+      // Kay 1989): its normal is mirrored toward the viewer, and the baked light still darkens it.)
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n\tnormal = normalize( vNormal );' +
+        (look.view_side ? ' { vec3 vv = normalize( vViewPosition ); normal = normalize( normal - 2.0 * min( 0.0, dot( normal, vv ) ) * vv ); }' : ''))
       // the two highlights, per directional light, on top of the standard shading and under the same baked AO
       .replace('#include <opaque_fragment>', [
         '#if NUM_DIR_LIGHTS > 0',
