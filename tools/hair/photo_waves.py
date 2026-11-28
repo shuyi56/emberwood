@@ -557,7 +557,7 @@ BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow'
                                # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
 BANG_BACK = 0.20            # HH
 BANG_BEND = (0.035, 0.06, 0.25)   # DRAFT (HH out, HH up, the outermost lock's share)
-BANG_RIBS, BANG_RIB_MM, BANG_FLICK_MM = 6, 4.0, 4.0   # DRAFT: locks across one side's bang, their depth, the ends' lift off the cheek
+BANG_RIBS, BANG_RIB_MM, BANG_FLICK_MM = 4, 4.0, 4.0   # DRAFT: locks across one side's bang, their depth, the ends' lift off the cheek
 BANG_TAPER, BANG_RAG = 0.10, 0.22   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
 BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
@@ -565,15 +565,20 @@ BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: r
 
 BANG_3D = True              # John 2026-11-29: "get the bangs correct by using 3d flow solver where it's being pulled by the side
                             # along multiple axis". False: the two traced edges blended in the front view (TRACE_IN, TRACE_OUT)
-BANG_AXES = dict(side0=0.45, side1=3.0, up=0.95, field=0.3, to=0.8, along=0.2)   # DRAFT: the pulls on a bang hair, as weights against gravity's 1:
+BANG_AXES = dict(side0=0.10, side0u=0.55, side1=3.2, up=0.95, field=0.3, to=0.8, along=0.2)   # DRAFT: the pulls on a bang hair, as weights against gravity's 1:
                             # forward off the crown (dying over the first third), to the side (side0 from the root, growing
                             # by side1 toward the tip), and up at the tip (gravity cancelled by this share)
 BANG_HOLD = (0.30, 0.55)    # DRAFT: the share of a bang hair's length held on the head, and where it is fully free
 BANG_OVER_MM = 20.0
-BANG_LEN = (1.0, 0.62)     # DRAFT (HH): a bang hair's length, nearest the part and outermost (from the traced lines)
+BANG_END_AT = 0.86           # the locks' tips: this share along the traced lines (past it the tips stood out beyond the side hair as spikes, 2026-11-29)
+BANG_TRACED_FLOW = True      # the 3D flow steered along the traced lines in the front view (False: by BANG_AXES' weights)
+BANG_CURL = (2.5, 60.0, 0.8)   # DRAFT: a lock's wave (mm), its wavelength (mm), and each hair's own wave (mm)
+BANG_LAYER = (1.0, 1.0, 1.0, 1.0)   # DRAFT: each lock's length as a share of the flow's, from the part outward
+BANG_LAYER_MM = 3.0                    # DRAFT: each lock lies this far over the next one out
+BANG_LEN = (0.80, 0.66)     # DRAFT (HH): a bang hair's length, nearest the part and outermost (from the traced lines)
 
 
-def _bang_march(root, surf, u, uc, sgn, k, side=None):
+def _bang_march(root, surf, u, uc, sgn, k, side=None, front=None):
     """The bang as a flow in 3D. Every hair is marched from its root over the head: at each step its heading is the
     sum of the pulls on it (gravity down; forward, off the crown; to the side, growing along the hair, as a round brush
     draws a curtain bang away from the part; up at the tip, where the blow-dry turns the end), with the part normal to
@@ -581,9 +586,16 @@ def _bang_march(root, surf, u, uc, sgn, k, side=None):
     nearest the part are pulled most (BANG_BEND[2] the outermost's share). The sheet's stand-off, fairing and cut
     are bang_sheet's. Returns (m, k, 3)."""
     m = len(root)
-    ds = ((BANG_LEN[0] + (BANG_LEN[1] - BANG_LEN[0]) * u) / (k - 1))[:, None]
+    # (John 2026-11-29: "carve a few locks from the flow and force the ends to meet tips and layer bangs like the
+    # picture". The flow is cut into BANG_RIBS locks by the roots' order; every hair of a lock has the lock's length
+    # (its middle hair's), times the lock's layer (BANG_LAYER, the lock nearest the part shortest), so the locks end
+    # one below the other; and over its last half each lock closes onto its mean line, fully, so its ends meet.)
+    lk = np.minimum((u * BANG_RIBS).astype(int), BANG_RIBS - 1)
+    lay = np.interp(lk / max(BANG_RIBS - 1, 1), np.linspace(0, 1, len(BANG_LAYER)), BANG_LAYER)
+    ds = ((BANG_LEN[0] + (BANG_LEN[1] - BANG_LEN[0]) * uc) * lay / (k - 1))[:, None]
     inner = 1 - (1 - BANG_BEND[2]) * uc
     P = np.zeros((m, k, 3)); p = root.astype(float).copy(); P[:, 0] = p
+    lkh = np.arange(m)
     for j in range(1, k):
         t = (j - 0.5) / (k - 1)
         q = p - SF.CENTRE; n = q / np.linalg.norm(q, axis=1, keepdims=True)
@@ -591,10 +603,30 @@ def _bang_march(root, surf, u, uc, sgn, k, side=None):
         # grows along the hair. The hair lies on the head, so its heading front to back is whatever keeps it on the
         # skin: over the crown that is forward, on the forehead down, at the temple back.
         down = 1 - BANG_AXES['up'] * inner * SF.sm(0.72, 1.0, t) ** 2
-        sx = sgn * (BANG_AXES['side0'] * SF.sm(0.0, 0.2, t) + BANG_AXES['side1'] * inner * SF.sm(0.45, 0.95, t) ** 1.3)
+        # (John 2026-11-29: "research how to get the bell shape forehead, right now it's a triangle". The cut: a
+        # triangle section, "the middle is the shortest, and either end is longer resembling an umbrella effect" (Sam
+        # Villa, twist cut fringe); the dry: a small round brush, "twist your wrist and curl the ends" (same), "that
+        # perfect sweeping motion on the ends" (Brad Mondo, Stylist). So the hair at the part is short, comes down the
+        # forehead nearly straight and turns out only in its curled end, at the brow: the bare forehead between the
+        # two sides is narrow above and flares at the brow, a bell. A steady pull to the side from the root gave
+        # straight diagonals: a triangle. side0: the pull on the forehead, small at the part and growing outward
+        # (side0u); side1: the curl of the end, over the last 40%.)
+        sx = sgn * ((BANG_AXES['side0'] + BANG_AXES['side0u'] * uc) * SF.sm(0.0, 0.2, t)
+                    + BANG_AXES['side1'] * inner * SF.sm(0.58, 0.97, t) ** 1.3)
         ny = np.where(np.abs(n[:, 1]) < 0.15, -0.15, n[:, 1])
         d = np.c_[sx, np.clip(-(sx * n[:, 0] - down * n[:, 2]) / ny, -3.0, 3.0), -down]
         d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+        step = ds
+        if front is not None:
+            # (John 2026-11-29, of round 12's traced sheet: "you got it right here". Seen from the front the flow
+            # is steered along the traced lines (TRACE_IN, TRACE_OUT, blended across the sheet): each step advances by
+            # the traced line's own step in x and z, and its depth is still solved on the head. The pulls above are
+            # then the traced field's, not weights.)
+            fx = sgn * (front[lkh, j, 0] - front[lkh, j - 1, 0]); fz = front[lkh, j, 1] - front[lkh, j - 1, 1]
+            fl = np.hypot(fx, fz)
+            d = np.c_[fx, np.clip(-(fx * n[:, 0] + fz * n[:, 2]) / ny, -3.0 * fl, 3.0 * fl), fz]
+            step = np.linalg.norm(d, axis=1, keepdims=True)
+            d /= np.maximum(step, 1e-9)
         if side is not None:
             # (the side field: the hair beside the bang where it leaves the head at the temple. Toward its end the
             # bang is drawn to that hair (BANG_AXES['to']) and along its heading (BANG_AXES['along']), in all three
@@ -608,15 +640,27 @@ def _bang_march(root, surf, u, uc, sgn, k, side=None):
             d = d + g * (BANG_AXES['to'] * to + BANG_AXES['along'] * al)
         d = d - (d * n).sum(1, keepdims=True) * n
         d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
-        p = p + d * ds
+        p = p + d * step
         q = p - SF.CENTRE; r = np.linalg.norm(q, axis=1, keepdims=True); U = q / r
         # (toward its end the bang rides over the side hair, BANG_OVER_MM off the skin: on the bare skin it could not
         # reach the photo's width, the head being narrower than the hair)
         p = SF.CENTRE + U * (surf.radius(U)[:, None] + (1.0 + BANG_OVER_MM * SF.sm(0.45, 0.9, t)) * MM)
         P[:, j] = p
+    # (John 2026-11-29: "you need natural hair curl as well". Hair is not drawn with a ruler: each lock carries its own
+    # slow wave across its length (BANG_CURL: mm, wavelength mm) and each hair a smaller one of its own, from the root
+    # out. Radius of the lock's wave: wavelength^2 / (4 pi^2 amplitude), kept over the 17.5 mm of a set fringe.)
+    rc = np.random.default_rng(17)
+    seg = np.diff(P, axis=1); sarc = np.c_[np.zeros(m), np.cumsum(np.linalg.norm(seg, axis=2), axis=1)] / MM
+    tan = np.gradient(P, axis=1); tan /= np.maximum(np.linalg.norm(tan, axis=2, keepdims=True), 1e-9)
+    nrm = P - SF.CENTRE; nrm /= np.linalg.norm(nrm, axis=2, keepdims=True)
+    lat = np.cross(tan, nrm); lat /= np.maximum(np.linalg.norm(lat, axis=2, keepdims=True), 1e-9)
+    tt_ = np.linspace(0, 1, k)[None, :]
+    phl = rc.uniform(0, 2 * np.pi, BANG_RIBS)[lk][:, None]; lml = (BANG_CURL[1] * rc.uniform(0.85, 1.15, BANG_RIBS))[lk][:, None]
+    wv = BANG_CURL[0] * np.sin(2 * np.pi * sarc / lml + phl) * SF.sm(0.1, 0.4, tt_)
+    wv = wv + BANG_CURL[2] * np.sin(2 * np.pi * sarc / (0.6 * lml) + rc.uniform(0, 2 * np.pi, (m, 1))) * SF.sm(0.05, 0.3, tt_)
+    P = P + lat * (wv * MM)[..., None]
     # (each lock draws to a tip: its hairs move onto the lock's mean line over the last 45%)
-    w = (BANG_TIP * SF.sm(0.55, 1.0, np.linspace(0, 1, k)))[None, :, None]
-    lk = np.minimum((u * BANG_RIBS).astype(int), BANG_RIBS - 1)
+    w = (BANG_TIP * SF.sm(0.35, BANG_END_AT, np.linspace(0, 1, k)) ** 0.7)[None, :, None]
     for j in range(BANG_RIBS):
         mm = lk == j
         if mm.sum() > 1:
@@ -674,7 +718,9 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
     # back views. The sheet stays in front of the temple: no farther back than BANG_BACK in front of the centre.)
     P = np.stack([X, np.minimum(0.5 * (lo + hi), SF.CENTRE[1] - BANG_BACK), Z], -1)
     if BANG_3D:
-        P = _bang_march(root, surf, u, uc, sgn, k, side)
+        B0 = (1 - u)[:, None, None] * cin[None] + u[:, None, None] * cout[None]
+        B0 = B0 + (np.c_[np.abs(root[:, 0]), root[:, 2]] - B0[:, 0])[:, None, :] * (1 - SF.sm(0.0, 0.4, t[0]))[None, :, None]
+        P = _bang_march(root, surf, u, uc, sgn, k, side, front=B0 if BANG_TRACED_FLOW else None)
     # (the stand-off is measured from a skin eased along the hair, so the sheet bridges the brow and does not dip)
     from scipy.ndimage import gaussian_filter1d
     q = P - SF.CENTRE
@@ -690,7 +736,10 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
     lift = (1.0 + FRINGE_ARCH_MM[0] * rise * (1 - down) + FRINGE_ARCH_MM[1] * down)[None, :] * MM
     lift = lift + (FRINGE_ARCH_MM[2] * SF.sm(*BANG_SPAN[2], tt))[None, :] * (1 - 0.85 * u)[:, None] * MM
     lift = lift - (0.6 * FRINGE_ARCH_MM[1] * SF.sm(0.5, 1.0, tt))[None, :] * u[:, None] * MM
-    lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
+    lift = lift + (3.0 * rng.random(m))[:, None] * MM * (SF.sm(0.0, 0.3, tt) * (1 - SF.sm(0.6, 1.0, tt) * (1.0 if BANG_3D else 0.0)))[None, :]     # (its thickness: 3 mm, closing at a 3D lock's tip)
+    if BANG_3D:                                                          # (the layers: each lock over the next one out)
+        lk_ = np.minimum((u * BANG_RIBS).astype(int), BANG_RIBS - 1)
+        lift = lift + (BANG_LAYER_MM * (BANG_RIBS - 1 - lk_))[:, None] * MM * SF.sm(0.2, 0.5, tt)[None, :]
     # (John 2026-11-29: "the lines you drew are correct but the render is flat ... the inflection near the ends and
     # it's bending up". Seen from the front the lines were right, but the sheet lay at one stand-off, a plate: now it is
     # ribbed across into BANG_RIBS locks (each a lit crest and a dark crease, BANG_RIB_MM deep, growing from the root),
@@ -713,6 +762,8 @@ def bang_sheet(root, surf, seed=3, k=44, side=None):
     # (John 2026-11-28: "edges are not curved, the ends should taper off". The lower edge is a curve, longest in the
     # middle of the sheet and shorter toward both edges (BANG_TAPER), the ends cut ragged so they thin out.)
     cut = (k * (1 - BANG_TAPER * (2 * u - 1) ** 2 - BANG_RAG * np.abs(2 * vr) * (0.6 + 0.4 * rng.random(m)))).astype(int)
+    if BANG_3D:                                                          # (a lock's hairs end together, at its tip)
+        cut = (np.full(m, k) * BANG_END_AT).astype(int) + 1 - (2 * rng.random(m)).astype(int)
     return [P[i, :max(cut[i], 4)] for i in range(m)]
 
 
@@ -973,7 +1024,7 @@ LOCK_DEPTH_MM = 3.0         # DRAFT: and the lock's own swing out of the fall wi
 
 TIP_T, TIP_K, TIP_CUT = 0.22, 0.85, 0.7   # DRAFT: the share of a lock's fall over which it draws to a tip, how far in, and how much
                                           # earlier its outermost hairs end
-BANG_TIP = 0.8                            # DRAFT: how far a bang lock's hairs draw onto its centre line at the end
+BANG_TIP = 1.0                            # DRAFT: how far a bang lock's hairs draw onto its centre line at the end
 
 
 def lock_fall(Fd, seed=5, log=print):
