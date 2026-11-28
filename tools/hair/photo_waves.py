@@ -542,6 +542,10 @@ BANG_END = ((0.11, 0.60), (0.30, 0.44))   # where the bang's inner hair ends: |x
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
+TRACE_IN = ((0.03, 0.862), (0.073, 0.81), (0.116, 0.724), (0.134, 0.638), (0.147, 0.578))   # TRACED on the photo (|x| HH, z HH,
+                            # the bang's inner edge from the hairline down to the brow's inner end; photo px (x - 262) / 232,
+                            # (348 - y) / 232, both sides averaged)
+TRACE_OUT = ((0.22, 0.78), (0.265, 0.68), (0.285, 0.545))   # the outer edge: out over the temple and down to the outer end
 BANG_INNER = (0.4, 0.25)    # DRAFT: the innermost hair's first handle: this share of the sideways reach, and this share of its
                             # drop downward (the outermost: all sideways, none down)
 BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
@@ -565,24 +569,23 @@ def bang_sheet(root, surf, seed=3, k=44):
     m = len(root)
     sgn = 1.0 if np.median(root[:, 0]) >= 0 else -1.0
     u = np.argsort(np.argsort(np.abs(root[:, 0]))) / max(m - 1, 1)
-    x3 = sgn * (BANG_END[0][0] + (BANG_END[1][0] - BANG_END[0][0]) * u)
-    z3 = BANG_END[0][1] + (BANG_END[1][1] - BANG_END[0][1]) * u
     t = np.linspace(0, 1, k)[None, :]
-    drop = (root[:, 2] - z3)[:, None]
-    # (John 2026-11-28: "bangs should begin from the roots and curve properly"; his line on the photo leaves the part
-    # sideways, rounds over and comes down to the brow, then runs out to the temple. So the curve starts AT the root:
-    # the hair leaves it square to the part, heading out, turns down over the forehead, and arrives at its end heading
-    # down and out. Before, the first handle pointed straight down and the first half of every hair was a straight drop.)
-    # (the inner edge is the photo's narrow arch: the hairs next to the part leave it heading down and only a little out,
-    # so the bare forehead under the part is an arch from the part to the brow's inner end, not a wide window; the outer
-    # hairs leave it sideways, over the lift, as John's line does. The first render, every hair leaving sideways, left
-    # a bare forehead 0.24 HH wide from the hairline down.)
-    uu = u[:, None]
-    bx = [root[:, 0:1], root[:, 0:1] + sgn * BANG_S[0] * (BANG_INNER[0] + (1 - BANG_INNER[0]) * uu),
-          x3[:, None] - sgn * BANG_S[2], x3[:, None]]
-    bz = [root[:, 2:3], root[:, 2:3] - BANG_INNER[1] * (1 - uu) * drop, z3[:, None] + BANG_S[1] * drop, z3[:, None]]
-    w = [(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3]
-    X = sum(a * b for a, b in zip(w, bx)); Z = sum(a * b for a, b in zip(w, bz))
+    # (John 2026-11-28: "trace the smooth curve compared to our trapezoidal". The bang's inner edge and its outer edge are
+    # traced on the photo (TRACE_IN, TRACE_OUT: the bare forehead is an arch, narrow and rounded at the hairline and
+    # then straight down, not the V the cubic gave) and every hair is the blend of the two curves by its place across
+    # the sheet, held at its own root and eased onto the blend over the first 40% of its length. The ends then lie on
+    # the line between the two traced ends, the photo's lower edge, which is nearly straight.)
+    from scipy.interpolate import CubicSpline
+
+    def curve(pts, tt_):
+        d = np.r_[0, np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))]
+        return CubicSpline(d / d[-1], pts, bc_type='natural')(tt_)
+    a_ = np.abs(root[:, 0]); r_in = root[np.argmin(a_)]; r_out = root[np.argmax(a_)]
+    cin = curve(np.r_[[[abs(r_in[0]), r_in[2]]], np.array(TRACE_IN)], t[0])
+    cout = curve(np.r_[[[abs(r_out[0]), r_out[2]]], np.array(TRACE_OUT)], t[0])
+    B = (1 - u)[:, None, None] * cin[None] + u[:, None, None] * cout[None]
+    B = B + (np.c_[np.abs(root[:, 0]), root[:, 2]] - B[:, 0])[:, None, :] * (1 - SF.sm(0.0, 0.4, t[0]))[None, :, None]
+    X = sgn * B[..., 0]; Z = B[..., 1]
     # the skin in front at each (x, z): bisection on y
     lo = np.full(X.shape, -0.75); hi = np.full(X.shape, SF.CENTRE[1])
     for _ in range(26):

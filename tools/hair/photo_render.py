@@ -3,7 +3,7 @@ render.py's fibre renderer (clay and shaded turnarounds and close-ups). No groom
 recipe's step 3, the field as it stands seen as hair, so its faults show before any locks are built.
 
     python3 tools/hair/photo_render.py HEAD.json.gz OUT_DIR [--lines 16000] [--per-root 2] [--size 750]
-        [--tone 7e4c34] [--photo reference.jpg] [--no-locks] [--quick] [--cache DIR | --no-cache]
+        [--tone 7e4c34] [--photo reference.jpg] [--no-locks] [--quick] [--draft] [--cache DIR | --no-cache]
 
 Each line is drawn --per-root times; the copies sit a little apart across the hair (square to it, COPY_MM) and are
 cut a little apart at the tip, and share the line's hairs, so the coverage on screen is the field's own hair count.
@@ -70,6 +70,8 @@ def main():
     head, out = a[0], a[1]
     opt = lambda k, d: type(d)(a[a.index(k) + 1]) if k in a else d
     n, per, size = opt('--lines', 16000), opt('--per-root', 2), opt('--size', 750)
+    if '--draft' in a:                                                    # (a look, not a picture: half the fibres, smaller)
+        per, size = 1, 560
     cache = None if '--no-cache' in a else opt('--cache', os.path.join(os.path.dirname(os.path.abspath(out)), 'photo-cache'))
     quick = '--quick' in a
     os.makedirs(out, exist_ok=True)
@@ -111,8 +113,8 @@ def main():
                 row.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
             Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'turn-%s.png' % mode))
         lap('turnarounds')
-    views = (('closeup-front', 0, (-0.75, 0.75, -0.55, 1.15)), ('closeup-side', 90, (-0.8, 0.8, -0.55, 1.15)),
-             ('closeup-34', 40, (-0.8, 0.8, -0.55, 1.15)), ('closeup-back', 180, (-0.75, 0.75, -0.55, 1.15)))
+    BOX = (-0.8, 0.8, -0.55, 1.15)                                         # (one box for all: the strip needs equal heights)
+    views = (('closeup-front', 0, BOX), ('closeup-side', 90, BOX), ('closeup-34', 40, BOX), ('closeup-back', 180, BOX))
     full = {}
     for name, az, box in views:
         if quick and name == 'closeup-34':
@@ -123,6 +125,8 @@ def main():
             bg, zb = backdrop(cv, (az, box), mode)
             imgs.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
         full[name] = imgs[-1]
+        if quick:
+            Image.fromarray(imgs[-1]).save(os.path.join(out, name + '.png'))
         if not quick:
             Image.fromarray(np.concatenate(imgs, 1)).save(os.path.join(out, name + '.png'))
     if quick:                                                             # (front, side and back in one strip)
