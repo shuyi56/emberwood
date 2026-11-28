@@ -132,6 +132,19 @@ LOOSE_FRACTION = (0.01, 0.05)   # John's bound on the loose locks' share of all 
 CUTS_MM = (150, 120, 90, 60, 40, 25)     # the cuts the balance sheet is taken on (mm of skin from the tie)
 
 
+def derive():
+    """Recompute the constants computed from others, after a style's parameter file has set the primaries
+    (tools/hair/pipeline/bind.py calls it). The formulas are the ones above; at the defaults this changes nothing."""
+    global TIE_Z, TIE_W, LAUNCH_DEG, K_MAX, WAVE_LEN, WAVE_A, BANG_EDGE_Z
+    TIE_Z = PH['tie_above_chin'] * (1 + PH['head_top_hair'])
+    TIE_W = PH['tie_w']
+    LAUNCH_DEG = math.degrees(math.atan2(PH['apex_rise'], PH['apex_behind_tie']))
+    K_MAX = 1.0 / (EAR_RIM_MM + EAR_DELTA_MM)
+    WAVE_LEN = PH['wave_len']
+    WAVE_A = 0.5 * PH['wave_swing']
+    BANG_EDGE_Z = PH['bang_edge_h'] * (1 + PH['head_top_hair'])
+
+
 def sm(a, b, x):
     return SF.sm(a, b, x)
 
