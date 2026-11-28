@@ -202,6 +202,30 @@ The Ranger's hair rebuild, foundations 1 to 8 (read `/mnt/project-files/hair-reb
 - Always paired with the tracer, `creator_truth.py` (see gauges): the creator's own outline is the ground truth
   (John's hair rule).
 
+### Wavy hair as wave locks: `tools/hair/wavy_flow.py`
+
+**Purpose.** The Warden's long wavy hair (the creator's `wavyFull`) rebuilt with the ponytail's generation: fibres
+grown from the approved groom on the head, then below z 0.3 each of about 120 wave locks solved as a Kirchhoff rod
+with the creator's own wave as its rest shape, the hairs riding their lock (drawn in, then opening into sub-locks),
+finished with the mid layer, the noising round, fairing, light through the hair, strand isolation and the 0.4 mm
+scalp cap. Writes the Face Creator asset (`asset-wavyFull.json`), the fibres (`fibres.npz`) and every gauge
+(`wavy.json`: wave height against the creator, rod report, kinks, light, hairline, join cover).
+
+**Run.** `python3 tools/hair/wavy_flow.py HEAD.json.gz GROOM_DIR wavyFull.json.gz OUT --noise 1.0 --rest-gain 1.4`
+(about 10 minutes, most of it the rods), then `apply-hair-fidelity.py ... wavyFull=OUT/asset-wavyFull.json` and
+`node tools/hair/creator_shots.cjs PAGE OUT_PREFIX wavyFull Warden` for the five views.
+
+**Trouble looks like.** `wave_groom_after_mm` off the creator's `wave_creator_mm` by more than 1.5 mm in a band (the
+rest gain is calibrated: re-calibrate when the body, the cut or the lock count changes); rods `residual_mm` over 0.5;
+`kinks.faired` over 20 deg; hairline bare cells; join cover under 1.
+
+**Grounded in.** The creator's wave (main.js `wavyMass`: 0.034 / 0.040 HH axes, wavelength 0.5 + 0.08 x section HH,
+grown in from z 0.3 to -0.05) as ground truth; the settled wave under its own hanging weight A0 / (1 + h / (Lb^3 k^2))
+(small-amplitude Kirchhoff rod), so the rest curvature is preloaded by that factor (gravity preloading, as in film
+long-hair rigs); the last inch left straight (stylists); rod constants from Robbins ch. 9. CALIBRATED: the rest gain
+(the cape and back flatten the wave's outward half, so the linear preload alone settles low). DRAFT: lock split 30 mm,
+packing 0.1, the clump and opening amounts.
+
 ---
 
 ## Accessories
@@ -234,6 +258,9 @@ ribbon that rolls). About 30 s for 33 locks of 75 segments.
 settles, since a 300 mm lock is far past its 45 mm bending length.
 
 **When.** Any tail, braid end or loose hank below a tie. Not for hair lying on the head (that is the flow field).
+Also the hang of loose long hair: `wavy_flow.py` (below) clamps one rod per wave lock where the hair leaves the head
+and passes each lock its own natural wave through `solve(..., rest=f)`, where `f(s)` returns the rest curvature per
+node, the signed turn rate and the phase per lock (the tail's fixed helix is the default).
 
 **Grounded in.** Kirchhoff rod statics; Bertails et al. 2006, Super-Helices (hair as an inextensible rod with
 natural curvature under gravity); Bergou et al. 2008, Discrete Elastic Rods (the Bishop frame). E 3.9 GPa, density

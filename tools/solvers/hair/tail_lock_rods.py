@@ -69,9 +69,12 @@ def _build(x0, R0, W, l):
     return X, Rs
 
 
-def solve(roots, frames, lengths, n_hairs, radius, head=None, seed=0, curl=(CURL_R_MM, CURL_PITCH_MM), log=None, squeeze=1.0, squeeze_mm=45.0):
+def solve(roots, frames, lengths, n_hairs, radius, head=None, seed=0, curl=(CURL_R_MM, CURL_PITCH_MM), log=None, squeeze=1.0, squeeze_mm=45.0,
+          rest=None):
     """roots (n, 3) mm; frames (n, 3, 3) columns d1, d2, t at the tie; lengths (n,) mm; n_hairs (n,); radius (n,) mm,
-    a lock's radius at the tie; head: f(points mm) -> (depth inside mm, outward normal) or None."""
+    a lock's radius at the tie; head: f(points mm) -> (depth inside mm, outward normal) or None.
+    rest: optional per-lock natural curl in place of `curl` (loose wavy hair, wavy_flow.py): a function
+    f(s (n, M) mm along each lock) -> (k0 (n, M) rest curvature per mm, tau0 (n,) signed rad per mm, phi (n,) rad)."""
     rng = np.random.default_rng(seed)
     n = len(roots)
     M = int(np.ceil(lengths.max() / SEG_MM))
@@ -83,7 +86,10 @@ def solve(roots, frames, lengths, n_hairs, radius, head=None, seed=0, curl=(CURL
     tau0 = c / (Rh * Rh + c * c) * (0.9 + 0.2 * rng.random(n))
     phi = 0.8 * rng.standard_normal(n)                  # (waves set together run near in step; DRAFT)
     grow = np.clip(s / CURL_FROM_MM, 0, 1); grow = grow * grow * (3 - 2 * grow)
-    K0 = (k0[:, None] * grow)[:, :, None] * np.stack([np.cos(tau0[:, None] * s + phi[:, None]), np.sin(tau0[:, None] * s + phi[:, None]), np.zeros_like(s)], 2)
+    kk = k0[:, None] * grow
+    if rest is not None:
+        kk, tau0, phi = rest(s)
+    K0 = kk[:, :, None] * np.stack([np.cos(tau0[:, None] * s + phi[:, None]), np.sin(tau0[:, None] * s + phi[:, None]), np.zeros_like(s)], 2)
     rad = radius[:, None] * np.sqrt(np.clip(1 - 0.7 * (np.arange(M + 1)[None, :] / M) ** 2, 0.1, 1))    # (thinning to the tip)
     # under the band the locks are pressed to `squeeze` of their free radius, and swell back over squeeze_mm (without
     # it, locks crowded at a tight tie start inside each other and the contact throws the outer ones clear)
