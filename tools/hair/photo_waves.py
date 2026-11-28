@@ -47,6 +47,14 @@ LIFT_MM = (1.0, 28.0)       # MEASURED (photo): hair stands 9 mm off the skull a
 LIFT_PER_MM = 0.12          # DRAFT: lift gained per mm combed
 FRINGE_LIFT_MM = 12.0       # DRAFT: the fringe stands off the forehead (ghd: 'lift at the base'; the photo shows its shadow
                             # under it). At 5 mm it lay on the skin
+# Sectioning (hairfinder, the seven-section parting: top, two sides, two crown, two nape, parted along the parietal ridge
+# and from ear to ear; Red Seal study guide 6.4: sides 'from the top of the ear forward to the face frame', top 'from
+# the parietal ridge up to the front hairline', a pivot section at the crown with 'a radial or pivoting parting', nape
+# 'below the occipital bone'). Direction: a long layered cut's sides are over-directed 'slightly backward' (NY study
+# guide 8.5), each bevel brought 'around the head shape' (Sam Villa), the face frame 'flowing away from the face'.
+# No source says the side hair is combed straight down; straight down is only the uncut 'natural fall'.
+BACK_SWEEP = 0.7            # DRAFT: the pull back along the skin against gravity, at the face frame
+FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
 FRINGE_RAD = 0.70           # DRAFT: the fringe section's half-angle round the head
 FRINGE_DEPTH = 0.10         # DRAFT (HH, 22 mm: a thin curtain; at 44 mm it hung as a dark slab over the eyes): its depth behind the hairline at the part, falling to 0 at FRINGE_RAD
@@ -137,6 +145,11 @@ def build(F, surf, n=24000, seed=11, log=print):
             push = np.where(kind[J] == 1, FRINGE_PUSH[0] + (FRINGE_PUSH[1] - FRINGE_PUSH[0]) * SF.sm(0.80, 0.56, pos[J, 2]), PART_PUSH)
             d = g[None] + push[:, None] * b
             d[kind[J] == 1, 1] -= 1.0                                   # (the fringe is combed forward over the hairline)
+            # the top and the sides are directed diagonally back, away from the face (John 2026-11-28: "research how to
+            # section properly, it shouldn't be straight here"; sections and directions in the note above BACK_SWEEP):
+            # most at the face frame, none at the ear-to-ear parting, where the crown's pivot takes over
+            wf = SF.sm(SF.AXIS[1] + 0.04, -0.24, pos[J, 1]) * (kind[J] != 1) * ~behind
+            d[:, 1] += BACK_SWEEP * wf
             d = d - (d * Uo).sum(1, keepdims=True) * Uo
             d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
             Q = pos[J] + step * d
@@ -579,10 +592,18 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
         if len(z) < 3:
             continue
         g = SF.sm(GATHER_Z[0], GATHER_Z[1], z)
+        # (the hair leaves the head still turning back: that turn dies away over FALL_CARRY, so the course off the head
+        # carries on the course on it: no straight drop under a swept side)
+        pj = paths[i][max(hand[i] - 7, 0):hand[i] + 1]
+        w0 = 0.0
+        if len(pj) > 3 and pj[0, 2] - pj[-1, 2] > 1e-3:
+            w0 = float(np.clip((abs(SF.theta(pj[-1:])[0]) - abs(SF.theta(pj[:1])[0])) / (pj[0, 2] - pj[-1, 2]), 0.0, 2.0))
+        carry = w0 * FALL_CARRY * (1 - np.exp(-(rel[q, 2] - z) / FALL_CARRY))
         ah = a0[q]
         if front[q]:                                                     # (beside the face: the whole front fall drawn back
             keep = lo + (max(FACE_KEEP, lo) - lo) * SF.sm(FACE_KEEP_Z[0], FACE_KEEP_Z[1], z)   # behind the cheek, order kept)
             ah = keep + (a0[q] - lo) * (FALL_SPLIT - keep) / (FALL_SPLIT - lo)
+        ah = ah + carry * np.clip((np.pi - ah) / 0.5, 0, 1)
         a = ah + (a1[q] - ah) * g
         t = np.clip((rel[q, 2] - z) / max(rel[q, 2] - BODY_AT_Z, 1e-6), 0, 1)
         tent = r0[q] + (land[q] - r0[q]) * t
