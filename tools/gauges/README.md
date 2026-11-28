@@ -298,6 +298,27 @@ Warden's wavy hair: -2.9 mm before, -0.6 mm after the hair beside the face lost 
 **Misses.** Which layer it is: render the layers in false colour for that (swap the strand shader's output per
 layer). The skin test is by colour and assumes the creator's lighting. The mm scale is rough.
 
+### Flow smoothness: `hair/flow_smooth.py`
+
+**What it is for.** A hair flow that turns in corners. A flow built from separate eases (back behind the cheek, then
+forward to the chest, then onto the body) can join them sharply and read as a zigzag; rank, turning-back and flux
+gauges do not see it (John 2026-11-28 on the photo style's front fall).
+
+**In and out.** The field's lines before any wave or curl is laid on them, and for each the node where it leaves the
+head. Out: the bend radius read over 10 mm (minimum, 1st percentile, median), the share of nodes under the bound, the
+worst lines with their heights, and the count of lines whose course round the body reverses more than once.
+```
+from flow_smooth import gauge;  gauge(lines, release, 'free')   # or 'set' for a fringe dried on a brush
+```
+
+**Trouble.** `ok` False. Free hair: over 1% of nodes under 45 mm (a hair's bending length: Goldstein, Warren, Ball
+2012, "about 5 cm"; 45.4 mm from Robbins' modulus in `tail_lock_rods.py`), any node under 25 mm, or a line with more
+than one reversal. Set hair: over 1% under 17.5 mm (a 35 mm round brush, ghd). The photo style's field v4: minimum
+7 mm, 3.4% under the bound; after fairing: minimum 59 mm, none under.
+
+**Misses.** Bends held by a contact (over an ear, at a tie) are real and will fail the free bound: pass only the free
+part. It reads single lines, not whether neighbours stay parallel (that is the rank gauge).
+
 **Grounded in.** The creator's own outline as ground truth (the project's hair rule). Thresholds DRAFT.
 
 ### Hair surface check: `hair/hair_check.py`

@@ -37,7 +37,7 @@ SEG_MM = 2.5
 N_HAIRS = 90000.0           # DRAFT: hairs on the scalp (the older grooms' budget; a scalp carries about 100,000, Robbins)
 RELEASE_Z = SF.CENTRE[2]    # the skin turns under below the skull's centre height: the hair leaves the head there
 PART_PUSH = 0.45            # DRAFT: the push away from the part against gravity along the skin (1: equal)
-FRINGE_ARCH_MM = (15.0, 7.0, 9.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
+FRINGE_ARCH_MM = (12.0, 5.0, 7.0)   # DRAFT: the arch's height off the root, how far it comes in again over the forehead, and the
                             # flick at the end (a 35 mm brush's radius is 17.5)
 FRINGE_PUSH = (0.45, 2.20)  # the same for the fringe, at the hairline and from the brow down: its inner edge runs from
                             # the part to the brow at |x| 0.12 and on out to the cheekbone at 0.30 (MEASURED)
@@ -449,14 +449,65 @@ FALL_SPLIT = 1.75           # DRAFT: |theta| behind the ear where the hair parts
 FRONT_BAND = (0.42, 0.85)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
 BACK_BAND = (2.30, np.pi)   # DRAFT: the back fall, down the back inside the shoulder blades (at 1.95 it draped over the
                             # shoulders' tops)
-GATHER_Z = (0.12, -0.25)    # DRAFT: the falls take their places between the jaw and the collarbone
-FACE_KEEP = 1.25            # MEASURED (the photo's face crop): beside the face the hair's front edge is at the face's own
+FAIR_MM = 25.0              # DRAFT: the course is faired over this length (half a bending length)
+GATHER_Z = (0.30, -0.45)    # DRAFT: the falls take their places between the jaw and the collarbone
+FACE_KEEP = 1.15            # MEASURED (the photo's face crop): beside the face the hair's front edge is at the face's own
                             # outline, back by the ear (an earring shows): no hair lies on the cheek. The angle round the
                             # head of the cheekbone's back edge, just in front of the ear (the ear's middle is at 1.57)
-FACE_KEEP_Z = (0.56, 0.22)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
+FACE_KEEP_Z = (0.56, 0.20)  # the front edge swings back to it between the temple and the cheekbone (ghd, Sam Villa: the
                             # pieces by the face are dried and cut 'flowing away from the face')
 STACK_MM = (2.0, 18.0)      # DRAFT: the fall's thickness: the innermost hair's stand-off and the outermost's
 BODY_AT_Z = -0.15           # where the tent from the head lands (the photo's shoulder line)
+
+
+BANG_END = ((0.17, 0.59), (0.27, 0.47))   # MEASURED (face crop): where the bang's inner hair ends (|x|, z: the brow's outer
+                            # half) and its outer hair (the temple, outside the eye's corner)
+BANG_S = (0.50, 0.40)       # DRAFT: the S's two handles, as shares of the hair's drop: it leaves the root heading down and
+                            # arrives heading down, and between the two it runs out to the side (the photo's S)
+
+
+def bang_sheet(root, surf, seed=3, k=44):
+    """One side's bang as ONE smooth surface (John 2026-11-28: "build the bangs as one smooth shape that produces that s
+    curve in the picture"). The surface is S(u, t): u across it (0 the hair nearest the part, 1 the outermost, by the
+    roots' order, so the order is kept) and t along the hair. Seen from the front every hair is a cubic that leaves its
+    root heading down, runs out to the side and arrives at its end heading down again: an S. Its ends lie on the measured
+    line from the brow to the temple. Out of the face it follows the skin at a stand-off that is the same smooth
+    function of t for every hair: the arch off the root, in over the forehead, the flick at the end (FRINGE_ARCH_MM).
+    root (m, 3), all on one side. Returns a list of (k, 3)."""
+    rng = np.random.default_rng(seed)
+    m = len(root)
+    sgn = 1.0 if np.median(root[:, 0]) >= 0 else -1.0
+    u = np.argsort(np.argsort(np.abs(root[:, 0]))) / max(m - 1, 1)
+    x3 = sgn * (BANG_END[0][0] + (BANG_END[1][0] - BANG_END[0][0]) * u)
+    z3 = BANG_END[0][1] + (BANG_END[1][1] - BANG_END[0][1]) * u
+    t = np.linspace(0, 1, k)[None, :]
+    drop = (root[:, 2] - z3)[:, None]
+    bx = [root[:, 0:1], root[:, 0:1], x3[:, None], x3[:, None]]
+    bz = [root[:, 2:3], root[:, 2:3] - BANG_S[0] * drop, z3[:, None] + BANG_S[1] * drop, z3[:, None]]
+    w = [(1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3]
+    X = sum(a * b for a, b in zip(w, bx)); Z = sum(a * b for a, b in zip(w, bz))
+    # the skin in front at each (x, z): bisection on y
+    lo = np.full(X.shape, -0.75); hi = np.full(X.shape, SF.CENTRE[1])
+    for _ in range(26):
+        mid = 0.5 * (lo + hi)
+        q = np.stack([X, mid, Z], -1).reshape(-1, 3) - SF.CENTRE
+        r = np.linalg.norm(q, axis=1)
+        inside = (r < surf.radius(q / r[:, None])).reshape(X.shape)
+        hi = np.where(inside, mid, hi); lo = np.where(inside, lo, mid)
+    P = np.stack([X, 0.5 * (lo + hi), Z], -1)
+    # (the stand-off is measured from a skin eased along the hair, so the sheet bridges the brow and does not dip)
+    from scipy.ndimage import gaussian_filter1d
+    q = P - SF.CENTRE
+    from scipy.ndimage import maximum_filter1d
+    r = gaussian_filter1d(maximum_filter1d(np.linalg.norm(q, axis=2), 9, axis=1, mode='nearest'), 4.0, axis=1, mode='nearest')
+    U = q / np.linalg.norm(q, axis=2, keepdims=True)
+    tt = t[0]
+    lift = (1.0 + FRINGE_ARCH_MM[0] * SF.sm(0.0, 0.40, tt) - FRINGE_ARCH_MM[1] * SF.sm(0.35, 0.85, tt)
+            + FRINGE_ARCH_MM[2] * SF.sm(0.65, 1.0, tt))[None, :] * MM
+    lift = lift + (3.0 * rng.random(m))[:, None] * MM * SF.sm(0.0, 0.3, tt)[None, :]     # (its thickness: 3 mm)
+    P = SF.CENTRE + U * (r + lift)[:, :, None]
+    cut = (k * (1 - FRINGE_FEATHER * 2 * rng.random(m))).astype(int)                     # (point cut)
+    return [P[i, :max(cut[i], 4)] for i in range(m)]
 
 
 def body_radius(depth, nth=128, zs=None):
@@ -474,6 +525,19 @@ def body_radius(depth, nth=128, zs=None):
     R = maximum_filter1d(R, 5, axis=0, mode='wrap')
     R = gaussian_filter(R, (2.0, 1.0), mode=('wrap', 'nearest'))
     return th, zs, R
+
+
+def _join(p, j, half=14, sig=4.0):
+    """The line faired where it leaves the head (node j): the nodes within `half` of it are drawn to their smoothed
+    places, most at j, none at the window's ends, so the scalp line runs into the fall with no corner."""
+    from scipy.ndimage import gaussian_filter1d
+    a, b = max(j - half, 1), min(j + half, len(p) - 1)
+    if b - a < 4:
+        return p
+    sm_ = gaussian_filter1d(p, sig, axis=0, mode='nearest')
+    w = np.clip(1 - np.abs(np.arange(a, b) - j) / half, 0, 1)[:, None]
+    q = p.copy(); q[a:b] = p[a:b] + w * w * (3 - 2 * w) * (sm_[a:b] - p[a:b])
+    return q
 
 
 def field2(F, surf, depth, n=24000, seed=11, log=print):
@@ -499,8 +563,15 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
     land = Rb(np.c_[np.clip(sg * a1, -np.pi, np.pi), np.full(len(hang), BODY_AT_Z)]) + stack
     lam = WAVE['lam_hh']
     phase = 0.5 * np.sin(2 * a0) + np.where(sg > 0, 0.6, 0.0)           # (one pattern a side, drifting round the head)
+    from scipy.ndimage import gaussian_filter1d
     lines = [p for p in paths]
+    base = {}
     basin = np.where(kind == 1, 0, -1)
+    for sd in (1.0, -1.0):                                              # (each side's bang: one smooth sheet)
+        fm = np.where((kind == 1) & (x['root'][:, 0] * sd > 0))[0]
+        if len(fm) > 3:
+            for i, l in zip(fm, bang_sheet(x['root'][fm], surf, seed=3 + int(sd))):
+                lines[i] = l
     sec = np.zeros(n, int)
     step = SEG_MM * MM
     for q, i in enumerate(hang):
@@ -515,8 +586,19 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
         a = ah + (a1[q] - ah) * g
         t = np.clip((rel[q, 2] - z) / max(rel[q, 2] - BODY_AT_Z, 1e-6), 0, 1)
         tent = r0[q] + (land[q] - r0[q]) * t
-        tent_mid = tent - stack[q] * t
-        R = np.maximum(Rb(np.c_[sg[q] * a, z]) + stack[q], tent)
+        floor = Rb(np.c_[sg[q] * a, z]) + stack[q]
+        over0 = max(float(floor[0] - r0[q]), 0.0)                        # (the floor meets the head where the hair leaves it)
+        R = np.maximum(floor - over0 * np.exp(-np.arange(len(z)) / (FAIR_MM / SEG_MM)), tent)
+        # one eased course (John 2026-11-28: "needs to be smoother"): the eases above meet in corners (behind the cheek,
+        # at the collarbone), so the course is faired over FAIR_MM along the hair, held at the head end, and kept off
+        # the body. gauges/hair/flow_smooth.py reads the bend radius of this course against a hair's bending length.
+        nf = FAIR_MM / SEG_MM
+        fade = np.exp(-np.arange(len(z)) / nf)
+        for _ in range(2):
+            a_s = gaussian_filter1d(a, nf, mode='nearest'); a = a_s + (a[0] - a_s[0]) * fade
+            R_s = gaussian_filter1d(R, nf, mode='nearest'); R_s = R_s + (R[0] - R_s[0]) * fade
+            R = np.maximum(R_s, gaussian_filter1d(Rb(np.c_[sg[q] * a, z]), nf, mode='nearest') + stack[q] - over0 * fade)
+        base[i] = _join(np.r_[paths[i][:hand[i]], np.c_[SF.AXIS[0] + R * np.sin(sg[q] * a), SF.AXIS[1] - R * np.cos(sg[q] * a), z]], hand[i])
         Wv = SF.sm(WAVE['start_z'], WAVE['full_z'], z) * WAVE['amp_hh']
         psi = 2 * np.pi * (RELEASE_Z - z) / lam + phase[q]               # (by height, not by each hair's own start:
                                                                           #  neighbours swing together)
@@ -525,7 +607,7 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
         R = R + 0.5 * Wv * np.cos(psi)                                    # (and half as much out of it, a quarter wave on:
         th = sg[q] * a                                                    #  the ribbon turns as it swings)
         low = np.c_[SF.AXIS[0] + R * np.sin(th), SF.AXIS[1] - R * np.cos(th), z]
-        lines[i] = np.r_[paths[i][:hand[i]], low]
+        lines[i] = _join(np.r_[paths[i][:hand[i]], low], hand[i])
         basin[i] = 1 if kind[i] == 2 else (2 if front[q] else 3)
         sec[i] = int(a0[q] / (np.pi / SECTORS))
     # gauges (the recipe's): rank swaps between neighbours, lines turning back, one sink per basin, the photo's widths
@@ -545,6 +627,12 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
             r2 = np.argsort(np.argsort([aa[-0.4][i] for i in o]))
             g['rank_moves_over_3pct_%s_%s' % (nm, 'L' if s_ > 0 else 'R')] = '%d of %d' % (int((np.abs(r2 - np.arange(len(o))) > 0.03 * len(o)).sum()), len(o))
     g['lines_turning_up'] = int(sum((np.diff(lines[i][hand[i]:, 2]) > 1e-6).any() for i in hang if basin[i] > 0))
+    import os, sys
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'gauges', 'hair'))
+    import flow_smooth as FS
+    bi = sorted(base)
+    g['smooth_falls'] = FS.gauge([base[i] for i in bi], [hand[i] for i in bi], 'free')
+    g['smooth_fringe'] = FS.gauge([lines[i] for i in np.where(basin == 0)[0]], None, 'set')
     tot = hairs.sum()
     g['basin_share_pct'] = {nm: round(100 * float(hairs[basin == b].sum() / tot), 1) for nm, b in
                             (('fringe', 0), ('face framing', 1), ('front fall', 2), ('back fall', 3), ('on the head', -1))}
