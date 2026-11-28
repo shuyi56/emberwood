@@ -75,7 +75,7 @@ ENV_Z = (1.00, 0.75)        # the surface eases from the top's height to the sid
                             # round 4's outline had two lobes on top and pinched in at the ears)
 OUTLINE_Z, OUTLINE_MAX_MM = 0.75, 12.0   # the side outline is held out from the head's widest (z 0.75) down, by at most this
 PART_DIP, PART_WIDE_MM = 1.0, 45.0   # DRAFT: the outer surface's height at the part (a share), and where it is full
-ENV_MM = (25.0, 14.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
+ENV_MM = (17.0, 15.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
                             # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden). By the
                             # temple 12 (it was 23): "sides are too thick and not smooth curves" (John 2026-11-28)
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
@@ -83,6 +83,8 @@ FLARE = (0.055, 0.08)        # MEASURED (the photo's half-widths 0.45 at the eye
                             # and John's line stepping out at eye level): the fall stands out this much (HH) below the
                             # temple, and this much again by the shoulder; the outer layer most
 SIDE_FLOW = dict(w=1.0, min=0.45, max=1.2, fwd=3.0)   # DRAFT: how far the sides' comb takes the bangs' flow, the back sweep kept, the slope's cap
+SHAPE_OUT = ((0.56, 0.50, 0.20, -0.15, -0.40, -0.80, -1.20),      # MEASURED on the photo against the field (HH by height z):
+             (0.00, 0.03, 0.09, 0.15, 0.14, 0.09, 0.05))          # how much farther out the photo's outline stands
 BACK_SWEEP = 0.9            # DRAFT: the pull back along the skin against gravity, at the face frame
 FALL_CARRY = 0.12           # DRAFT (HH): below the head the hair keeps turning the way it left for about this drop
 FRINGE_HANG_Z = 0.66        # DRAFT: below the forehead's bulge the fringe hangs free of the skin
@@ -924,7 +926,7 @@ def _cached(cache, name, key, make, log=print):
     return v
 
 
-PART_STAND = (12.0, 14.0, 60.0)   # DRAFT (mm): how far the hair by the part stands in toward it, the length over which it
+PART_STAND = (18.0, 14.0, 60.0)   # DRAFT (mm): how far the hair by the part stands in toward it, the length over which it
                                   # stands up, and the length by which it has leaned back out
 
 
@@ -1090,6 +1092,12 @@ def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=Non
         tent = r0[q] + (land[q] - r0[q]) * t
         flare = (FLARE[0] * SF.sm(RELEASE_Z, RELEASE_Z - 0.16, z) + FLARE[1] * SF.sm(0.25, -0.15, z)) * (0.35 + 0.65 * d[q]) \
             * (1 - 0.6 * SF.sm(-0.2, -0.6, z)) * np.clip(np.sin(a), 0, 1) ** 2       # (at the sides: not on the chest, not down the back)
+        # (John 2026-11-29: "go back to the flow solver, the overall shape is still wrong". The whole field drawn over the
+        # photo (tools/hair/overlays/field_overlay.py) showed the outline: the photo's hair is 0.49 HH from its middle at
+        # the temple, 0.61 at the chin and 0.65 at the chest; the field's was 0.42, 0.55 and 0.54, a straight column where
+        # the photo opens into a bell. SHAPE_OUT is that difference by height, added at the sides, most on the outer
+        # layer so the fall gains body, not a hollow.)
+        flare = flare + np.interp(z, SHAPE_OUT[0][::-1], SHAPE_OUT[1][::-1]) * (0.45 + 0.55 * d[q]) * np.clip(np.sin(a), 0, 1) ** 2
         floor = Rb(np.c_[sg[q] * a, z]) + stack[q]
         over0 = max(float(floor[0] - r0[q]), 0.0)                        # (the floor meets the head where the hair leaves it)
         R = np.maximum(floor - over0 * np.exp(-np.arange(len(z)) / (FAIR_MM / SEG_MM)), tent + flare)
