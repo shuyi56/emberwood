@@ -135,6 +135,10 @@ const KK_WRAP = 0.5;                              // STYLE: how far the light wr
                                                   // N.L to 0.25..1; Karis 2016 wraps the scattered part)
 const SC_SAT = 0.5;                               // STYLE: how far the scattered light takes the hair's hue (Karis: absorption along the path)
 const STRAND_ROUGH = 0.6;                         // STYLE: a soft sheen along the lit strands (0.8 read matte and flat)
+const END_ON = 0.35;                               // STYLE: a ribbon is at full width once sin(tangent, view) passes this
+const SPEC_SOFT = 1.5;                            // STYLE: soft ceiling on the summed highlights (x / (1 + k luma)): a lone wide
+                                                  // ribbon lying flat to the lamp lit up edge to edge as a pale band
+const SPEC_EDGE = 0.6;                            // STYLE: the highlights fall off by this much toward a ribbon's edges
 const PX_WORLD = { value: 0.002 };                // one pixel's width at unit depth: set each frame from the camera
 function cutTexture() {
   const W = 256, H = 512, c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -308,8 +312,11 @@ function buildStyle(asset, tone, creatorMat) {
         'vec4 mvPosition = modelViewMatrix * vec4( transformed - ( coverIn + floor( strandTier + 0.01 ) * ' + (MID_IN * HH / HEAD_MM).toFixed(5) + ' ) * normal, 1.0 );',
         'vec3 tv = normalize( ( modelViewMatrix * vec4( strandT, 0.0 ) ).xyz );',
         'vStrandT = tv; vStrandOcc = strandOcc; vLight = strandLight; vSide = strandSide; vArc = strandArc; vTier = floor( strandTier + 0.01 ); vTip = fract( strandTier + 0.01 ) / 0.45;',
-        'vec3 sd = normalize( cross( tv, normalize( -mvPosition.xyz ) ) );',
-        'mvPosition.xyz += sd * ( 0.5 * max( strandW * coverW, -mvPosition.z * pxWorld ) * strandSide );',
+        // (a ribbon that runs toward the camera has no side to face it with: its side vector flips from vertex to vertex
+        // and the ribbon knots into black facets. It narrows to a hair's width there instead.)
+        'vec3 sdc = cross( tv, normalize( -mvPosition.xyz ) ); float sdl = length( sdc );',
+        'vec3 sd = sdc / max( sdl, 1e-4 );',
+        'mvPosition.xyz += sd * ( 0.5 * max( strandW * coverW * smoothstep( 0.0, ' + END_ON.toFixed(2) + ', sdl ), -mvPosition.z * pxWorld ) * strandSide );',
         'gl_Position = projectionMatrix * mvPosition;'].join('\n'));
     const f = x => x.toFixed(3);
     sh.fragmentShader = 'varying vec3 vStrandT;\nvarying vec2 vStrandOcc;\nvarying vec4 vLight;\nvarying float vSide;\nvarying float vArc;\nvarying float vTier;\nvarying float vTip;\n' + sh.fragmentShader
@@ -357,6 +364,7 @@ function buildStyle(asset, tone, creatorMat) {
         '' + (cover ? '' : '  outgoingLight += ( 1.0 - vTier ) * sGl * mix( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( 1.0, 0.97, 0.92 ), ' + f(GLOW_WHITE) + ' ) * vStrandOcc.x;'),
         '  outgoingLight += ( ' + f(KK_GAIN) + ' * RECIPROCAL_PI * sKK + ' + f(SC_SPEC) + ' * ( 0.4 + 1.2 * vStrandOcc.y ) * sScS ) * diffuseColor.rgb * vStrandOcc.x;',
         '  outgoingLight += ' + f(SCATTER) + ' * RECIPROCAL_PI * sSc * diffuseColor.rgb * pow( diffuseColor.rgb / max( max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) ), 0.001 ), vec3( ' + f(SC_SAT) + ' ) ) * mix( 1.0, vStrandOcc.x, 0.5 );',
+        '  sAcc *= ( 1.0 - ' + f(SPEC_EDGE) + ' * vSide * vSide ) / ( 1.0 + ' + f(SPEC_SOFT) + ' * dot( sAcc, vec3( 0.2126, 0.7152, 0.0722 ) ) );',
         '  outgoingLight += ' + (cover ? COVER_SPEC.toFixed(3) + ' * ' : '') + 'mix( 1.0, ' + MID_SPEC.toFixed(3) + ', vTier ) * sAcc * vStrandOcc.x * vStrandOcc.x; }',
         '#endif',
         '#include <opaque_fragment>'].join('\n'));
