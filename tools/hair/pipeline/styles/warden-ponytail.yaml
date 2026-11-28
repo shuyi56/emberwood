@@ -1,0 +1,165 @@
+# The Warden's swept ponytail (2026-11-25 to 11-28), as a style file. Built with the ponytail recipe
+# (docs/hair/ponytail-recipe.md); every value is today's tool value, so this file reproduces today's field.
+# A leaf is a bare value or {v, flag, src}; a mapping's _flag / _src is inherited by its children.
+# Flags: SOURCED MEASURED CREATOR CALIBRATED JOHN DRAFT STYLE DERIVED TOOL (tools/hair/pipeline/params.py).
+schema: emberwood-hair-style/1
+style: warden-ponytail
+family: tied
+title: Swept ponytail, curtain bangs, temple lock
+
+inputs:
+  head: hair-rebuild/warden-face/warden-head.json.gz            # the Face Creator's export (faces and scalp come only from it)
+  reference: hair-rebuild/ponytail-flow/reference.measure.json  # refmeasure sheet of the side photo (round 6, unit 616 px)
+  bangs_reference: hair-rebuild/ponytail-flow/bangs/photo.measure.json   # the bangs' sheet (13 strand angles)
+
+reference:
+  # The photo in heads (unit head top to chin, plumb through the ear canal). The measure stage checks each against the
+  # sheet; a value kept off the sheet needs a reason under `kept`.
+  ratios:
+    _flag: MEASURED
+    _src: reference.measure.json (round 6, re-measured on gridded crops)
+    tie_above_chin: 0.545
+    tie_behind_ear: 0.510
+    tie_w: 0.252
+    apex_rise: 0.146
+    apex_behind_tie: 0.105
+    pony_len_y: 1.713
+    tail_behind_tie: 0.20
+    pony_max_w: 0.633
+    fall_deg: 1.1
+    wave_len: 0.548
+    wave_swing: 0.097
+    bang_edge_h: 0.575
+    ear_wisp: 0.374
+    head_top_hair: {v: 0.03, flag: MEASURED, src: "hair over the crown in the photo's unit (recipe step 0)"}
+  sheet_names: {fall_deg: fall.deg_from_vertical}
+  tolerance_by_ratio:
+    fall_deg: {v: 0.1, flag: DRAFT, src: "degrees: a tenth of a degree off plumb over a 0.9 m fall"}
+  tolerance: {v: 0.005, flag: DRAFT, src: "half a percent of a head, about a landmark's reading error at 616 px"}
+  kept:
+    tail_behind_tie: "the round 6 field was solved with 0.20; the sheet now reads 0.211 (2.4 mm further back). Kept so the field is today's; set 0.211 to follow the sheet (moves the free fall)"
+    tie_above_chin: "reads 0.542 on the round 6 sheet; 0.545 kept, inside the reading's error, so the lines solved to the tie stay (ponytail-flow README round 6)"
+
+part: {}            # a tied style has no part on top: every root runs to the tie. The bangs' part is bangs.curve.part_mm
+
+tie:
+  off_skin_hh: {v: 0.07, flag: MEASURED, src: "tie_behind_ear 0.471 (sheet v1) against the skull's 0.40 at that height"}
+  packing_max: {v: 0.95, flag: SOURCED, src: "Goldstein, Warren, Ball 2012 (GWB12), packing at the clamp"}
+  launch_fibre_deg: {v: 17.0, flag: SOURCED, src: "GWB12: the outer fibres' angle to the axis at the tie"}
+  launch_max_deg: {v: 84.0, flag: DRAFT, src: "the steepest launch the fit may try"}
+  ring_mm: {v: 34.0, flag: DRAFT, src: "the handover starts this far outside the tie's radius"}
+  hand_axis_mm: {v: 30.0, flag: DRAFT, src: "and ends this far down the bundle's axis"}
+  converge_max_deg: {v: 45.0, flag: DRAFT, src: "steepest convergence onto the bundle (m_max = tan)"}
+
+root_lift:
+  model: stack       # the lift is the stack's thickness: flux x a hair's section / packing (recipe 1.6), not a profile
+  packing_loose: {v: 0.165, flag: CALIBRATED, src: "groom.py PACKING"}
+  packing_rise_mm: {v: 60.0, flag: DRAFT, src: "packing rises from loose to the tie's over the last 6 cm of scalp"}
+
+scalp:
+  sag_g: {v: 0.9, flag: CALIBRATED, src: "John's drawn lines, 2026-11-25 (gravity across the line where the skin is steep)"}
+  sag_fade_rad: {v: [0.15, 0.55], flag: DRAFT, src: "the pull fades 12 to 45 mm of skin from the tie"}
+  resolve:
+    _flag: DRAFT
+    _src: "the first field's ear wisp and nape wisps patches, re-solved to the tie along John's lines"
+    ear wisp: {th: [1.05, 1.5], depth_mm: 16.0, z: [0.0, 0.66]}
+    nape wisps: {th: [2.3, 3.2], depth_mm: 13.0, z: [0.0, 1.0]}
+
+ear:
+  cover_hh: {v: 0.10, flag: MEASURED, src: "round 6 sheet: the side hair's edge crosses the ear 0.114 head below its top"}
+  offset_mm: {v: 3.0, flag: DRAFT, src: "the hair's offset over the ear"}
+  rim_mm: {v: 5.0, flag: DRAFT, src: "the ear rim's radius; curl bound K = 1 / (rim + offset)"}
+  lanes_mm: {v: 5.0, flag: DRAFT, src: "the highest ear line runs this far above the ear's top"}
+  ease_passes: {v: 10, flag: TOOL, src: "passes easing the corner where an ear line turns over the ear"}
+
+fall:
+  hair_length_hh: {v: 2.0, flag: CALIBRATED, src: "one length for every hair, so the longest tail matches the photo"}
+  bending_length_mm: {v: 50.0, flag: SOURCED, src: "GWB12: about 5 cm"}
+  pi0: {v: 0.85, flag: SOURCED, src: "GWB12 envelope pressure"}
+  rstar_mm: {v: 47.0, flag: CALIBRATED, src: "the photo's widest tail on sheet v1 (0.524 head); still open: v6 says 0.633"}
+
+wave:
+  # Two perpendicular sinusoids (tools/hair/pipeline/wave.py). The tail's mass wave is planar (the S in the side
+  # plane); its locks wind as helices round their places, each lock its own phase.
+  mass:
+    form: planar
+    length_hh: {v: 0.548, flag: MEASURED, src: "ref:wave_len"}
+    amp_side_hh: {v: 0.0485, flag: MEASURED, src: "ref:wave_swing*0.5 (half the crest-to-trough swing)"}
+    amp_out_hh: {v: 0.0, flag: STYLE, src: "planar: no out-of-plane part"}
+    twist_deg: {v: 0, flag: STYLE, src: "planar"}
+    grow_in_hh: {v: 0.25, flag: DRAFT, src: "GWB12: curl reduced near the clamp; full a quarter head below it"}
+  locks:
+    form: helix
+    count: {v: 9, flag: DRAFT, src: "one middle lock and a ring of eight"}
+    core_share: {v: 0.42, flag: DRAFT, src: "the middle lock's share of the bundle's radius"}
+    gather: {v: 0.5, flag: DRAFT, src: "render.py CLUMP 0.55 at the tip"}
+    radius_mm: {v: 8.0, flag: DRAFT, src: "a lock's winding radius at mid tail (the tail's swing is 10.6 mm, MEASURED)"}
+    phase_spread_rad: {v: 1.1, flag: DRAFT, src: "locks' phases spread, so they part at crests and close at troughs"}
+    grow_in_mm: {v: 120.0, flag: DRAFT, src: "the locks form over one wave below the handover"}
+
+bangs:
+  section_rad: {v: 0.75, flag: CREATOR, src: "groom.py's bang section, corner to corner"}
+  depth_mm: {v: 60.0, flag: CREATOR, src: "the creator's bang section depth (CLAUDE.md: 60 mm, overrides the guides' 32)"}
+  # edge_z is not set: ponytail_flow derives it from reference bang_edge_h x (1 + head_top_hair). Setting it overrides.
+  fan_rad: {v: 0.07, flag: DRAFT, src: "each fringe hair's end spread round the head by its root"}
+  stagger_mm: {v: 9.0, flag: DRAFT, src: "the deepest-rooted fringe hairs end up to this much above the edge"}
+  preset: curtain
+  curve:
+    # bangs_flow's B/D blend: t = normalize(w B + (1 - w) D), w = smoothstep(w0, w1, |u|)
+    part_mm: {v: 0.0, flag: SOURCED, src: "curlcentric, bangstyle, mindbodygreen: a middle part for curtain bangs"}
+    sweep: {v: 0, flag: STYLE, src: "split at the part"}
+    d_deg: {v: 27.7, flag: CALIBRATED, src: "fitted to the photo's 13 strand angles (bangs fit.json)"}
+    w0_mm: {v: 37.5, flag: CALIBRATED, src: "fitted to the photo's strand angles"}
+    w1_mm: {v: 145.0, flag: CALIBRATED, src: "fitted to the photo's strand angles"}
+    edge_above_eye: {v: 0.087, flag: MEASURED, src: "bangs photo.measure.json: fringe_edge against the eye"}
+    side_below_eye: {v: 0.097, flag: MEASURED, src: "bangs photo.measure.json: side_end against the eye"}
+    side_u_mm: {v: 70.0, flag: MEASURED, src: "bangs photo.measure.json"}
+    side_end_behind_nose: {v: 0.263, flag: MEASURED, src: "bangs photo.measure.json"}
+
+loose_locks:
+  locks:
+    temple lock: {_flag: DRAFT, _src: "places from L'Oreal and Biolage guides and the photo; no source gives a thickness",
+                  th: [0.75, 0.95], depth_mm: 22.0, z: [0.6, 1.0], len: 0.62}
+  gather: {v: 0.45, flag: CALIBRATED, src: "round 6: at 0.3 the corrected lock left 4 sideburn hairline cells bare"}
+  end_y_hh: {v: 0.0, flag: MEASURED, src: "cut just inside the ear's front edge, keeps the sideburn cell covered"}
+  lift_mm: {v: 4.0, flag: DRAFT, src: "the lock rides this far off the skin"}
+  share_bound: {v: [0.01, 0.05], flag: JOHN, src: "John's bound on the loose locks' share of all hair"}
+
+finish:
+  # bangs_creator_asset.py's stages, in the order a stylist does them (recipe step 5); leave one out to see what it adds
+  steps: [volume, funnel, mid-layer, trim, tail-locks, join-blend, join-zigzag]
+  noise: {v: 1.0, flag: STYLE, src: "noise_round.py at its draft amounts (long and quiet for straight hair)"}
+  strands: {v: 14000, flag: TOOL, src: "strands written to the asset"}
+  cap_lift_mm: {v: 0.4, flag: CALIBRATED, src: "PR #97: at 1 mm the roots beside the join lay under the cap"}
+
+stages:
+  look: false        # the field drawn as fibres (ponytail_render.py, about a minute a view); turn on for recipe step 3
+
+gauges:
+  f_min_per_mm: {v: 4.0, flag: DRAFT, src: "hairline_gap.py HL_COVER, the no-gap floor"}
+  curl_step_mm: {v: 4.0, flag: TOOL, src: "curvature read over half the tightest radius allowed"}
+  slack_eps: {v: 0.005, flag: DRAFT, src: "arc >= 1.005 x the way along the skin; no source gives a number"}
+  cuts_mm: {v: [150, 120, 90, 60, 40, 25], flag: TOOL, src: "the balance sheet's cuts"}
+  flux_error_pct: {v: 2.0, flag: DRAFT, src: "the recipe's bar: flux conserved within 2%"}
+  rank_swaps_max: {v: 0, flag: SOURCED, src: "John's model: strands keep rank"}
+  handover_gap_mm: {v: 0.1, flag: DRAFT, src: "the recipe's bar is 0 mm; 0.1 allows rounding"}
+  handover_deg: {v: 1.0, flag: DRAFT, src: "the recipe's bar is 0 deg; 1 deg allows the quintic's sampling"}
+  wave_tol_share: {v: 0.1, flag: DRAFT, src: "the measured wave within a tenth of the style's"}
+  allow_fail:
+    # known faults, reported and not tuned away (recipe: "report it, do not tune the field to hide it")
+    bundle middle line (free hair): "the fold over the tie again: the middle line bends at 14 mm radius within 40 mm of the tie (past 40 mm its tightest is 49 mm, inside the 45 mm bound). Same open fault as the curl radius"
+    curl radius: "the bundle folds over the tie tighter than the ear-rim bound; a fold-at-the-tie bound is still to be found (recipe step 2)"
+    loose share pct: "only the temple lock is loose (0.77%); the ear and nape wisps were re-solved to the tie on John's lines"
+    rank swaps: "2 swaps inside the tail's locks (field6 had the same 2)"
+    flux conserved per cut: "the outermost cut (150 mm) over-counts by 3%: lines crossing it twice over the crown (field6: 4.9%)"
+    handover turn deg: "0.7 deg at one line after the round 6 ear routing (field6: 0.14)"
+    photo gap apex_rise: "open on the Warden: the arc over the tie is half the photo's (launch at its 84 deg limit)"
+    photo gap pony_max_w: "open on the Warden: R* calibrated to the first sheet, the tail a fifth too narrow"
+    photo gap tail_behind_tie: "open on the Warden: follows the arc"
+    photo gap fall_deg: "open on the Warden: follows the arc"
+    bangs divergence: "the curtain thins at the part past half its length (under the 4 per mm floor at u 6 to 22 mm); the same on the approved curtain (bangs/curtain/bangs.json)"
+    bangs rank_swaps: "a few swaps at the section's outer edge (u 57 to 60 mm), 6 on the approved curtain (bangs README: FAIL, kept)"
+    bangs curl: "0.23% of the sweep tighter than the 19 mm brush on the approved curtain"
+    photo gap ear_top_above_chin: "the creator's ear sits 0.083 head higher on its head than the photo's: the two heads, not the hair (README round 6)"
+
+approved: {}        # the field_review gate prints the digest to put here once John has seen the field

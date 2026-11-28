@@ -76,6 +76,13 @@ Find your kind of project, then take everything in its row in order. "Every proj
 | **Accessories** (chains, pendants) | the chain's Verlet drop in `blender/shared/accessories.py` | `contours`; `layer_gaps` (the chain over the clothes) | the module's docstring |
 | **Game runtime cloth and capes** | `src/world/fabric-core.js`, `fabric-stiff.js` (PR #83) | fabric bench `tools/fabric-bench/bench.mjs` (bending length against target); cape checks `tools/cape-lab/check.mjs` (loop drift, clearance, jitter) | `tools/fabric-bench/README.md` (PR #83) |
 
+### A new hairstyle
+
+Start from a style file, not from code: `tools/hair/pipeline/README.md`. Copy the nearest `styles/*.yaml` (tied to a
+tie: `warden-ponytail`; loose: `warden-photo-waves`), measure the reference into it, flag every number, and run
+`python3 tools/hair/pipeline/run.py STYLE.yaml OUT`. The runner runs the Hair row's tools and gauges in the recipe's
+order and stops at the field gate until John has seen the field.
+
 ## Catalogue
 
 Status: **main** is on main in this folder; **main (stays)** is on main outside this folder, for the reason given;
@@ -114,6 +121,7 @@ Status: **main** is on main in this folder; **main (stays)** is on main outside 
 | Plane breaks (the chisel read from tone: corner place, edge width, climb onto the cheek) | gauge | face | numpy, scipy, PIL, scikit-image | main: `gauges/face/plane_breaks.py` |
 | Clay and key matcap views of creator heads | gauge | face | node, Playwright | main: `gauges/face/render_clay.cjs` |
 | Hair surface check | gauge | hair | Blender | main: `gauges/hair/hair_check.py`; PR #27 has a newer copy in `tools/render-review/hair_check.py` |
+| Hair pipeline (one runner: a style is a parameter file; graph of stages, gauges and the field gate; the shared wave model and gauge) | runner, gauge | hair | numpy, scipy, PyYAML | this PR: `tools/hair/pipeline/` (`run.py`, `styles/*.yaml`, `wave.py`) |
 | Reference measuring (refmeasure) | gauge | measuring | numpy, PIL, browser page | PR #89: `tools/refmeasure/` |
 | Join continuity (G0/G1/G2) | gauge | anatomy, any join | numpy | PR #86: `blender/shared/continuity.py`, `tools/joins/` |
 | Draft topology | gauge | patterns | numpy, PIL | PR #87: `blender/shared/drafttopo.py`, `tools/render-queue/rq_drafttopo.py` |
