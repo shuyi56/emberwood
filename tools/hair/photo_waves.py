@@ -542,10 +542,10 @@ BANG_END = ((0.11, 0.60), (0.30, 0.44))   # where the bang's inner hair ends: |x
                             # half) and its outer hair (the temple, outside the eye's corner)
 BANG_S = (0.06, 0.45, 0.05) # DRAFT: the S's handles: out from the root square to the part (HH), up from the end (a share of
                             # the hair's drop) and in from the end (HH): out, round and down, then out again
-TRACE_IN = ((0.03, 0.862), (0.073, 0.81), (0.116, 0.724), (0.134, 0.638), (0.147, 0.578))   # TRACED on the photo (|x| HH, z HH,
+TRACE_IN = ((0.085, 0.757), (0.13, 0.612), (0.20, 0.50), (0.30, 0.42), (0.41, 0.385))   # (John's line, 2026-11-29) # TRACED on the photo (|x| HH, z HH,
                             # the bang's inner edge from the hairline down to the brow's inner end; photo px (x - 262) / 232,
                             # (348 - y) / 232, both sides averaged)
-TRACE_OUT = ((0.22, 0.78), (0.265, 0.68), (0.285, 0.545))   # the outer edge: out over the temple and down to the outer end
+TRACE_OUT = ((0.27, 0.72), (0.30, 0.62), (0.35, 0.52), (0.41, 0.455), (0.46, 0.43))   # (the old V's outer edge, bent out at the end) # the outer edge: out over the temple and down to the outer end
 BANG_INNER = (0.4, 0.25)    # DRAFT: the innermost hair's first handle: this share of the sideways reach, and this share of its
                             # drop downward (the outermost: all sideways, none down)
 BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the arch rises, dips and flicks. GAUGED
@@ -555,7 +555,7 @@ BANG_SPAN = ((0.0, 0.45), (0.3, 0.95), (0.6, 1.0))   # where along the hair the 
 
 BANG_FLOW = False              # John 2026-11-28 'redraft bangs go back to flow': the fringe is the comb's own flow from its
                                # roots (lifted with the rest), not the traced sheet (bang_sheet, kept: BANG_FLOW = False)
-BANG_TAPER, BANG_RAG = 0.30, 0.16   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
+BANG_TAPER, BANG_RAG = 0.10, 0.16   # the lower edge's fall-off toward the sheet's two edges, and the ragged end (shares of the length)
 BANG_FAIR = 3.0                # nodes (of k) the bang is faired over. GAUGED: rooted 66 mm back, unfaired, 2.2% of nodes
                                # bent tighter than the 35 mm brush (at the root and at the brow); faired over 3, 0.3%
 
