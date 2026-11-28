@@ -4,6 +4,13 @@ A solver finds a shape from forces, constraints or a cost: the fold a lapel take
 fall, a heel's height. Read [`../INDEX.md`](../INDEX.md) first for which ones your project needs. Every solver run is
 followed by its contour inspection ([`../gauges/README.md`](../gauges/README.md#contours)) before any render.
 
+**Every solver and render driver caches its stages.** A stage whose inputs did not change is read from disk, not
+rebuilt: key each stage on its input files' hashes and on the code and constants it depends on (`folds.cache_key`,
+`ponytail_flow`'s `OUT/../cache`, `photo_waves._cached` with `_code_key`), keep the stages apart so that a change late
+in the chain (a cut, the locks, a camera) does not redo the early ones (the scalp field, the comb, the backdrops), give
+the driver a `--quick` look for iteration, and write the seconds per stage into its report. A driver that starts from
+zero on every run is a fault: the photo hair's first driver did, and every change cost 10 minutes (2026-11-28).
+
 Each entry: **what it is for**, **in and out**, **run**, **trouble looks like**, **use it when**, **grounded in**.
 Known limits and their fixes for the cloth solvers are kept in
 [`docs/clothing-solvers/solver-issues.md`](../../docs/clothing-solvers/solver-issues.md); read it before calling a

@@ -13,6 +13,9 @@ it names, and read their entries (`tools/solvers/README.md`, `tools/gauges/READM
 and gauges go in `tools/solvers/<domain>/` or `tools/gauges/<domain>/`, documented in the same shape, with a row in
 the index. Edit the real files under `tools/`; the files left at old paths are shims.
 
+Every new solver or render driver caches its stages on disk from its first version (the rule and the helpers to copy
+are at the top of `tools/solvers/README.md`): a change to one stage must not rebuild the stages before it.
+
 ## Shoulders: how to blend them into the arms
 
 The neck-to-arm line has to read as one continuous curve. The usual ways it breaks are a square

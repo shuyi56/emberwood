@@ -3,11 +3,16 @@ render.py's fibre renderer (clay and shaded turnarounds and close-ups). No groom
 recipe's step 3, the field as it stands seen as hair, so its faults show before any locks are built.
 
     python3 tools/hair/photo_render.py HEAD.json.gz OUT_DIR [--lines 16000] [--per-root 2] [--size 750]
-        [--tone 7e4c34] [--photo reference.jpg] [--no-locks]
+        [--tone 7e4c34] [--photo reference.jpg] [--no-locks] [--quick] [--cache DIR | --no-cache]
 
 Each line is drawn --per-root times; the copies sit a little apart across the hair (square to it, COPY_MM) and are
 cut a little apart at the tip, and share the line's hairs, so the coverage on screen is the field's own hair count.
 With --photo the front close-up is saved beside the reference.
+
+Cached under --cache (default OUT/../photo-cache): the head's scalp field, the comb over the head, the body's radius
+table and every view's clay backdrop. Each is rebuilt only when the head file or the code and constants it depends on
+change, so a change to the falls, the cut or the locks skips them. --quick draws only the front, side and back
+close-ups in colour (quick.png). render.json's 'seconds' gives the time per stage.
 """
 import gzip
 import json
@@ -52,46 +57,84 @@ def fibres(Fd, per_root=2, seed=7):
     return np.array(paths), np.array(hairs), np.array(basin)
 
 
+def _md5(path):
+    import hashlib
+    return hashlib.md5(open(path, 'rb').read()).hexdigest()[:12]
+
+
 def main():
+    import time
     from PIL import Image
     a = sys.argv[1:]
     head, out = a[0], a[1]
     opt = lambda k, d: type(d)(a[a.index(k) + 1]) if k in a else d
     n, per, size = opt('--lines', 16000), opt('--per-root', 2), opt('--size', 750)
+    cache = None if '--no-cache' in a else opt('--cache', os.path.join(os.path.dirname(os.path.abspath(out)), 'photo-cache'))
+    quick = '--quick' in a
     os.makedirs(out, exist_ok=True)
+    T = [time.time()]; times = {}
+
+    def lap(name):
+        T.append(time.time()); times[name] = round(T[-1] - T[-2], 1)
     if '--tone' in a:
         h = a[a.index('--tone') + 1].lstrip('#')
         RD.FILL_SRGB = tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    hk = _md5(head)
+    src = lambda m: _md5(m.__file__)
     pts = SF.load_head(head)
-    surf = SF.Surface(pts); F = SF.build(surf)
+    surf, F = PW._cached(cache, 'head', (hk, src(SF)), lambda: (lambda sf: (sf, SF.build(sf)))(SF.Surface(pts)))
     body = json.load(gzip.open(head))['bodies']['mannequin']
     coll, depth = WF.colliders(surf, body)
-    Fd = PW.field2(F, surf, depth, n)
+    lap('head')
+    Fd = PW.field2(F, surf, depth, n, cache=cache, head_key=hk)
+    lap('field')
+    lrep = None
     if '--no-locks' not in a:
         Fd, lrep = PW.lock_fall(Fd)
+    lap('locks')
     paths, hairs, basin = fibres(Fd, per)
+    lap('fibres')
     RD.HEAD_CLOUD = pts
     RD.SCALP_F = F
-    rep = dict(locks=None if '--no-locks' in a else lrep, lines=n, fibres=len(paths), hairs=round(float(hairs.sum())), per_root=per, gauges=Fd['gauges'])
-    for mode in ('clay', 'full'):
-        row = []
-        for az in (0, 45, 90, 135, 180):
-            cv = RD.Canvas(size, az)
-            bg, zb = RD.clay_backdrop(cv, surf, body, mode)
-            row.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
-        Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'turn-%s.png' % mode))
-    for name, az, box in (('closeup-front', 0, (-0.75, 0.75, -0.55, 1.15)), ('closeup-side', 90, (-0.8, 0.8, -0.55, 1.15)),
-                          ('closeup-34', 40, (-0.8, 0.8, -0.55, 1.15)), ('closeup-back', 180, (-0.75, 0.75, -0.55, 1.15))):
-        imgs = []
+
+    def backdrop(cv, key, mode):
+        # (the clay head and body behind the hair: the same for every hair, so drawn once per view and kept)
+        return PW._cached(cache, 'backdrop', (hk, src(RD), key, mode, size, RD.FILL_SRGB),
+                          lambda: RD.clay_backdrop(cv, surf, body, mode))
+    rep = dict(locks=lrep, lines=n, fibres=len(paths), hairs=round(float(hairs.sum())), per_root=per, gauges=Fd['gauges'])
+    if not quick:
         for mode in ('clay', 'full'):
+            row = []
+            for az in (0, 45, 90, 135, 180):
+                cv = RD.Canvas(size, az)
+                bg, zb = backdrop(cv, ('turn', az), mode)
+                row.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
+            Image.fromarray(np.concatenate(row, 1)).save(os.path.join(out, 'turn-%s.png' % mode))
+        lap('turnarounds')
+    views = (('closeup-front', 0, (-0.75, 0.75, -0.55, 1.15)), ('closeup-side', 90, (-0.8, 0.8, -0.55, 1.15)),
+             ('closeup-34', 40, (-0.8, 0.8, -0.55, 1.15)), ('closeup-back', 180, (-0.75, 0.75, -0.55, 1.15)))
+    full = {}
+    for name, az, box in views:
+        if quick and name == 'closeup-34':
+            continue
+        imgs = []
+        for mode in (('full',) if quick else ('clay', 'full')):
             cv = RD.Canvas(size, az, box)
-            bg, zb = RD.clay_backdrop(cv, surf, body, mode)
+            bg, zb = backdrop(cv, (az, box), mode)
             imgs.append((RD.to_srgb(RD.render_hair(cv, paths, mode, bg, zb, hairs)) * 255).astype(np.uint8))
-        Image.fromarray(np.concatenate(imgs, 1)).save(os.path.join(out, name + '.png'))
-        if name == 'closeup-front' and '--photo' in a:
-            ph = Image.open(a[a.index('--photo') + 1]).convert('RGB')
-            ph = ph.resize((int(ph.width * imgs[1].shape[0] / ph.height), imgs[1].shape[0]))
-            Image.fromarray(np.concatenate([np.asarray(ph), imgs[1]], 1)).save(os.path.join(out, 'beside-photo.png'))
+        full[name] = imgs[-1]
+        if not quick:
+            Image.fromarray(np.concatenate(imgs, 1)).save(os.path.join(out, name + '.png'))
+    if quick:                                                             # (front, side and back in one strip)
+        Image.fromarray(np.concatenate([full[k] for k in ('closeup-front', 'closeup-side', 'closeup-back')], 1)).save(
+            os.path.join(out, 'quick.png'))
+    if '--photo' in a:
+        fr = full['closeup-front']
+        ph = Image.open(a[a.index('--photo') + 1]).convert('RGB')
+        ph = ph.resize((int(ph.width * fr.shape[0] / ph.height), fr.shape[0]))
+        Image.fromarray(np.concatenate([np.asarray(ph), fr], 1)).save(os.path.join(out, 'beside-photo.png'))
+    lap('closeups')
+    rep['seconds'] = dict(times, total=round(T[-1] - T[0], 1))
     json.dump(rep, open(os.path.join(out, 'render.json'), 'w'), indent=1, default=str)
     print(json.dumps({k: v for k, v in rep.items() if k != 'gauges'}))
 

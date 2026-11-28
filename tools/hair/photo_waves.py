@@ -27,6 +27,7 @@ How a fibre is combed (a head line; the lengths are then hung and waved by wavy_
     build(F, surf, n) -> paths (list of (k, 3) at SEG mm), hairs per fibre, lock key, kind (0 length, 1 fringe, 2 framing)
 """
 import math
+import os
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -70,7 +71,10 @@ TOP_LIFT_MM, ROOT_RISE_MM = 27.0, 36.0   # the hair's height over the skull at t
 # tangent to it: height T * (1 - (1 - s/L)^2) over the run L. Leaving angle atan(2T/L) = 47 degrees, bend radius
 # L^2/(2T) = 56 mm (a large round brush and the hair's own spring). Before, the rise was a smoothstep: flat on the skin
 # at the root, then a steep ramp, then flat again, three times the bend, so the top read as spikes, not arches.
-ENV_MM = (27.0, 12.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
+ENV_Z = (1.00, 0.75)        # the surface eases from the top's height to the side's over this height, ending at the head's widest (at 0.62:
+                            # round 4's outline had two lobes on top and pinched in at the ears)
+OUTLINE_Z, OUTLINE_MAX_MM = 0.75, 12.0   # the side outline is held out from the head's widest (z 0.75) down, by at most this
+ENV_MM = (25.0, 14.0)       # the hair's outer surface over the skull: at the top and by the temple (John 2026-11-28: "raise the
                             # hair more", front and back alike; the photo's own top outline reads 9 mm, overridden). By the
                             # temple 12 (it was 23): "sides are too thick and not smooth curves" (John 2026-11-28)
 SWEEP_IN_MM = 70.0          # DRAFT: the back sweep grows in over this length from the root
@@ -191,7 +195,21 @@ def build(F, surf, n=24000, seed=11, log=print):
             # blue": the lift was a base and two patches, front +12 mm and back +8 mm, and the section over the ear sat in the
             # gap between them). Its height depends on the height on the head alone: ENV_MM[0] over the top, ENV_MM[1] by the
             # temple, the same in front, over the ears and behind. A hair's layer sets how deep under it the hair lies.
-            capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(0.95, 0.62, Q[:, 2])) * (0.45 + 0.55 * layer[J])
+            capz = (ENV_MM[0] + (ENV_MM[1] - ENV_MM[0]) * SF.sm(*ENV_Z, Q[:, 2])) * (0.45 + 0.55 * layer[J])
+            # (one smooth outline down the sides: below the head's widest the skull narrows to the ear, and the hair
+            # laid on it at a set height followed it in, so the outline pinched at ear height (round 4: 4.6 mm in from
+            # z 0.75 to 0.55). The hair over the sides is lifted by that narrowing, so the outline falls straight.)
+            Hq = Q[:, 2] < OUTLINE_Z
+            if Hq.any():
+                th_ = SF.theta(Q[Hq])
+                ref = np.c_[SF.AXIS[0] + np.sin(th_), SF.AXIS[1] - np.cos(th_), np.full(Hq.sum(), OUTLINE_Z)] - SF.CENTRE
+                ref = ref / np.linalg.norm(ref, axis=1, keepdims=True)
+                pr = SF.CENTRE + ref * surf.radius(ref)[:, None]
+                ps = SF.CENTRE + Un[Hq] * surf.radius(Un[Hq])[:, None]
+                rc = lambda X: np.hypot(X[:, 0] - SF.AXIS[0], X[:, 1] - SF.AXIS[1])
+                horiz = np.maximum(np.hypot(Un[Hq, 0], Un[Hq, 1]), 0.5)
+                fill = np.clip(rc(pr) - rc(ps), 0, OUTLINE_MAX_MM * MM) / horiz * np.abs(np.sin(th_))
+                capz = capz.copy(); capz[Hq] = capz[Hq] + fill / MM * SF.sm(OUTLINE_Z, OUTLINE_Z - 0.03, Q[Hq, 2])
             lift = (LIFT_MM[0] + capz * (1 - (1 - min(s_mm / ROOT_RISE_MM, 1.0)) ** 2)) * MM
             # the fringe bends in two planes (John 2026-11-28: "bangs should also be 3d twisting along 2 planes like the
             # picture"). Out of the forehead: an arch up off the root over the hairline (ghd: "lift at the base", on a
@@ -500,6 +518,9 @@ FALL_SPLIT = 2.20           # DRAFT: |theta| where the hair parts over the shoul
 FRONT_BAND = (0.55, 1.30)   # MEASURED: the front fall on the chest (x 0.2 to 0.6 from the midline at the collarbone)
 BACK_BAND = (2.30, np.pi)   # DRAFT: the back fall, down the back inside the shoulder blades (at 1.95 it draped over the
                             # shoulders' tops)
+SIDE_CUT_Z = -0.45          # the shoulder's height on the mannequin: where the side hair is cut
+SIDE_CUT_A = (0.80, 1.20, 2.40, 2.75)   # DRAFT: the falls' places (angle round the body) cut to it: rising in over the front
+                            # fall's outer part, full over the shoulder, out again behind it (the middle front and back long)
 FAIR_MM = 25.0              # DRAFT: the course is faired over this length (half a bending length)
 GATHER_Z = (0.50, -0.50)    # the falls start for their places at the cheek and ear and are there at the collarbone (John
                             # 2026-11-28: "twist more at the cheeks and ear section so it's less of a sharp turn in the chin
@@ -650,14 +671,43 @@ def _fair_head(p, surf):
     return SF.CENTRE + U * np.maximum(r, floor)[:, None]
 
 
-def field2(F, surf, depth, n=24000, seed=11, log=print):
+def _cached(cache, name, key, make, log=print):
+    """make() once per key: the result is pickled under cache/name-<key>.pkl. cache None: no caching."""
+    import hashlib, pickle, time
+    if cache is None:
+        return make()
+    os.makedirs(cache, exist_ok=True)
+    f = os.path.join(cache, '%s-%s.pkl' % (name, hashlib.md5(repr(key).encode()).hexdigest()[:16]))
+    if os.path.exists(f):
+        return pickle.load(open(f, 'rb'))
+    t = time.time(); v = make()
+    pickle.dump(v, open(f + '.tmp', 'wb'), protocol=4); os.replace(f + '.tmp', f)
+    log('cache: built %s in %.0f s' % (name, time.time() - t))
+    return v
+
+
+def _code_key(*fns):
+    """What a function's result depends on in this module: its own source and the module constants it names."""
+    import inspect
+    g = globals(); out = []
+    for fn in fns:
+        out.append(inspect.getsource(fn))
+        out += [(k, repr(g[k])) for k in sorted(set(fn.__code__.co_names)) if k.isupper() and k in g]
+    return out
+
+
+def field2(F, surf, depth, n=24000, seed=11, log=print, cache=None, head_key=None):
+    """cache: a directory. The comb over the head (build) and the body's radius table are saved there and reused
+    while the head (head_key), n, seed, and the code and constants they depend on are unchanged, so a change to the
+    falls, the bangs' sheet, the cut or the locks does not re-comb the head."""
     """Returns dict(line: list of (k, 3), basin: per line (0 fringe, 1 face framing, 2 front fall, 3 back fall, -1 lies
     on the head), hairs, root, sec (the line's section, for colour), release (per line: node where it leaves the head),
     gauges)."""
     from scipy.interpolate import RegularGridInterpolator
-    paths, hairs, _, kind, x = build(F, surf, n, seed, log=lambda t: None)
+    paths, hairs, _, kind, x = _cached(cache, 'comb', (head_key, n, seed, _code_key(build, curtain_z)),
+                                       lambda: build(F, surf, n, seed, log=lambda t: None), log)
     hand, layer, z_end = x['hand'], x['layer'], x['z_end']
-    bt, bz, bR = body_radius(depth)
+    bt, bz, bR = _cached(cache, 'bodyradius', (head_key, _code_key(body_radius)), lambda: body_radius(depth), log)
     Rb = RegularGridInterpolator((np.r_[bt, np.pi], bz[::-1]), np.c_[bR.T, bR[0]].T[:, ::-1], bounds_error=False, fill_value=None)
     hang = np.where((hand >= 0) & (kind != 1))[0]
     rel = np.array([paths[i][min(hand[i], len(paths[i]) - 1)] for i in hang])
@@ -698,7 +748,12 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
     sec = np.zeros(n, int)
     step = SEG_MM * MM
     for q, i in enumerate(hang):
-        z = np.arange(rel[q, 2], RELEASE_Z - (RELEASE_Z - z_end[i]) / TAKE, -step)   # (cut by height here: no length is taken up)
+        ze = RELEASE_Z - (RELEASE_Z - z_end[i]) / TAKE
+        # (the hair that falls over the shoulders is cut at the shoulder, graded into the long front and back: John
+        # 2026-11-28, "cut sides to shoulder length")
+        ws = SF.sm(SIDE_CUT_A[0], SIDE_CUT_A[1], a1[q]) * SF.sm(SIDE_CUT_A[3], SIDE_CUT_A[2], a1[q])
+        ze = ze + ws * (max(ze, SIDE_CUT_Z + RAGGED * ((i * 0.6180339) % 1.0)) - ze)       # (point cut: ragged by RAGGED)
+        z = np.arange(rel[q, 2], ze, -step)   # (cut by height here: no length is taken up)
         if len(z) < 3:
             continue
         g = SF.sm(GATHER_Z[0], GATHER_Z[1], z)
@@ -787,6 +842,13 @@ def field2(F, surf, depth, n=24000, seed=11, log=print):
 # neighbours, so the locks part in depth), and toward the ends a lock opens into sub-locks. The field stays the shape:
 # a lock's axis is the mean of its own field lines, so the locks fill the field's fall and keep its order.
 LOCK_SIZE = 160             # DRAFT: field lines per lock (16,000 lines: about 45 locks a side; the recipe's tail took 33)
+LOCK_SCALE = {1: 0.25, 2: 2.5, 3: 0.7}   # lock size by fall, as a share of LOCK_SIZE (John 2026-11-28: "use thicker locks and
+                            # fewer like the picture for the hair that rests on the chest and thinner ones for the shoulder
+                            # locks"): face framing finest, the front fall on the chest 2.5x (the photo shows about 4 or 5
+                            # broad locks a side there), the back fall over the shoulders 0.7x
+CLUMP_B = {3: 0.85}         # the back fall barely gathers, and LOCK_PLAY scales its locks' own wave and opening: the back is
+LOCK_PLAY = {3: 0.3}        # one continuous sheet (John 2026-11-28: "back should be continuous"; gathered, the back's locks
+                            # left gaps and a step where they began under the head)
 CLUMP = 0.45                # recipe step 6: a lock gathers to this share of its spread on the head
 CLUMP_Z = 0.10              # HH below the release over which it gathers
 SUBLOCKS, SUB_OPEN, HAIR_OPEN = 3, 1.4, 0.7   # recipe step 6: 3 sub-locks, middles 1.4x farther out at the tip, hairs 0.7x
@@ -794,9 +856,11 @@ END_FADE = 0.08              # HH: a member is weighed out of its lock's axis ov
 OPEN_FROM = 0.0            # recipe step 6: opening starts 12% down the lock
 LOCK_IN = 0.20              # HH below the release over which a lock's own wave grows in (John 2026-11-28: "separate locks
                             # earlier"; it grew in with the side's wave, from z 0.38 to 0.12, so the locks parted only low)
-LOCK_LAM = 0.12            # DRAFT: a lock's wavelength within this share of its side's
-LOCK_PHASE = 0.9            # rad: a lock's own wave phase against its side's (wavy_flow's jitter: a twelfth of a wave)
-LOCK_DEPTH_MM = 4.0         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
+LOCK_SWING = 0.5            # DRAFT: a lock's swing across the fall off its side's, as a share of the wave (at 1.0, with the
+                            # phase sd 0.9 and the wavelength 12% off, round 4 read as crimp, not loose waves)
+LOCK_LAM = 0.04            # DRAFT: a lock's wavelength within this share of its side's
+LOCK_PHASE = 0.5            # rad: a lock's own wave phase against its side's (wavy_flow's jitter: a twelfth of a wave)
+LOCK_DEPTH_MM = 3.0         # DRAFT: and the lock's own swing out of the fall with it (the locks part in depth)
 
 
 def lock_fall(Fd, seed=5, log=print):
@@ -820,7 +884,7 @@ def lock_fall(Fd, seed=5, log=print):
                 q = l[np.argmin(np.abs(l[:, 2] - zg))] if l[-1, 2] < zg else l[-1]
                 feat.append(np.r_[r, q])
             feat = np.array(feat)
-            k = max(1, int(round(len(m) / LOCK_SIZE * (4 if b == 1 else 1))))   # (face framing: finer locks)
+            k = max(1, int(round(len(m) / (LOCK_SIZE * LOCK_SCALE[b]))))
             cen = feat[rng.choice(len(m), k, replace=False)]
             for _ in range(6):                                            # (a few Lloyd steps: even, compact locks)
                 lab = cKDTree(cen).query(feat)[1]
@@ -864,7 +928,8 @@ def lock_fall(Fd, seed=5, log=print):
         # (the side's wave is replaced by the lock's own: its phase and wavelength a little off its side's, the swing
         # across the fall as large as the side's and LOCK_DEPTH_MM out of it. With the side's wave alone every lock
         # waved in step and the fall read as one rippled sheet in the first render.)
-        en = SF.sm(RELEASE_Z, RELEASE_Z - LOCK_IN, zz)                  # (from the release: the locks part high)
+        bl = int(basin[m[0]])
+        en = SF.sm(RELEASE_Z, RELEASE_Z - LOCK_IN, zz) * LOCK_PLAY.get(bl, 1.0)                  # (from the release: the locks part high)
         ph = rng.normal(0, LOCK_PHASE); lam_l = WAVE['lam_hh'] * (1 + LOCK_LAM * rng.uniform(-1, 1))
         psi = 2 * np.pi * (RELEASE_Z - zz) / WAVE['lam_hh']
         psl = 2 * np.pi * (RELEASE_Z - zz) / lam_l + ph
@@ -872,7 +937,7 @@ def lock_fall(Fd, seed=5, log=print):
         out /= np.maximum(np.linalg.norm(out, axis=1, keepdims=True), 1e-9)
         tan = np.c_[-out[:, 1], out[:, 0]]
         ax2 = ax + out * (en * LOCK_DEPTH_MM * MM * np.sin(psl + 0.5 * np.pi))[:, None] \
-            + tan * (en * WAVE['amp_hh'] * (np.sin(psl) - np.sin(psi)))[:, None] * np.sign(np.mean(ax[:, 0]) + 1e-9)
+            + tan * (en * LOCK_SWING * WAVE['amp_hh'] * (np.sin(psl) - np.sin(psi)))[:, None] * np.sign(np.mean(ax[:, 0]) + 1e-9)
         # sub-locks: by the side of the axis each member lies on at mid-fall
         mid = len(zz) // 2
         om = np.nan_to_num(X[:, mid] - ax[mid])
@@ -887,8 +952,8 @@ def lock_fall(Fd, seed=5, log=print):
                 continue
             zi = zz[ok]; Xi = X[a_, ok]; A = ax[ok]; A2 = ax2[ok]
             t = np.clip((zi[0] - zi) / max(zi[0] - zi[-1], 1e-6), 0, 1)                  # (0 at the release, 1 at the tip)
-            gather = 1 - (1 - CLUMP) * SF.sm(zi[0], zi[0] - CLUMP_Z, zi)
-            opn = SF.sm(OPEN_FROM, 1.0, t)
+            gather = 1 - (1 - CLUMP_B.get(bl, CLUMP)) * SF.sm(zi[0], zi[0] - CLUMP_Z, zi)
+            opn = SF.sm(OPEN_FROM, 1.0, t) * LOCK_PLAY.get(bl, 1.0)
             ss = sub == sub[a_]
             sc = (((Xh[ss] - ax[None]) * Wt[ss][..., None]).sum(0) / Wt[ss].sum(0)[:, None])[ok]
             sc = np.c_[[gaussian_filter1d(sc[:, c], 4.0, mode='nearest') for c in range(2)]].T
